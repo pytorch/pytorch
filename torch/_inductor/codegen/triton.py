@@ -2764,6 +2764,18 @@ class TMACompatibilityChecker:
         return self.force
 
 
+def _should_use_xmask_unswitch(kernel: TritonKernel) -> bool:
+    """Whether xmask unswitch optimization may apply.
+
+    Config flag must be enabled and x-dimension numel must be dynamic.
+    Per-op eligibility (xmask is sole mask) is checked at load/store sites.
+    """
+    if not config.triton.xmask_unswitch:
+        return False
+    xtree = kernel.range_trees[0]
+    return not isinstance(xtree.numel, (sympy.Integer, int))
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -2802,6 +2814,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
+        # Map masked expr → unmasked expr for xmask unswitch optimization.
+        # Populated by load()/store() when xmask is the sole mask.
+        self._xmask_unswitch_map: dict[str, str] = {}
+        self._use_xmask_unswitch = _should_use_xmask_unswitch(self)
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
         self.helper_functions = HelperFunctions()
@@ -3832,6 +3848,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         append_broadcast = None
         shape: BlockShapeType = None
+        _register_xmask_load = False
+        unmasked_line = ""
 
         if should_unwrap_unspec_arg(name):
             line = var
@@ -3867,6 +3885,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape = ()
             else:
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
+                # Register unmasked variant for xmask unswitch optimization.
+                _register_xmask_load = (
+                    self._use_xmask_unswitch
+                    and indexing.mask_vars == OrderedSet(["xmask"])
+                )
+                if _register_xmask_load:
+                    unmasked_line = f"tl.load({var} + ({indexing.index_str}), None{ep}{other}{cachemod})"
 
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
@@ -3882,12 +3907,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and config.triton.codegen_upcast_to_fp32
             ):
                 line += ".to(tl.float32)"
+                if _register_xmask_load:
+                    unmasked_line += ".to(tl.float32)"
                 dtype = torch.float32
             if dtype == torch.bool and torch.version.hip is None:
                 # Workaround for https://github.com/triton-lang/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
                 # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
+                if _register_xmask_load:
+                    unmasked_line += ".to(tl.int1)"
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
@@ -3900,6 +3929,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
+
+        if _register_xmask_load:
+            self._xmask_unswitch_map[f"{result_var} = {line}"] = (
+                f"{result_var} = {unmasked_line}"
+            )
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -3994,6 +4028,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
+            # Register unmasked variant for xmask unswitch optimization.
+            if (
+                self._use_xmask_unswitch
+                and isinstance(indexing, IndexingOptions)
+                and indexing.mask_vars == OrderedSet(["xmask"])
+            ):
+                self._xmask_unswitch_map[line] = (
+                    f"tl.store({var} + ({indexing_str}), {value}, None)"
+                )
         elif mode == "atomic_add":
             self.atomic_add_found = True
             indexing_str = indexing.index_str
@@ -5305,10 +5348,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.invalidate(self.outside_loop_vars)
                 tree.cache_clear()
         else:
-            self.body.splice(self.indexing_code)
-            self.body.splice(self.loads)
-            self.body.splice(self.compute)
-            self.body.splice(self.stores)
+            self._codegen_body()
         self.body.splice(self.post_loop_combine)
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store
@@ -6192,6 +6232,56 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         xtree = self.range_trees[0]
         assert xtree.prefix == "x"
         return self._has_constant_mask(xtree)
+
+    def _codegen_body(self) -> None:
+        """Splice indexing/loads/compute/stores into self.body.
+
+        When xmask_unswitch is enabled and there are unswitchable ops,
+        each load/store gets its own if/else with shared compute.
+        Otherwise, plain masked code is emitted.
+        """
+        if not self._xmask_unswitch_map:
+            self._codegen_body_plain()
+        else:
+            self._codegen_body_unswitch_ldst_only()
+
+    def _codegen_body_plain(self) -> None:
+        """Plain masked code — no unswitch."""
+        for buf in [self.indexing_code, self.loads, self.compute, self.stores]:
+            self.body.splice(buf)
+
+    def _emit_unswitched_lines(
+        self, buf: IndentedBuffer, unswitch_map: dict[str, str]
+    ) -> None:
+        """Emit lines from buf, wrapping unswitchable ones in if/else."""
+        predicate = "xoffset + XBLOCK <= xnumel"
+        for line_str in buf.getvalue().splitlines():
+            stripped = line_str.lstrip()
+            if stripped in unswitch_map:
+                self.body.writeline(f"if {predicate}:")
+                with self.body.indent():
+                    self.body.writeline(unswitch_map[stripped])
+                self.body.writeline("else:")
+                with self.body.indent():
+                    self.body.writeline(stripped)
+            else:
+                self.body.writeline(line_str)
+
+    def _codegen_body_unswitch_ldst_only(self) -> None:
+        """Load/store-only unswitch — compute shared outside branches."""
+        unswitch_map = self._xmask_unswitch_map
+
+        # Emit indexing code directly (shared)
+        self.body.splice(self.indexing_code)
+
+        # Wrap each unswitchable load in its own if/else
+        self._emit_unswitched_lines(self.loads, unswitch_map)
+
+        # Emit compute directly (shared)
+        self.body.splice(self.compute)
+
+        # Wrap each unswitchable store in its own if/else
+        self._emit_unswitched_lines(self.stores, unswitch_map)
 
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:

@@ -258,6 +258,98 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
 
 
+class TestXmaskUnswitch(InductorTestCase):
+    """Test the xmask_unswitch codegen optimization.
+
+    The unswitched pattern is only generated for dynamic shapes where xnumel
+    is symbolic. For static shapes, Triton already specializes on the
+    actual value via divisibility hints.
+    """
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_dynamic_shape_generates_unswitch(self):
+        """Dynamic (symbolic) xnumel should emit unswitched pattern."""
+
+        def fn(x):
+            return x * 3.0 + 1.0
+
+        x = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": True}):
+            result, code = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        code_str = "\n".join(code)
+        self.assertIn("xoffset + XBLOCK <= xnumel", code_str)
+        self.assertIn(", None)", code_str)
+        self.assertIn(", xmask)", code_str)
+        # Should have multiple if/else blocks (per load + per store)
+        self.assertGreater(
+            code_str.count("xoffset + XBLOCK <= xnumel"),
+            1,
+            "should have separate if/else for loads and stores",
+        )
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_static_shape_no_unswitch(self):
+        """Static shapes should NOT emit unswitch — Triton specializes
+        on the actual value via divisibility hints."""
+
+        def fn(x):
+            return x * 3.0 + 1.0
+
+        x = torch.randn(1000, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": True}):
+            _, code = run_and_get_code(torch.compile(fn), x)
+        code_str = "\n".join(code)
+        self.assertNotIn("xoffset + XBLOCK <= xnumel", code_str)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_2d_transpose_no_unswitch(self):
+        """2D tiled kernels (e.g. transpose) should NOT emit unswitch
+        because both x and y masks are dynamic."""
+
+        def fn(a, b):
+            return a + b.T
+
+        a = torch.randn(33, 17, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(17, 33, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": True}):
+            _, code = run_and_get_code(torch.compile(fn, dynamic=True), a, b)
+        code_str = "\n".join(code)
+        self.assertNotIn("xoffset + XBLOCK <= xnumel", code_str)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_combo_kernel_unswitch(self):
+        """Combo kernel fusing two independent pointwise ops should emit
+        both the pid dispatch (combo) and the unswitch pattern in each
+        sub-kernel under dynamic shapes."""
+
+        def fn(x1, x2):
+            return x1 * x1, x2 + 1.0
+
+        x1 = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        x2 = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch(
+            {
+                "combo_kernels": True,
+                "benchmark_combo_kernel": False,
+                "triton.xmask_unswitch": True,
+            }
+        ):
+            result, code = run_and_get_code(
+                torch.compile(fn, dynamic=True), x1, x2
+            )
+        code_str = "\n".join(code)
+        # Should be a combo kernel with pid-based dispatch
+        self.assertIn("pid = tl.program_id(0)", code_str)
+        self.assertIn("num_xblocks_0", code_str)
+        # Should contain unswitch pattern inside the combo sub-kernels
+        self.assertIn("xoffset + XBLOCK <= xnumel_0", code_str)
+        self.assertIn(", None)", code_str)
+        result_ref = fn(x1, x2)
+        torch.testing.assert_close(result[0], result_ref[0], atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(result[1], result_ref[1], atol=1e-3, rtol=1e-3)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
