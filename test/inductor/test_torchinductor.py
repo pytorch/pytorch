@@ -13653,7 +13653,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, code = run_and_get_code(torch.compile(fn), x, y, z)
         # z's alignment check should appear between the two mm calls:
         # first mm (uses x, y) -> alignment clone (for z) -> second mm (uses z)
-        FileCheck().check("extern_kernels.mm(").check("copy_misaligned").check(
+        FileCheck().check("extern_kernels.mm(").check("copy_if_misaligned").check(
             "extern_kernels.mm("
         ).run(code[0])
 
@@ -13669,30 +13669,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         _, code = run_and_get_code(torch.compile(fn), x, y)
         # cpp_wrapper should NOT contain Python-syntax alignment copies
-        self.assertNotIn("copy_misaligned", code[0])
+        self.assertNotIn("copy_if_misaligned", code[0])
 
-    def test_copy_misaligned_returns_same_tensor_when_aligned(self):
+    def test_copy_if_misaligned_returns_same_tensor_when_aligned(self):
         import weakref
 
-        from torch._C._dynamo.guards import copy_misaligned
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         x = torch.randn(32, 32, device=self.device)
         ref = weakref.ref(x)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertIs(result, x)
         del x, result
         self.assertIsNone(ref(), "aligned tensor should be freed")
 
-    def test_copy_misaligned_clones_when_misaligned(self):
+    def test_copy_if_misaligned_clones_when_misaligned(self):
         import weakref
 
-        from torch._C._dynamo.guards import copy_misaligned
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         big = torch.randn(32 * 32 + 1, device=self.device)
         x = big[1:].reshape(32, 32)
         self.assertNotEqual(x.data_ptr() % 16, 0)
         ref_orig = weakref.ref(x)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertIsNot(result, x)
         self.assertEqual(result.data_ptr() % 16, 0)
         self.assertEqual(result, x)
@@ -13705,11 +13705,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         del big
         self.assertIsNone(ref_orig(), "original tensor should be freed")
 
-    def test_copy_misaligned_empty_tensor(self):
-        from torch._C._dynamo.guards import copy_misaligned
+    def test_copy_if_misaligned_empty_tensor(self):
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         x = torch.randn(0, device=self.device)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertEqual(result.size(), x.size())
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
