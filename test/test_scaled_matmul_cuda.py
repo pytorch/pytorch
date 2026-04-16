@@ -1697,8 +1697,8 @@ class TestFP8Matmul(TestCase):
         # Verify that actual F8 mm raises expected error
         if torch.version.hip:
             # ROCm does not yet support DeepSeek-style blockwise scaling
-            expected_error = ValueError
-            expected_pattern = "Invalid scaling configuration"
+            expected_error = NotImplementedError
+            expected_pattern = "1x128 and 128x128 scaling not available with ROCm"
         else:
             # CUDA non-SM90 should raise NotImplementedError
             expected_error = NotImplementedError
