@@ -2733,6 +2733,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
   });
+  py_module.def("_get_blas_default_backend", []() {
+    return at::globalContext().blasDefaultBackend();
+  });
 
   py::enum_<at::blas::ScalingType>(
       py_module, "_ScalingType", "Supported Tensor scaling types")

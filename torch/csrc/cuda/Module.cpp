@@ -1612,6 +1612,72 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_getCublasWorkspaceSize(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::cuda::getChosenWorkspaceSize());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_setCublasWorkspaceSize(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "set cublas workspace size expects an int, but got ",
+      THPUtils_typename(arg));
+  int64_t size = THPUtils_unpackLong(arg);
+  TORCH_CHECK(
+      size >= 0, "cublas workspace size must be non-negative, got ", size);
+  at::cuda::setChosenWorkspaceSize(static_cast<size_t>(size));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_getCublasLtWorkspaceSize(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(at::cuda::getCUDABlasLtWorkspaceSize());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_setCublasLtWorkspaceSize(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "set cublaslt workspace size expects an int, but got ",
+      THPUtils_typename(arg));
+  int64_t size = THPUtils_unpackLong(arg);
+  TORCH_CHECK(
+      size >= 0, "cublaslt workspace size must be non-negative, got ", size);
+  at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(size));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_resetCublasWorkspaceSize(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::resetChosenWorkspaceSize();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_resetCublasLtWorkspaceSize(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::resetCUDABlasLtWorkspaceSize();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -2053,6 +2119,30 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_clearCublasWorkspaces",
      THCPModule_clearBlasWorkspaces_wrap,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getCublasWorkspaceSize",
+     THCPModule_getCublasWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_setCublasWorkspaceSize",
+     THCPModule_setCublasWorkspaceSize,
+     METH_O,
+     nullptr},
+    {"_cuda_getCublasLtWorkspaceSize",
+     THCPModule_getCublasLtWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_setCublasLtWorkspaceSize",
+     THCPModule_setCublasLtWorkspaceSize,
+     METH_O,
+     nullptr},
+    {"_cuda_resetCublasWorkspaceSize",
+     THCPModule_resetCublasWorkspaceSize,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_resetCublasLtWorkspaceSize",
+     THCPModule_resetCublasLtWorkspaceSize,
      METH_NOARGS,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",
