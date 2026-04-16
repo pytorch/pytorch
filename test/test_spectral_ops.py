@@ -1597,6 +1597,42 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
             torch.istft(x.to(device), n_fft=100, window=window)
 
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_istft_compile_length_exceeds_signal(self, device):
+        """torch.compile should not error when istft length exceeds the reconstructed signal size.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/179593
+        """
+        n_fft = 1024
+        hop_length = 512
+        # length intentionally exceeds the reconstructed signal size so the
+        # narrow-then-pad path is exercised.
+        length = 51712
+        window = torch.hann_window(n_fft, device=device)
+        spec = torch.view_as_complex(
+            torch.randn(16, n_fft // 2 + 1, 100, 2, device=device)
+        )
+
+        with self.assertWarnsOnceRegex(
+            UserWarning, "The length of signal is shorter than the length parameter."
+        ):
+            eager_out = torch.istft(
+                spec, n_fft=n_fft, hop_length=hop_length,
+                window=window, length=length,
+            )
+
+        compiled_istft = torch.compile(torch.istft)
+        with self.assertWarnsOnceRegex(
+            UserWarning, "The length of signal is shorter than the length parameter."
+        ):
+            compiled_out = compiled_istft(
+                spec, n_fft=n_fft, hop_length=hop_length,
+                window=window, length=length,
+            )
+
+        self.assertEqual(eager_out, compiled_out)
+
 
 class FFTDocTestFinder:
     '''The default doctest finder doesn't like that function.__module__ doesn't
