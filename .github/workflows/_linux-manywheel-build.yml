@@ -11,10 +11,6 @@ on:
         required: true
         type: string
         description: JSON array of GPU build config objects
-    secrets:
-      github-token:
-        required: true
-        description: GitHub token
 
 permissions:
   id-token: write
