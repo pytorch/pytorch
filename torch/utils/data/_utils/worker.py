@@ -332,11 +332,13 @@ def _base_worker_loop(
         # main process won't send more tasks to this worker, and will send
         # `None` to this worker to properly exit it.
         #
-        # Note that we cannot set `done_event` from a MP worker as it is shared
-        # among all processes. Instead, we set the `iteration_end` flag to
-        # signify that the iterator is exhausted. When either `done_event` or
-        # `iteration_end` is set, we skip all processing step and just wait for
-        # `None`.
+        # We use a local `iteration_end` flag (rather than setting `done_event`)
+        # to signify that this worker's iterator is exhausted. For MP workers,
+        # `done_event` is shared across processes and should only be set by the
+        # main process. For thread workers, `done_event` is a threading.Event
+        # that could technically be set from any thread, but we keep the same
+        # protocol for consistency. When either `done_event` or `iteration_end`
+        # is set, we skip processing and just wait for the `None` sentinel.
         iteration_end = False
 
         # Create watchdog to check if parent is alive

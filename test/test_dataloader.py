@@ -4083,7 +4083,7 @@ class TestThreadingDataLoader(TestCase):
                 self.assertTrue(torch.equal(samples1, samples2))
                 self.assertTrue(torch.equal(targets1, targets2))
 
-    @parametrize("pin_memory", ["True", "False"])
+    @parametrize("pin_memory", [True, False])
     def test_threading_with_persistent_workers(self, pin_memory):
         # Test with persistent_workers=True
         loader = DataLoader(
@@ -4648,7 +4648,7 @@ print("SUCCESS")
             timeout=1,
         )
 
-        with self.assertRaises(RuntimeError, msg="DataLoader timed out"):
+        with self.assertRaisesRegex(RuntimeError, "DataLoader timed out"):
             list(loader)
 
     def test_thread_worker_method_mobile_build_rejected(self):

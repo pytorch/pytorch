@@ -20,6 +20,7 @@ import threading
 import warnings
 from collections.abc import Callable
 from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -39,7 +40,6 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
-from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -309,7 +309,7 @@ class DataLoader(Generic[_T_co]):
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
         worker_method (str, optional): Worker implementation to use, ``"multiprocessing"`` for process-based workers
             or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``).
-            Note that ``"thread"`` is only supported on Linux.
+            Note that ``"thread"`` is experimental and only supported on Linux.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -1182,9 +1182,10 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         return data
 
     def _mark_worker_as_unavailable(self, worker_id, shutdown=False):
-        # Mark a worker as having finished its work e.g., due to
-        # exhausting an `IterableDataset`. This should be used only when this
-        # `_ParallelDataLoaderIter` is going to continue running.
+        # Mark a worker as having finished its work, e.g., due to
+        # exhausting an `IterableDataset`, or during shutdown.
+        # When shutdown=False, the iterator is expected to continue
+        # running with remaining workers.
 
         if (
             not self._workers_status[worker_id]
@@ -1306,7 +1307,11 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
         def _atexit_cleanup():
             self_ref = weak_self()
             if self_ref is not None:
-                self_ref._shutdown_workers()
+                try:
+                    self_ref._shutdown_workers()
+                except Exception:
+                    # Don't let a failed cleanup disrupt interpreter shutdown.
+                    pass
 
         threading._register_atexit(_atexit_cleanup)  # type: ignore[attr-defined]
 
@@ -1321,6 +1326,28 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
         return f"DataLoader worker (thread(s) {thread_ids_str}) exited unexpectedly"
 
     def _shutdown_workers(self) -> None:
+        # NOTE [ Threading DataLoader Shutdown Logic ]
+        #
+        # Thread workers are shut down via three mechanisms, in order of preference:
+        #
+        # 1. Explicit cleanup: When the iterator goes out of scope or is deleted,
+        #    __del__ calls _shutdown_workers(). This sends None sentinels to each
+        #    worker's index_queue and joins the threads. This is the normal path.
+        #
+        # 2. Interpreter shutdown: We register a callback via
+        #    threading._register_atexit() in __init__. This fires during
+        #    threading._shutdown(), BEFORE daemon threads are abandoned and
+        #    BEFORE atexit handlers run. This is the last safe moment to
+        #    signal threads and join them. Uses a weakref to avoid preventing
+        #    GC of the iterator.
+        #
+        # 3. Daemon fallback: Thread workers are daemon threads, so if both
+        #    (1) and (2) fail, they are abandoned when the process exits.
+        #    This is a last resort — it may cause C++ cleanup warnings.
+        #
+        # The python_exit_status guard below protects against __del__ being
+        # called during late-stage module cleanup (after atexit has fired),
+        # where Python objects may be partially finalized.
         if _utils is None or _utils.python_exit_status is not False:
             return
         if not self._shutdown:
