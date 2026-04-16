@@ -910,27 +910,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
-    def _borrow_tensor_input_for_assign(self, tensor_expr: str) -> str:
-        # Subgraphs are inlined, so any borrowed handle stays within the wrapper scope.
-        return f"borrow_arrayref_tensor_as_tensor({tensor_expr})"
-
-    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
-
-        for (inner_input, inner_input_val), outer_input in zip(
-            subgraph.graph.graph_inputs.items(), outer_inputs
-        ):
-            if not isinstance(inner_input_val, ir.TensorBox):
-                continue
-
-            self.writeline(f"AtenTensorHandle {inner_input}_handle;")
-            self.writeline(
-                "AOTI_TORCH_ERROR_CODE_CHECK("
-                f"aoti_torch_assign_tensors_out({self._borrow_tensor_input_for_assign(outer_input)}, "
-                f"&{inner_input}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
-
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
@@ -956,7 +935,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 "AOTI_TORCH_ERROR_CODE_CHECK("
-                f"aoti_torch_assign_tensors_out({self._borrow_tensor_input_for_assign(inp)}, "
+                f"aoti_torch_assign_tensors_out(borrow_arrayref_tensor_as_tensor({inp}), "
                 f"&{out_name}_handle));"
             )
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
