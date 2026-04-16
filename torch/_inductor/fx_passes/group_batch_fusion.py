@@ -621,7 +621,7 @@ class PreGradBatchLinearFusion(BatchFusion):
         return getitem_node.args[0]
 
     def match(self, node: torch.fx.Node):
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
