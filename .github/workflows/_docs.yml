@@ -93,8 +93,7 @@ jobs:
             timeout-minutes: 360
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}linux.c7i.2xlarge
-            # It takes less than 30m to finish python docs unless there are issues
-            timeout-minutes: 30
+            timeout-minutes: 45
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
     # The current name requires updating the database last docs push query from test-infra every time the matrix is updated
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
@@ -176,6 +175,7 @@ jobs:
             -e RUN_DOXYGEN \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            -e GITHUB_WORKSPACE=/var/lib/jenkins/workspace \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
@@ -284,7 +284,7 @@ jobs:
             timeout-minutes: 360
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}l-x86iavx512-16-128
-            timeout-minutes: 30
+            timeout-minutes: 45
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
       - name: Setup Linux

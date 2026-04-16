@@ -766,17 +766,17 @@ class VariableBuilder:
             pass
 
         if has_triton_experimental_host_tma():
-            from triton.tools.experimental_descriptor import (  # noqa: F811
+            from triton.tools.experimental_descriptor import (
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
         if has_triton_tensor_descriptor_host_tma():
-            from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
+            from triton.tools.tensor_descriptor import TensorDescriptor
         if has_triton():
             import triton as triton_mod
 
             if hasattr(triton_mod, "set_allocator"):
-                set_allocator = triton_mod.set_allocator  # noqa: F811
+                set_allocator = triton_mod.set_allocator
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -2842,7 +2842,7 @@ class VariableBuilder:
             # break because they expect all cuda inputs but our tensorified
             # float will be a f64[] cpu tensor. Fixes the following test
             # when specialize_float=False
-            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (

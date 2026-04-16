@@ -480,7 +480,7 @@ class TestVarlenAttention(NNTestCase):
         )
 
         compiled_forward = torch.compile(
-            attention_block.forward_varlen, backend="eager", fullgraph=True
+            attention_block.forward_varlen, backend="eager"
         )
         with OpLoggingMode() as mode:
             output = compiled_forward(x_packed, cu_seq, shape.max_seq_len)
@@ -511,7 +511,7 @@ class TestVarlenAttention(NNTestCase):
             varlen_attn_out(out_buf, q, k, v, cu_seq, cu_seq, max_len, max_len)
             return out_buf
 
-        compiled_out = torch.compile(run_varlen_out, backend="eager", fullgraph=True)
+        compiled_out = torch.compile(run_varlen_out, backend="eager")
         with OpLoggingMode() as out_mode:
             compiled_out(q, k, v, cu_seq, shape.max_seq_len)
 

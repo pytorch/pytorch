@@ -1,6 +1,6 @@
 import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -24,7 +24,7 @@ __all__ = [
 
 
 @compatibility(is_backward_compatible=False)
-def getattr_recursive(obj: object, name: str) -> object:
+def getattr_recursive(obj: object, name: str) -> Any:
     for layer in name.split("."):
         if isinstance(obj, torch.nn.ModuleList):
             if hasattr(obj, "_modules") and layer in obj._modules:

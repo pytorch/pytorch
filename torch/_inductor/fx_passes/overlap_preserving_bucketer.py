@@ -10,6 +10,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
+    _get_collective_node_from_wait,
     _schedulable_wait_node,
     BucketMode,
     get_full_bucket_key,
@@ -48,7 +49,7 @@ class WhyNoBucket:
     def __call__(self, reason: str, *args: Any) -> None:
         if bucket_log.isEnabledFor(logging.DEBUG):
             bucket_log.debug(
-                "cannot bucket %s with %s: " + reason,  # noqa: G003
+                "cannot bucket %s with %s: " + reason,
                 self.name1,
                 self.name2,
                 *args,
@@ -228,8 +229,8 @@ class OverlapPreservingBucketer:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
             elif _schedulable_wait_node(node):
-                wait_input = node.args[0]
-                if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
+                wait_coll = _get_collective_node_from_wait(node)
+                if isinstance(wait_coll, fx.Node) and get_group_name(wait_coll) == pg:
                     node_type = "waits"
                 # Wait for a different PG but hiding a collective on this PG
                 elif node in hiding_nodes:
@@ -588,10 +589,9 @@ class OverlapPreservingBucketer:
             coll = event.node
         # For wait events, look up the start node from the event's args
         elif event.is_wait:
-            wait_input = event.node.args[0]
-            if not isinstance(wait_input, fx.Node):
+            coll = _get_collective_node_from_wait(event.node)
+            if coll is None:
                 return None, []
-            coll = wait_input
         else:
             return None, []
 
@@ -1021,20 +1021,30 @@ class OverlapPreservingBucketer:
                 mode=self.bucket_mode,
             )
 
-        # Get new nodes
-        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
-        assert len(new_waits) == 1
-
-        new_wait = new_waits[0]
-        new_start = new_wait.args[0]
-        assert isinstance(new_start, fx.Node)
+        # Identify the new wait(s) and their collective start in a single pass
+        wait_to_start = {
+            n: start
+            for n in new_nodes
+            if (start := _get_collective_node_from_wait(n)) is not None
+        }
+        new_waits = list(wait_to_start)
 
         # Create mapping of all erased nodes to their replacements
         erased_to_new: dict[fx.Node, fx.Node | None] = {}
-        for old_start in old_starts:
-            erased_to_new[old_start] = new_start
-        for old_wait in old_waits:
-            erased_to_new[old_wait] = new_wait
+        new_start = wait_to_start[new_waits[0]]
+        if len(new_waits) == 1:
+            # Standard bucketing: single start + single wait
+            new_wait = new_waits[0]
+            for old_start in old_starts:
+                erased_to_new[old_start] = new_start
+            for old_wait in old_waits:
+                erased_to_new[old_wait] = new_wait
+        else:
+            # Coalesced bucketing: single start + N waits (one per original tensor)
+            assert len(new_waits) == len(old_waits)
+            for old_start in old_starts:
+                erased_to_new[old_start] = new_start
+            erased_to_new.update(dict(zip(old_waits, new_waits)))
 
         # Handle convert_element_type nodes that were fused and erased
         # The bucketed operation may have a _pre_bucket op that handles dtype conversion
@@ -1070,7 +1080,7 @@ def finalize_overlap_scheduling(
     region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
-    bucket_mode: BucketMode = "default",
+    bucket_mode: BucketMode | None = None,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.

@@ -35,7 +35,7 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
@@ -1842,7 +1842,7 @@ def speculate_subgraph_with_auto_output_flattening(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -2042,7 +2042,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -4836,7 +4836,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if i.is_tensor():
                     bwd_args.append(i)
                 else:
-                    bwd_args.append(CONSTANT_VARIABLE_NONE)
+                    bwd_args.append(ConstantVariable.create(None))
 
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
@@ -5668,7 +5668,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         return out
 
 
-from .invoke_subgraph import InvokeSubgraphHigherOrderVariable  # noqa: E402
+from .invoke_subgraph import InvokeSubgraphHigherOrderVariable
 
 
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()

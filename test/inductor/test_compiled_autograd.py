@@ -3653,7 +3653,7 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], getitem_27);  getitem_1 = getitem_2 = getitem_27 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
@@ -5269,6 +5269,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
+    "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode causes frame skip
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
@@ -5415,6 +5416,17 @@ skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
+
+# boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
+skipped_tests.add("test_custom_function_boxed_grads")
+skipped_tests.add("test_custom_function_boxed_grads_multi_output")
+skipped_tests.add("test_custom_function_boxed_grads_no_extra_refs")
+skipped_tests.add("test_custom_function_boxed_grads_cleanup_on_error")
+skipped_tests.add("test_custom_function_boxed_grads_chain")
+skipped_tests.add("test_custom_function_boxed_grads_none_grads")
+skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
+skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
+skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
