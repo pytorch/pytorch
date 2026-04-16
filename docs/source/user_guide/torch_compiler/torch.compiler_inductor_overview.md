@@ -65,6 +65,8 @@ page.
 
 ## TorchInductor Pipeline
 
+The figure below shows the code structure of TorchInductor.
+
 ```{image} ../../_static/img/inductor_user_guide/arch_detailed.png
 :alt: Detailed TorchInductor compilation pipeline from Pre-grad Passes through Code Generation to hardware targets
 :width: 600px
@@ -329,11 +331,15 @@ TORCH_TRACE=/tmp/my_traced_log_dir python3 example.py
 tlparse /tmp/my_traced_log_dir -o tl_out/
 ```
 
-The generated HTML organizes log artifacts by compile ID. Among other things, you
-can observe the post-grad graph discussed earlier (for example, in
-`0_0_0/inductor_post_grad_graph_6.txt`) and the generated code. The `tlparse`
-output also includes other information such as the dynamo graph, the pre-grad
-graph, cache hit/miss information, and the dynamo C++ guards.
+The generated HTML organizes log artifacts by compile ID. For example:
+
+<!-- TODO: Add tlparse output screenshot from Google Doc (image showing compile ID artifacts) -->
+
+Among other things, you can observe the post-grad graph discussed earlier (in
+`0_0_0/inductor_post_grad_graph_6.txt`) and the generated code (in
+`_0_0_0/inductor_output_code_<hash>_7.txt`). The `tlparse` output also includes
+other information such as the dynamo graph, the pre-grad graph, cache hit/miss
+information, and the dynamo C++ guards.
 
 :::{seealso}
 - [Provenance Tracking](torch.compiler_inductor_provenance) for using

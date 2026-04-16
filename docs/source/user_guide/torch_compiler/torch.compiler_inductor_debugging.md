@@ -124,7 +124,11 @@ $ ls output
 -_0_0_0  chromium_events.json  compile_directory.json  failures_and_restarts.html  index.html  raw.log
 ```
 
-`index.html` renders a view that shows different **Stack Frames**, which
+`index.html` renders like this:
+
+<!-- TODO: Add tlparse index.html screenshot from Google Doc (showing Stack Frames and compile artifacts organized by compile ID) -->
+
+This view shows different **Stack Frames**, which
 together form a **Stack Trie**. Each of these frames correspond to one or more
 [compile](https://github.com/pytorch/pytorch/blob/3d06ff82a84a118f0ed246864d4fc01ac4726328/torch/_inductor/__init__.py#L33)
 calls in TorchInductor, and you can see the intermediate results from
@@ -137,7 +141,11 @@ input shape, and a
 was triggered.
 
 You can view timing information by going to <https://ui.perfetto.dev/> and
-opening up the file `chromium_events.json`. This view breaks down the runtime
+opening up the file `chromium_events.json`:
+
+<!-- TODO: Add Perfetto timing view screenshot from Google Doc (showing runtime breakdown of compiler phases) -->
+
+This view breaks down the runtime
 of various important phases in the compiler and can be helpful when debugging
 performance issues in the compilation itself.
 

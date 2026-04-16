@@ -47,8 +47,9 @@ This process occurs for both the forward and backward graphs.
 
 ### Decomposition Tables
 
-Decomposition happens at multiple levels. The decomposition table structure is
-defined in
+Decomposition happens at multiple levels. During AOT Autograd tracing, it checks
+if an operation has registered in the decomposition table. The decomposition
+table structure is defined in
 [torch/_decomp/\_\_init\_\_.py](https://github.com/pytorch/pytorch/blob/main/torch/_decomp/__init__.py),
 and the actual implementations are registered in
 [torch/_decomp/decompositions.py](https://github.com/pytorch/pytorch/blob/main/torch/_decomp/decompositions.py).
