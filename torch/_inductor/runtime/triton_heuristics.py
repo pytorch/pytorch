@@ -4546,10 +4546,10 @@ class GridExpr:
         at codegen time and are instead referenced by variable names.
         """
         meta: dict[str, Any] = {
-            "XBLOCK": f"{kernel_name}_result.xblock",
-            "YBLOCK": f"{kernel_name}_result.yblock",
-            "ZBLOCK": f"{kernel_name}_result.zblock",
-            "R0_BLOCK": f"{kernel_name}_result.r0block",
+            "XBLOCK": f"{kernel_name}_result.xblocks[0]",
+            "YBLOCK": f"{kernel_name}_result.yblocks[0]",
+            "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
+            "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
@@ -4738,6 +4738,15 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 
 class SequentialFlattenComboKernelGrid(GridExpr):
     """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
+
+    def generate_lazy(self, kernel_name: str) -> None:
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        num_kernels = combo_meta["num_kernels"]
+        meta: dict[str, Any] = {}
+        for i in range(num_kernels):
+            meta[f"XBLOCK_{i}"] = f"{kernel_name}_result.xblocks[{i}]"
+            meta[f"YBLOCK_{i}"] = f"{kernel_name}_result.yblocks[{i}]"
+        self.generate(meta, is_lazy=True)
 
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]
