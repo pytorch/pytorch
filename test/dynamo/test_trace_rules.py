@@ -13,7 +13,9 @@ import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
 from torch._dynamo.testing import CompileCounter
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.trace_rules import (
+
     LEGACY_MOD_INLINELIST,
     load_object,
     lookup_inner,

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import requires_cuda, skipIfWindows
+from torch.testing._internal.common_utils import requires_accelerator, requires_cuda, skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -23,6 +23,9 @@ from torch.testing._internal.logging_utils import logs_to_string
 # you assume static by default, put it in a regular test file and
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
@@ -63,6 +66,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    @requires_accelerator
     @requires_cuda
     def test_no_recompilations_with_efficient_attention(self):
         def fn(q, k, v, attn_mask):

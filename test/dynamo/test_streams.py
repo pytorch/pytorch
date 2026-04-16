@@ -12,7 +12,11 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_utils import requires_accelerator, requires_cuda
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -32,17 +36,17 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-    @requires_cuda
+    @requires_accelerator
     def test_stream_weakref(self):
         s = torch.Stream()
         weakref.ref(s)
 
-    @requires_cuda
+    @requires_accelerator
     def test_event_weakref(self):
         e = torch.Event()
         weakref.ref(e)
 
-    @requires_cuda
+    @requires_accelerator
     def test_stream_enter_exit(self):
         def fn(x, y, s1, s2):
             with s1:
@@ -81,7 +85,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @requires_cuda
+    @requires_accelerator
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_context_graph_break(self):
         def fn(x, y):
@@ -110,20 +114,20 @@ class <lambda>(torch.nn.Module):
         self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
         self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
 
-    @requires_cuda
+    @requires_accelerator
     def test_stream_input(self):
         def fn(x, y, s):
             z = torch.add(x, y)
             y = z + 2
             return y, s
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device="cuda"))
+        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device=device_type))
         expected = fn(*inp)
         fn_opt = torch.compile(fn, fullgraph=True)
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
-    @requires_cuda
+    @requires_accelerator
     def test_local_stream_return(self):
         def fn(x, y):
             s = torch.Stream()
@@ -141,14 +145,14 @@ class <lambda>(torch.nn.Module):
         # Stream should be newly allocated on each call
         self.assertNotEqual(s0, s1)
 
-    @requires_cuda
+    @requires_accelerator
     def test_get_current_stream_return(self):
         def fn(x, s):
             with s:
                 s0 = torch.accelerator.current_stream()
             return x, s0
 
-        s_inp = torch.Stream(device="cuda")
+        s_inp = torch.Stream(device=device_type)
         inp = (torch.ones(2, 2) + 1, s_inp)
         fn_opt = torch.compile(fn, fullgraph=True)
         _, s0 = fn_opt(*inp)
@@ -182,7 +186,7 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
-    @requires_cuda
+    @requires_accelerator
     def test_nested_stream_enter_exit(self):
         def fn(x, y, s0, s1, s2):
             with s1:
@@ -236,7 +240,7 @@ class <lambda>(torch.nn.Module):
     def test_nested_stream_enter_exit_graph_break(self):
         pass
 
-    @requires_cuda
+    @requires_accelerator
     def test_local_stream_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -277,7 +281,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_local_stream_nested_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -320,6 +324,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_accelerator
     @requires_cuda
     def test_new_stream_api(self) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
@@ -345,6 +350,7 @@ class <lambda>(torch.nn.Module):
 
         fn(torch.ones(2, 2, device="cuda:0"))
 
+    @requires_accelerator
     @requires_cuda
     def test_current_stream_api(self) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
@@ -376,7 +382,7 @@ class <lambda>(torch.nn.Module):
 
         fn(torch.ones(2, 2, device="cuda:0"))
 
-    @requires_cuda
+    @requires_accelerator
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -426,7 +432,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_stream_backward_simple(self) -> None:
         def fn(x, y):
             s2 = torch.Stream()
@@ -506,6 +512,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @requires_accelerator
     @requires_cuda
     def test_stream_backward_sync(self) -> None:
         def fn(x, y):
@@ -612,7 +619,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_event_tracing(self):
         def fn(x) -> None:
             e = torch.Event()
@@ -620,7 +627,7 @@ class GraphModule(torch.nn.Module):
             x.add_(1)
             return x
 
-        inp = (torch.ones(2, 2, device="cuda"),)
+        inp = (torch.ones(2, 2, device=device_type),)
         (
             _,
             _,
@@ -643,7 +650,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
@@ -665,7 +672,7 @@ class <lambda>(torch.nn.Module):
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
 
-    @requires_cuda
+    @requires_accelerator
     def test_run_opcheck_wait_record(self):
         from torch._dynamo.variables.streams import record_event, wait_event
         from torch.library import opcheck
@@ -689,7 +696,7 @@ class <lambda>(torch.nn.Module):
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
 
-    @requires_cuda
+    @requires_accelerator
     def test_run_opcheck_wait_record_stream(self):
         from torch._dynamo.variables.streams import wait_stream
         from torch.library import opcheck
@@ -709,7 +716,7 @@ class <lambda>(torch.nn.Module):
         finally:
             reset_user_object_tracking()
 
-    @requires_cuda
+    @requires_accelerator
     def test_record_stream_problem_basic(self):
         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
         # for what this tests/solves for
@@ -728,7 +735,7 @@ class <lambda>(torch.nn.Module):
 
             return z0, z
 
-        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        inp = (torch.ones(2, 2, device=device_type, requires_grad=True),)
         (
             actual,
             _,
@@ -797,7 +804,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_record_stream_problem_interleaved(self):
         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
         # for what this tests/solves for
@@ -829,7 +836,7 @@ class GraphModule(torch.nn.Module):
             e.wait()
             return z, z1, z2
 
-        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        inp = (torch.ones(2, 2, device=device_type, requires_grad=True),)
         (
             actual,
             _,
@@ -1008,6 +1015,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @requires_accelerator
     @requires_cuda
     def test_epilogue_copy_streams_inference(self):
         def fn(x):
@@ -1040,6 +1048,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_accelerator
     @requires_cuda
     def test_epilogue_copy_streams_external(self):
         @torch.compile(backend="eager")
@@ -1485,7 +1494,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @requires_cuda
+    @requires_accelerator
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
@@ -1496,7 +1505,7 @@ class GraphModule(torch.nn.Module):
                 e.record()
                 return x
 
-            inp = (torch.ones(2, 2, device="cuda"),)
+            inp = (torch.ones(2, 2, device=device_type),)
             fn(*inp)
 
     def test_is_marked_side_effectful(self):

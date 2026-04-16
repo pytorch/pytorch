@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_accelerator_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -153,7 +153,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
 

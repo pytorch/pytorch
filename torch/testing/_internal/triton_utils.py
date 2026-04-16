@@ -21,6 +21,13 @@ requires_gpu_and_triton = unittest.skipUnless(
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
+from torch.testing._internal.common_utils import TEST_PRIVATEUSE1
+from torch.utils._triton import has_triton as _has_triton
+HAS_ACCELERATOR_AND_TRITON = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or (TEST_PRIVATEUSE1 and _has_triton())
+requires_accelerator_and_triton = unittest.skipUnless(
+    HAS_ACCELERATOR_AND_TRITON, "requires accelerator and triton"
+)
+
 if has_triton():
     import triton
     from triton import language as tl
