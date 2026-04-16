@@ -4091,7 +4091,6 @@ class TestAutograd(TestCase):
 
             torch._dynamo.reset()
 
-            prev = torch.get_default_device()
             try:
                 # Using torch.device("cuda") directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
@@ -4102,7 +4101,7 @@ class TestAutograd(TestCase):
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
-                torch.set_default_device(prev)
+                torch.set_default_device(None)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
@@ -4116,11 +4115,10 @@ class TestAutograd(TestCase):
         @contextlib.contextmanager
         def apply_device(device):
             try:
-                prev = torch.get_default_device()
                 torch.set_default_device(device)
                 yield
             finally:
-                torch.set_default_device(prev)
+                torch.set_default_device(None)
 
         def context_fn():
             return contextlib.nullcontext(), apply_device("cuda")
@@ -4134,6 +4132,47 @@ class TestAutograd(TestCase):
                 fn, a, context_fn=context_fn, use_reentrant=False
             )
             out.backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpoint_device_context_no_mode_stack_leak(self):
+        """Checkpoint with set_default_device context_fn should not leak DeviceContext."""
+        from torch.utils._device import DeviceContext
+
+        @contextlib.contextmanager
+        def device_ctx(device):
+            try:
+                torch.set_default_device(device)
+                yield
+            finally:
+                torch.set_default_device(None)
+
+        def context_fn():
+            return contextlib.nullcontext(), device_ctx("cuda")
+
+        def fn(x):
+            return x.sin().cos()
+
+        num_device_ctx_before = sum(
+            isinstance(m, DeviceContext)
+            for m in torch.overrides._get_current_function_mode_stack()
+        )
+
+        with device_ctx("cuda"):
+            a = torch.tensor(1.0, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(
+                fn, a, context_fn=context_fn, use_reentrant=False
+            )
+            out.backward()
+
+        num_device_ctx_after = sum(
+            isinstance(m, DeviceContext)
+            for m in torch.overrides._get_current_function_mode_stack()
+        )
+        self.assertEqual(
+            num_device_ctx_before,
+            num_device_ctx_after,
+            "Checkpoint leaked a DeviceContext onto the TorchFunction mode stack",
+        )
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)

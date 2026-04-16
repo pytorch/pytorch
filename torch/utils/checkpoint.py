@@ -1589,13 +1589,19 @@ def _checkpoint_without_reentrant_generator(
     from torch.overrides import _get_current_function_mode_stack
     from torch.utils._device import DeviceContext
 
-    # recompute_fn should respect the device context of the original forward
-    device_ctx = next(
-        filter(
-            lambda mode: isinstance(mode, DeviceContext),
-            reversed(_get_current_function_mode_stack()),
-        ),
-        contextlib.nullcontext(),
+    # recompute_fn should respect the device context of the original forward.
+    # Capture just the device, not the live DeviceContext object — reusing the
+    # same object causes prev_mode linkage that leaks entries onto the mode
+    # stack when combined with set_default_device save/restore patterns.
+    _fwd_device_ctx_device = next(
+        (mode.device for mode in reversed(_get_current_function_mode_stack())
+         if isinstance(mode, DeviceContext)),
+        None,
+    )
+    device_ctx: contextlib.AbstractContextManager = (
+        DeviceContext(_fwd_device_ctx_device)
+        if _fwd_device_ctx_device is not None
+        else contextlib.nullcontext()
     )
     error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
     is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
