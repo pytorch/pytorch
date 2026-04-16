@@ -4521,7 +4521,7 @@ class CppKernelProxy(CppKernel):
                 ):
                     hint_tail_size = V.graph.sizevars.optimization_hint(tail_size)
                     return V.graph.sizevars.guard_or_false(
-                        sympy.Gt(10 * hint_tail_size, 8 * tiling_factor)
+                        sympy.Gt(2 * hint_tail_size, tiling_factor)
                     )
                 return True
 
