@@ -437,29 +437,77 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
-# Additional expected failures that only apply on ROCm.
-# Same structure as the main xfail dicts: test_type -> backend -> op_name -> dtypes.
-ROCM_XFAILS = {
-    "batch_invariance": {
-        "inductor_default": {
-            "log1p": {fp32},
-        },
+ROCM_EAGER_EQUIV_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.rms_norm": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
     },
+    "inductor_default": {
+        "sigmoid": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.silu": {fp16, fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_numerics": {
+        "sigmoid": {fp32},
+        "sub": {ALL},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+}
+
+ROCM_DETERMINISM_XFAILS = {}
+
+ROCM_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "nn.functional.linear": {ALL},
+        "log1p": {fp32},
+    },
+    "inductor_numerics": {
+        "nn.functional.linear": {ALL},
+    },
+}
+
+ROCM_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "log1p": {fp32},
+        "rsqrt": {bf16, fp32},
+        "sigmoid": {fp32},
+        "sin": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+    "inductor_numerics": {
+        "sigmoid": {fp32},
+    },
+}
+
+ROCM_BINARY_NUMERICAL_XFAILS = {}
+
+ROCM_XFAIL_DICTS = {
+    "eager_equivalence": ROCM_EAGER_EQUIV_XFAILS,
+    "determinism": ROCM_DETERMINISM_XFAILS,
+    "batch_invariance": ROCM_BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": ROCM_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": ROCM_BINARY_NUMERICAL_XFAILS,
 }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
-    is_xfail = dtype in xfails or ALL in xfails
-
-    if not is_xfail and torch.version.hip is not None:
-        rocm_xfails = (
-            ROCM_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
-        )
-        is_xfail = dtype in rocm_xfails or ALL in rocm_xfails
-
-    return is_xfail
+    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
+    xfails = xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set())
+    return dtype in xfails or ALL in xfails
 
 
 def compile_fn(fn, backend):
