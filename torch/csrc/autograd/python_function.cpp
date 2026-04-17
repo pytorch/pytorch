@@ -63,7 +63,7 @@ PyObject* THPGradientEdgeClass = nullptr;
 namespace {
 
 inline void check_legacy_fn_attr_access(
-    const std::shared_ptr<torch::autograd::Node>& cdata,
+    const c10::intrusive_ptr<torch::autograd::Node>& cdata,
     const char* attr) {
   TORCH_CHECK(
       cdata,
@@ -353,6 +353,20 @@ auto PyNode::release_variables() -> void {
   }
 }
 
+void PyNode::release_resources() {
+  // NB: Node::release_resources calls into release_variables(), which
+  // accesses the Python object so it must be called first.
+  Node::release_resources();
+
+  // Release the Python object so that it can be freed when the C++ Node
+  // outlives all strong references (weak_intrusive_ptr may keep the
+  // allocation alive, but shouldn't prevent the PyObject from being freed).
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_CLEAR(obj);
+  }
+}
+
 auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*)obj;
@@ -583,7 +597,7 @@ static void THPFunction_dealloc(THPFunction* self) {
 
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
-  self->cdata.~weak_ptr<PyNode>();
+  self->cdata.~weak_intrusive_ptr();
   self->output_info.~vector();
   self->input_info.~vector();
   self->saved_variables.~vector();
@@ -602,7 +616,8 @@ static PyObject* THPFunction_new(
   // most fields
   THPFunction* self = (THPFunction*)obj;
   // Setup the PyNode later; we can't keep it live here
-  new (&self->cdata) std::weak_ptr<PyNode>();
+  new (&self->cdata)
+      c10::weak_intrusive_ptr<PyNode>(c10::intrusive_ptr<PyNode>());
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
@@ -669,7 +684,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 // do in this case.  After this method is run, t2var is extended with
 // mappings for output tensors as well.
 static void _wrap_outputs(
-    const std::shared_ptr<PyNode>& cdata,
+    const c10::intrusive_ptr<PyNode>& cdata,
     THPFunction* self,
     const variable_list& input_vars,
     PyObject* raw_output,
@@ -884,7 +899,7 @@ static void _get_tensors_to_save(
 // Save any variables that requested by to_save
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
-    const std::shared_ptr<PyNode>& cdata_ptr,
+    const c10::intrusive_ptr<PyNode>& cdata_ptr,
     THPFunction* self,
     PyObject* outputs,
     int64_t num_outputs) {
@@ -1173,7 +1188,7 @@ void _trace_post_record(
 
 PyObject* process_outputs(
     PyObject* op_obj,
-    const std::shared_ptr<PyNode>& cdata,
+    const c10::intrusive_ptr<PyNode>& cdata,
     THPFunction* grad_fn,
     const UnpackedInput& unpacked,
     PyObject* inputs,
@@ -1406,8 +1421,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
     return nullptr;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
 
-  auto cdata =
-      std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
+  auto cdata = c10::make_intrusive<PyNode>(std::move(ctx_obj));
   ctx->cdata = cdata;
 
   // Record input nodes if tracing
