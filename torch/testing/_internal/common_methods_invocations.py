@@ -3183,7 +3183,14 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
 
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
 
-    for size, min, max in product(sizes, [0, -10], [0, 10]):
+    minima = [0]
+    maxima = [10]
+
+    if dtype.is_signed:
+        minima.append(-10)
+        maxima.append(0)
+
+    for size, min, max in product(sizes, minima, maxima):
         # construct sample input omitting bins arg
         yield SampleInput(make_arg(size), min=min, max=max)
 
@@ -20646,6 +20653,9 @@ op_db: list[OpInfo] = [
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64),
+           dtypesIfMPS=floating_types_and(
+               torch.bfloat16, torch.float16, torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64
+           ),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
