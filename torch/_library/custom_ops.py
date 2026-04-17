@@ -379,7 +379,7 @@ class CustomOpDef:
                             return inspect.getmodule(fn)
 
                         schema = self._opoverload._schema
-                        if not schema._is_view_op():
+                        if not schema._is_view_op() and torch.is_grad_enabled():
                             utils._c_check_aliasing_constraint(
                                 self._name,
                                 args,

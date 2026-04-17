@@ -3927,6 +3927,25 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    def test_output_aliasing_allowed_under_no_grad(self):
+        # aliasing check should be skipped when autograd is disabled
+        @torch.library.custom_op("_torch_testing::f", mutates_args=("x",))
+        def f(x: Tensor) -> Tensor:
+            return x.view(-1)
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            f(x)
+
+        with torch.no_grad():
+            out = f(x)
+            self.assertTrue(out.data_ptr() == x.data_ptr())
+
+        with torch.inference_mode():
+            x2 = torch.randn(3)
+            out2 = f(x2)
+            self.assertTrue(out2.data_ptr() == x2.data_ptr())
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
         @torch.library.custom_op(
