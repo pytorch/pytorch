@@ -68,6 +68,22 @@ auto Node::forward_op_name() const -> std::string {
   return n.substr(0, pos) + suffix;
 }
 
+bool Node::task_should_compute_output(size_t output_edge_index) const {
+  TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+  const auto& next = next_edges_[output_edge_index];
+  if (next.is_valid()) {
+    const auto exec_info = get_current_graph_task_exec_info();
+    if (exec_info && !exec_info->empty()) {
+      auto it = exec_info->find(next.function.get());
+      if (it == exec_info->end() || !it->second.should_execute()) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 AnomalyMetadata* Node::metadata() noexcept {
   if (!anomaly_metadata_) {
     anomaly_metadata_ = Engine::get_default_engine().make_anomaly_metadata();
