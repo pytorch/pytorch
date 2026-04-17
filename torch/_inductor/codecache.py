@@ -2381,6 +2381,8 @@ end
                 if name not in graph.folded_constants
             )
 
+            import ctypes
+
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes: bytes) -> bytes:
                     padded_bytes = raw_bytes.ljust(
@@ -2391,8 +2393,6 @@ end
 
                 # This serializes the tensor's untyped_storage to bytes by accessing
                 # the raw data of the underlying structure.
-                import ctypes
-
                 if t.numel() == 0:
                     return b""
 
@@ -2412,6 +2412,31 @@ end
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
+            def _write_tensor_to_file(
+                f: typing.IO[bytes], t: torch.Tensor, all_cuda: bool
+            ) -> int:
+                """Write tensor data directly to file, avoiding a Python bytes copy."""
+                if t.numel() == 0:
+                    return 0
+
+                if t.is_mkldnn:
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
+
+                buf = (ctypes.c_ubyte * nbytes).from_address(data_ptr)
+                f.write(buf)
+                written = nbytes
+                if not all_cuda:
+                    padding = (-nbytes) % ALIGN_BYTES
+                    if padding:
+                        f.write(b"\x00" * padding)
+                    written += padding
+                return written
+
             # For binary_blob with external weights, stream constants directly
             # to disk to avoid holding the full serialized blob in memory.
             # This is critical for large models (e.g. 20GB+ quantized MoE).
@@ -2430,11 +2455,11 @@ end
                 with open(external_weights_path, "wb") as f_weights:
                     for name in graph.constants:
                         if name not in graph.folded_constants:
-                            chunk = _to_bytes(
-                                graph.get_original_value_of_constant(name), all_cuda
+                            consts_size += _write_tensor_to_file(
+                                f_weights,
+                                graph.get_original_value_of_constant(name),
+                                all_cuda,
                             )
-                            f_weights.write(chunk)
-                            consts_size += len(chunk)
                 serialized_weights = b""
                 generated_files.append(external_weights_path)
             else:
