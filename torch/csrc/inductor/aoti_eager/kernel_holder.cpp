@@ -501,7 +501,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       qualified_name.end());
 
   py::gil_scoped_acquire gil;
-  py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {
+  py::handle op_py_func = op.getPythonOp([&]() -> PyObject* {
     py::handle torch_api_function = py::module::import("torch")
                                         .attr("ops")
                                         .attr(ns_str.c_str())
