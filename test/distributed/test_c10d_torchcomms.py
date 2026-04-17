@@ -167,6 +167,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             input_tensor,
             output_split_sizes=output_split_sizes,
             input_split_sizes=input_split_sizes,
+            group=self.pg,
         )
 
         # Verify: section from sender i should contain value (i + rank)
