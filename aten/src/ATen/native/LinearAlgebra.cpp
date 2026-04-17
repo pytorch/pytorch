@@ -37,6 +37,7 @@
 #include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
 #include <ATen/ops/_dyn_quant_pack_4bit_weight_native.h>
 #include <ATen/ops/_int_mm_native.h>
+#include <ATen/ops/_int_mm_acc_f32_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
