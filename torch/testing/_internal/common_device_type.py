@@ -345,6 +345,21 @@ class DeviceTypeTestBase(TestCase):
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
 
+    # Optional skip mechanism built on top of instantiate_device_type_tests()
+    # and DeviceTypeTestBase. A class-level configuration field
+    # (skipped_testcases) is read during instantiation to skip tests.
+    #
+    # Format:
+    #   {
+    #       "<TestClassName>": ["test_method", ...] | ["*"]
+    #   }
+    #
+    # Behavior:
+    #   - If a class is not listed, it is unaffected by this configuration.
+    #   - ["test_method", ...]: skip only the specified methods.
+    #   - ["*"]: skip all tests from the class.
+    skipped_testcases: ClassVar[dict[str, Sequence[str]]]
+
     @property
     def precision(self):
         return self._tls.precision
@@ -387,6 +402,13 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def get_skipped_testcases(cls, test_class_name):
+        skipped_testcases = getattr(cls, "skipped_testcases", None)
+        if skipped_testcases is not None and test_class_name in skipped_testcases:
+            return skipped_testcases[test_class_name]
+        return []
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -946,6 +968,11 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
+        skipped = base.get_skipped_testcases(generic_test_class.__name__)
+        # Skip the entire class
+        if "*" in skipped:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupported runtime class:
@@ -977,6 +1004,9 @@ def instantiate_device_type_tests(
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
+                # Skip the specified methods.
+                if name in skipped:
+                    continue
                 test = getattr(generic_test_class, name)
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
