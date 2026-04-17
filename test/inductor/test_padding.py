@@ -908,7 +908,6 @@ class PaddingTest(TestCaseBase):
         )
         self.assertEqual(result.stride(), expected_stride)
 
-
     def test_reduction_comprehensive_padding_stride(self):
         """Comprehensive padding should not cause stride mismatches for
         user-visible reductions.
