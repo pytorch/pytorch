@@ -1066,17 +1066,13 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The parent stream was cached on the InputBuffer by InputBuffer::add()
-  // as the consuming node's canonical stream (possibly overridden by the
-  // stale-capture path when a stale non-capturing node stream collides
-  // with a capturing producer). Reading the cached value here keeps the
-  // override decision in one place and avoids re-running the detection
-  // per node visit. For code paths where InputBuffer::add() was never
-  // called with an accelerator input (e.g. CPU-only backward), fall back
-  // to the node's canonical stream.
+  // If InputBuffer::add() applied the stale-capture override, use the
+  // stream it cached so the StreamGuard activates the capturing stream
+  // instead of the stale one. Otherwise fall back to the node's canonical
+  // stream. See InputBuffer::opt_parent_stream for the invariant.
   auto opt_parent_stream = inputs.opt_parent_stream.has_value()
       ? inputs.opt_parent_stream
-      : (*func).stream();
+      : func->stream();
 
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 

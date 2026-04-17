@@ -466,7 +466,7 @@ def set_override_stale_capture_stream(enabled: bool) -> None:
     """Control behavior when autograd detects a stale non-capturing stream during
     CUDA graph capture.
 
-    During CUDA graph capture, autograd nodes may reference a stale stream from
+    During CUDA graph capture, autograd nodes may reference a stale stream
     that is not part of the capture. With the flag disabled (the
     process-initial state), autograd raises a ``RuntimeError`` when the stale
     stream is the default stream (stream 0), because this case always
