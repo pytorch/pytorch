@@ -896,6 +896,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
+                node.name,
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
             )
