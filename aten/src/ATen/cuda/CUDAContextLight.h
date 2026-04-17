@@ -97,9 +97,7 @@ TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
 // map is only ever accessed by that thread.
 struct WorkspaceMapHash {
   size_t operator()(const std::pair<int, void*>& p) const {
-    return std::hash<uintptr_t>{}(
-        reinterpret_cast<uintptr_t>(p.second) ^
-        (static_cast<uintptr_t>(p.first) << 48));
+    return std::hash<int>{}(p.first) ^ std::hash<void*>{}(p.second);
   }
 };
 using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>, WorkspaceMapHash>;
