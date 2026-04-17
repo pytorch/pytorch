@@ -180,25 +180,13 @@ def fork_rng(
             see details in :ref:`accelerator<accelerators>`
     """
 
-    if device_type is None:
-        if devices is not None:
-            devices = list(devices)
-            if devices:
-                try:
-                    device_type = torch.device(devices[0]).type
-                except Exception:
-                    device_type = "cuda"
-            else:
-                device_type = "cuda"
-        else:
-            device_type = "cuda"
+    device_type = device_type or torch.accelerator.current_accelerator().type
 
     if device_type == "meta":
         yield
         return
 
-    device_type = torch.device(device_type).type
-    device_mod = getattr(torch, device_type, None)
+    device_mod = torch.get_device_module(device_type)
     if device_mod is None:
         raise RuntimeError(
             f"torch has no module of `{device_type}`, you should register "
