@@ -316,24 +316,7 @@ file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_at
 file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
-  add_library(flash_attention OBJECT EXCLUDE_FROM_ALL ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
-
-  target_include_directories(flash_attention SYSTEM PUBLIC
-    ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc
-    ${PROJECT_SOURCE_DIR}/third_party/flash-attention/include
-    ${PROJECT_SOURCE_DIR}/third_party/cutlass/include
-    ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src
-  )
-
-  target_compile_definitions(flash_attention PRIVATE
-    # Copied from https://github.com/pytorch/pytorch/blob/a10024d7dea47c52469059a47efe376eb20adca0/caffe2/CMakeLists.txt#L1431
-    FLASH_NAMESPACE=pytorch_flash
-    FLASHATTENTION_DISABLE_ALIBI
-    FLASHATTENTION_DISABLE_SOFTCAP
-    UNFUSE_FMA
-  )
-
-  set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  add_subdirectory(native/transformers/cuda/flash_attn)
 endif()
 
 if(USE_FLASH_ATTENTION)
