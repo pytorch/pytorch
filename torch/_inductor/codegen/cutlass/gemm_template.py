@@ -982,7 +982,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         if (
             self.use_fast_accum is not None
-            and cutlass_utils._normalize_cuda_arch(cuda_env.get_cuda_arch()) == 90
+            and int(cutlass_utils._normalize_cuda_arch(cuda_env.get_cuda_arch())) == 90
         ):
             is_op_fast_accum = "fastaccum" in op.configuration_name()
             if self.use_fast_accum ^ is_op_fast_accum:
