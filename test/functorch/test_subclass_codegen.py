@@ -190,7 +190,7 @@ def inner_fn(args):
 
         globals_dict["compiled_fn"] = mock_compiled_fn
         local_dict = {}
-        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)  # noqa: S102
+        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)
         wrapper = local_dict["inner_fn"]
 
         a = torch.randn(4)

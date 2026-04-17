@@ -1094,12 +1094,12 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         from torch._library import capture_triton
 
         @triton.jit
-        def my_jit(x):  # noqa: F811
+        def my_jit(x):
             arg_0 = tl.load(x)
             tl.store(x, arg_0 + 1)
 
         @torch._library.triton_op("test::my_triton_op", mutates_args=())
-        def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def my_triton_op(x: torch.Tensor) -> torch.Tensor:
             y = x.clone().detach_().requires_grad_(True)
             capture_triton(my_jit)[1,](y)
             return y
@@ -3224,7 +3224,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):  # noqa: F841
+        def fn2(x):
             y = x.sin()
             z = y.cos()
             return z
@@ -3486,7 +3486,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
         self.assertIn(
-            "WeakValueDictionary.__init__.<locals>.remove",  # noqa: B950
+            "WeakValueDictionary.__init__.<locals>.remove",
             log_context.output[0],
         )
 
@@ -3507,7 +3507,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
         self.assertIn(
-            """AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>""",  # noqa: B950
+            """AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>""",
             log_context.output[0],
         )
         mock_trace.assert_called_once()

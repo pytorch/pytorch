@@ -24,7 +24,6 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 
 
-# flake8: noqa: B950
 # Owner(s): ["module: inductor"]
 
 

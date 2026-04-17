@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
 import copy
 import math
 from dataclasses import dataclass
@@ -844,7 +843,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, gO):
                 return torch.tensor(float("nan")).expand(10, 10)
 
-        def run_fn(a):  # noqa: F841
+        def run_fn(a):
             out = MyFunc2.apply(a)
             return out.sum()
 
@@ -1668,7 +1667,7 @@ class GraphModule(torch.nn.Module):
             mask = block_start < n_elements
             grad_out = tl.load(grad_out_ptr + block_start, mask=mask)
             # Read offsets (read-only, not written back)
-            _offsets_val = tl.load(offsets_ptr + 0)  # noqa: F841
+            _offsets_val = tl.load(offsets_ptr + 0)
             tl.store(grad_x_ptr + block_start, grad_out, mask=mask)
 
         class FnWithReadOnlyBwdInput(torch.autograd.Function):

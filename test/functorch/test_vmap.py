@@ -684,8 +684,6 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
-        # noqa: F841
-
         def foo(xy):
             return xy[0] * xy[1]
 

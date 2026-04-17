@@ -1,4 +1,4 @@
-# flake8: noqa: E266, C417, B950
+# flake8: noqa: E266, C417
 from dataclasses import dataclass
 
 import torch
