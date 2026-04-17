@@ -421,7 +421,6 @@ UNARY_NUMERICAL_XFAILS = {
 
 BINARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "fmod": {bf16, fp32},
         "remainder": {ALL},
     },
     "inductor_numerics": {
@@ -447,17 +446,34 @@ ROCM_XFAILS = {
     },
 }
 
+# Additional expected failures that only apply on CUDA (not ROCm).
+# fmod numerical tests fail on CUDA but pass on ROCm (MI300).
+CUDA_ONLY_XFAILS = {
+    "binary_numerical": {
+        "inductor_default": {
+            "fmod": {bf16, fp32},
+        },
+    },
+}
+
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
     is_xfail = dtype in xfails or ALL in xfails
 
-    if not is_xfail and torch.version.hip is not None:
-        rocm_xfails = (
-            ROCM_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
-        )
-        is_xfail = dtype in rocm_xfails or ALL in rocm_xfails
+    if torch.version.hip is not None:
+        if not is_xfail:
+            rocm_xfails = (
+                ROCM_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
+            )
+            is_xfail = dtype in rocm_xfails or ALL in rocm_xfails
+    else:
+        if not is_xfail:
+            cuda_xfails = (
+                CUDA_ONLY_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
+            )
+            is_xfail = dtype in cuda_xfails or ALL in cuda_xfails
 
     return is_xfail
 
