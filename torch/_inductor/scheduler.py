@@ -2310,16 +2310,18 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         node1: ExternKernelSchedulerNode,
         node2: SchedulerNode,
     ) -> FusedSchedulerNode:
+        assert isinstance(node1.node, ir.UserDefinedTritonKernel)
         scheduler = node1.scheduler
-        # this unmet dependency is the buffer which is mutated
-        # after fusion, we don't need this buffer anymore,
-        # because the kernel directly writes to the output buffer of the epilogue
-        assert len(node1.unmet_dependencies) == 1
-        original_mutated_buffer = scheduler.name_to_buf[
-            next(iter(node1.unmet_dependencies)).name
-        ]
-        original_mutated_buffer.users.remove(NodeUser(node1))
-        return FusedExternTritonKernelSchedulerNode(scheduler, node1, node2)
+
+        assert len(node1.node.mutation_outputs) == 1
+        # pyrefly: ignore[bad-assignment]
+        mutated_name: str = node1.node.mutation_outputs[0].name
+        # Node1's mutated tensor becomes an intermediary tensor.
+        # Thus, remove node1 from the respective allocated buffer's users
+        # for `Scheduler.dead_node_elimination` to remove.
+        real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
+        scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
+        return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
