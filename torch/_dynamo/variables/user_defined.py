@@ -1952,10 +1952,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         # NOTE we assume the following descriptors are side-effect-free as far
         # as Dynamo tracing is concerned.
-        if not self._object_has_getattribute and (
+        #
+        # C-level descriptors (getset_descriptor for __dict__, member_descriptor
+        # for __slots__) are always safe to resolve — their __get__ is
+        # implemented in C and doesn't run user code, so __getattribute__
+        # overrides are irrelevant.  The NO_SUCH_SUBOBJ and
+        # _is_c_defined_property cases DO require the absence of a custom
+        # __getattribute__ because they fall back to
+        # type(self.value).__getattribute__ which could be user-overridden.
+        if inspect.ismemberdescriptor(subobj) or inspect.isgetsetdescriptor(subobj):
+            subobj = type(self.value).__getattribute__(self.value, name)
+        elif not self._object_has_getattribute and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
-            or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
@@ -2106,26 +2114,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def generic_getattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
+        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
+
+        This mirrors object.__getattribute__ and is called from:
+        - var_getattr (for objects without a custom __getattribute__)
+        - SuperVariable.call_method (when super().__getattribute__() resolves
+          to object.__getattribute__)
+
+        The algorithm: MRO walk → data descriptor → instance __dict__ →
+        non-data descriptor / plain class attr → dynamic fallback →
+        __getattr__ → AttributeError.
+        """
         source: Source | None = AttrSource(self.source, name) if self.source else None
-
-        if self._object_has_getattribute:
-            getattribute_fn = inspect.getattr_static(
-                type(self.value), "__getattribute__"
-            )
-            new_source: AttrSource | None = (
-                AttrSource(self.source, "__getattribute__") if self.source else None
-            )
-
-            try:
-                return variables.UserMethodVariable(
-                    getattribute_fn,
-                    self,
-                    source=new_source,
-                ).call_function(tx, [VariableTracker.build(tx, name)], {})
-            except ObservedAttributeError:
-                # Pass through to __getattr__ if __getattribute__ fails
-                handle_observed_exception(tx)
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
@@ -2265,6 +2268,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if self._object_has_getattribute:
+            getattribute_fn = inspect.getattr_static(
+                type(self.value), "__getattribute__"
+            )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
+
+            try:
+                return variables.UserMethodVariable(
+                    getattribute_fn,
+                    self,
+                    source=new_source,
+                ).call_function(tx, [VariableTracker.build(tx, name)], {})
+            except ObservedAttributeError:
+                # Pass through to __getattr__ if __getattribute__ fails
+                handle_observed_exception(tx)
+
+        return self.generic_getattr(tx, name)
 
     def resolve_data_descriptor(
         self,
