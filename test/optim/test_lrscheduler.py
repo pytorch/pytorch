@@ -535,10 +535,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
         targets = [single_targets, [x * epochs for x in single_targets]]
@@ -559,10 +558,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
         targets = [single_targets, [x * epochs for x in single_targets]]
@@ -594,10 +592,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
         targets = [single_targets, [x * 10 for x in single_targets]]
@@ -617,10 +614,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
         targets = [single_targets, [x * 10 for x in single_targets]]
@@ -678,9 +674,7 @@ class TestLRScheduler(TestCase):
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_cosinelr(self):
-        scheduler = CosineLR(
-            self.opt, start_factor=0.3, end_factor=0.7, total_iters=6
-        )
+        scheduler = CosineLR(self.opt, start_factor=0.3, end_factor=0.7, total_iters=6)
         closed_form_scheduler = CosineLR(
             self.opt, start_factor=0.3, end_factor=0.7, total_iters=6
         )
@@ -1139,10 +1133,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         schedulers = [None] * 2
         single_targets = [base_lr * (0.9**x) for x in range(epochs)]
@@ -1166,10 +1159,9 @@ class TestLRScheduler(TestCase):
         base_lr = 0.05
 
         def _factor(t):
-            return (
-                0.5 * (start_factor + end_factor)
-                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
-            )
+            return 0.5 * (start_factor + end_factor) + 0.5 * (
+                start_factor - end_factor
+            ) * math.cos(math.pi * t / iters)
 
         schedulers = [None] * 2
         # StepLR: decay by 0.1 every 3 steps

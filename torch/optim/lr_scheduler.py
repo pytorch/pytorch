@@ -1334,6 +1334,7 @@ class PolynomialLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+
 class CosineLR(LRScheduler):
     r"""Scale the learning rate of each parameter group using a cosine interpolation.
 
@@ -1438,11 +1439,9 @@ class CosineLR(LRScheduler):
             + \frac{\gamma_s - \gamma_e}{2}
             \cos \left(\frac{t \pi}{T}\right)
         """
-        return (
-            0.5 * (self.start_factor + self.end_factor)
-            + 0.5 * (self.start_factor - self.end_factor)
-            * math.cos(math.pi * step / max(1, self.total_iters))
-        )
+        return 0.5 * (self.start_factor + self.end_factor) + 0.5 * (
+            self.start_factor - self.end_factor
+        ) * math.cos(math.pi * step / max(1, self.total_iters))
 
     @override
     def get_lr(self) -> list[float | Tensor]:
@@ -1474,16 +1473,14 @@ class CosineLR(LRScheduler):
 
         if self.last_epoch == 0:
             return [
-                group["lr"] * self.start_factor
-                for group in self.optimizer.param_groups
+                group["lr"] * self.start_factor for group in self.optimizer.param_groups
             ]
 
         if self._is_initial or self.last_epoch > self.total_iters:
             return _param_groups_val_list(self.optimizer, "lr")
 
-        factor = (
-            self._compute_factor(self.last_epoch)
-            / self._compute_factor(self.last_epoch - 1)
+        factor = self._compute_factor(self.last_epoch) / self._compute_factor(
+            self.last_epoch - 1
         )
         return [group["lr"] * factor for group in self.optimizer.param_groups]
 
@@ -1504,10 +1501,10 @@ class CosineLR(LRScheduler):
             same types as their current ``group["lr"]``\s.
         """
         return [
-            base_lr
-            * self._compute_factor(min(self.total_iters, self.last_epoch))
+            base_lr * self._compute_factor(min(self.total_iters, self.last_epoch))
             for base_lr in self.base_lrs
         ]
+
 
 class CosineAnnealingLR(LRScheduler):
     r"""
