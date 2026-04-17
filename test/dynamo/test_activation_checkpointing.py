@@ -3204,14 +3204,14 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
             node.meta["seq_nr"]
             for node in gm.graph.nodes
             if node.op == "call_function"
-            and not node.meta.get("custom", {}).get("autograd_backward", False)
+            and not node.meta.get("autograd_backward", False)
             and "seq_nr" in node.meta
         }
         backward_seq_nrs = {
             node.meta["seq_nr"]
             for node in gm.graph.nodes
             if node.op == "call_function"
-            and node.meta.get("custom", {}).get("autograd_backward", False)
+            and node.meta.get("autograd_backward", False)
             and "seq_nr" in node.meta
         }
 

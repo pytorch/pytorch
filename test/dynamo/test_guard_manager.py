@@ -590,10 +590,13 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not TEST_GPU, "requires gpu")
     def test_call_function_no_args_guard(self):
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
         root = RootGuardManager()
-        x = torch.accelerator.current_device_index()
+        device = torch.accelerator.current_accelerator()
+        # Use device.index which is device-agnostic (works on all accelerators)
+        x = device.index if device.index is not None else 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
