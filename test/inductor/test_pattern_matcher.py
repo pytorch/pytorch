@@ -863,23 +863,36 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-    def test_pointless_convert(self):
-        def fn1(x):
-            x = torch.ops.prims.convert_element_type.default(x, torch.float16)
-            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+    @parametrize(
+        "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
+        [
+            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, True, 2),
+            (torch.float16, torch.float32, True, 1),
+        ],
+    )
+    def test_pointless_convert(
+        self, input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls
+    ):
+        def fn(x):
+            x = torch.ops.prims.convert_element_type.default(x, intermediate_dtype)
+            x = torch.ops.prims.convert_element_type.default(x, input_dtype)
             return x
 
-        gm = torch.fx.symbolic_trace(fn1)
+        x = torch.randn(8, device=GPU_TYPE, dtype=input_dtype)
+        gm = make_fx(fn)(x)
         self.assertEqual(count_calls(gm.graph), 2)
-        joint_graph.joint_graph_passes(gm)
-        self.assertEqual(count_calls(gm.graph), 1)
+        with inductor_config.patch(emulate_precision_casts=emulate_precision_casts):
+            joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), expected_calls)
 
-        def fn2(x):
+        def fn_int(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.int32)
             x = torch.ops.prims.convert_element_type.default(x, torch.float32)
             return x
 
-        gm = torch.fx.symbolic_trace(fn2)
+        x = torch.randn(8, device=GPU_TYPE, dtype=torch.float32)
+        gm = make_fx(fn_int)(x)
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
