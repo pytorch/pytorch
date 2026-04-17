@@ -1,6 +1,6 @@
 import builtins
 import functools
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -279,7 +279,7 @@ class MetaTracer(torch.fx.Tracer):
                 raise AssertionError("Dont support composite output yet")
             rv.install_tensor_meta(meta_out)
         except Exception as e:
-            warnings.warn(f"Could not compute metadata for {kind} target {target}: {e}")
+            _warn_torch(f"Could not compute metadata for {kind} target {target}: {e}")
 
         return rv  # pyrefly: ignore [bad-return]
 

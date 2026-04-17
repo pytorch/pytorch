@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math as pymath
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -29,7 +29,7 @@ def set_driver_to_cpu():
         driver.set_active(backend.driver())
         return
     # This can be a hard error once triton-cpu is merged into fbcode
-    warnings.warn(
+    _warn_torch(
         "Could not find an active CPU backend. Generated kernels will not be executable!"
     )
 

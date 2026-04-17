@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from typing import TYPE_CHECKING
 
 import torch
@@ -731,7 +731,7 @@ def copy__impl(
     **kwargs: Any,
 ) -> ComplexTensor | torch.Tensor:
     if not self.dtype.is_complex:
-        warnings.warn(
+        _warn_torch(
             "Casting complex values to real discards the imaginary part", UserWarning
         )
         src_re, src_im = split_complex_arg(src)

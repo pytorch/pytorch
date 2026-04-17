@@ -11,7 +11,7 @@ import operator
 import os
 import os.path
 import re
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -1281,7 +1281,7 @@ def default_partition(
         if _is_functional_graph(joint_module.graph)[0] is not None:
             # Fall-back to previous behavior to avoid bc-breaking, although can
             # eventually flip the switch to make this a hard error.
-            warnings.warn(
+            _warn_torch(
                 "Trying to unsafely apply AC to a non-functional graph with the "
                 "default partitioner. Falling back to min-cut partitioner."
             )

@@ -3,7 +3,7 @@ import inspect
 import numbers
 import types
 import typing
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
@@ -303,7 +303,7 @@ def create_type_hint(x: object) -> object:
             return ret_type(base_type)
     except Exception:
         # We tried to create a type hint for list but failed.
-        warnings.warn(
+        _warn_torch(
             f"We were not able to successfully create type hint from the type {x}"
         )
     return x
@@ -330,7 +330,7 @@ def type_matches(signature_type: Any, argument_type: Any) -> bool:
             return True
 
         if not inspect.isclass(sig_el_type):
-            warnings.warn(
+            _warn_torch(
                 f"Does not support nested parametric types, got {signature_type}. Please file a bug."
             )
             return False

@@ -21,7 +21,7 @@ Key functionality groups:
 """
 
 import functools
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, ParamSpec
@@ -115,7 +115,7 @@ class FakeBackwardCFunction:
 
     def __getattr__(self, name: str) -> Any:
         if name == "saved_variables":
-            warnings.warn(
+            _warn_torch(
                 "'saved_variables' is deprecated; use 'saved_tensors'",
                 DeprecationWarning,
             )

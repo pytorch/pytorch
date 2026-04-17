@@ -47,6 +47,7 @@ import sys
 import threading
 import traceback
 import warnings
+from torch._warn_utils import warn as _warn_torch
 import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
@@ -2623,7 +2624,7 @@ class CUDAGraphTreeManager:
             return
 
         self.warned_functions.add(function_id)
-        warnings.warn(
+        _warn_torch(
             "Unable to hit fast path of CUDAGraphs because outputs from a previous step "
             "still require backward. Ensure backward() is invoked or detach outputs. "
             "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation."

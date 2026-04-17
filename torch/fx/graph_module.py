@@ -8,7 +8,7 @@ import itertools
 import linecache
 import sys
 import traceback
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
@@ -740,7 +740,7 @@ class {module_name}(torch.nn.Module):
         init_file.write_text("from .module import *")
 
         if len(blobified_modules) > 0:
-            warnings.warn(
+            _warn_torch(
                 "Was not able to save the following children modules as reprs -"
                 f"saved as pickled files instead: {blobified_modules}"
             )

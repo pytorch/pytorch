@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import threading
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
@@ -1514,7 +1515,7 @@ def load(
             pickle_module = pickle
 
     if pickle_load_args != {} and weights_only:
-        warnings.warn("pickle_load_args only works if `weights_only=False`.")
+        _warn_torch("pickle_load_args only works if `weights_only=False`.")
 
     # make flipping default BC-compatible
     if mmap is None:

@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 import time
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
@@ -317,7 +317,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        _warn_torch(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
@@ -3126,7 +3126,7 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
-        warnings.warn(
+        _warn_torch(
             f"{device_props.name} does not support bfloat16 compilation natively, skipping"
         )
         raise SkipFrame("BF16 is not supported")

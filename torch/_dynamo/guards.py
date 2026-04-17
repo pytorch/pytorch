@@ -34,7 +34,7 @@ import sys
 import textwrap
 import traceback
 import types
-import warnings
+from torch._warn_utils import warn as _warn_torch
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1323,7 +1323,7 @@ class GuardBuilder(GuardBuilderBase):
             and sys.version_info >= (3, 13)
             and sys.version_info < (3, 13, 1)
         ):
-            warnings.warn(
+            _warn_torch(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
             )

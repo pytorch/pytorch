@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import re
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 
@@ -409,7 +409,7 @@ def _create_dynamo_config_router(config_str: str) -> GraphConfigRouter:
     """
     router = GraphConfigRouter(config_str)
     if not router.is_empty():
-        warnings.warn(
+        _warn_torch(
             "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS is set. Dynamo config overrides are "
             "keyed by frame ID. Some dynamo configs can affect graph breaks, "
             "which may alter the number of frames and shift frame IDs, causing "

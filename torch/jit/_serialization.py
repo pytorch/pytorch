@@ -11,7 +11,7 @@ functionalities in `torch.jit`.
 
 import os
 import sys
-import warnings
+from torch._warn_utils import warn as _warn_torch
 
 import torch
 from torch._jit_internal import _get_model_id
@@ -80,13 +80,13 @@ def save(m, f, _extra_files=None) -> None:
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.save` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.save` is deprecated. Please switch to `torch.export`.",
             DeprecationWarning,
         )
@@ -167,13 +167,13 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         os.remove("scriptmodule.pt")
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.load` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.load` is deprecated. Please switch to `torch.export`.",
             DeprecationWarning,
         )

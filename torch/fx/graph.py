@@ -15,6 +15,7 @@ import re
 import types
 import typing
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections import defaultdict
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -1580,7 +1581,7 @@ class Graph:
         if to_erase.graph != self:
             raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
-            warnings.warn(f"erase_node({to_erase}) on an already erased node")
+            _warn_torch(f"erase_node({to_erase}) on an already erased node")
             return
 
         if (
@@ -1720,7 +1721,7 @@ class Graph:
             try:
                 submod: torch.nn.Module = mod.get_submodule(module_path)
             except AttributeError:
-                warnings.warn(f"Failed to fetch module {module_path}!")
+                _warn_torch(f"Failed to fetch module {module_path}!")
                 return False
 
             if not hasattr(submod, name):
@@ -1796,7 +1797,7 @@ class Graph:
             self.owning_module is not None
             and self.owning_module.get_submodule(module_name) is None
         ):
-            warnings.warn(
+            _warn_torch(
                 "Attempted to insert a call_module Node with "
                 "no underlying reference in the owning "
                 "GraphModule! Call "

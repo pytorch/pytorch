@@ -8,7 +8,7 @@ import operator
 import os
 import re
 import sys
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any, cast, Optional
@@ -3897,7 +3897,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
                     _use_fp32 = True
                 elif _lowp_fp_type is not None:
                     if _lowp_fp_type != opt_ctx.dtype:
-                        warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
+                        _warn_torch("bf16 and fp16 are mixed in the scheduler node.")
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:

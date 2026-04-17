@@ -16,6 +16,7 @@ import os
 import threading
 import traceback
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
@@ -1347,14 +1348,14 @@ def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
 
         _cached_hip_to_amdsmi = dict(gen())
         if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
-            warnings.warn(
+            _warn_torch(
                 "Cannot translate HIP ID to AMD SMI ID due to"
                 " lack of translation information prior to ROCm 6.4."
                 " Functions that rely on amdsmi"
                 " (e.g. temperature()) may operate on wrong devices."
             )
     if device not in _cached_hip_to_amdsmi:
-        warnings.warn(
+        _warn_torch(
             f"Cannot translate HIP ID {device} to AMD SMI ID due to"
             " undetected HIP ID from amdsmi."
             " amdsmi_get_gpu_enumeration_info() only report these HIP IDs"

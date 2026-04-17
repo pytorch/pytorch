@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
@@ -334,14 +334,14 @@ class TuningProcessPool:
                 config.max_autotune_subproc_result_timeout_seconds,
             )
         except TimeoutError:
-            warnings.warn(
+            _warn_torch(
                 f"Timed out benchmarking choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
             # Set to INF so this choice will be ignored
             return float("inf")
         except Exception as process_exception:
-            warnings.warn(
+            _warn_torch(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )

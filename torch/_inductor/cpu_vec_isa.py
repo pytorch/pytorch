@@ -6,7 +6,7 @@ import platform
 import re
 import subprocess
 import sys
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from typing import Any
 
@@ -490,7 +490,7 @@ def get_isa_from_cpu_capability(
                 return vec_isa
 
     if capability:
-        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+        _warn_torch(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
 
     return vec_isa_list[0]
 

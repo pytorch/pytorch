@@ -33,7 +33,7 @@ import sys
 import time
 import traceback
 import types
-import warnings
+from torch._warn_utils import warn as _warn_torch
 import weakref
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field as dc_field
@@ -2240,7 +2240,7 @@ class OutputGraph(OutputGraphCommon):
             )
             if side_effect_refs:
                 if torch._dynamo.config.side_effect_replay_policy == "warn":
-                    warnings.warn(
+                    _warn_torch(
                         f"While compiling, we found certain side effects happened in the model.forward. "
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )

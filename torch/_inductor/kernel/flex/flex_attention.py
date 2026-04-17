@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -794,7 +794,7 @@ def flex_attention_backward(*args, **kwargs):
                 "is not yet implemented. The TRITON backend supports deterministic backward."
             )
         if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
-            warnings.warn(
+            _warn_torch(
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. Running non-deterministic backward.",
             )
