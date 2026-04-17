@@ -955,7 +955,7 @@ class profile(_KinetoProfile):
 
     def step(self) -> None:
         """
-        Signal the profiler that the next profiling step has started.
+        Signals the profiler that the next profiling step has started.
         """
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
