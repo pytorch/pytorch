@@ -856,8 +856,10 @@ def _call_while_loop(
             example_value = placeholder.meta.get(
                 "example_value", placeholder.meta.get("val", None)
             )
-            if isinstance(example_value, torch.Tensor):
-                storages |= get_tensor_storages(example_value)
+            assert isinstance(example_value, torch.Tensor), (
+                "The mutated input must be a tensor"
+            )
+            storages |= get_tensor_storages(example_value)
         return storages
 
     mutated_input_storages = _mutated_tensor_storages(
@@ -901,7 +903,7 @@ def _call_while_loop(
         + list(additional_inputs_seq)
         + list(additional_lifted_inputs)
     )
-    storage_to_while_loop_input_indices: dict[StorageWeakRef, set[int]] = {}
+    mutated_inputs = []
     for idx, inp in enumerate(all_while_loop_inputs):
         example_value = None
         if isinstance(inp, VariableTracker):
@@ -913,15 +915,10 @@ def _call_while_loop(
 
         if isinstance(example_value, torch.Tensor):
             for storage in get_tensor_storages(example_value):
-                storage_to_while_loop_input_indices.setdefault(storage, set()).add(idx)
+                if storage in mutated_input_storages:
+                    mutated_inputs.append(idx)
+                    break
 
-    mutated_inputs = sorted(
-        {
-            i
-            for storage in mutated_input_storages
-            for i in storage_to_while_loop_input_indices.get(storage, set())
-        }
-    )
     mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
     body_nn_modules = dict(tx.output.nn_modules)
@@ -2072,7 +2069,7 @@ def speculate_subgraph(
                     source_target,
                 )
                 mutation_info = subtracer.has_input_mutation()
-                graph._dynamo_mutated_input_indices = (
+                graph._dynamo_mutated_input_indices = (  # pyrefly: ignore[missing-attribute]
                     mutation_info.mutated_input_indices
                 )
 
