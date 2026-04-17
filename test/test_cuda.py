@@ -1126,8 +1126,6 @@ print(t.is_pinned())
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
 
-
-
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
