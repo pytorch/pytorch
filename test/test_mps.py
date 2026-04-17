@@ -13033,10 +13033,7 @@ class TestConsistency(TestCaseMPS):
             #
             # Forward check
             #
-            opt_dtype = None
-            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
-                opt_dtype = torch.float32
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
 
             if op.name == "unique" and cpu_sample.kwargs["sorted"] is False:
                 continue
