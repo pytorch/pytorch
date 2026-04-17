@@ -13,6 +13,7 @@
 ```{eval-rst}
 
 .. autoclass:: torch.profiler.profile
+  :members:
   :inherited-members:
 
 .. autoclass:: torch.profiler.ProfilerAction
