@@ -345,7 +345,6 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
               grid.scalar_type());
 
   auto input_requires_grad = output_mask[0];
-  auto grid_requires_grad = output_mask[1];
   int32_t interp_mode = static_cast<int32_t>(interpolation_mode);
   int32_t pad_mode = static_cast<int32_t>(padding_mode);
 
@@ -353,7 +352,11 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   if (input_requires_grad) {
     grad_input = at::zeros_like(input);
   }
-  auto grad_grid = grid_requires_grad ? at::empty_like(grid, MemoryFormat::Contiguous) : at::Tensor();
+  // Always allocate grad_grid, matching CPU/CUDA and the 2D MPS backward.
+  // Autograd requires a defined tensor for every output declared in the
+  // derivative, even when the corresponding input doesn't require grad.
+  auto grad_grid = interp_mode == 1 ? at::zeros_like(grid, MemoryFormat::Contiguous)
+                                    : at::empty_like(grid, MemoryFormat::Contiguous);
 
   const auto& input_contiguous = input.contiguous();
   const auto& grid_contiguous = grid.contiguous();
@@ -369,20 +372,16 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   auto out_W = grid_contiguous.size(3);
 
   bool run_grad_input = input_requires_grad;
-  bool run_grad_grid = grid_requires_grad && interp_mode != 1;
-
-  if (grid_requires_grad && interp_mode == 1) {
-    grad_grid.zero_();
-  }
+  bool run_grad_grid = interp_mode != 1;
 
   if (!run_grad_input && !run_grad_grid) {
     return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
 
-  // The combined kernel needs valid buffer pointers for both outputs even when
-  // only one gradient is requested, so allocate 1-element dummies as needed.
-  auto grad_input_buf = run_grad_input ? grad_input : at::zeros({1}, input.options());
-  auto grad_grid_buf = run_grad_grid ? grad_grid : at::empty({1}, grid.options());
+  // The combined kernel needs a valid buffer pointer for grad_input even when
+  // it is not requested, so allocate a dummy with the expected rank so stride
+  // queries below remain in range.
+  auto grad_input_buf = run_grad_input ? grad_input : at::zeros({1, 1, 1, 1, 1}, input.options());
 
   GridSampler3DBackwardParams params;
   params.interpolation_mode = interp_mode;
@@ -405,7 +404,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
     params.grad_output_strides[i] = safe_downcast<int32_t, int64_t>(grad_output_contiguous.stride(i));
     params.input_strides[i] = safe_downcast<int32_t, int64_t>(input_contiguous.stride(i));
     params.grad_input_strides[i] = safe_downcast<int32_t, int64_t>(grad_input_buf.stride(i));
-    params.grad_grid_strides[i] = safe_downcast<int32_t, int64_t>(grad_grid_buf.stride(i));
+    params.grad_grid_strides[i] = safe_downcast<int32_t, int64_t>(grad_grid.stride(i));
   }
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -420,17 +419,12 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
       getMPSProfiler().beginProfileKernel(
           pso,
           "grid_sampler_3d_backward",
-          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid_buf});
+          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid});
 
       [computeEncoder setComputePipelineState:pso];
 
-      mtl_setArgs(computeEncoder,
-                  grad_output_contiguous,
-                  input_contiguous,
-                  grid_contiguous,
-                  grad_input_buf,
-                  grad_grid_buf,
-                  params);
+      mtl_setArgs(
+          computeEncoder, grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid, params);
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
       MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
