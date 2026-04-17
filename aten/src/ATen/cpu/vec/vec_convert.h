@@ -57,6 +57,19 @@ struct VecRoundConvert {
   }
 };
 
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+struct VecConvert<
+    dst_t,
+    dst_n,
+    src_t,
+    src_n,
+    std::enable_if_t<std::is_same_v<dst_t, src_t> && dst_n == src_n>> {
+  static inline VectorizedN<dst_t, dst_n> apply(
+      const VectorizedN<src_t, src_n>& src) {
+    return src;
+  }
+};
+
 template <typename dst_t, typename src_t>
 inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert(
     const Vectorized<src_t>& src) {
