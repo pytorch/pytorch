@@ -1419,9 +1419,9 @@ class CosineLR(LRScheduler):
                 "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
             )
 
-        if end_factor > 1.0 or end_factor < 0:
+        if end_factor > 1.0 or end_factor <= 0:
             raise ValueError(
-                "Ending multiplicative factor expected to be between 0 and 1."
+                "Ending multiplicative factor expected to be greater than 0 and less or equal to 1."
             )
 
         self.start_factor = start_factor
@@ -1440,7 +1440,7 @@ class CosineLR(LRScheduler):
         return (
             0.5 * (self.start_factor + self.end_factor)
             + 0.5 * (self.start_factor - self.end_factor)
-            * math.cos(math.pi * step / self.total_iters)
+            * math.cos(math.pi * step / max(1, self.total_iters))
         )
 
     @override

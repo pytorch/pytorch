@@ -582,7 +582,7 @@ class TestLRScheduler(TestCase):
 
     def test_cosinelr_end_factor_limits(self):
         with self.assertRaises(ValueError):
-            CosineLR(self.opt, end_factor=-0.1, total_iters=4)
+            CosineLR(self.opt, end_factor=0.0, total_iters=4)
         with self.assertRaises(ValueError):
             CosineLR(self.opt, end_factor=1.1, total_iters=4)
 
