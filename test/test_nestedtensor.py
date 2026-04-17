@@ -8769,10 +8769,10 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="unimplemented_masked_fill",
     ),
-    XFailRule(
-        op_match_fn=lambda device, op: op.full_name == "nextafter",
-        name="nextafter_backward_not_implemented",
-    ),
+    # XFailRule(
+    #     op_match_fn=lambda device, op: op.full_name == "nextafter",
+    #     name="nextafter_backward_not_implemented",
+    # ),
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
