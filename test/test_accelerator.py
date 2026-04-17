@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
@@ -261,6 +262,10 @@ class TestAccelerator(TestCase):
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
 
+    @unittest.skipIf(
+        TEST_XPU,
+        "bare-bones/opaque bit-field dtypes cause undefined behavior on XPU, see https://github.com/pytorch/pytorch/issues/179888",
+    )
     def test_device_capability_supported_dtypes(self):
         try:
             caps = torch.accelerator.get_device_capability()
