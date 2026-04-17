@@ -29,7 +29,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
 
   # H100 A100 runners
   opmicrobenchmark-build:
@@ -60,7 +59,7 @@ jobs:
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
     secrets: inherit
 
-  # B200 runner (OSDC)
+  # B200 runner
   opmicrobenchmark-build-b200:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build-b200
@@ -76,27 +75,18 @@ jobs:
         { include: [
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
-      use-arc: true
-      python-version: "3.10"
-      compiler: gcc11
-      cuda-version: "12.8"
     secrets: inherit
 
   opmicrobenchmark-test-b200:
     name: opmicrobenchmark-test-b200
     uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - opmicrobenchmark-build-b200
-      - get-label-type
+    needs: opmicrobenchmark-build-b200
     with:
       timeout-minutes: 500
       build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
-      use-arc: true
-      python-version: "3.10"
-      compiler: gcc11
-      cuda-version: "12.8"
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit
 
   # ROCM MI300 runner
