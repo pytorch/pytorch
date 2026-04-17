@@ -1092,24 +1092,29 @@ static at::Tensor linear_int8_with_onednn_weight(
   static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
   static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
   static const bool context_cache_enabled = cache_flag_str != "" && cache_flag_str == "1";
-  static thread_local std::unordered_map<int64_t, QlinearForwardParams>
+  static thread_local std::unordered_map<
+      QlinearForwardCacheKey,
+      QlinearForwardParams,
+      QlinearForwardCacheKeyHash>
       qlinear_forward_params_map;
   static tensor empty_tensor;
   static tensor::desc empty_tensor_desc;
   int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
+  int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
+  const QlinearForwardCacheKey cache_key({weight_addr, M});
 #if defined(__powerpc__)
-  bool allow_cache = context_cache_enabled && !is_fp8;
+      bool allow_cache = context_cache_enabled && !is_fp8;
 #else
-  bool allow_cache = context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
+      bool allow_cache =
+          context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
 #endif
   if (allow_cache) {
-    auto it = qlinear_forward_params_map.find(weight_addr);
+    auto it = qlinear_forward_params_map.find(cache_key);
     if (it != qlinear_forward_params_map.end()) {
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
       auto& params = it->second;
-      if (params.K == K && params.M == M && params.N == N) {
+        if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()
             : at::empty({M, N}, at::device(c10::kCPU).dtype(params.out_dtype));
@@ -1201,7 +1206,6 @@ static at::Tensor linear_int8_with_onednn_weight(
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
   auto src = at::native::itensor_from_tensor(input_contig);
-  int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
 
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
@@ -1330,7 +1334,6 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (allow_cache) {
     QlinearForwardParams params;
     params.K = K;
-    params.M = M;
     params.N = N;
     params.out_dtype = out_dtype;
     params.output_size = output_size;
@@ -1349,7 +1352,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.dst = dst;
     params.src1 = binary_post_op == "add" ? std::make_optional<tensor>(src1) : std::nullopt;
     params.init_args();
-    qlinear_forward_params_map[weight_addr] = params;
+    qlinear_forward_params_map[cache_key] = params;
   }
   return dim == 2 ? output : output.resize_(output_size);
 }
