@@ -189,11 +189,20 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export USE_TSAN=1
+  export USE_CUDA=0
+  export USE_XNNPACK=0
+  export USE_FBGEMM=0
+  export USE_DISTRIBUTED=0
+  export BUILD_TEST=0
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *-tsan* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
@@ -333,49 +342,51 @@ else
       fi
     fi
 
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
-    CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
-    CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
-    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+      CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
+      CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
+      CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
+      mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
-    # Build custom operator tests.
-    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+      # Build custom operator tests.
+      CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+      CUSTOM_OP_TEST="$PWD/test/custom_operator"
+      python --version
+      SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
 
-    mkdir -p "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+      mkdir -p "$CUSTOM_OP_BUILD"
+      pushd "$CUSTOM_OP_BUILD"
+      cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+            -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      make VERBOSE=1
+      popd
+      assert_git_not_dirty
 
-    # Build jit hook tests
-    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
-    mkdir -p "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+      # Build jit hook tests
+      JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+      JIT_HOOK_TEST="$PWD/test/jit_hooks"
+      python --version
+      SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+      mkdir -p "$JIT_HOOK_BUILD"
+      pushd "$JIT_HOOK_BUILD"
+      cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+            -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      make VERBOSE=1
+      popd
+      assert_git_not_dirty
 
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir -p "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+      # Build custom backend tests.
+      CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+      CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+      python --version
+      mkdir -p "$CUSTOM_BACKEND_BUILD"
+      pushd "$CUSTOM_BACKEND_BUILD"
+      cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+            -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      make VERBOSE=1
+      popd
+      assert_git_not_dirty
+    fi
   else
     # Test no-Python build
     echo "Building libtorch"
