@@ -758,6 +758,81 @@ def _create_runtime_wrapper(
         if cm is not None:
             cm.__exit__(None, None, None)
 
+    # Codegen mutation epilogue: emit straight-line code per mutated input
+    # with all branches resolved at compile time.
+    if runtime_metadata.num_mutated_inp_runtime_indices > 0:
+        mut_lines = ["def _apply_mutations(orig_inputs, updated_inputs):"]
+        mut_globals: dict[str, object] = {
+            "torch": torch,
+            "_unwrap_tensoralias": _unwrap_tensoralias,
+        }
+        for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
+            meta = runtime_metadata.input_info[inpt_idx]
+            if not meta.mutates_data and not meta.mutates_metadata:
+                continue
+            oi = f"orig_inputs[{inpt_idx}]"
+            ui = f"updated_inputs[{i}]"
+            if meta.mutates_storage_metadata:
+                if trace_joint:
+                    mut_lines.append(f"    _u{i} = _unwrap_tensoralias({ui})")
+                else:
+                    mut_lines.append(f"    _u{i} = {ui}")
+                mut_lines.append(f"    with torch.no_grad(): {oi}.set_(_u{i})")
+            elif meta.mutates_metadata and not meta.mutates_data:
+                if trace_joint:
+                    mut_lines.append(f"    _u{i} = _unwrap_tensoralias({ui})")
+                else:
+                    mut_lines.append(f"    _u{i} = {ui}")
+                mut_lines.append(
+                    f"    {oi}.as_strided_(_u{i}.size(), _u{i}.stride(), _u{i}.storage_offset())"
+                )
+            else:
+                if meta.mutates_data and meta.mutates_metadata:
+                    mut_lines.append(
+                        f"    {oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
+                    )
+                else:
+                    assert meta.mutates_data, (  # noqa: S101
+                        f"expected mutates_data for input {inpt_idx}"
+                    )
+                if meta.is_leaf:
+                    mut_lines.append(
+                        f"    if {oi}.requires_grad: {oi}.detach().copy_({ui})"
+                    )
+                    mut_lines.append(f"    else: {oi}.copy_({ui})")
+                else:
+                    has_stream = (
+                        runtime_metadata.mutated_inp_stream_indices is not None
+                        and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
+                    )
+                    if has_stream:
+                        msg_name = f"_stream_err_{i}"
+                        mut_globals[msg_name] = (
+                            "Mutations on inputs with user-specified streams are not yet supported. "
+                            "See: https://github.com/pytorch/pytorch/issues/172522"
+                        )
+                        mut_lines.append(f"    raise RuntimeError({msg_name})")
+                    else:
+                        mut_lines.append(f"    {oi}.copy_({ui})")
+        if len(mut_lines) == 1:
+            mut_lines.append("    pass")
+        mut_source = "\n".join(mut_lines)
+
+        from .subclass_codegen import _compile_and_exec_source
+
+        codegen_apply_mutations = _compile_and_exec_source(
+            mut_source, mut_globals, "_apply_mutations", "mutation_epilogue"
+        )
+        import types
+
+        runtime_epilogue._apply_input_mutations = types.MethodType(  # type: ignore[attr-defined]
+            lambda self, orig_inputs, updated_inputs: codegen_apply_mutations(
+                orig_inputs, updated_inputs
+            ),
+            runtime_epilogue,
+        )
+
     @simple_wraps(compiled_invoker.compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
         # Create context manager for profiler
