@@ -25310,15 +25310,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type='cuda'
             ),
-            # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
