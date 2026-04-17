@@ -1229,10 +1229,6 @@ _scaled_nvfp4_nvfp4(
 void check_swizzle_lengths(ScaledGemmImplementation impl,
                            std::vector<SwizzleType>& swizzle_a,
                            std::vector<SwizzleType>& swizzle_b) {
-#ifdef USE_ROCM
-  // ROCM doesn't swizzle their formats - we don't care what's passed.
-  return;
-#else
   // Store implementations that care about swizzling, and how many swizzle arguments
   // they have to have
   // NOTE(slayton): auto here is unable to deduce the correct type..
@@ -1249,13 +1245,45 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
     if (impl != check_impl) {
       continue;
     }
-    TORCH_CHECK_VALUE(swizzle_a.size() == num_args, "swizzle_a must have ", num_args, " values, got ", swizzle_a.size());
-    TORCH_CHECK_VALUE(swizzle_b.size() == num_args, "swizzle_b must have ", num_args, " values, got ", swizzle_b.size());
+#ifdef USE_ROCM
+    if (
+        check_impl != ScaledGemmImplementation::MXFP8_MXFP8 &&
+        check_impl != ScaledGemmImplementation::MXFP4_MXFP4) {
+      // ROCm currently does not support NVFP4 paths.
+      break;
+    }
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == 1 && swizzle_b.size() == 1,
+        "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
+        swizzle_a.size(),
+        " and ",
+        swizzle_b.size());
+    TORCH_CHECK_VALUE(
+        swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
+            swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE");
+#else
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == num_args,
+        "swizzle_a must have ",
+        num_args,
+        " value",
+        num_args == 1 ? "" : "s",
+        ", got ",
+        swizzle_a.size());
+    TORCH_CHECK_VALUE(
+        swizzle_b.size() == num_args,
+        "swizzle_b must have ",
+        num_args,
+        " value",
+        num_args == 1 ? "" : "s",
+        ", got ",
+        swizzle_b.size());
+#endif
 
     // No need to check anything else
     break;
   }
-#endif
 }
 
 };  // anonymous namespace
