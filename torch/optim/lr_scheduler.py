@@ -31,6 +31,7 @@ __all__ = [
     "LinearLR",
     "ExponentialLR",
     "SequentialLR",
+    "CosineLR",
     "CosineAnnealingLR",
     "ChainedScheduler",
     "ReduceLROnPlateau",
