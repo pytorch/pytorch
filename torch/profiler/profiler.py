@@ -416,7 +416,8 @@ class _KinetoProfile:
         )
 
     def events(self):
-        """Return the list of unaggregated :class:`~torch.autograd.profiler_util.FunctionEvent`
+        """
+        Return the list of unaggregated :class:`~torch.autograd.profiler_util.FunctionEvent`
         objects, for use in the trace callback or after profiling has finished.
         """
         if self.profiler is None:
@@ -953,12 +954,8 @@ class profile(_KinetoProfile):
         self._transit_action(self.current_action, None)
 
     def step(self) -> None:
-        """Signal the profiler that the next profiling step has started.
-
-        Advances the schedule by one step, which may start or stop tracing and may
-        invoke ``on_trace_ready`` at cycle boundaries. Call once per training
-        iteration when using a non-default ``schedule``; a no-op-like marker under
-        the default schedule.
+        """
+        Signal the profiler that the next profiling step has started.
         """
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
@@ -979,13 +976,16 @@ class profile(_KinetoProfile):
             self.step_rec_fn.__enter__()
 
     def set_custom_trace_id_callback(self, callback) -> None:
-        """Set the trace ID generator. Called at the start of each cycle, so updating
+        """
+        Set the trace ID generator. Called at the start of each cycle, so updating
         it between cycles yields distinct IDs per cycle.
         """
         self.custom_trace_id_callback = callback
 
     def get_trace_id(self):
-        """Return the current cycle's trace ID, or ``None`` before the first cycle."""
+        """
+        Returns the current trace ID.
+        """
         if self.profiler is None:
             return None
         return self.profiler.trace_id
