@@ -44,13 +44,6 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
-if torch.version.hip:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest(
-        "PR180277 will fix the combo-kernel hip config issue on ROCm"
-    )
-
 
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
