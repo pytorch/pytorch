@@ -1347,10 +1347,20 @@ class CosineLR(LRScheduler):
     .. math::
         \gamma_t = \frac{\gamma_s + \gamma_e}{2}
         + \frac{\gamma_s - \gamma_e}{2}
-        \cos\!\left(\frac{t \, \pi}{T}\right)
+        \cos \left(\frac{t \pi}{T}\right)
 
     where :math:`\gamma_s` is ``start_factor``, :math:`\gamma_e` is
     ``end_factor``, and :math:`T` is ``total_iters``.
+
+    In particular:
+
+    .. math::
+        \forall t \gamma_t \in \left[ \gamma_{min}; \gamma_{max} \right] \\
+        \gamma_{min} = min(\gamma_s, \gamma_e) \\
+        \gamma_{max} = max(\gamma_s, \gamma_e)
+
+    Which guarantees that :math:`\gamma_t > 0` given the constraints on the
+    starting and ending factors.
 
     The learning rate is updated recursively as:
 
@@ -1423,9 +1433,9 @@ class CosineLR(LRScheduler):
         r"""Compute the multiplicative factor at step ``step``.
 
         .. math::
-            \gamma_t = \frac{1}{2}\left(\gamma_s + \gamma_e\right)
-            + \frac{1}{2}\left(\gamma_s - \gamma_e\right)
-            \cos\!\left(\frac{t \, \pi}{T}\right)
+            \gamma_t = \frac{\gamma_s + \gamma_e}{2}
+            + \frac{\gamma_s - \gamma_e}{2}
+            \cos \left(\frac{t \pi}{T}\right)
         """
         return (
             0.5 * (self.start_factor + self.end_factor)
