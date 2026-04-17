@@ -14947,6 +14947,17 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
+    def test_builtin_constant_fold_str_conversions(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            s = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
+            return x + len(s)
+
+        x = torch.randn(4)
+        res = fn(x)
+        expected = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
+        self.assertEqual(res, x + len(expected))
+
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
 
