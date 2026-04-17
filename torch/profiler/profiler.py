@@ -963,6 +963,24 @@ class profile(_KinetoProfile):
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
+        # If GPU collection was stopped (e.g. buffer overflow), force an
+        # early stop regardless of what the schedule says.
+        if (
+            prev_action
+            in (
+                ProfilerAction.WARMUP,
+                ProfilerAction.RECORD,
+                ProfilerAction.RECORD_AND_SAVE,
+            )
+            and self.current_action != ProfilerAction.NONE
+            and torch.autograd._is_stopped()
+        ):
+            warn(
+                "GPU activity collection was stopped early. "
+                f"Aborting profiling at step {self.step_num}."
+            )
+            self.current_action = ProfilerAction.NONE
+
         self._transit_action(prev_action, self.current_action)
         if os.environ.get("KINETO_USE_DAEMON", "") or (
             is_fbcode() and os.environ.get("KINETO_FORCE_STEP_HOOK", "")

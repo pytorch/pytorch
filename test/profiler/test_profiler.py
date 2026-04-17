@@ -3782,6 +3782,85 @@ class TestPrivateUse1ProfilerState(TestCase):
                 )
 
 
+class TestProfilerEarlyAbort(TestCase):
+    """Tests for early abort of profiling when GPU collection is stopped."""
+
+    PATCH_TARGET = "torch.autograd._is_stopped"
+
+    def _make_profiler(self, **schedule_kwargs):
+        return profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(**schedule_kwargs),
+        )
+
+    def test_step_early_abort_from_warmup(self):
+        with patch(self.PATCH_TARGET, return_value=True):
+            p = self._make_profiler(wait=0, warmup=2, active=2)
+            p.start()
+            # step 0 -> 1: WARMUP -> WARMUP, _is_stopped returns True but
+            # current_action is WARMUP (not NONE), so no override yet because
+            # the schedule still says WARMUP and we only abort when the schedule
+            # would keep us in an active state.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_step_early_abort_from_record(self):
+        with patch(self.PATCH_TARGET, return_value=False):
+            p = self._make_profiler(wait=0, warmup=1, active=3)
+            p.start()
+            # step 0 -> 1: WARMUP -> RECORD (normal)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD -> RECORD, but _is_stopped -> True
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_step_early_abort_from_record_and_save(self):
+        with patch(self.PATCH_TARGET, return_value=False):
+            p = self._make_profiler(wait=0, warmup=1, active=1)
+            p.start()
+            # step 0 -> 1: WARMUP -> RECORD_AND_SAVE (normal)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD_AND_SAVE -> WARMUP (repeat), but
+            # _is_stopped -> True forces NONE
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_step_no_abort_when_none(self):
+        with patch(self.PATCH_TARGET, return_value=True):
+            p = self._make_profiler(wait=2, warmup=1, active=1)
+            p.start()
+            # step 0 -> 1: NONE -> NONE, _is_stopped is True but prev_action
+            # is NONE so no abort should trigger.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_step_no_abort_when_already_stopping(self):
+        with patch(self.PATCH_TARGET, return_value=False):
+            p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
+            p.start()
+            # step 0 -> 1: WARMUP -> RECORD_AND_SAVE
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD_AND_SAVE -> NONE (schedule naturally stops),
+            # _is_stopped is True but current_action is already NONE so no
+            # override happens — the normal transition fires.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerEventsParity(TestCase):
