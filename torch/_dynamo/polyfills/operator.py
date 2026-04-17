@@ -5,18 +5,53 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+import sys
+from typing import Any, overload, SupportsIndex, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
+from . import import_fresh_module
+
+
+# Import the pure Python operator module, blocking the C extension
+py_operator = import_fresh_module("operator", blocked=["_operator"])
+assert py_operator is not None
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Container, Iterable, MutableSequence, Sequence
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter", "methodcaller", "countOf"]
+__all__ = [
+    "add",
+    "and_",
+    "attrgetter",
+    "concat",
+    "contains",
+    "countOf",
+    "delitem",
+    "floordiv",
+    "getitem",
+    "index",
+    "indexOf",
+    "inv",
+    "itemgetter",
+    "lshift",
+    "methodcaller",
+    "mod",
+    "mul",
+    "neg",
+    "not_",
+    "or_",
+    "pos",
+    "pow",
+    "rshift",
+    "setitem",
+    "sub",
+    "truediv",
+    "truth",
+]
 
 
 _T = TypeVar("_T")
@@ -117,3 +152,126 @@ def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any
 @substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
 def countOf(a: Iterable[_T], b: _T, /) -> int:
     return sum(it is b or it == b for it in a)
+
+
+@substitute_in_graph(operator.add, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def add(a: Any, b: Any, /) -> Any:
+    return py_operator.add(a, b)
+
+
+@substitute_in_graph(operator.sub, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def sub(a: Any, b: Any, /) -> Any:
+    return py_operator.sub(a, b)
+
+
+@substitute_in_graph(operator.mul, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def mul(a: Any, b: Any, /) -> Any:
+    return py_operator.mul(a, b)
+
+
+@substitute_in_graph(operator.floordiv, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def floordiv(a: Any, b: Any, /) -> Any:
+    return py_operator.floordiv(a, b)
+
+
+@substitute_in_graph(operator.truediv, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def truediv(a: Any, b: Any, /) -> Any:
+    return py_operator.truediv(a, b)
+
+
+@substitute_in_graph(operator.contains, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def contains(a: Container[object], b: object, /) -> bool:
+    return py_operator.contains(a, b)
+
+
+@substitute_in_graph(operator.truth, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def truth(a: Any, /) -> bool:
+    return py_operator.truth(a)
+
+
+if sys.version_info >= (3, 11):
+    __all__.append("call")
+
+    @substitute_in_graph(operator.call, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
+    def call(obj: Callable[..., Any], /, *args, **kwargs) -> Any:
+        return py_operator.call(obj, *args, **kwargs)
+
+
+@substitute_in_graph(operator.getitem, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def getitem(a, b, /) -> Any:
+    return py_operator.getitem(a, b)
+
+
+@substitute_in_graph(operator.concat, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def concat(a: Sequence[_T], b: Sequence[_T], /) -> Sequence[_T]:
+    return py_operator.concat(a, b)
+
+
+@substitute_in_graph(operator.indexOf, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
+def indexOf(a: Iterable[_T], b: _T, /) -> int:
+    return py_operator.indexOf(a, b)
+
+
+@substitute_in_graph(operator.inv, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def inv(a: Any, /) -> Any:
+    return py_operator.inv(a)
+
+
+@substitute_in_graph(operator.lshift, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def lshift(a: Any, b: Any, /) -> Any:
+    return py_operator.lshift(a, b)
+
+
+@substitute_in_graph(operator.rshift, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def rshift(a: Any, b: Any, /) -> Any:
+    return py_operator.rshift(a, b)
+
+
+@substitute_in_graph(operator.mod, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def mod(a: Any, b: Any, /) -> Any:
+    return py_operator.mod(a, b)
+
+
+@substitute_in_graph(operator.neg, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def neg(a: Any, /) -> Any:
+    return py_operator.neg(a)
+
+
+@substitute_in_graph(operator.pos, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def pos(a: Any, /) -> Any:
+    return py_operator.pos(a)
+
+
+@substitute_in_graph(operator.pow, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def pow(a: Any, b: Any, /) -> Any:
+    return py_operator.pow(a, b)
+
+
+@substitute_in_graph(operator.or_, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def or_(a: Any, b: Any, /) -> Any:
+    return py_operator.or_(a, b)
+
+
+@substitute_in_graph(operator.and_, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def and_(a: Any, b: Any, /) -> Any:
+    return py_operator.and_(a, b)
+
+
+@substitute_in_graph(operator.not_, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def not_(a: Any, /) -> Any:
+    return py_operator.not_(a)
+
+
+@substitute_in_graph(operator.setitem, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
+def setitem(a: MutableSequence[_T], b: SupportsIndex, c: _T, /) -> None:
+    return py_operator.setitem(a, b, c)
+
+
+@substitute_in_graph(operator.delitem, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
+def delitem(a: MutableSequence[_T], b: SupportsIndex, /) -> None:
+    return py_operator.delitem(a, b)
+
+
+@substitute_in_graph(operator.index, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def index(a: SupportsIndex, /) -> int:
+    return py_operator.index(a)

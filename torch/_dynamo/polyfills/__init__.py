@@ -6,6 +6,10 @@ Python polyfills for common builtins.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 #          Add it in the TYPE_CHECKING block below as well.
 
+from __future__ import annotations
+
+import importlib
+import sys as py_sys
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
@@ -23,6 +27,8 @@ C = TypeVar("C")
 
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from ..utils import dict_keys
 
     # Load by torch._dynamo.polyfills.loader
@@ -698,3 +704,29 @@ def group_tensors_by_device_and_dtype(
             indices.append(idx)
 
     return result
+
+
+# Partially copied from CPython test/support/import_helper.py
+# https://github.com/python/cpython/blob/bb8791c0b75b5970d109e5557bfcca8a578a02af/Lib/test/support/import_helper.py
+def _save_and_remove_modules(names: set[str]) -> dict[str, ModuleType]:
+    orig_modules = {}
+    prefixes = tuple(name + "." for name in names)
+    for modname in list(py_sys.modules):
+        if modname in names or modname.startswith(prefixes):
+            orig_modules[modname] = py_sys.modules.pop(modname)
+    return orig_modules
+
+
+def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
+    # Keep track of modules saved for later restoration as well
+    # as those which just need a blocking entry removed
+    names = {name, *blocked}
+    orig_modules = _save_and_remove_modules(names)
+    for modname in blocked:
+        py_sys.modules[modname] = None  # type: ignore[assignment]
+
+    try:
+        return importlib.import_module(name)
+    finally:
+        _save_and_remove_modules(names)
+        py_sys.modules.update(orig_modules)
