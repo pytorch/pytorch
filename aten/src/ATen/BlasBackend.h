@@ -39,6 +39,31 @@ enum class ScalingType : std::uint8_t {
   BlockWise128x128, // fp32 scales
 };
 
+inline std::string ScalingTypeToString(ScalingType scaling_type) {
+  switch (scaling_type) {
+    case ScalingType::TensorWise:
+      return "TensorWise";
+    case ScalingType::RowWise:
+      return "RowWise";
+    case ScalingType::BlockWise1x16:
+      return "BlockWise1x16";
+    case ScalingType::BlockWise1x32:
+      return "BlockWise1x32";
+    case ScalingType::BlockWise1x128:
+      return "BlockWise1x128";
+    case ScalingType::BlockWise128x128:
+      return "BlockWise128x128";
+    default:
+      TORCH_CHECK(false, "Unknown scaling type");
+  }
+}
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    ScalingType scaling_type) {
+  return stream << ScalingTypeToString(scaling_type);
+}
+
 enum class SwizzleType : std::uint8_t { NO_SWIZZLE = 0, SWIZZLE_32_4_4 = 1 };
 
 } // namespace blas

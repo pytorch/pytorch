@@ -6919,6 +6919,51 @@ def scaled_grouped_mm(
     swizzle_a = expand_single_value(swizzle_a)
     swizzle_b = expand_single_value(swizzle_b)
 
+    low_precision_dtypes = {
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float4_e2m1fn_x2,
+        getattr(torch, "float8_e4m3fnuz", None),
+        getattr(torch, "float8_e5m2fnuz", None),
+    }
+    low_precision_dtypes.discard(None)
+
+    if (
+        mat_a.dtype not in low_precision_dtypes
+        or mat_b.dtype not in low_precision_dtypes
+    ):
+        raise ValueError(
+            "scaled_grouped_mm expects pre-quantized low-precision inputs for "
+            f"mat_a and mat_b, but got mat_a.dtype={mat_a.dtype} and "
+            f"mat_b.dtype={mat_b.dtype}. If your inputs are bf16/fp16/fp32, "
+            "use grouped_mm instead."
+        )
+
+    if len(scale_a) != len(scale_recipe_a):
+        raise ValueError(
+            "scale_a and scale_recipe_a must describe the same number of scale "
+            f"tensors, but got len(scale_a)={len(scale_a)} and "
+            f"len(scale_recipe_a)={len(scale_recipe_a)}."
+        )
+    if len(scale_b) != len(scale_recipe_b):
+        raise ValueError(
+            "scale_b and scale_recipe_b must describe the same number of scale "
+            f"tensors, but got len(scale_b)={len(scale_b)} and "
+            f"len(scale_recipe_b)={len(scale_recipe_b)}."
+        )
+
+    if (
+        offs is not None
+        and mat_a.dim() == 2
+        and mat_b.dim() == 3
+        and offs.numel() != mat_b.shape[0]
+    ):
+        raise ValueError(
+            "For 2D x 3D grouped GEMM, offs must contain one group end offset "
+            f"per matrix in mat_b, but got len(offs)={offs.numel()} and "
+            f"mat_b.shape[0]={mat_b.shape[0]}."
+        )
+
     # native_functions has restrictions on what can be defined
     # & passed through - std::optional<ArrayRef<Tensor>> for instance
     # *cannot* be passed, but an empty vector (list) can.

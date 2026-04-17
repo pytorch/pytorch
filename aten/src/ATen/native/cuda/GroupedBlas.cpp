@@ -18,6 +18,7 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/StringUtil.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
@@ -91,6 +92,35 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
     return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
   }
 #endif
+}
+
+// Per-impl availability for grouped GEMM only. Non-grouped _scaled_mm checks
+// device support once up front, but grouped impls have different HW requirements
+// (rowwise: SM89+/ROCm, mxfp/fp4: SM100 + MSLK) so we filter per-entry.
+// Keyed on ScaledGemmImplementation so the compiler warns on unhandled cases.
+bool _is_grouped_impl_available(ScaledGemmImplementation impl) {
+  switch (impl) {
+    case ScaledGemmImplementation::ROWWISE_ROWWISE:
+#ifdef USE_ROCM
+#ifdef USE_MSLK
+      return at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
+#else
+      return false;
+#endif
+#else
+      return true;
+#endif
+    case ScaledGemmImplementation::MXFP8_MXFP8:
+    case ScaledGemmImplementation::MXFP4_MXFP4:
+    case ScaledGemmImplementation::NVFP4_NVFP4:
+#if defined(USE_MSLK) && !defined(USE_ROCM)
+      return _scaled_mm_allowed_device(/*sm90_only*/false, /*sm100_only*/true);
+#else
+      return false;
+#endif
+    default:
+      return false;
+  }
 }
 
 // 2d-2d and 2d-3d
@@ -520,11 +550,54 @@ namespace {
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
-  { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
-  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
-  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
-  { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
+// Each entry carries a human-readable description of its expected inputs
+// for error reporting. The accept_fn is the source of truth for matching;
+// the description is only used when no implementation matched.
+struct dispatch_entry {
+  std::string_view name;
+  std::string_view mat_a_dtype;
+  std::string_view mat_b_dtype;
+  std::string_view scale_recipe_a;
+  std::string_view scale_recipe_b;
+  std::string_view scale_dtypes_a;
+  std::string_view scale_dtypes_b;
+  acceptance_fn accept_fn;
+  ScaledGemmImplementation scaled_gemm_impl;
+};
+
+const std::array<dispatch_entry, 4> scale_grouped_kernel_dispatch = {{
+  {"rowwise_rowwise",
+   "[Float8_e4m3fn, Float8_e4m3fnuz]",
+   "[Float8_e4m3fn, Float8_e4m3fnuz]",
+   "[RowWise]",
+   "[RowWise]",
+   "[Float]",
+   "[Float]",
+   scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
+  {"mxfp8_mxfp8",
+   "[Float8_e4m3fn]",
+   "[Float8_e4m3fn]",
+   "[BlockWise1x32]",
+   "[BlockWise1x32]",
+   "[Float8_e8m0fnu]",
+   "[Float8_e8m0fnu]",
+   scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  {"mxfp4_mxfp4",
+   "[Float4_e2m1fn_x2]",
+   "[Float4_e2m1fn_x2]",
+   "[BlockWise1x32]",
+   "[BlockWise1x32]",
+   "[Float8_e8m0fnu]",
+   "[Float8_e8m0fnu]",
+   scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
+  {"nvfp4_nvfp4",
+   "[Float4_e2m1fn_x2]",
+   "[Float4_e2m1fn_x2]",
+   "[BlockWise1x16, TensorWise]",
+   "[BlockWise1x16, TensorWise]",
+   "[Float8_e4m3fn, Float]",
+   "[Float8_e4m3fn, Float]",
+   scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
 
 } // anonymous namespace
 
@@ -602,23 +675,74 @@ _scaled_grouped_mm_cuda_v2(
   // at this point we can start working out what we want to be doing
   // Try to do as few steps as possible.
   // NOTE: support is deliberately sparse, can explicitly enumerate all combinations allowed.
-  // Do this via a list of defined (name, acceptance, concrete_impl) tuples.
+  // Do this via the grouped dispatch table shared by matching and error reporting.
   ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
   for (const auto& fn_entry : scale_grouped_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(mat_a.scalar_type(),
-                        scale_recipe_a_enum,
-                        scale_a,
-                        mat_b.scalar_type(),
-                        scale_recipe_b_enum,
-                        scale_b);
+    if (!_is_grouped_impl_available(fn_entry.scaled_gemm_impl)) {
+      continue;
+    }
+    bool ok = fn_entry.accept_fn(mat_a.scalar_type(),
+                                 scale_recipe_a_enum,
+                                 scale_a,
+                                 mat_b.scalar_type(),
+                                 scale_recipe_b_enum,
+                                 scale_b);
     if (ok) {
-      gemm_impl = scaled_gemm_impl;
+      gemm_impl = fn_entry.scaled_gemm_impl;
       break;
     }
   }
-  TORCH_CHECK_VALUE(gemm_impl != ScaledGemmImplementation::NONE,
-      "No gemm implementation was found");
+  if (gemm_impl == ScaledGemmImplementation::NONE) {
+    std::string available_impls = "Available grouped implementations for this build/runtime:\n";
+    bool any_available_impl = false;
+    for (const auto& entry : scale_grouped_kernel_dispatch) {
+      if (!_is_grouped_impl_available(entry.scaled_gemm_impl)) {
+        continue;
+      }
+      any_available_impl = true;
+      available_impls += c10::str(
+          "- ", entry.name,
+          ": mat_a.dtype=", entry.mat_a_dtype,
+          ", mat_b.dtype=", entry.mat_b_dtype,
+          ", scale_recipe_a=", entry.scale_recipe_a,
+          ", scale_recipe_b=", entry.scale_recipe_b,
+          ", scale_dtypes_a=", entry.scale_dtypes_a,
+          ", scale_dtypes_b=", entry.scale_dtypes_b,
+          "\n");
+    }
+    if (!any_available_impl) {
+      available_impls += "- none\n";
+    }
+
+    auto format_recipes = [](const std::vector<ScalingType>& recipes) {
+      std::string r = "[";
+      for (const auto i : c10::irange(recipes.size())) {
+        if (i > 0) r += ", ";
+        r += at::blas::ScalingTypeToString(recipes[i]);
+      }
+      return r + "]";
+    };
+    auto format_scale_dtypes = [](ArrayRef<Tensor> scales) {
+      std::string r = "[";
+      for (const auto i : c10::irange(scales.size())) {
+        if (i > 0) r += ", ";
+        r += c10::str(scales[i].scalar_type());
+      }
+      return r + "]";
+    };
+
+    TORCH_CHECK_VALUE(
+        false,
+        c10::str(
+            "No grouped GEMM implementation matched this invocation. Got:\n",
+            "- mat_a.dtype=", mat_a.scalar_type(), "\n",
+            "- mat_b.dtype=", mat_b.scalar_type(), "\n",
+            "- scale_recipe_a=", format_recipes(scale_recipe_a_enum), "\n",
+            "- scale_recipe_b=", format_recipes(scale_recipe_b_enum), "\n",
+            "- len(scale_a)=", scale_a.size(), ", scale dtypes A=", format_scale_dtypes(scale_a), "\n",
+            "- len(scale_b)=", scale_b.size(), ", scale dtypes B=", format_scale_dtypes(scale_b), "\n",
+            available_impls));
+  }
 
   switch (gemm_impl) {
     case ScaledGemmImplementation::ROWWISE_ROWWISE: {

@@ -593,6 +593,81 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
 
     return th, tq, t_blocked_scales, t_global_scales
 
+def _3d_grouped_tensor_to_blocked_scaled(t, G, format):
+    th_list = []
+    tq_list = []
+    t_scale_list = []
+    t_global_scale_list = []
+
+    for i in range(G):
+        if format == "mxfp8":
+            th, tq, t_scale = _convert_to_mxfp8_with_hp_ref(t[i])
+        elif format == "nvfp4":
+            th, tq, t_scale, t_global_scale = _convert_to_nvfp4_with_hp_ref(t[i])
+            t_global_scale_list.append(t_global_scale)
+        elif format == "mxfp4":
+            th, tq, t_scale = _convert_to_mxfp4_with_hp_ref(t[i])
+        else:
+            raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
+
+        if torch.version.cuda:
+            t_scale = to_blocked(t_scale)
+
+        th_list.append(th)
+        tq_list.append(tq)
+        t_scale_list.append(t_scale)
+
+    t_global_scales = None
+    if len(t_global_scale_list) > 0:
+        t_global_scales = torch.stack(t_global_scale_list)
+
+    return (
+        torch.stack(th_list, dim=0).contiguous(),
+        torch.stack(tq_list, dim=0).contiguous(),
+        torch.stack(t_scale_list, dim=0).contiguous(),
+        t_global_scales,
+    )
+
+
+def _2d_grouped_rows_to_blocked_scaled(t, K, G, offs, format):
+    th_list = []
+    tq_list = []
+    t_scale_list = []
+    t_global_scale_list = []
+
+    for i in range(G):
+        prev_group_end = 0 if i == 0 else offs[i - 1]
+        curr_group_end = offs[i]
+        group_size = curr_group_end - prev_group_end
+        if group_size > 0:
+            t_slice = t[prev_group_end:curr_group_end, :]
+            if format == "mxfp8":
+                th, tq, t_scale = _convert_to_mxfp8_with_hp_ref(t_slice)
+            elif format == "nvfp4":
+                th, tq, t_scale, t_global_scale = _convert_to_nvfp4_with_hp_ref(t_slice)
+                t_global_scale_list.append(t_global_scale)
+            elif format == "mxfp4":
+                th, tq, t_scale = _convert_to_mxfp4_with_hp_ref(t_slice)
+            else:
+                raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
+
+            if torch.version.cuda:
+                t_scale = to_blocked(t_scale)
+            th_list.append(th)
+            tq_list.append(tq)
+            t_scale_list.append(t_scale)
+
+    t_global_scales = None
+    if len(t_global_scale_list) > 0:
+        t_global_scales = torch.stack(t_global_scale_list)
+
+    tq = torch.cat(tq_list, dim=0).contiguous()
+    th = torch.cat(th_list, dim=0).contiguous()
+    t_scale = torch.cat(t_scale_list, dim=0).contiguous().reshape(-1, K // 32)
+
+    return th, tq, t_scale, t_global_scales
+
+
 def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     # Build some standard args that are wordy
     swizzle = SwizzleType.NO_SWIZZLE
@@ -822,7 +897,6 @@ class TestFP8Matmul(TestCase):
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
-        block_size = 32
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device="cuda") * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device="cuda") * 0.01
@@ -830,86 +904,10 @@ class TestFP8Matmul(TestCase):
             G, total_M, multiple_of=32, device="cuda"
         )
 
-        # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
-        # as they each used for independent gemm in the grouped gemm.
-        def _3d_to_blocked_scaled(W, G, format):
-            wh_list = []
-            wq_list = []
-            w_scale_list = []
-            w_global_scale_list = []
-            for i in range(G):
-                if format == "mxfp8":
-                    wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
-                elif format == "nvfp4":
-                    w_scale, wq = to_mxfp(W[i], format="mxfp8")
-                    wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
-                    w_global_scale_list.append(w_global_scale)
-                elif format == "mxfp4":
-                    wh, wq, w_scale = _convert_to_mxfp4_with_hp_ref(W[i])
-                else:
-                    raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
-
-                # Swizzle scaled
-                if torch.version.cuda:
-                    w_scale = to_blocked(w_scale)
-
-                wh_list.append(wh)
-                wq_list.append(wq)
-                w_scale_list.append(w_scale)
-            wh = torch.stack(wh_list, dim=0).contiguous()
-            wq = torch.stack(wq_list, dim=0).contiguous()
-            w_scale = torch.stack(w_scale_list, dim=0).contiguous()
-            # Global scales only exist for nvfp4
-            if len(w_global_scale_list) > 0:
-                w_global_scales = torch.stack(w_global_scale_list)
-            else:
-                w_global_scales = None
-            return wh, wq, w_scale, w_global_scales
-
-        wh, wq, w_blocked_scales, w_global_scales = _3d_to_blocked_scaled(W, G, format)
-
-        # For each group along `total_M` in the 2D tensor, quantize and convert scale to blocked format separately,
-        # as they each used for independent gemm in the grouped gemm.
-        def _2d_to_blocked_scaled(X, K, G, offs, format):
-            xh_list = []
-            xq_list = []
-            x_scale_list = []
-            x_global_scale_list = []
-            for i in range(G):
-                prev_group_end = 0 if i == 0 else input_group_end_offsets[i - 1]
-                curr_group_end = input_group_end_offsets[i]
-                group_size = curr_group_end - prev_group_end
-                if group_size > 0:
-                    x_slice = X[prev_group_end:curr_group_end, :]
-                    if format == "mxfp8":
-                        xh, xq, x_scale = _convert_to_mxfp8_with_hp_ref(x_slice)
-                    elif format == "nvfp4":
-                        xh, xq, x_scale, x_global_scale = _convert_to_nvfp4_with_hp_ref(x_slice)
-                        x_global_scale_list.append(x_global_scale)
-                    elif format == "mxfp4":
-                        xh, xq, x_scale = _convert_to_mxfp4_with_hp_ref(x_slice)
-                    else:
-                        raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
-
-                    if torch.version.cuda:
-                        x_scale = to_blocked(x_scale)
-                    xh_list.append(xh)
-                    xq_list.append(xq)
-                    x_scale_list.append(x_scale)
-            xh = torch.cat(xh_list, dim=0).contiguous()
-            xq = torch.cat(xq_list, dim=0).contiguous()
-            x_scale = torch.cat(x_scale_list, dim=0).contiguous()
-            x_scale = x_scale.reshape(-1, K // block_size)
-            xq = xq.view(-1, xq.shape[-1])
-            xh = xh.view(-1, xh.shape[-1])
-
-            x_global_scales = None
-            if len(x_global_scale_list) > 0:
-                x_global_scales = torch.stack(x_global_scale_list)
-
-            return xh, xq, x_scale, x_global_scales
-
-        xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+        wh, wq, w_blocked_scales, w_global_scales = _3d_grouped_tensor_to_blocked_scaled(W, G, format)
+        xh, xq, x_blocked_scales, x_global_scales = _2d_grouped_rows_to_blocked_scaled(
+            X, K, G, input_group_end_offsets, format
+        )
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -953,6 +951,65 @@ class TestFP8Matmul(TestCase):
 
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+
+    def _make_mxfp8_grouped_mm_2d_3d_inputs(self, G=4, M=256, N=512, K=4096):
+        X = torch.randn((M, K), dtype=torch.bfloat16, device="cuda") * 0.1
+        W = torch.randn((G, N, K), dtype=torch.bfloat16, device="cuda") * 0.01
+        offs = generate_jagged_offs(G, M, multiple_of=32, device="cuda")
+
+        _, mat_b, scale_b, _ = _3d_grouped_tensor_to_blocked_scaled(W, G, "mxfp8")
+        _, mat_a, scale_a, _ = _2d_grouped_rows_to_blocked_scaled(X, K, G, offs, "mxfp8")
+        kwargs = _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, "mxfp8")
+        kwargs["mat_a"] = mat_a
+        kwargs["mat_b"] = mat_b.transpose(-2, -1)
+        kwargs["output_dtype"] = kwargs.pop("out_dtype")
+        kwargs.pop("wrap_v2")
+        return kwargs, X
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    def test_scaled_grouped_mm_invalid_inputs_raise_descriptive_errors(self, device):
+        kwargs, x = self._make_mxfp8_grouped_mm_2d_3d_inputs()
+
+        with self.assertRaisesRegex(ValueError, "pre-quantized low-precision inputs"):
+            scaled_grouped_mm(**{**kwargs, "mat_a": x})
+
+        with self.assertRaisesRegex(
+            ValueError, "scale_a and scale_recipe_a must describe the same number"
+        ):
+            scaled_grouped_mm(
+                **{
+                    **kwargs,
+                    "scale_recipe_a": [ScalingType.BlockWise1x32, ScalingType.TensorWise],
+                }
+            )
+
+        with self.assertRaisesRegex(
+            ValueError, "scale_b and scale_recipe_b must describe the same number"
+        ):
+            scaled_grouped_mm(
+                **{
+                    **kwargs,
+                    "scale_recipe_b": [ScalingType.BlockWise1x32, ScalingType.TensorWise],
+                }
+            )
+
+        with self.assertRaisesRegex(ValueError, "offs must contain one group end offset"):
+            scaled_grouped_mm(**{**kwargs, "offs": kwargs["offs"][:-1]})
+
+        with self.assertRaisesRegex(
+            ValueError, "No grouped GEMM implementation matched this invocation"
+        ) as ctx:
+            scaled_grouped_mm(
+                **{
+                    **kwargs,
+                    "scale_recipe_a": [ScalingType.RowWise],
+                }
+            )
+        self.assertIn("- scale_recipe_a=[RowWise]", str(ctx.exception))
+        self.assertIn(
+            "Available grouped implementations for this build/runtime:",
+            str(ctx.exception),
+        )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
