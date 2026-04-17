@@ -272,6 +272,18 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
       sizes_and_strides_.strides_arrayref());
 }
 
+void TensorImpl::incref_pyobject() const noexcept {
+  pyobj_slot_.incref();
+}
+
+void TensorImpl::decref_pyobject() const noexcept {
+  pyobj_slot_.decref();
+}
+
+bool TensorImpl::try_incref_pyobject() const noexcept {
+  return pyobj_slot_.try_incref();
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
