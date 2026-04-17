@@ -666,6 +666,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3359")
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_amp_autocast(self):
         class MyModule(torch.nn.Module):
