@@ -1235,6 +1235,10 @@ def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
+def _get_cudnn_depthwise_kernel() -> str: ...  # THPModule_getCuDNNDepthwiseKernel
+def _set_cudnn_depthwise_kernel(
+    arg: str,
+) -> None: ...  # THPModule_setCuDNNDepthwiseKernel
 def _get_miopen_immediate() -> _bool: ...  # THPModule_userImmediateMiopen
 def _set_miopen_immediate(arg: _bool) -> None: ...  # THPModule_setUserImmediateMiopen
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
