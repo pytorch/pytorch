@@ -4899,9 +4899,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 tma_heuristic.mm_configs = original_tma_mm_configs
                 mm_heuristic.mm_configs = original_mm_mm_configs
 
-    @unittest.skipIf(
-        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @parametrize(
         "test_case",
         [
@@ -4971,9 +4969,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @unittest.skipIf(
-        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize("fuse_epilogue", (True, False))
     @parametrize("use_async_compile", (True, False))
@@ -5024,9 +5020,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused_add_mul"
                     ).run(code[0])
 
-    @unittest.skipIf(
-        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize(
         "test_case",
@@ -5087,9 +5081,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @unittest.skipIf(
-        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize(
         "test_case",
@@ -5124,7 +5116,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             epilogue_runtime = 0.3
             expect_fusion = False
         else:
-            raise RuntimeError("Invalid test case")
+            raise RuntimeError("Invalid test case, unreachable")
 
         f = self._get_mm_with_epilogue_fn()
         a, b = self._get_mm_inputs()
@@ -5150,9 +5142,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
-    @unittest.skipIf(
-        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
     @parametrize("use_async_compile", (True, False))
     def test_epilogue_prologue_fusion_cache_preserved(self, use_async_compile: bool):
         def f(a, b):
