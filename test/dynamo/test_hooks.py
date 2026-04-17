@@ -370,7 +370,7 @@ def forward(self, L_x_ : torch.Tensor):
     a = getitem * 3
     add = a + getitem;  a = None
     sum_1 = add.sum();  add = None
-    return (sum_1, getitem)""",  # noqa: B950
+    return (sum_1, getitem)""",
         )
 
     def test_hook_on_intermediate_used_before_and_after(self):
@@ -522,7 +522,7 @@ def forward(self, L_x_ : torch.Tensor):
     sum_1 = result.sum();  result = None
     sum_2 = getitem_3.sum();  getitem_3 = None
     add = sum_1 + sum_2;  sum_1 = sum_2 = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
 
     def test_intermediary_hooks(self):
@@ -915,7 +915,7 @@ def forward(self, L_x_ : torch.Tensor):
             comp_out[0].backward(torch.ones(4))
 
             self.assertEqual(cnts.frame_count, 1)
-            my_hook = my_hook2  # noqa: F811
+            my_hook = my_hook2
             self.assertEqual(x0.grad, x1.grad)
 
             eager_out = mod(x0)

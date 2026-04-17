@@ -374,7 +374,7 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
-    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
         )
 
     def test_debug_mode_einsum(self):
@@ -1070,7 +1070,7 @@ class TestDTensorDebugMode(TestCase):
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
       aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
-    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",  # noqa: B950
+    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",
             ignore_comments=True,
         )
 
@@ -1119,7 +1119,7 @@ class TestDTensorDebugMode(TestCase):
       [annotate] [exit InvokeSubgraph HOP] subgraph_0
       aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] subgraph_1
-    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",
             ignore_comments=True,
         )
 

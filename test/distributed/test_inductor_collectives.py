@@ -722,7 +722,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
         ):
             lib.define(
-                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"
             )
             lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
             lib.impl("alltoall_autograd", alltoall_autograd, "Meta")

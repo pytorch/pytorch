@@ -50,21 +50,21 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('placeholder', 'l_x_', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
             """\
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'mul_1', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})
 ('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
-('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
+('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",
         )
 
     def test_activation_checkpointing(self):
@@ -95,17 +95,17 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'wrap_body_0', {'ac_sin': 0})
 [('placeholder', 'l_x_', {'ac_sin': 0}), ('call_function', 'sin', {'ac_sin': 0}), ('output', 'output', {'ac_sin': 0})]
 ('call_function', 'tag_activation_checkpoint', {'ac_sin': 0})
-('call_function', 'ac', {'ac_sin': 0})""",  # noqa: B950
+('call_function', 'ac', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
-            """('call_function', 'sin', {'ac_sin': 0})""",  # noqa: B950
+            """('call_function', 'sin', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'cos', {'ac_sin': 0})
-('call_function', 'mul', {'ac_sin': 0})""",  # noqa: B950
+('call_function', 'mul', {'ac_sin': 0})""",
         )
 
     def test_activation_checkpointing_annotation_inside(self):
@@ -133,17 +133,17 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         bw_metadata = fx_traceback._get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
-            """[('call_function', 'p', {'stage': 0})]""",  # noqa: B950
+            """[('call_function', 'p', {'stage': 0})]""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
-            """('call_function', 'sin', {'stage': 0})""",  # noqa: B950
+            """('call_function', 'sin', {'stage': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'cos', {'stage': 0})
-('call_function', 'mul', {'stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'stage': 0})""",
         )
 
     @requires_cuda_and_triton
@@ -205,7 +205,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'mask_fn_0', {'compile_inductor': 0})
 [('placeholder', 'child', {'compile_inductor': 0}), ('placeholder', 'child_1', {'compile_inductor': 0}), ('placeholder', 'child_2', {'compile_inductor': 0}), ('placeholder', 'child_3', {'compile_inductor': 0}), ('call_function', 'ge', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('call_function', 'flex_attention', {'compile_inductor': 0})
-('call_function', 'out', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'out', {'compile_inductor': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
@@ -218,7 +218,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'getitem', {'compile_inductor': 0})
 ('call_function', 'getitem_1', {'compile_inductor': 0})
 ('call_function', 'detach_1', {'compile_inductor': 0})
-('call_function', 'detach_3', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'detach_3', {'compile_inductor': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
@@ -236,7 +236,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'flex_attention_backward', {'compile_inductor': 0})
 ('call_function', 'getitem_3', {'compile_inductor': 0})
 ('call_function', 'getitem_4', {'compile_inductor': 0})
-('call_function', 'getitem_5', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'getitem_5', {'compile_inductor': 0})""",
         )
 
     @requires_cuda_and_triton
@@ -322,21 +322,21 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('placeholder', 'l_x_', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
             """\
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'mul_1', {'pp_stage': 0})
 ('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
-('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
+('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",
         )
 
     def test_graph_break(self):
@@ -378,7 +378,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'mul_1', {'moo': 0})
 ('call_function', 'ge', {'moo': 0})
 ('call_function', '_check', {'moo': 0})
-('call_function', 'mul', {'moo': 0})""",  # noqa: B950
+('call_function', 'mul', {'moo': 0})""",
         )
 
 

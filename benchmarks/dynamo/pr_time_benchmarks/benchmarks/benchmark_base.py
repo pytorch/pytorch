@@ -54,7 +54,7 @@ if log_to_scuba:
         # A unique number for each run of a particular workflow in a repository, e.g., 238742. Derived from GITHUB_RUN_NUMBER.
         28: optional string github_run_number_str;
         }
-        """,  # noqa: B950
+        """,
     )
 
 

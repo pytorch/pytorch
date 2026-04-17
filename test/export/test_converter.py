@@ -1366,12 +1366,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # noqa: F841
+        def func2(x):
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # noqa: F841
+        def func3(x):
             while x.sum() < 10:
                 x += x.sin()
             return x

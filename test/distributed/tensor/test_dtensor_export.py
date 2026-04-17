@@ -546,7 +546,7 @@ graph():
     %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
     %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
-    return (getitem,)""",  # noqa: B950
+    return (getitem,)""",
         )
 
     def test_dtensor_mark_unbacked(self):

@@ -487,7 +487,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
                 )
 
             def fsdp_fwd_bwd():
-                fsdp_model(inp).sum().backward()  # noqa: F821
+                fsdp_model(inp).sum().backward()
 
             for _ in range(5):
                 fsdp_fwd_bwd()

@@ -312,7 +312,7 @@ def forward(self, L_x_ : torch.Tensor):
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new('my_net2', None)
     c = b + 2;  b = None
     _record_function_exit__record_function_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit__record_function_2 = None
-    return (c,)""",  # noqa: B950
+    return (c,)""",
         )
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
@@ -327,7 +327,7 @@ def forward(self, arg0_1):
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new.default('my_net2')
     add = torch.ops.aten.add.Tensor(cos, 2);  cos = None
     _record_function_exit_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit_2 = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
         with torch.profiler.profile() as prof:
             fn_c(

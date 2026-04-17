@@ -233,10 +233,10 @@ def format_results_to_html(run_id):
                     f"<details id='section-{key}'><summary>{key} ({len(values)})</summary>\n"
                 )
                 html_f.write(
-                    f"<a href='#' onclick='document.querySelectorAll(\"#section-{key} input\").forEach(checkbox => checkbox.checked = true);'>Enable all</a>\n"  # noqa: B950
+                    f"<a href='#' onclick='document.querySelectorAll(\"#section-{key} input\").forEach(checkbox => checkbox.checked = true);'>Enable all</a>\n"
                 )
                 html_f.write(
-                    f"<a href='#' onclick='document.querySelectorAll(\"#section-{key} input\").forEach(checkbox => checkbox.checked = false);'>Disable all</a>\n"  # noqa: B950
+                    f"<a href='#' onclick='document.querySelectorAll(\"#section-{key} input\").forEach(checkbox => checkbox.checked = false);'>Disable all</a>\n"
                 )
                 for value in values:
                     safe_value = str(value).replace(".", "_")
@@ -246,13 +246,13 @@ def format_results_to_html(run_id):
                         f"{value}</label>\n"
                     )
                     html_f.write(
-                        f"<style>body:has(#filter-{key}-{safe_value}:not(:checked)) .visible-{key}-{safe_value} {{ display: none; }}</style>\n"  # noqa: B950
+                        f"<style>body:has(#filter-{key}-{safe_value}:not(:checked)) .visible-{key}-{safe_value} {{ display: none; }}</style>\n"
                     )
                 html_f.write("</details>")
             # one more filter: show "first" mode only
             html_f.write("<details><summary>First mode that fails only</summary>\n")
             html_f.write(
-                "<label><input type='checkbox' id='filter-mode-first' checked>"  # noqa: B950
+                "<label><input type='checkbox' id='filter-mode-first' checked>"
                 "Exclude items where a previous mode also fails</label>\n"
             )
             html_f.write("</details>\n")
@@ -261,10 +261,10 @@ def format_results_to_html(run_id):
                 "<details id='section-columns'><summary>Column filter</summary>\n"
             )
             html_f.write(
-                "<a href='#' onclick='document.querySelectorAll(\"#section-columns input\").forEach(checkbox => checkbox.checked = true);'>Enable all</a>\n"  # noqa: B950
+                "<a href='#' onclick='document.querySelectorAll(\"#section-columns input\").forEach(checkbox => checkbox.checked = true);'>Enable all</a>\n"
             )
             html_f.write(
-                "<a href='#' onclick='document.querySelectorAll(\"#section-columns input\").forEach(checkbox => checkbox.checked = false);'>Disable all</a>\n"  # noqa: B950
+                "<a href='#' onclick='document.querySelectorAll(\"#section-columns input\").forEach(checkbox => checkbox.checked = false);'>Disable all</a>\n"
             )
             DEFAULT_HIDDEN_KEYS = [
                 "gpu",
@@ -274,7 +274,7 @@ def format_results_to_html(run_id):
             ]
             for key in KEYS:
                 html_f.write(
-                    f"<label><input type='checkbox' id='filter-column-{key}' {'' if key in DEFAULT_HIDDEN_KEYS else 'checked'}>{key}</label>\n"  # noqa: B950
+                    f"<label><input type='checkbox' id='filter-column-{key}' {'' if key in DEFAULT_HIDDEN_KEYS else 'checked'}>{key}</label>\n"
                 )
                 html_f.write(
                     f"<style>body:has(#filter-column-{key}:not(:checked)) .visible-column-{key} {{ display: none; }}</style>\n"
@@ -301,7 +301,7 @@ def format_results_to_html(run_id):
                             f"<input type='checkbox' id='filter-mismatch-sample-{data['identifier']}'>\n"
                         )
                         html_f.write(
-                            f"<style>body:has(#filter-mismatch-sample-{data['identifier']}:not(:checked)) .visible-mismatch-sample-{data['identifier']} {{ display: none; }}</style>\n"  # noqa: B950
+                            f"<style>body:has(#filter-mismatch-sample-{data['identifier']}:not(:checked)) .visible-mismatch-sample-{data['identifier']} {{ display: none; }}</style>\n"
                         )
                     else:
                         html_f.write(f"{data[key]}\n")
@@ -381,7 +381,7 @@ async def ensure_global_utils():
     await run("rm install.sh")
 
     await run(
-        "wget --no-verbose https://github.com/seeraven/gitcache/releases/download/v1.0.29/gitcache_v1.0.29_Ubuntu22.04_x86_64"  # noqa: B950
+        "wget --no-verbose https://github.com/seeraven/gitcache/releases/download/v1.0.29/gitcache_v1.0.29_Ubuntu22.04_x86_64"
     )
     await run("mv gitcache_v1.0.29_Ubuntu22.04_x86_64 global_bin/gitcache")
     await run("chmod +x global_bin/gitcache")
@@ -938,7 +938,7 @@ def main():
         (gpu,) = args.gpu
         logging.basicConfig(
             level=logging.INFO,
-            format=f"%(asctime)s - runner:{gpu}/{args.pytorch_version}/{args.cuda_version}/{args.mode} - %(message)s",  # noqa: B950
+            format=f"%(asctime)s - runner:{gpu}/{args.pytorch_version}/{args.cuda_version}/{args.mode} - %(message)s",
         )
         asyncio.run(runner(args))
     if args.worker:
