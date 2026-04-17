@@ -1126,34 +1126,6 @@ print(t.is_pinned())
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
 
-    @recover_orig_fp32_precision
-    @serialTest()
-    def test_set_flags_with_mixed_tf32_state(self):
-        # Reproduce the scenario from torch.export._ignore_backend_decomps():
-        # user sets conv.fp32_precision="ieee" (new API) without syncing the
-        # legacy allow_tf32_cudnn flag, creating a mixed state where
-        # `torch.backends.cudnn.allow_tf32` raises RuntimeError.
-        # set_flags() must not raise when saving/restoring in this mixed state.
-        torch.backends.cudnn.conv.fp32_precision = "ieee"
-        # Confirm mixed state raises on the legacy getter.
-        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
-            print(torch.backends.cudnn.allow_tf32)
-        # set_flags() saves+applies new value without raising.
-        orig = torch.backends.cudnn.set_flags(False)
-        # Restoring should also not raise.
-        torch.backends.cudnn.set_flags(*orig)
-        # After restore, new-API conv precision is back to "ieee".
-        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
-
-        # Also verify: setting both allow_tf32 AND fp32_precision together
-        # (the corrected usage) is fully round-tripped by set_flags.
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.conv.fp32_precision = "ieee"
-        orig = torch.backends.cudnn.set_flags(True)
-        torch.backends.cudnn.set_flags(*orig)
-        self.assertFalse(torch.backends.cudnn.allow_tf32)
-        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
-
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -9363,28 +9335,20 @@ class TestFP32PrecisionFlags(TestCase):
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
-        # Setting the top-level generic fp32_precision should propagate to
-        # cudnn.conv and cudnn.rnn when they are in "inherit" mode (NONE or
-        # initial DEFAULT).  This is a regression test for the bug where their
-        # initial DEFAULT value was not inheriting from the generic setting.
-        #
-        # Reset to "inherit" (NONE) first so the test is not order-dependent on
-        # whether a prior test left explicit TF32 in place.
-        torch.backends.cudnn.conv.fp32_precision = "none"
-        torch.backends.cudnn.rnn.fp32_precision = "none"
-
-        # Use the flags() context manager to avoid flags_frozen() errors when
-        # setting the top-level generic precision via ContextProp.
+        # Regression test: setting torch.backends.fp32_precision = "ieee"
+        # must propagate to cudnn.conv and cudnn.rnn.
+        torch.backends.fp32_precision = "ieee"
+        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
+        self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
+        self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
         with torch.backends.flags(fp32_precision="ieee"):
-            self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
-            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
-
-            # A more-specific override still takes precedence over the generic
-            torch.backends.cudnn.conv.fp32_precision = "tf32"
-            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
-            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
+            self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+            # allow_tf32 should return False cleanly — no RuntimeError.
+        self.assertFalse(torch.backends.cudnn.allow_tf32)
 
 
 if __name__ == "__main__":

@@ -220,17 +220,21 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   if (!op.has_value()) {
     bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
     bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
+    // Only raise if conv and rnn disagree — that is a genuine mix of the
+    // legacy and new APIs. The legacy allow_tf32_cudnn bool is not included
+    // in this check because it can be stale when the new-API generic path
+    // (torch.backends.fp32_precision) was used to set the precision.
     TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
+        allow_tf32_rnn == allow_tf32_conv,
         "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
         "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
         "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
         "We suggest only using the new API to set the TF32 flag(s). See also: ",
         "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+    return allow_tf32_conv;
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
-  return allow_tf32_cudnn;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
@@ -394,30 +398,32 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
-  // DEFAULT and NONE both fall through to parent settings.
-  // We track whether the original stored value was DEFAULT so we can apply the
-  // correct legacy fallback at the end (TF32 for CUDA conv/rnn).
-  bool started_as_default = (precision == Float32Precision::DEFAULT);
-  if (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT) {
+
+  // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
+  // default". It is only used as the initial state for CUDA conv/rnn.
+  if (precision == Float32Precision::DEFAULT) {
+    key.second = Float32Op::ALL;
+    Float32Precision parent = fp32_precision.find(key)->second;
+    if (parent == Float32Precision::NONE || parent == Float32Precision::DEFAULT) {
+      key.first = Float32Backend::GENERIC;
+      parent = fp32_precision.find(key)->second;
+    }
+    if (parent != Float32Precision::NONE && parent != Float32Precision::DEFAULT) {
+      // A parent explicitly overrides; apply it (cuda does not support bf16).
+      return (backend == Float32Backend::CUDA && parent == Float32Precision::BF16)
+          ? Float32Precision::NONE
+          : parent;
+    }
+    return Float32Precision::TF32;
+  }
+
+  if (precision == Float32Precision::NONE) {
     key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
   }
-  if (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT) {
+  if (precision == Float32Precision::NONE) {
     key.first = Float32Backend::GENERIC;
     precision = fp32_precision.find(key)->second;
-  }
-
-  // When the original stored value was DEFAULT and no parent specifies a concrete
-  // precision, apply the legacy backend default (TF32 for CUDA conv/rnn).
-  if (started_as_default && (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT)) {
-    if (backend == Float32Backend::CUDA && (op == Float32Op::CONV || op == Float32Op::RNN)) {
-      return Float32Precision::TF32;
-    }
-    return Float32Precision::NONE;
-  }
-
-  if (precision == Float32Precision::DEFAULT) {
-    precision = Float32Precision::NONE;
   }
 
   // "cuda" does not support "bf16"
