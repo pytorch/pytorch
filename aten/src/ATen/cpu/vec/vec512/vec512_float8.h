@@ -166,8 +166,7 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
     // Rounding may carry into the NaN bit pattern (0x7f); saturate to max
     __mmask16 round_overflow =
         _mm512_cmpeq_epi32_mask(normal_result, _mm512_set1_epi32(0x7f));
-    normal_result =
-        _mm512_mask_set1_epi32(normal_result, round_overflow, 0x7e);
+    normal_result = _mm512_mask_set1_epi32(normal_result, round_overflow, 0x7e);
     result = _mm512_mask_mov_epi32(result, normal_mask, normal_result);
   }
 
