@@ -8328,18 +8328,9 @@ total number of elements in each tensor need to be the same.
 .. note:: When :attr:`std` is a CUDA tensor, this function synchronizes
           its device with the CPU.
 
-.. note:: This function only supports floating-point dtypes (e.g.,
-          ``torch.float32``, ``torch.float64``). Passing integer dtypes
-          such as ``torch.long`` will raise a ``NotImplementedError``
-          on both CPU and CUDA devices. Note that
-          :func:`torch.set_default_dtype` does **not** affect integer
-          tensor creation -- ``torch.tensor(1)`` always returns ``int64``
-          regardless of the default dtype. Use ``torch.tensor(1.0)``
-          to get a floating-point tensor.
-
 Args:
-    mean (Tensor): the tensor of per-element means
-    std (Tensor): the tensor of per-element standard deviations
+    mean (float or Tensor): the tensor of per-element means. Only floating point types are supported.
+    std (float or Tensor): the tensor of per-element standard deviations. Only floating point types are supported.
 
 Keyword args:
     {generator}
