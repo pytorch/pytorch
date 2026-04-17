@@ -1424,12 +1424,12 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_counter_c_0_ : {fx_class}, object_getattribute_L_nested_counter_c_1_ : {fx_class}):
+def forward(self, L_x_ : torch.Tensor, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {fx_class}):
     l_x_ = L_x_
-    object_getattribute_l_nested_counter_c_0_ = object_getattribute_L_nested_counter_c_0_
-    object_getattribute_l_nested_counter_c_1_ = object_getattribute_L_nested_counter_c_1_
-    x = torch.ops._TestOpaqueObject.increment_counter(object_getattribute_l_nested_counter_c_0_, l_x_);  object_getattribute_l_nested_counter_c_0_ = l_x_ = None
-    x_1 = torch.ops._TestOpaqueObject.increment_counter(object_getattribute_l_nested_counter_c_1_, x);  object_getattribute_l_nested_counter_c_1_ = x = None
+    l_nested_counter_c_0_ = L_nested_counter_c_0_
+    l_nested_counter_c_1_ = L_nested_counter_c_1_
+    x = torch.ops._TestOpaqueObject.increment_counter(l_nested_counter_c_0_, l_x_);  l_nested_counter_c_0_ = l_x_ = None
+    x_1 = torch.ops._TestOpaqueObject.increment_counter(l_nested_counter_c_1_, x);  l_nested_counter_c_1_ = x = None
     x_2 = x_1 + 1;  x_1 = None
     x_3 = x_2 + 2;  x_2 = None
     return (x_3,)""",
@@ -1457,18 +1457,18 @@ def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_counter_c_0_
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_queue_q_ : {fx_class}):
+def forward(self, L_x_ : torch.Tensor, L_nested_queue_q : {fx_class}):
     l_x_ = L_x_
-    object_getattribute_l_nested_queue_q_ = object_getattribute_L_nested_queue_q_
+    l_nested_queue_q = L_nested_queue_q
     tan = l_x_.tan()
-    queue_push = torch.ops._TestOpaqueObject.queue_push(object_getattribute_l_nested_queue_q_, tan);  tan = queue_push = None
+    queue_push = torch.ops._TestOpaqueObject.queue_push(l_nested_queue_q, tan);  tan = queue_push = None
     cos = l_x_.cos();  l_x_ = None
-    queue_push_1 = torch.ops._TestOpaqueObject.queue_push(object_getattribute_l_nested_queue_q_, cos);  cos = queue_push_1 = None
-    pop1 = torch.ops._TestOpaqueObject.queue_pop(object_getattribute_l_nested_queue_q_)
+    queue_push_1 = torch.ops._TestOpaqueObject.queue_push(l_nested_queue_q, cos);  cos = queue_push_1 = None
+    pop1 = torch.ops._TestOpaqueObject.queue_pop(l_nested_queue_q)
     sym_size_int = torch.ops.aten.sym_size.int(pop1, 0)
     ge = sym_size_int >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    pop2 = torch.ops._TestOpaqueObject.queue_pop(object_getattribute_l_nested_queue_q_);  object_getattribute_l_nested_queue_q_ = None
+    pop2 = torch.ops._TestOpaqueObject.queue_pop(l_nested_queue_q);  l_nested_queue_q = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(pop2, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
