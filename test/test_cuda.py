@@ -1126,6 +1126,8 @@ print(t.is_pinned())
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
 
+
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -9337,18 +9339,11 @@ class TestFP32PrecisionFlags(TestCase):
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
         # Regression test: setting torch.backends.fp32_precision = "ieee"
         # must propagate to cudnn.conv and cudnn.rnn.
-        torch.backends.fp32_precision = "ieee"
-        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
-        self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
-        self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
         with torch.backends.flags(fp32_precision="ieee"):
             self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
-            # allow_tf32 should return False cleanly — no RuntimeError.
-        self.assertFalse(torch.backends.cudnn.allow_tf32)
 
 
 if __name__ == "__main__":

@@ -220,21 +220,17 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   if (!op.has_value()) {
     bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
     bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
-    // Only raise if conv and rnn disagree — that is a genuine mix of the
-    // legacy and new APIs. The legacy allow_tf32_cudnn bool is not included
-    // in this check because it can be stale when the new-API generic path
-    // (torch.backends.fp32_precision) was used to set the precision.
     TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv,
+        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
         "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
         "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
         "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
         "We suggest only using the new API to set the TF32 flag(s). See also: ",
         "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-    return allow_tf32_conv;
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
+  return allow_tf32_cudnn;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
