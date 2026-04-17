@@ -10,7 +10,6 @@ import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
-    _infer_size,
     _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
     _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
@@ -3570,7 +3569,7 @@ def binary_cross_entropy(
         )
 
     if weight is not None:
-        new_size = _infer_size(target.size(), weight.size())
+        new_size = torch.broadcast_shapes(target.size(), weight.size())
         weight = weight.expand(new_size)
 
     # pyrefly: ignore [bad-argument-type]
