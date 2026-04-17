@@ -2412,17 +2412,47 @@ end
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            if (
-                config.aot_inductor.package_constants_in_so
-                or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
-            ):
-                serialized_weights = b"".join(
-                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants
-                    if name not in graph.folded_constants
+            # For binary_blob with external weights, stream constants directly
+            # to disk to avoid holding the full serialized blob in memory.
+            # This is critical for large models (e.g. 20GB+ quantized MoE).
+            can_stream_to_disk = (
+                config.aot_inductor.package_constants_on_disk_format == "binary_blob"
+                and not config.aot_inductor.package_constants_in_so
+            )
+
+            external_weights_path = None
+            if can_stream_to_disk:
+                external_weights_filename = f"{wrapper_path_operator.stem}_weights.blob"
+                external_weights_path = str(
+                    wrapper_path_operator.with_name(external_weights_filename)
                 )
-            else:
+                consts_size = 0
+                with open(external_weights_path, "wb") as f_weights:
+                    for name in graph.constants:
+                        if name not in graph.folded_constants:
+                            chunk = _to_bytes(
+                                graph.get_original_value_of_constant(name), all_cuda
+                            )
+                            f_weights.write(chunk)
+                            consts_size += len(chunk)
                 serialized_weights = b""
+                generated_files.append(external_weights_path)
+            else:
+                if (
+                    config.aot_inductor.package_constants_in_so
+                    or config.aot_inductor.package_constants_on_disk_format
+                    == "binary_blob"
+                ):
+                    serialized_weights = b"".join(
+                        _to_bytes(
+                            graph.get_original_value_of_constant(name), all_cuda
+                        )
+                        for name in graph.constants
+                        if name not in graph.folded_constants
+                    )
+                else:
+                    serialized_weights = b""
+                consts_size = len(serialized_weights)
 
             if config.aot_inductor.package_constants_on_disk_format == "pickle_weights":
                 # We need to return a storage key here because the original value tensor might be a clone
@@ -2438,8 +2468,6 @@ end
                 )
                 generated_files.append(weights_dict)
 
-            consts_size = len(serialized_weights)
-
             use_external_weights, use_mmap_weights = determine_aoti_mmap_flags(
                 consts_size
             )
@@ -2449,8 +2477,7 @@ end
                     "use_external_weights and  use_mmap_weights cannot both be True."
                 )
 
-            external_weights_path = None
-            if use_external_weights:
+            if not can_stream_to_disk and use_external_weights:
                 external_weights_filename = f"{wrapper_path_operator.stem}_weights.blob"
                 external_weights_path = str(
                     wrapper_path_operator.with_name(external_weights_filename)
@@ -2542,10 +2569,11 @@ end
                 if use_external_weights:
                     aot_constants = struct.pack("q", consts_size)
                     assert external_weights_path is not None
-                    # For external weights, write weights to separate file and embed minimal placeholder
-                    with open(external_weights_path, "wb") as f_weights:
-                        f_weights.write(serialized_weights)
-                    generated_files.append(external_weights_path)
+                    if not can_stream_to_disk:
+                        # Write weights to separate file (streaming path already wrote it)
+                        with open(external_weights_path, "wb") as f_weights:
+                            f_weights.write(serialized_weights)
+                        generated_files.append(external_weights_path)
             else:
                 # we'll append weights binary to the end of .so file and mmap it when loading
                 magic_number = cast(
