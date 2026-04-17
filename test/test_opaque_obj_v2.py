@@ -52,7 +52,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class Color(OpaqueBase):
@@ -3760,8 +3760,8 @@ class GraphModule(torch.nn.Module):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_benchmark_harness_no_pickle_for_opaque_inputs(self):
         """Opaque graph inputs must not be pickled in the benchmark harness."""
-        a = torch.randn(4, 4, device="cuda")
-        b = torch.randn(4, 4, device="cuda")
+        a = torch.randn(4, 4, device=GPU_TYPE)
+        b = torch.randn(4, 4, device=GPU_TYPE)
         twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
 
         def fn(x):
