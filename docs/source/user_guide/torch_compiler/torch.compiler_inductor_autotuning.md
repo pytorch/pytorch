@@ -207,7 +207,7 @@ with config.patch({
 }):
 ```
 
-### Example
+### Example: Matmul Autotuning
 
 We can use an example to better illustrate TorchInductor's autotune process. We
 will use matmul examples for autotuning on Triton and ATen.
@@ -428,7 +428,7 @@ class LocalCache:
         """Save autotuning result to cache"""
 ```
 
-### Example
+### Example: Reduction Autotuning
 
 Here is a simple example of a reduction operation that illustrates
 `CachingAutotuner` usage.

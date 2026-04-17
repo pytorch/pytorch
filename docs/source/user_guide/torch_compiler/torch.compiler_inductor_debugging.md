@@ -238,7 +238,9 @@ tensor([[ 0.3684, -0.0135, -0.9576,  ...,  0.1886, -0.3092, -0.9964],
 Or, suppose we want to change the generated kernel from sin to arcsin. We can
 just edit the kernel string directly:
 
-```cpp
+```{code-block} text
+:caption: Editing the generated kernel from sin to arcsin
+
 cpp_fused_sin_0 = async_compile.cpp_pybinding(['const float*', 'float*'], '''
 #include "/tmp/torchinductor_user/pi/cpicxudqmdsjh5cm4klbtbrvy2cxwr7whxl3md2zzdjdf3orvfdf.h"
 extern "C"  void kernel(const float* in_ptr0,
