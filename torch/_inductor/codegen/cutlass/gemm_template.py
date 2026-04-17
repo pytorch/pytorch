@@ -442,6 +442,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             beta (float): The scaling factor applied to the output matrix.
             input_reorder (Optional[List[int]]): Specifies the reordering of the input nodes. If not provided,
                             no reordering is performed. Defaults to None.
+            use_fast_accum (Optional[bool]): enable/disable tensor-core fast accumulation (only available in `CUTLASS3xGemmTemplate` and Hopper GPUs)
         """
         super().__init__(
             str(Placeholder.KERNEL_NAME), input_nodes, layout, input_reorder
@@ -979,7 +980,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
 
-        if self.use_fast_accum is not None:
+        if (
+            self.use_fast_accum is not None
+            and int(cutlass_utils._normalize_cuda_arch(cuda_env.get_cuda_arch())) == 90
+        ):
             is_op_fast_accum = "fastaccum" in op.configuration_name()
             if self.use_fast_accum ^ is_op_fast_accum:
                 return None
