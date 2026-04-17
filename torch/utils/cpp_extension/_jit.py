@@ -2,9 +2,9 @@
 """JIT compile path for :mod:`torch.utils.cpp_extension`.
 
 Implements :func:`load` and :func:`load_inline` plus the ninja-driven compile
-pipeline. Intentionally does not import ``setuptools`` at module load time;
-the Windows-only ``_get_vc_env`` / ``_run_ninja_build`` paths reach into
-``setuptools._distutils`` lazily.
+pipeline. No ``setuptools`` imports anywhere -- the Windows-only
+``_get_vc_env`` helper shells out to ``vswhere.exe`` and ``vcvarsall.bat``
+directly.
 """
 
 import collections
@@ -1181,19 +1181,71 @@ def _get_num_workers(verbose: bool) -> int | None:
 
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    """Return the Visual C++ build environment for ``vc_arch``.
+
+    Locates the latest Visual Studio install via ``vswhere.exe`` and captures
+    what ``vcvarsall.bat <vc_arch>`` sets. Keys are lowercased; callers that
+    merge this into ``os.environ`` should uppercase them.
+    """
+    if os.environ.get("DISTUTILS_USE_SDK"):
+        return {k.lower(): v for k, v in os.environ.items()}
+
+    program_files = os.environ.get(
+        "ProgramFiles(x86)",
+        os.environ.get("ProgramFiles", r"C:\Program Files (x86)"),
+    )
+    vswhere = os.path.join(
+        program_files, "Microsoft Visual Studio", "Installer", "vswhere.exe"
+    )
+    if not os.path.exists(vswhere):
+        raise RuntimeError(
+            f"vswhere.exe not found at {vswhere}; install Visual Studio or the "
+            "Microsoft C++ Build Tools with the 'Desktop development with C++' "
+            "workload."
+        )
+
+    install_path = (
+        subprocess.check_output(
+            [
+                vswhere,
+                "-latest",
+                "-prerelease",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+                "-products",
+                "*",
+            ]
+        )
+        .decode("mbcs", errors="strict")
+        .strip()
+    )
+    if not install_path:
+        raise RuntimeError(
+            "No Visual Studio installation with the MSVC build tools "
+            "(Microsoft.VisualStudio.Component.VC.Tools.x86.x64) was found."
+        )
+
+    vcvarsall = os.path.join(install_path, "VC", "Auxiliary", "Build", "vcvarsall.bat")
+    if not os.path.exists(vcvarsall):
+        raise RuntimeError(f"vcvarsall.bat not found at {vcvarsall}")
+
+    # /u forces cmd.exe to emit output as UTF-16LE so non-ASCII paths in
+    # localized Windows installs round-trip intact.
     try:
-        from setuptools import distutils  # type: ignore[attr-defined]
+        out = subprocess.check_output(
+            f'cmd /u /c "{vcvarsall}" {vc_arch} && set',
+            stderr=subprocess.STDOUT,
+        ).decode("utf-16le", errors="replace")
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"vcvarsall.bat {vc_arch} failed:\n{exc.output}") from exc
 
-        return distutils._msvccompiler._get_vc_env(vc_arch)
-    except AttributeError:
-        try:
-            from setuptools._distutils import _msvccompiler
-
-            return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[attr-defined]
-        except AttributeError:
-            from setuptools._distutils.compilers.C import msvc
-
-            return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
+    return {
+        key.lower(): value
+        for key, _, value in (line.partition("=") for line in out.splitlines())
+        if key and value
+    }
 
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
@@ -1204,9 +1256,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and "VSCMD_ARG_TGT_ARCH" not in env:
-        from setuptools import distutils  # type: ignore[attr-defined]
-
-        plat_name = distutils.util.get_platform()
+        plat_name = sysconfig.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
         vc_env = {k.upper(): v for k, v in _get_vc_env(plat_spec).items()}
         for k, v in env.items():

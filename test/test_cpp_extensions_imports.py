@@ -17,7 +17,9 @@ other tests can't hide a regression.
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
+import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -91,6 +93,37 @@ class TestCppExtensionImports(TestCase):
             assert m.SyclExtension is not None
             """
         )
+
+    def test_non_adapter_modules_do_not_import_setuptools(self):
+        """Static check: only ``setuptools.py`` may reference setuptools.
+
+        Guards against a future refactor silently re-introducing an import
+        of setuptools (eager or lazy) in ``_discovery.py``, ``_jit.py``, or
+        ``__init__.py``. The adapter submodule is the single allowed home.
+        """
+        pkg_dir = Path(torch.utils.cpp_extension.__file__).parent
+        for name in ("__init__.py", "_discovery.py", "_jit.py"):
+            src = (pkg_dir / name).read_text()
+            # Strip comments and docstrings by parsing and re-dumping imports.
+            import ast
+
+            tree = ast.parse(src)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        self.assertFalse(
+                            alias.name == "setuptools"
+                            or alias.name.startswith("setuptools."),
+                            f"{name} imports {alias.name}; setuptools must live "
+                            "only in torch.utils.cpp_extension.setuptools",
+                        )
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    self.assertFalse(
+                        mod == "setuptools" or mod.startswith("setuptools."),
+                        f"{name} imports from {mod}; setuptools must live "
+                        "only in torch.utils.cpp_extension.setuptools",
+                    )
 
 
 if __name__ == "__main__":
