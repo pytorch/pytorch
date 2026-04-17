@@ -16,7 +16,7 @@ using namespace torch::test;
 #define ASSERT_VARIABLE_EQ(a, b) ASSERT_TRUE(torch::allclose((a), (b)))
 #define EXPECT_VARIABLE_EQ(a, b) EXPECT_TRUE(torch::allclose((a), (b)))
 
-std::string graph_desc(std::shared_ptr<Node> node) {
+std::string graph_desc(c10::intrusive_ptr<Node> node) {
   if (!node) {
     return "None";
   }
