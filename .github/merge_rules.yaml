@@ -535,6 +535,7 @@
   - aten/src/ATen/detail/PrivateUse1HooksInterface.*
   - docs/source/accelerator/**
   - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  - test/test_accelerator.py
   approved_by:
   - albanD
   - fffrog
