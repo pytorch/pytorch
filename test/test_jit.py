@@ -3135,7 +3135,7 @@ class TestScript(JitTestCase):
 
 
     def test_oneline_func(self):
-        def fn(x): return x  # noqa: E704
+        def fn(x): return x
 
         self.checkScript(fn, (torch.ones(2, 2), ))
 
@@ -3261,8 +3261,8 @@ class TestScript(JitTestCase):
 
     def test_no_self_arg_ignore_function(self):
         class MyModule(nn.Module):
-            @torch.jit.ignore  # noqa: B902
-            def call_np():  # noqa: B902
+            @torch.jit.ignore
+            def call_np():
                 # type: () -> int
                 return np.random.choice(2, p=[.95, .05])
 
@@ -3870,7 +3870,7 @@ def foo(x):
     def test_calls_in_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
             def spooky(a):
-                # type: print("Hello") -> Tensor # noqa: F723
+                # type: print("Hello") -> Tensor
                 return a + 2
             print(torch.__file__)
             torch.jit.annotations.get_signature(spooky, None, 1, True)
@@ -6122,7 +6122,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):
             @torch.jit.script
             def test_mult(x, y):
                 return not (x, y)
@@ -6147,7 +6147,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):
 
             @torch.jit.script
             def test_bad_conditional(x):
@@ -11393,8 +11393,8 @@ dedent """
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
-                @torch.jit.script_method  # noqa: B902
-                def forward():  # noqa: B902
+                @torch.jit.script_method
+                def forward():
                     return torch.zeros(3, 4)
 
             MethodNoSelf()
@@ -11751,7 +11751,7 @@ dedent """
         # i in comprehension doesn't write to function scope
         def foo():
             i = 1
-            x = [i if i != 5 else 3 for i in range(7)]  # noqa: C416
+            x = [i if i != 5 else 3 for i in range(7)]
             return i, x
 
         self.assertEqual(foo(), torch.jit.script(foo)())
@@ -13004,7 +13004,7 @@ dedent """
                               c   # type: Tensor
                               ):
                 # type: (int, int, int) -> Tensor
-                # type: bad type line  # noqa: F723
+                # type: bad type line
 
                 return a + b + c
 
@@ -14362,7 +14362,7 @@ dedent """
         self.assertEqual(out, torch.tensor(6.0))
 
     def test_namedtuple_type_inference(self):
-        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])  # noqa: UP014
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
         _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
 
         def test_check_named_tuple_value():
@@ -14510,12 +14510,12 @@ dedent """
         # decorators. This is fixed on master but not on version 2.1.1.
         # Next version update remove noqa and add @typing.overload annotation
 
-        @torch.jit._overload  # noqa: F811
-        def test_simple(x1):  # noqa: F811
+        @torch.jit._overload
+        def test_simple(x1):
             # type: (int) -> int
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def test_simple(x1):  # noqa: F811
             # type: (float) -> float
             pass
@@ -14537,8 +14537,8 @@ dedent """
         old_func = test_simple
 
         # testing that new functions added work with caching
-        @torch.jit._overload  # noqa: F811
-        def test_simple(x1):  # noqa: F811
+        @torch.jit._overload
+        def test_simple(x1):
             # type: (str) -> str
             pass
 
@@ -14547,8 +14547,8 @@ dedent """
             return old_func("hi")
 
         # testing new function same qualified name
-        @torch.jit._overload  # noqa: F811
-        def test_simple(a, b):  # noqa: F811
+        @torch.jit._overload
+        def test_simple(a, b):
             # type: (int, int) -> int
             pass
 
@@ -14564,12 +14564,12 @@ dedent """
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
         # where the type is valid.
-        @torch.jit._overload  # noqa: F811
-        def identity(x1):  # noqa: F811
+        @torch.jit._overload
+        def identity(x1):
             # type: (str) -> str
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def identity(x1):  # noqa: F811
             # type: (float) -> float
             pass
@@ -14596,12 +14596,12 @@ dedent """
         with self.assertRaisesRegex(Exception, "cannot be directly compiled"):
             torch.jit.script(identity)
 
-        @torch.jit._overload  # noqa: F811
-        def impl_compile_failure(x, y):  # noqa: F811
+        @torch.jit._overload
+        def impl_compile_failure(x, y):
             # type: (str, str) -> (str)
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def impl_compile_failure(x, y):  # noqa: F811
             # type: (int, int) -> (int)
             pass
@@ -14616,8 +14616,8 @@ dedent """
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
-        @torch.jit._overload  # noqa: F811
-        def good_overload(x=1):  # noqa: F811
+        @torch.jit._overload
+        def good_overload(x=1):
             # type: (int) -> (int)
             pass
 
@@ -14632,8 +14632,8 @@ dedent """
 
 
         with self.assertRaisesRegex(Exception, "must equal to the default parameter"):
-            @torch.jit._overload  # noqa: F811
-            def bad_default_on_overload(x, y=2):  # noqa: F811
+            @torch.jit._overload
+            def bad_default_on_overload(x, y=2):
                 # type: (int, int) -> (int)
                 pass
 
@@ -14645,12 +14645,12 @@ dedent """
             def test():
                 return bad_default_on_overload(1, 2)
 
-        @torch.jit._overload  # noqa: F811
-        def diff_default(x):  # noqa: F811
+        @torch.jit._overload
+        def diff_default(x):
             # type: (int) -> int
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def diff_default(x):  # noqa: F811
             # type: (str) -> str
             pass
@@ -14663,12 +14663,12 @@ dedent """
 
         self.assertEqual(test(), torch.jit.script(test)())
 
-        @torch.jit._overload  # noqa: F811
-        def diff_num_params(x):  # noqa: F811
+        @torch.jit._overload
+        def diff_num_params(x):
             # type: (float) -> float
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def diff_num_params(x, y):  # noqa: F811
             # type: (int, int) -> int
             pass
@@ -14682,7 +14682,7 @@ dedent """
 
         self.assertEqual(test(), torch.jit.script(test)())
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def diff_num_params_no_annot():
             # type: () -> int
             pass
@@ -14709,9 +14709,9 @@ dedent """
                     return 0
 
         @torch.jit._overload
-        def null_overload(x: int) -> int: ...  # noqa: E704
+        def null_overload(x: int) -> int: ...
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def null_overload(x: str) -> str:  # noqa: F811
             pass
 
@@ -14726,7 +14726,7 @@ dedent """
             def forward(self, x: int):
                 pass
 
-            @torch.jit._overload_method  # noqa: F811
+            @torch.jit._overload_method
             def forward(self, x: Tensor):  # noqa: F811
                 pass
 
@@ -14754,12 +14754,12 @@ dedent """
         self.assertEqual(out2, ref_out)
 
     def test_function_overloading_isinstance(self):
-        @torch.jit._overload  # noqa: F811
-        def my_conv(x, y):  # noqa: F811
+        @torch.jit._overload
+        def my_conv(x, y):
             # type: (float, str) -> (float)
             pass
 
-        @torch.jit._overload  # noqa: F811
+        @torch.jit._overload
         def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
@@ -14780,12 +14780,12 @@ dedent """
 
     def test_method_overloading(self):
         class Over(torch.nn.Module):
-            @torch.jit._overload_method  # noqa: F811
-            def forward(self, x):  # noqa: F811
+            @torch.jit._overload_method
+            def forward(self, x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 pass
 
-            @torch.jit._overload_method  # noqa: F811
+            @torch.jit._overload_method
             def forward(self, x):  # noqa: F811
                 # type: (Tensor) -> Tensor
                 pass
@@ -14814,11 +14814,11 @@ dedent """
         self.assertEqual(over(x), x + 20)
 
         class Unannotated(torch.nn.Module):
-            @torch.jit._overload_method  # noqa: F811
-            def hello(self, x):  # noqa: F811
+            @torch.jit._overload_method
+            def hello(self, x):
                 pass
 
-            @torch.jit._overload_method  # noqa: F811
+            @torch.jit._overload_method
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -14834,12 +14834,12 @@ dedent """
             torch.jit.script(w)
 
         class CompileOverloadError(torch.nn.Module):
-            @torch.jit._overload_method  # noqa: F811
-            def hello(self, x):  # noqa: F811
+            @torch.jit._overload_method
+            def hello(self, x):
                 # type: (str) -> (int)
                 pass
 
-            @torch.jit._overload_method  # noqa: F811
+            @torch.jit._overload_method
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -14858,12 +14858,12 @@ dedent """
         if sys.version_info < (3, 13):  # test broken in 3.13
             with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
-                    @torch.jit._overload_method  # noqa: F811
-                    def forward(self, x):  # noqa: F811
+                    @torch.jit._overload_method
+                    def forward(self, x):
                         # type: (int) -> int
                         pass
 
-                    @torch.jit._overload_method  # noqa: F811
+                    @torch.jit._overload_method
                     def forward(self, x):  # noqa: F811
                         # type: (Tensor) -> Tensor
                         pass
@@ -14875,7 +14875,7 @@ dedent """
                 b = torch.jit.script(a)
 
                 class W3(torch.nn.Module):
-                    def forward(self, x):  # noqa: F811
+                    def forward(self, x):
                         return x + 5 + 10
 
                 a = W3()
@@ -14893,11 +14893,11 @@ dedent """
         self.assertEqual(a(torch.tensor(1)), torch.tensor(2))
 
         class W2(torch.nn.Module):
-            @torch.jit._overload_method  # noqa: F811
-            def hello(self, x):  # noqa: F811
+            @torch.jit._overload_method
+            def hello(self, x):
                 pass
 
-            @torch.jit._overload_method  # noqa: F811
+            @torch.jit._overload_method
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -15634,7 +15634,7 @@ dedent """
                 return 1
 
             @torch.jit._overload_method
-            def hi(self, x: Tensor): ...  # noqa: E704
+            def hi(self, x: Tensor): ...
 
             def hi(self, x):  # noqa: F811
                 return 2

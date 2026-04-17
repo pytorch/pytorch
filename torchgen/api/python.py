@@ -1476,7 +1476,7 @@ def dispatch_lambda_exprs(
             inits.extend(
                 [
                     f"auto __{name} = {arg_parser_expr};",
-                    f"::std::optional<DimnameList> {name} = __{name} ? ::std::make_optional(DimnameList(__{name}.value())) : ::std::nullopt;",  # noqa: B950
+                    f"::std::optional<DimnameList> {name} = __{name} ? ::std::make_optional(DimnameList(__{name}.value())) : ::std::nullopt;",
                 ]
             )
             lambda_args_exprs[name] = name
