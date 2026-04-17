@@ -1,0 +1,1 @@
+# mypy: allow-untyped-defs

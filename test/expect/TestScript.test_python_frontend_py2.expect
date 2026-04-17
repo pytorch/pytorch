@@ -1,0 +1,4 @@
+(def
+  (ident fn)
+  (decl (list) (option))
+  (list (raise (option))))

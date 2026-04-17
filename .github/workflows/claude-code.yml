@@ -1,0 +1,22 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+jobs:
+  claude-code:
+    uses: pytorch/test-infra/.github/workflows/_claude-code.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    secrets: inherit
+    with:
+      additional_claude_args: '--allowedTools Skill'
+      append_system_prompt: |
+        When asked to review a PR, always use the /pr-review skill first.
+        It contains PyTorch-specific review guidelines, output format, and critical checks.

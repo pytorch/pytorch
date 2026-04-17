@@ -1,0 +1,420 @@
+diff --git a/test/dynamo/cpython/3_13/mapping_tests.py b/test/dynamo/cpython/3_13/mapping_tests.py
+index ed89a81a6ea..b19cec7cb23 100644
+--- a/test/dynamo/cpython/3_13/mapping_tests.py
++++ b/test/dynamo/cpython/3_13/mapping_tests.py
+@@ -1,10 +1,64 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/mapping_tests.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # tests common to dict and UserDict
+ import unittest
+ import collections
+ from test.support import get_c_recursion_limit
+
+
+-class BasicTestMappingProtocol(unittest.TestCase):
++class BasicTestMappingProtocol(__TestCase):
+     # This base class can be used to check that an object conforms to the
+     # mapping protocol
+
+@@ -196,70 +250,76 @@ class BasicTestMappingProtocol(unittest.TestCase):
+         self.assertRaises((TypeError, AttributeError), d.update, 42)
+
+         outerself = self
+-        class SimpleUserDict:
+-            def __init__(self):
+-                self.d = outerself.reference
+-            def keys(self):
+-                return self.d.keys()
+-            def __getitem__(self, i):
+-                return self.d[i]
++        with torch._dynamo.error_on_graph_break(False):
++            class SimpleUserDict:
++                def __init__(self):
++                    self.d = outerself.reference
++                def keys(self):
++                    return self.d.keys()
++                def __getitem__(self, i):
++                    return self.d[i]
+         d.clear()
+         d.update(SimpleUserDict())
+         i1 = sorted(d.items())
+         i2 = sorted(self.reference.items())
+         self.assertEqual(i1, i2)
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+         d = self._empty_mapping()
+-        class FailingUserDict:
+-            def keys(self):
+-                raise Exc
++        with torch._dynamo.error_on_graph_break(False):
++            class FailingUserDict:
++                def keys(self):
++                    raise Exc
+         self.assertRaises(Exc, d.update, FailingUserDict())
+
+         d.clear()
+
+-        class FailingUserDict:
+-            def keys(self):
+-                class BogonIter:
+-                    def __init__(self):
+-                        self.i = 1
+-                    def __iter__(self):
+-                        return self
+-                    def __next__(self):
+-                        if self.i:
+-                            self.i = 0
+-                            return 'a'
+-                        raise Exc
+-                return BogonIter()
+-            def __getitem__(self, key):
+-                return key
++        with torch._dynamo.error_on_graph_break(False):
++            class FailingUserDict:
++                def keys(self):
++                    class BogonIter:
++                        def __init__(self):
++                            self.i = 1
++                        def __iter__(self):
++                            return self
++                        def __next__(self):
++                            if self.i:
++                                self.i = 0
++                                return 'a'
++                            raise Exc
++                    return BogonIter()
++                def __getitem__(self, key):
++                    return key
+         self.assertRaises(Exc, d.update, FailingUserDict())
+
+-        class FailingUserDict:
+-            def keys(self):
+-                class BogonIter:
+-                    def __init__(self):
+-                        self.i = ord('a')
+-                    def __iter__(self):
+-                        return self
+-                    def __next__(self):
+-                        if self.i <= ord('z'):
+-                            rtn = chr(self.i)
+-                            self.i += 1
+-                            return rtn
+-                        raise StopIteration
+-                return BogonIter()
+-            def __getitem__(self, key):
+-                raise Exc
++        with torch._dynamo.error_on_graph_break(False):
++            class FailingUserDict:
++                def keys(self):
++                    class BogonIter:
++                        def __init__(self):
++                            self.i = ord('a')
++                        def __iter__(self):
++                            return self
++                        def __next__(self):
++                            if self.i <= ord('z'):
++                                rtn = chr(self.i)
++                                self.i += 1
++                                return rtn
++                            raise StopIteration
++                    return BogonIter()
++                def __getitem__(self, key):
++                    raise Exc
+         self.assertRaises(Exc, d.update, FailingUserDict())
+
+         d = self._empty_mapping()
+-        class badseq(object):
+-            def __iter__(self):
+-                return self
+-            def __next__(self):
+-                raise Exc()
++        with torch._dynamo.error_on_graph_break(False):
++            class badseq(object):
++                def __iter__(self):
++                    return self
++                def __next__(self):
++                    raise Exc()
+
+         self.assertRaises(Exc, d.update, badseq())
+
+@@ -409,13 +469,14 @@ class TestMappingProtocol(BasicTestMappingProtocol):
+         d.update(self._full_mapping({1:2, 3:4, 5:6}).items())
+         self.assertEqual(d, {1:2, 2:4, 3:4, 5:6})
+
+-        class SimpleUserDict:
+-            def __init__(self):
+-                self.d = {1:1, 2:2, 3:3}
+-            def keys(self):
+-                return self.d.keys()
+-            def __getitem__(self, i):
+-                return self.d[i]
++        with torch._dynamo.error_on_graph_break(False):
++            class SimpleUserDict:
++                def __init__(self):
++                    self.d = {1:1, 2:2, 3:3}
++                def keys(self):
++                    return self.d.keys()
++                def __getitem__(self, i):
++                    return self.d[i]
+         d.clear()
+         d.update(SimpleUserDict())
+         self.assertEqual(d, {1:1, 2:2, 3:3})
+@@ -431,39 +492,44 @@ class TestMappingProtocol(BasicTestMappingProtocol):
+             yield 1
+         self.assertEqual(d.fromkeys(g()), {1:None})
+         self.assertRaises(TypeError, {}.fromkeys, 3)
+-        class dictlike(self.type2test): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class dictlike(self.type2test): pass
+         self.assertEqual(dictlike.fromkeys('a'), {'a':None})
+         self.assertEqual(dictlike().fromkeys('a'), {'a':None})
+         self.assertTrue(dictlike.fromkeys('a').__class__ is dictlike)
+         self.assertTrue(dictlike().fromkeys('a').__class__ is dictlike)
+         self.assertTrue(type(dictlike.fromkeys('a')) is dictlike)
+-        class mydict(self.type2test):
+-            def __new__(cls):
+-                return collections.UserDict()
++        with torch._dynamo.error_on_graph_break(False):
++            class mydict(self.type2test):
++                def __new__(cls):
++                    return collections.UserDict()
+         ud = mydict.fromkeys('ab')
+         self.assertEqual(ud, {'a':None, 'b':None})
+         self.assertIsInstance(ud, collections.UserDict)
+         self.assertRaises(TypeError, dict.fromkeys)
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class baddict1(self.type2test):
+-            def __init__(self, *args, **kwargs):
+-                raise Exc()
++            class baddict1(self.type2test):
++                def __init__(self, *args, **kwargs):
++                    raise Exc()
+
+         self.assertRaises(Exc, baddict1.fromkeys, [1])
+
+-        class BadSeq(object):
+-            def __iter__(self):
+-                return self
+-            def __next__(self):
+-                raise Exc()
++        with torch._dynamo.error_on_graph_break(False):
++            class BadSeq(object):
++                def __iter__(self):
++                    return self
++                def __next__(self):
++                    raise Exc()
+
+         self.assertRaises(Exc, self.type2test.fromkeys, BadSeq())
+
+-        class baddict2(self.type2test):
+-            def __setitem__(self, key, value):
+-                raise Exc()
++        with torch._dynamo.error_on_graph_break(False):
++            class baddict2(self.type2test):
++                def __setitem__(self, key, value):
++                    raise Exc()
+
+         self.assertRaises(Exc, baddict2.fromkeys, [1])
+
+@@ -537,25 +603,27 @@ class TestHashMappingProtocol(TestMappingProtocol):
+
+     def test_getitem(self):
+         TestMappingProtocol.test_getitem(self)
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class BadEq(object):
+-            def __eq__(self, other):
+-                raise Exc()
+-            def __hash__(self):
+-                return 24
++            class BadEq(object):
++                def __eq__(self, other):
++                    raise Exc()
++                def __hash__(self):
++                    return 24
+
+         d = self._empty_mapping()
+         d[BadEq()] = 42
+         self.assertRaises(KeyError, d.__getitem__, 23)
+
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++        with torch._dynamo.error_on_graph_break(False):
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+
+         d = self._empty_mapping()
+         x = BadHash()
+@@ -565,9 +633,10 @@ class TestHashMappingProtocol(TestMappingProtocol):
+
+     def test_fromkeys(self):
+         TestMappingProtocol.test_fromkeys(self)
+-        class mydict(self.type2test):
+-            def __new__(cls):
+-                return collections.UserDict()
++        with torch._dynamo.error_on_graph_break(False):
++            class mydict(self.type2test):
++                def __new__(cls):
++                    return collections.UserDict()
+         ud = mydict.fromkeys('ab')
+         self.assertEqual(ud, {'a':None, 'b':None})
+         self.assertIsInstance(ud, collections.UserDict)
+@@ -575,15 +644,16 @@ class TestHashMappingProtocol(TestMappingProtocol):
+     def test_pop(self):
+         TestMappingProtocol.test_pop(self)
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+
+         d = self._empty_mapping()
+         x = BadHash()
+@@ -613,11 +683,12 @@ class TestHashMappingProtocol(TestMappingProtocol):
+         d[1] = d
+         self.assertEqual(repr(d), '{1: {...}}')
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class BadRepr(object):
+-            def __repr__(self):
+-                raise Exc()
++            class BadRepr(object):
++                def __repr__(self):
++                    raise Exc()
+
+         d = self._full_mapping({1: BadRepr()})
+         self.assertRaises(Exc, repr, d)
+@@ -635,13 +706,14 @@ class TestHashMappingProtocol(TestMappingProtocol):
+         self.assertEqual(self._full_mapping({1: 2}),
+                          self._full_mapping({1: 2}))
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class BadCmp(object):
+-            def __eq__(self, other):
+-                raise Exc()
+-            def __hash__(self):
+-                return 1
++            class BadCmp(object):
++                def __eq__(self, other):
++                    raise Exc()
++                def __hash__(self):
++                    return 1
+
+         d1 = self._full_mapping({BadCmp(): 1})
+         d2 = self._full_mapping({1: 1})
+@@ -651,15 +723,16 @@ class TestHashMappingProtocol(TestMappingProtocol):
+     def test_setdefault(self):
+         TestMappingProtocol.test_setdefault(self)
+
+-        class Exc(Exception): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Exc(Exception): pass
+
+-        class BadHash(object):
+-            fail = False
+-            def __hash__(self):
+-                if self.fail:
+-                    raise Exc()
+-                else:
+-                    return 42
++            class BadHash(object):
++                fail = False
++                def __hash__(self):
++                    if self.fail:
++                        raise Exc()
++                    else:
++                        return 42
+
+         d = self._empty_mapping()
+         x = BadHash()

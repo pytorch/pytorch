@@ -1,0 +1,3 @@
+def foo(a: Tensor) -> NoneType:
+  print("hi\016")
+  return None
