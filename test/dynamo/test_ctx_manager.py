@@ -589,7 +589,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_device(self):
         def fn(x):
-            with torch.accelerator.device_index(x.device.index - 1):
+            with torch.accelerator.device_index(max(x.device.index - 1, 0)):
                 x = torch.sin(x + 1)
             return x
 
