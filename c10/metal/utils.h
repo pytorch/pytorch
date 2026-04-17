@@ -82,6 +82,11 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 
+template <>
+struct OpMathType<half2> {
+  using type = float2;
+};
+
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {

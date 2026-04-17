@@ -13482,6 +13482,45 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements should have been nan")
         self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements should have been {idx}")
 
+    def test_reduction_utils_complex(self):
+        """Test simd_sum and simd_prod for float2 (complex64)."""
+        lib = torch.mps.compile_shader("""
+            #include <c10/metal/reduction_utils.h>
+            kernel void do_sum(device float2* out,
+                               constant float2* inp,
+                               uint idx [[thread_position_in_grid]]) {
+                out[idx] = c10::metal::simd_sum(inp[idx]);
+            }
+
+            kernel void do_prod(device float2* out,
+                                constant float2* inp,
+                                uint idx [[thread_position_in_grid]]) {
+                out[idx] = c10::metal::simd_prod(inp[idx]);
+            }
+        """)
+
+        # Test simd_sum: all 32 lanes get the same total
+        x = torch.randn(28, device="mps", dtype=torch.complex64)
+        y = torch.empty_like(x)
+        lib.do_sum(y, x)
+        x_sum = x.sum()
+        max_err = (y - x_sum).abs().max().item()
+        self.assertLess(max_err, 1e-4, f"simd_sum error {max_err}, expected {x_sum}")
+
+        # Test simd_prod: product of a few small complex numbers
+        # Use only 4 non-unit values to keep the product numerically stable
+        x_prod = torch.ones(32, device="mps", dtype=torch.complex64)
+        x_prod[0] = 1 + 2j
+        x_prod[1] = 3 - 1j
+        x_prod[2] = -1 + 1j
+        x_prod[3] = 2 + 0j
+        y_prod = torch.empty_like(x_prod)
+        lib.do_prod(y_prod, x_prod, threads=(32,), group_size=(32,))
+        expected_prod = x_prod.prod()
+        # Only lane 0 has the final result for shuffle-down reduction
+        max_err = (y_prod[0] - expected_prod).abs().item()
+        self.assertLess(max_err, 1e-4, f"simd_prod error {max_err}, expected {expected_prod}")
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
         from torch._inductor.codegen.mps import DTYPE_TO_METAL
