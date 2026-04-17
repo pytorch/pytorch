@@ -302,7 +302,7 @@ def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_li
                 schema = torch._C._get_schema(qualified_op_name, overload_name)
                 if schema.overload_name:
                     reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
-                torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                torch_compile_op_lib_impl._impl_with_aoti_compile(
                     reg_op_name, dispatch_key
                 )
             except Exception as e:
@@ -7271,10 +7271,10 @@ class CommonTemplate:
 
         # test no-op
         fns = (
-            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
-            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
-            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
-            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),
+            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
@@ -7360,7 +7360,7 @@ class CommonTemplate:
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_9: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
-        return (add_9,)"""  # noqa: B950
+        return (add_9,)"""
         self.assertExpectedInline(
             post_grad_graph,
             expected_graph,
@@ -7384,7 +7384,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         add: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
         slice_1: "f32[s77, s27, 1][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.slice.Tensor(add, -1, 0, -1);  add = None
         add_9: "f32[s77, s27, 1][s27, 1, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(slice_1, 1);  slice_1 = None
-        return (add_9,)"""  # noqa: B950
+        return (add_9,)"""
         self.assertExpectedInline(
             post_grad_graph,
             expected_graph,
@@ -7413,7 +7413,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = empty = None
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
-        return (add_13,)"""  # noqa: B950
+        return (add_13,)"""
         self.assertExpectedInline(
             post_grad_graph,
             expected_graph,
@@ -14868,7 +14868,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # Dynamic shapes have compound sympy expressions (e.g. 3*s12*s80*s80)
             # whose C++ formatting (3L*s12*...) requires regex matching.
             suffix = "L?" if config.cpp_wrapper else ""
-            size_assert_pattern = rf"assert_size_stride.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, s12, s80, s80., .3{suffix}\*s12\*s80\*s80, s12\*s80\*s80, 1{suffix}, s12\*s80, s1.."  # noqa: B950
+            size_assert_pattern = rf"assert_size_stride.[a-z]+[0-9]+, .2{suffix}, 3{suffix}, s12, s80, s80., .3{suffix}\*s12\*s80\*s80, s12\*s80\*s80, 1{suffix}, s12\*s80, s1.."
             FileCheck().check_regex(size_assert_pattern).run(code)
         else:
             FileCheck().check("assert_size_stride(").check(
@@ -15482,7 +15482,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected_graph1 = f"""\
 def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
         permute: "f32[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
-        return (permute,)"""  # noqa: B950
+        return (permute,)"""
 
         post_grad_graph = get_post_grad_graph(f, (x,))
 
@@ -15498,7 +15498,7 @@ def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
         expected_graph2 = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.device)}"):
         permute: "f32[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
-        return (permute,)"""  # noqa: B950
+        return (permute,)"""
         post_grad_graph = get_post_grad_graph(f, (x,))
         self.assertExpectedInline(
             post_grad_graph,
@@ -15524,7 +15524,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
         expected_graph = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
         permute: "u8[s77, s53, s27][s27*s53, 1, s53]{str(x.device)}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
-        return (permute,)"""  # noqa: B950
+        return (permute,)"""
         self.assertExpectedInline(
             post_grad_graph,
             expected_graph,
@@ -16470,7 +16470,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -17304,14 +17304,14 @@ if RUN_GPU:
     tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
     tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
                 )
             else:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
         tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, R0_BLOCK])
-        tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+        tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
                 )
 
         # Disable index propagation, so the indirect indexing isn't optimized away

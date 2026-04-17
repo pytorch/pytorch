@@ -4049,7 +4049,7 @@ class TestBinaryUfuncs(TestCase):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
             if int(np.__version__.split(".")[0]) >= 2:
-                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)
             else:
                 expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
@@ -4059,7 +4059,7 @@ class TestBinaryUfuncs(TestCase):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
             if int(np.__version__.split(".")[0]) >= 2:
-                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)
             else:
                 expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)

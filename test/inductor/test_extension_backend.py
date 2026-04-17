@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import skipIfWindows
 
 
 try:
-    from extension_backends.cpp.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
+    from extension_backends.cpp.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend
         ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
