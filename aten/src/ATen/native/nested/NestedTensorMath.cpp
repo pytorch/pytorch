@@ -233,7 +233,7 @@ Tensor nested_from_padded_generic(
   std::vector<at::Tensor> all_sizes = sizes.unbind();
   for (const auto& size : all_sizes) {
     IntArrayRef sizes_i(
-        size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
+        size.const_data_ptr<int64_t>(), size.const_data_ptr<int64_t>() + size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
         sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
@@ -273,7 +273,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
 
   const auto sizes_num_rows = sizes.sizes()[0];
   const auto sizes_num_columns = sizes.sizes()[1];
-  const auto sizes_data_start = sizes.data_ptr<int64_t>();
+  const auto sizes_data_start = sizes.const_data_ptr<int64_t>();
   const auto sizes_data_end = sizes_data_start + sizes.numel();
   std::vector<int64_t> split_sizes;
   split_sizes.reserve(sizes_num_rows);
@@ -993,8 +993,8 @@ static bool can_cat_nested_sizes(const Tensor& nested_sizes1, const Tensor& nest
     return false;
   }
 
-  auto nested_sizes1_ptr = nested_sizes1.data_ptr<int64_t>();
-  auto nested_sizes2_ptr = nested_sizes2.data_ptr<int64_t>();
+  auto nested_sizes1_ptr = nested_sizes1.const_data_ptr<int64_t>();
+  auto nested_sizes2_ptr = nested_sizes2.const_data_ptr<int64_t>();
   const auto num_components = nested_sizes1.size(0);
   const auto num_dims = nested_sizes1.size(1);
   for (auto c : c10::irange(num_components)) {

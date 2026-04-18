@@ -2586,7 +2586,7 @@ static Tensor& masked_select_out_impl_cpu(
   auto mask_long =
       at::empty(shape, self.options().dtype(at::kLong)).copy_(*_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
-  auto mask_long_data = mask_long.data_ptr<int64_t>();
+  auto mask_long_data = mask_long.const_data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
   // use std::exclusive_scan when PyTorch upgrades to C++17, which have better
