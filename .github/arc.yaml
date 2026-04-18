@@ -83,6 +83,10 @@ runner_mapping:
   linux.arm64.m7g.metal: l-barm64g4-62-226                       # m7g.metal
 
 
+  # ---- x86 GPU — B200 (p6 family) ----
+
+  linux.dgx.b200: l-x86iamx-22-225-b200                             # p6-b200.48xlarge (1 GPU)
+
   # ---- Partner hardwares ----
 
   linux.idc.xpu: linux.idc.xpu
