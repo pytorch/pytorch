@@ -3,6 +3,7 @@
 """Tests for @leaf_function with make_fx, aot_function, and torch.compile."""
 
 import copy
+import re
 from functools import partial
 from unittest.mock import patch
 
@@ -944,10 +945,16 @@ class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
                 args_clone2,
             )
 
+        def _normalize(gm):
+            s = normalize_gm(gm.print_readable(print_output=False))
+            # Normalize nn_module_index which varies depending on whether an
+            # accelerator is available (stream reserves index 0).
+            return re.sub(r"'', \d+, ", "'', 0, ", s)
+
         return (
-            normalize_gm(eager_backend.graphs[0].print_readable(print_output=False)),
-            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            _normalize(eager_backend.graphs[0]),
+            _normalize(backend.fw_graphs[0]),
+            _normalize(backend.bw_graphs[0]),
         )
 
     def test_leaf_function_simple(self):

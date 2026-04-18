@@ -11,8 +11,11 @@ from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
     get_external_object_by_index,
     register_graph_created_object,
+    register_user_object,
+    reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
 from .base import VariableTracker
@@ -265,10 +268,23 @@ class SymbolicStreamState:
 
         cur_stack: list[StreamVariable] = []
         if torch.accelerator.is_available():
-            stream_var = LazyVariableTracker.create(
-                torch.accelerator.current_stream(),
-                source=CurrentStreamSource(torch.accelerator.current_stream().device),
+            # Reset the registry so the current stream is guaranteed index 0.
+            reset_user_object_tracking()
+            stream = torch.accelerator.current_stream()
+            source = CurrentStreamSource(stream.device)
+            # Register the current stream so it gets index 0 (registry is
+            # fresh at tracing start).  The inductor wrapper updates this
+            # entry at runtime so cudagraph capture uses the capture stream
+            # instead of this stale trace-time stream.
+            index = register_user_object(stream, source)
+            assert index == CURRENT_STREAM_INDEX, (
+                f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
+                f"got {index}"
             )
+            stream_var = LazyVariableTracker.create(stream, source=source)
+            # Set user_object_index as an instance attribute so accessing it
+            # does NOT trigger LazyVariableTracker realization.
+            stream_var.user_object_index = index  # type: ignore[union-attr]
             cur_stack = [stream_var]  # type: ignore[list-item]
 
         self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
@@ -293,7 +309,7 @@ class SymbolicStreamState:
         return len(self.cur_stream_stack) > 0
 
     def cur_stream_id(self) -> int:
-        """Get an identifier for the current stream without realizing lazy variables."""
+        """Get a Python object id for the current stream without realizing lazy variables."""
         stream = self.cur_stream_stack[-1]
         if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
             return id(stream.peek_value())
@@ -589,25 +605,26 @@ class EventVariable(VariableTracker):
         from .builder import wrap_fx_proxy_cls
 
         if name == "wait":
+            _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.wait_event,
                 (
                     self.user_object_index,
-                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                    stream_index,
                 ),
                 {},
             )
             return ConstantVariable.create(None)
         elif name == "record":
-            stream_arg = EventVariable._get_stream_arg(tx, args, kwargs)
+            stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
             tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.record_event,
                 (
                     self.user_object_index,
-                    stream_arg.user_object_index,
+                    stream_index,
                 ),
                 {},
             )
@@ -650,7 +667,14 @@ class EventVariable(VariableTracker):
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "StreamVariable":
+    ) -> tuple["StreamVariable", int]:
+        """Returns (stream_variable, stream_index_for_op).
+
+        The ambient current stream is registered at index 0 in the external
+        object registry.  The inductor wrapper updates index 0 at runtime so
+        that cudagraph capture sees the capture stream, not the stale
+        trace-time default stream.
+        """
         stream_arg = None
         if args:
             stream_arg = args[0]
@@ -658,9 +682,10 @@ class EventVariable(VariableTracker):
             stream_arg = kwargs.get("stream")
 
         if not stream_arg:
-            stream_arg = tx.symbolic_stream_state.cur_stream()
+            stream_var = tx.symbolic_stream_state.cur_stream()
+            return stream_var, stream_var.user_object_index  # type: ignore[return-value]
 
-        return stream_arg  # type: ignore[return-value]
+        return stream_arg, stream_arg.user_object_index  # type: ignore[return-value]
 
     @staticmethod
     def make_construct_in_graph_event_fn(

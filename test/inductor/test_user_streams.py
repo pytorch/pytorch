@@ -1159,13 +1159,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[1024]"):
         l_x_ = L_x_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
         a: "f32[1024]" = l_x_ * 2
 
         b: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
@@ -1180,8 +1180,7 @@ arg0_1, = args
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
+    stream1 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
         arg0_1 = copy_if_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
@@ -1191,7 +1190,7 @@ with torch.cuda._DeviceGuard(0):
         buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         stream0 = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=stream0)
-        torch.ops.streams.synchronize_stream.default(0)
+        torch.ops.streams.synchronize_stream.default(1)
     return (buf3, )""",
         )
 
@@ -1228,20 +1227,20 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
-        record_event = torch.ops.streams.record_event(1, 2);  record_event = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index_2 = None
+        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(1, 0);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(2, 1);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
         return (b,)
 """,
         )
@@ -1307,35 +1306,35 @@ class GraphModule(torch.nn.Module):
         l_w2_ = L_w2_
         l_w3_ = L_w3_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
+        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(5);  get_external_object_by_index_4 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(3, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(4, 1);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(3, 1);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(4, 2);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(4, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(5, 2);  record_event_1 = None
 
-        wait_event_1 = torch.ops.streams.wait_event(4, 2);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(5, 3);  wait_event_1 = None
 
         c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
 
-        synchronize_stream_2 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_2 = None
+        synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
         return (c,)
 """,
         )
@@ -1403,32 +1402,31 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(3, 1);  record_event = None
 
         b: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(3, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(4, 2);  record_event_1 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
-        wait_event = torch.ops.streams.wait_event(2, 4);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(3, 0);  wait_event = None
 
-        wait_event_1 = torch.ops.streams.wait_event(3, 4);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(4, 0);  wait_event_1 = None
 
         c: "f32[32, 32]" = a + b;  a = b = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
         return (c,)
 """,
         )
@@ -2269,6 +2267,71 @@ class TestPDLWithMultiStream(InductorTestCase):
         ).run(triton_code)
 
 
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@torch._inductor.config.patch({"triton.cudagraphs": True})
+class TestStreamCudagraphInteraction(InductorTestCase):
+    """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
+
+    def test_implicit_current_stream_with_cudagraphs(self):
+        """Event record/wait with implicit current stream must work under cudagraph capture.
+
+        The implicit current stream resolves at runtime via torch.cuda.current_stream(),
+        which correctly returns the cudagraph capture stream during recording.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            ev.record()
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait()
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_explicit_current_stream_with_cudagraphs(self):
+        """Passing torch.cuda.current_stream() explicitly must also work under capture.
+
+        The user writes ev.record(torch.cuda.current_stream()) which is
+        semantically identical to ev.record() — both should resolve to the
+        capture stream during cudagraph recording, not the stale default stream.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            cur = torch.cuda.current_stream()
+            ev.record(cur)
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait(cur)
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestStreamCodegen)
@@ -2277,6 +2340,7 @@ instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
 if __name__ == "__main__":
