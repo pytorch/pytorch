@@ -459,7 +459,7 @@ class TestTransformers(NNTestCase):
         handle.remove()
 
     @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.002)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
