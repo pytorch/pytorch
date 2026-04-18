@@ -8363,6 +8363,21 @@ class TestQuantizedConv(TestCase):
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
+    @unittest.skipIf(
+        torch.backends.quantized.engine == "none",
+        "No default quantized engine available",
+    )
+    def test_qconv1d_default_engine(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177254
+        # On aarch64, fbgemmSupportedCPU() incorrectly returned True, causing
+        # the default quantized engine to be X86 which crashed in FBGEMM with
+        # "RuntimeError: unknown architecure".  # codespell:ignore architecure
+        qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
+        x = torch.quantize_per_tensor(
+            torch.randn(1, 4, 16), scale=1.0, zero_point=0, dtype=torch.quint8
+        )
+        qconv1d(x)
+
 
 
 class TestPadding(TestCase):
