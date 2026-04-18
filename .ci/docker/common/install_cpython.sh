@@ -27,13 +27,9 @@ function do_cpython_build {
     check_var $py_folder
     tar -xzf Python-$py_ver.tgz
 
-    local base_ver=${py_ver%%+*}
     local additional_flags=""
-    if [[ "$base_ver" == *"t" ]]; then
+    if [[ "$py_ver" == *"t" ]]; then
         additional_flags=" --disable-gil"
-    fi
-    if [[ "$py_ver" == *"+tsan" ]]; then
-        additional_flags+=" --with-thread-sanitizer"
     fi
 
     pushd $py_folder
@@ -78,22 +74,18 @@ function do_cpython_build {
     # packaging is needed to create symlink since wheel no longer provides needed information
     retry ${prefix}/bin/pip install packaging==25.0 wheel==0.45.1 setuptools==80.9.0
     local abi_tag=$(${prefix}/bin/python -c "from packaging.tags import interpreter_name, interpreter_version; import sysconfig ; from sysconfig import get_config_var; print('{0}{1}-{0}{1}{2}'.format(interpreter_name(), interpreter_version(), 't' if sysconfig.get_config_var('Py_GIL_DISABLED') else ''))")
-    # Append build variant suffix (e.g., "+tsan") to the abi tag
-    if [[ "$py_ver" == *"+"* ]]; then
-        abi_tag="${abi_tag}+${py_ver#*+}"
-    fi
     ln -sf ${prefix} /opt/python/${abi_tag}
 }
 
 function build_cpython {
     local py_ver=$1
     check_var $py_ver
-    local py_suffix=${py_ver%%+*}
-    local py_folder=$py_suffix
+    local py_suffix=$py_ver
+    local py_folder=$py_ver
 
     # Special handling for nogil
-    if [[ "${py_suffix}" == *"t" ]]; then
-        py_suffix=${py_suffix::-1}
+    if [[ "${py_ver}" == *"t" ]]; then
+        py_suffix=${py_ver::-1}
         py_folder=$py_suffix
     fi
     retry wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
