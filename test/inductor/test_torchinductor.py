@@ -10004,6 +10004,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize(
         "constructor_and_args",
         [
+            (torch.tensor, ([[[1.0] * 128] * 128],)),
             (torch.empty, ([1, 128, 128],)),
             (torch.ones, ([1, 128, 128],)),
             (torch.zeros, ([1, 128, 128],)),
@@ -10025,19 +10026,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         constructor, args = constructor_and_args
 
-        failing_constructors = [
-            torch.rand,
-        ]
-
         def fn():
             return constructor(*args, pin_memory=True, device=self.device)
 
         result = torch.compile(fn, backend="inductor")()
-        if constructor in failing_constructors:
-            # We will get signal when one of the constructor correctly supports `pin_memory=True`.
-            self.assertFalse(result.is_pinned())
-        else:
-            self.assertTrue(result.is_pinned())
+        self.assertTrue(result.is_pinned())
         self.assertEqual(result.shape, [1, 128, 128])
 
     def test_new_empty(self):

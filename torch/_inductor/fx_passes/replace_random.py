@@ -190,7 +190,10 @@ def replace_random(
     layout=None,
     pin_memory=None,
 ):
+    overloadpacket = match.output_node().target.overloadpacket  # type: ignore[union-attr]
     if generator is not None:
+        return
+    if pin_memory:
         return
 
     def replacement(size):
@@ -204,9 +207,7 @@ def replace_random(
     mode = {
         aten.rand: "rand",
         aten.randn: "randn",
-    }[
-        match.output_node().target.overloadpacket  # type: ignore[union-attr]
-    ]  # type: ignore[union-attr]
+    }[overloadpacket]
     device = get_device(device)
     replacement_fn = replacement
 
