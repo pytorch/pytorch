@@ -37,7 +37,7 @@
 #include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
 #include <ATen/ops/_dyn_quant_pack_4bit_weight_native.h>
 #include <ATen/ops/_int_mm_native.h>
-#include <ATen/ops/_int_mm_acc_f32_native.h>
+#include <ATen/ops/_int_mm_acc_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
@@ -3770,22 +3770,25 @@ Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cpu(self, mat2, result);
 }
 
-Tensor& _int_mm_acc_f32_out_cpu(
+Tensor& _int_mm_acc_out_cpu(
     const Tensor& self,
     const Tensor& mat2,
+    std::optional<ScalarType> out_dtype,
     Tensor& result) {
 
 #ifndef STRIP_ERROR_MESSAGES
-  static constexpr std::string_view func_name = "_int_mm_acc_f32_out_cpu";
+  static constexpr std::string_view func_name = "_int_mm_acc_out_cpu";
 #endif
+  // Resolve the optional to a concrete ScalarType named 'out_dtype_'
+  const ScalarType out_dtype_ = out_dtype.value_or(at::kFloat);
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
   TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
-  TORCH_CHECK(result.dtype() == kFloat, func_name, ": result must be float32");
-
-  // ---- Layout checks ----
+  TORCH_CHECK(result.dtype() == at::kFloat || result.dtype() == at::kBFloat16, func_name, ": result must be float32 or bfloat16");
+  TORCH_CHECK(result.scalar_type() == out_dtype_, func_name, ": result dtype mismatch. Expected ", out_dtype_, " but got ", result.scalar_type());
   TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
   TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
   TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
@@ -3796,64 +3799,80 @@ Tensor& _int_mm_acc_f32_out_cpu(
   }
 
   bool dispatched = false;
-  #if defined(__aarch64__)
-    if (at::globalContext().userEnabledMkldnn()) {
-      try {
-        // int8 × int8 → float
-        mkldnn_matmul_i8i8f32(self, mat2, result);
-        dispatched = true;
-      } catch (const std::exception& e) {
-        TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
-      }
+
+#if defined(__aarch64__)
+  if (at::globalContext().userEnabledMkldnn()) {
+    try {
+      mkldnn_matmul_i8i8_acc(self, mat2, result);
+      dispatched = true;
+    } catch (const std::exception& e) {
+      TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
     }
-  #endif  // __aarch64__
+  }
+#endif
 
   // ---- Naive fallback (portable) ----
   if (!dispatched) {
-    auto a = reinterpret_cast<const int8_t*>(self.data_ptr());
     auto b = reinterpret_cast<const int8_t*>(mat2.data_ptr());
-    auto c = reinterpret_cast<float*>(result.data_ptr());
-
+    auto c_float = result.scalar_type() == at::kFloat
+        ? reinterpret_cast<float*>(result.data_ptr())
+        : nullptr;
+    auto c_bf16 = result.scalar_type() == at::kBFloat16
+        ? reinterpret_cast<at::BFloat16*>(result.data_ptr())
+        : nullptr;
     const int64_t m = result.size(0);
     const int64_t n = result.size(1);
     const int64_t k = self.size(1);
-
     const int64_t lda_0 = self.strides()[0];
     const int64_t lda_1 = self.strides()[1];
-
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
-
-    const int64_t ldc_0 = result.strides()[0];
-    const int64_t ldc_1 = result.strides()[1];
-
-    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
-      for (const auto idx : c10::irange(start, end)) {
-        const int64_t row = idx / n;
-        const int64_t col = idx % n;
-
-        int32_t acc = 0;
-
-        for (const auto kk : c10::irange(k)) {
-          acc += static_cast<int32_t>(
-                    a[row * lda_0 + kk * lda_1]) *
-                static_cast<int32_t>(
-                    b[kk * ldb_0 + col * ldb_1]);
-        }
-
-        // single conversion at the end
-        c[row * ldc_0 + col * ldc_1] = static_cast<float>(acc);
-      }
+    const int64_t ldc = result.strides()[0];
+    #define COMPUTE_WITH_A_TYPE(a_type)                             \
+    auto a = reinterpret_cast<const a_type*>(self.data_ptr());      \
+    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
+      for (const auto idx : c10::irange(start, end)) {              \
+        const int64_t row = idx / n;                                \
+        const int64_t col = idx % n;                                \
+        int32_t acc = 0;                                            \
+        for (const auto kk : c10::irange(k)) {                      \
+          acc += static_cast<int32_t>(                              \
+                    a[row * lda_0 + kk * lda_1]) *                  \
+                static_cast<int32_t>(                               \
+                    b[kk * ldb_0 + col * ldb_1]);                   \
+        }                                                           \
+        if (c_float) {                                              \
+          c_float[row * ldc + col] = static_cast<float>(acc);       \
+        } else {                                                    \
+          c_bf16[row * ldc + col] = static_cast<at::BFloat16>(acc); \
+        }                                                           \
+      }                                                             \
     });
+
+    if (self.scalar_type() == at::kByte) {
+      COMPUTE_WITH_A_TYPE(uint8_t);
+    } else {
+      COMPUTE_WITH_A_TYPE(int8_t);
+    }
   }
   return result;
 }
 
-Tensor _int_mm_acc_f32_cpu(
+Tensor _int_mm_acc_cpu(
     const Tensor& self,
-    const Tensor& mat2) {
-  auto result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(kFloat));
-  return _int_mm_acc_f32_out_cpu(self, mat2, result);
+    const Tensor& mat2,
+    std::optional<ScalarType> out_dtype) {
+
+  //Default out_dtype_ to Float if None is provided
+  const ScalarType out_dtype_ = out_dtype.value_or(at::kFloat);
+  TORCH_CHECK(out_dtype_ == at::kFloat || out_dtype_ == at::kBFloat16,
+      "_int_mm_acc_cpu: out_dtype_ must be float32 or bfloat16");
+
+  auto result = at::empty(
+      {self.size(0), mat2.size(1)},
+      self.options().dtype(out_dtype_));
+
+  return _int_mm_acc_out_cpu(self, mat2, out_dtype_, result);
 }
 
 } // namespace native

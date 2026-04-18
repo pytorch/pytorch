@@ -6589,79 +6589,54 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
     @onlyCPU
+    @dtypes(torch.bfloat16, torch.float32)
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
-    def test__int_mm_acc_f32_cpu(
-        self,
-        device,
-        m,
-        k,
-        n,
-        use_transpose_a,
-        use_transpose_b,
-        non_contig_type,
-    ):
-        """
-        Tests int8 x int8 -> float32 matmul
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_acc_cpu(self, device, dtype, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
+        # non_contig_type:
+        # 0: the whole data buffer is contiguous (can be transposed)
+        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
+        # 2: Neither stride is 1
 
-        non_contig_type:
-        0: fully contiguous
-        1: stride of one dim is 1 but buffer not contiguous
-        2: neither stride is 1
-        """
-
-        def genf_int_float(x, y, use_transpose, non_contig_type):
+        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
             if use_transpose:
                 x, y = y, x
-
             if non_contig_type != 0:
                 y = y * 2
-
-            x_int8 = torch.randint(
-                -128, 127, (x, y),
-                dtype=torch.int8,
-                device=device
-            )
+            dt_info = torch.iinfo(dtype)
+            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
             x_float = x_int8.to(torch.float32)
-
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
                 x_float = x_float[:, : y // 2]
             elif non_contig_type == 2:
                 x_int8 = x_int8[:, ::2]
                 x_float = x_float[:, ::2]
-
             if use_transpose:
                 return x_int8.t(), x_float.t()
-
             return x_int8, x_float
 
-        # Avoid invalid slicing edge case
         if non_contig_type != 0 and (m == 0 or k == 0):
             return
 
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
 
-        # ---- Main op ----
-        c_float = torch._int_mm_acc_f32(a_int8, b_int8)
+        c = torch._int_mm_acc(a_int8, b_int8, out_dtype=dtype)
+        self.assertTrue(c.dtype is dtype)
+        self.assertEqual(c.device, torch.device(device))
+        self.assertEqual(c, torch.mm(a_float, b_float).to(dtype))
 
-        self.assertTrue(c_float.dtype is torch.float32)
-        self.assertEqual(c_float.device, torch.device(device))
+        c_result = torch.empty(c.size(), dtype=dtype, device=device)
 
-        ref = torch.mm(a_float, b_float)
-
-        self.assertEqual(c_float, ref)
-
-        # # ---- out= variant ----
-        c_out = torch.empty_like(ref)
-        torch._int_mm_acc_f32(a_int8, b_int8, out=c_out)
-
-        self.assertEqual(c_out, ref)
+        # Checking out variant
+        torch._int_mm_acc(a_int8, b_int8, out_dtype=dtype, out=c_result)
+        self.assertEqual(c_result, torch.mm(a_float, b_float).to(dtype))
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
