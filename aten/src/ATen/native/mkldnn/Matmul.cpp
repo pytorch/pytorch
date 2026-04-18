@@ -3,7 +3,6 @@
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/Matmul.h>
-#include <ATen/native/mkldnn/DNNLMatmulHelper.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -86,7 +85,8 @@ void mkldnn_matmul_i8i8i32(
   TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
-void mkldnn_matmul_i8i8f32(
+// Supports outdtype float32 or bfloat16
+void mkldnn_matmul_i8i8_acc(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -632,25 +632,257 @@ void mkldnn_matmul_i8i8i32(
   }
 }
 
-void mkldnn_matmul_i8i8f32(
+template <typename dst_t>
+static void _mkldnn_matmul_i8i8_acc_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
 
-  const int64_t M = mat1.size(0);
-  const int64_t K = mat1.size(1);
-  const int64_t N = mat2.size(1);
+  auto engine = ideep::engine::cpu_engine();
+  auto stream = ideep::stream::default_stream();
 
-  DNNLPrimitiveHelper::gemm_s8s8_dnnl<float>(
-  mat1.data_ptr<int8_t>(),
-  mat2.data_ptr<int8_t>(),
-  result.data_ptr<float>(),
-  M, N, K,
-  mat1.stride(0),
-  mat1.stride(1),
-  mat2.stride(0),
-  mat2.stride(1));
+  ideep::tensor::data_type dst_dtype;
+  if constexpr (std::is_same_v<dst_t, float>) {
+    dst_dtype = ideep::tensor::data_type::f32;
+  } else if constexpr (std::is_same_v<dst_t, at::BFloat16>) {
+    dst_dtype = ideep::tensor::data_type::bf16;
+  }
+  else {
+  static_assert(
+      std::is_same_v<dst_t, float> ||
+      std::is_same_v<dst_t, at::BFloat16>,
+      "unsupported dst_t");
+  }
+
+  ideep::tensor src(
+      {mat1.sizes().vec(),
+       mat1.scalar_type() == at::kByte
+           ? ideep::tensor::data_type::u8
+           : ideep::tensor::data_type::s8,
+       mat1.strides().vec()},
+      mat1.data_ptr());
+
+  ideep::tensor wei(
+      {mat2.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat2.strides().vec()},
+      mat2.data_ptr());
+
+  ideep::tensor dst(
+      {result.sizes().vec(),
+       dst_dtype,
+       result.strides().vec()},
+      result.data_ptr());
+
+  auto a_strides = mat1.strides();
+  auto b_strides = mat2.strides();
+
+  // ---- fast-path detection ----
+  // Enable caching only when src is row-major and wei is column-major
+  bool is_a_row_major = (a_strides[0] == mat1.size(1) && a_strides[1] == 1);
+  bool is_b_col_major = (b_strides[0] == 1 && b_strides[1] == mat2.size(0));
+  bool use_fast_path = is_a_row_major && is_b_col_major;
+
+  struct PrimitiveKey {
+    int64_t M, N, K;
+    ScalarType src_dtype;
+
+    bool operator==(const PrimitiveKey& o) const {
+      return M == o.M && N == o.N && K == o.K && src_dtype == o.src_dtype;
+    }
+  };
+
+  struct PrimitiveHash {
+    size_t operator()(const PrimitiveKey& k) const {
+      size_t h = std::hash<int64_t>()(k.M);
+      h ^= std::hash<int64_t>()(k.N) << 1;
+      h ^= std::hash<int64_t>()(k.K) << 2;
+      h ^= std::hash<int>()(static_cast<int>(k.src_dtype)) << 3;
+      return h;
+    }
+  };
+
+  struct PrimitiveValue {
+    dnnl::matmul primitive;
+    dnnl::matmul::primitive_desc pd;
+  };
+
+  static std::unordered_map<PrimitiveKey, PrimitiveValue, PrimitiveHash> primitive_cache;
+  static std::mutex primitive_mutex;
+  constexpr size_t MAX_PRIMITIVE_CACHE_SIZE = 1024;
+
+  dnnl::matmul primitive;
+  dnnl::matmul::primitive_desc pd;
+
+  auto M = mat1.size(0);
+  auto K = mat1.size(1);
+  auto N = mat2.size(1);
+
+  if (use_fast_path) {
+    PrimitiveKey key{M, N, K, mat1.scalar_type()};
+
+    std::lock_guard<std::mutex> guard(primitive_mutex);
+
+    if (primitive_cache.size() > MAX_PRIMITIVE_CACHE_SIZE) {
+      primitive_cache.clear();
+    }
+
+    auto it = primitive_cache.find(key);
+    if (it == primitive_cache.end()) {
+
+      auto src_md = dnnl::memory::desc(
+          src.get_dims(), src.get_data_type(),
+          dnnl::memory::format_tag::any);
+
+      auto wei_md = dnnl::memory::desc(
+          wei.get_dims(), wei.get_data_type(),
+          dnnl::memory::format_tag::any);
+
+      auto dst_md = dnnl::memory::desc(
+          dst.get_dims(), dst.get_data_type(),
+          dnnl::memory::format_tag::any);
+
+      ideep::attr_t op_attr;
+      op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+      auto prim_desc = dnnl::matmul::primitive_desc(
+          engine, src_md, wei_md, dst_md, op_attr);
+
+      auto prim = dnnl::matmul(prim_desc);
+
+      it = primitive_cache.emplace(
+          key, PrimitiveValue{prim, prim_desc}).first;
+    }
+
+    primitive = it->second.primitive;
+    pd = it->second.pd;
+
+  } else {
+    // no cache path
+    auto src_md = dnnl::memory::desc(
+        src.get_dims(), src.get_data_type(),
+        dnnl::memory::format_tag::any);
+
+    auto wei_md = dnnl::memory::desc(
+        wei.get_dims(), wei.get_data_type(),
+        dnnl::memory::format_tag::any);
+
+    auto dst_md = dnnl::memory::desc(
+        dst.get_dims(), dst.get_data_type(),
+        dnnl::memory::format_tag::any);
+
+    ideep::attr_t op_attr;
+    op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+    pd = dnnl::matmul::primitive_desc(
+        engine, src_md, wei_md, dst_md, op_attr);
+
+    primitive = dnnl::matmul(pd);
+  }
+
+  ideep::tensor src_opt = src;
+  if (pd.src_desc() != src.get_desc()) {
+    src_opt = ideep::tensor(pd.src_desc());
+    dnnl::reorder(src, src_opt).execute(stream, src, src_opt);
+  }
+
+  struct WeightKey {
+    const void* data_ptr;
+    int64_t K, N;
+    int64_t stride0, stride1;
+    const void* pd; // primitive descriptor identity
+
+    bool operator==(const WeightKey& o) const {
+      return data_ptr == o.data_ptr &&
+             K == o.K && N == o.N &&
+             stride0 == o.stride0 &&
+             stride1 == o.stride1 &&
+             pd == o.pd;
+
+    }
+  };
+
+  struct WeightHash {
+    size_t operator()(const WeightKey& k) const {
+      size_t h = std::hash<const void*>()(k.data_ptr);
+      h ^= std::hash<int64_t>()(k.K) << 1;
+      h ^= std::hash<int64_t>()(k.N) << 2;
+      h ^= std::hash<int64_t>()(k.stride0) << 3;
+      h ^= std::hash<int64_t>()(k.stride1) << 4;
+      h ^= std::hash<const void*>()(k.pd) << 5;
+      return h;
+    }
+  };
+
+  static std::unordered_map<WeightKey, ideep::tensor, WeightHash> weight_cache;
+  static std::mutex weight_mutex;
+  constexpr size_t MAX_WEIGHT_CACHE_SIZE = 1024;
+
+  ideep::tensor wei_opt = wei;
+
+  if (use_fast_path) {
+    WeightKey key{
+        mat2.data_ptr(),
+        K, N,
+        b_strides[0], b_strides[1],
+        pd.get()
+    };
+
+    std::lock_guard<std::mutex> guard(weight_mutex);
+
+    if (weight_cache.size() > MAX_WEIGHT_CACHE_SIZE) {
+      weight_cache.clear();
+    }
+
+    auto it = weight_cache.find(key);
+    if (it == weight_cache.end()) {
+
+      if (pd.weights_desc() != wei.get_desc()) {
+        ideep::tensor packed(pd.weights_desc());
+        dnnl::reorder(wei, packed).execute(stream, wei, packed);
+
+        it = weight_cache.emplace(key, packed).first;
+      } else {
+        it = weight_cache.emplace(key, wei).first;
+      }
+    }
+
+    wei_opt = it->second;
+
+  } else {
+  if (pd.weights_desc() != wei.get_desc()) {
+    wei_opt = ideep::tensor(pd.weights_desc());
+    dnnl::reorder(wei, wei_opt).execute(stream, wei, wei_opt);
+  }
+  }
+
+  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src_opt});
+  args.insert({DNNL_ARG_WEIGHTS, wei_opt});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  primitive.execute(stream, args);
 }
+
+void mkldnn_matmul_i8i8_acc(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+// x: u8 or s8 * w:s8 -> y:f32 or y:bf16
+  if (result.scalar_type() == at::kFloat) {
+    _mkldnn_matmul_i8i8_acc_with_primitive<float>(
+        mat1, mat2, result);
+  } else if (result.scalar_type() == at::kBFloat16) {
+    _mkldnn_matmul_i8i8_acc_with_primitive<at::BFloat16>(
+        mat1, mat2, result);
+  } else {
+    TORCH_CHECK(
+        false,
+        "mkldnn_matmul_i8i8_acc: only float32 and bfloat16 are supported");
+  }
+}
+
 
 } // namespace at
 
