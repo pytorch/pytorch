@@ -23,9 +23,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _iterate_exprs,
     DimConstraints,
     DimDynamic,
     expect_true,
+    free_symbols,
     guard_bool,
     guard_float,
     guard_int,
@@ -3570,6 +3572,28 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a")))
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
+
+    def test_iterate_exprs_dict(self):
+        """Test that _iterate_exprs handles dict values (e.g. from triton_kernel_wrapper_functional)."""
+        a, b = sympy.symbols("a b")
+
+        # dict with tensor values and string keys — should not crash
+        t = torch.randn(3, 4)
+        result = list(_iterate_exprs({"Out": t}))
+        # concrete tensor has no symbolic exprs
+        self.assertEqual(len(result), 0)
+
+        # dict with sympy keys — should iterate over both keys and values
+        result = list(_iterate_exprs({a: 1, b: 2}))
+        self.assertEqual(len(result), 2)
+        self.assertIn(a, result)
+        self.assertIn(b, result)
+
+        # free_symbols works on dicts with sympy keys
+        self.assertEqual(free_symbols({a + b: 1}), {a, b})
+
+        # empty dict
+        self.assertEqual(list(_iterate_exprs({})), [])
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
