@@ -56,11 +56,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
-    _EvalFrameOverride,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
-    set_eval_frame_override,
+    set_fullgraph_compiled_frame_count,
+    set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -98,7 +98,6 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, distributed, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .compile_options import DynamoCompileOptions
 from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
@@ -315,7 +314,6 @@ def _create_wrapped_callback(
         convert_frame.convert_frame(  # type: ignore[arg-type]
             compiler_fn,
             hooks,
-            DynamoCompileOptions(),
         ),
         hooks,
     )
@@ -485,7 +483,7 @@ class OptimizedModule(torch.nn.Module):
             raise RuntimeError(
                 "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
-        if not self.dynamo_ctx._compile_options.fullgraph:
+        if not self.dynamo_ctx.fullgraph:
             raise RuntimeError(
                 "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
             )
@@ -728,12 +726,6 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 _not_set = object()
 
 
-def _get_eval_frame_override() -> _EvalFrameOverride:
-    if torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code:
-        return _EvalFrameOverride.ERROR
-    return _EvalFrameOverride.SKIP
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -745,7 +737,12 @@ class _TorchDynamoContext:
         patch_fn: Callable[[], Any] = nothing,
         first_ctx: bool = False,
         *,
-        compile_options: DynamoCompileOptions | None = None,
+        fullgraph: bool = False,
+        error_on_graph_break: bool | None = None,
+        export: bool = False,
+        dynamic: bool | None = None,
+        compiler_config: Any | None = None,
+        package: CompilePackage | None = None,
         hooks: Hooks | None = None,
     ) -> None:
         super().__init__()
@@ -754,9 +751,14 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
         self.first_ctx = first_ctx
-        self._compile_options = compile_options or DynamoCompileOptions()
+        self.fullgraph = fullgraph
+        self.error_on_graph_break = error_on_graph_break
+        self.export = export
+        self._dynamic = dynamic
+        self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
+        self._package = package
         self._hooks = hooks
         patch_fn()
 
@@ -764,10 +766,8 @@ class _TorchDynamoContext:
         backend = innermost_backend(callback)  # type: ignore[arg-type]
         cached_backends.setdefault(id(backend), backend)  # type: ignore[arg-type]
 
-        if self._compile_options.dynamic is not None:
-            self.enter_exit_hooks.append(
-                make_set_enable_dynamic(self._compile_options.dynamic)
-            )
+        if dynamic is not None:
+            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
 
         if on_enter is not nothing:
             # this case is not common
@@ -819,34 +819,29 @@ class _TorchDynamoContext:
     def __call__(self, fn: Any) -> Any:
         # public api for compiler config/options
         def get_compiler_config() -> Any:
-            return self._compile_options.compiler_config
+            return self.compiler_config
 
         from .package import DynamoCache
 
-        # If self._compile_options.package is lazily initialized, we should check the dynamo cache now
+        # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            if (
-                self._compile_options.package is not None
-                and not self._compile_options.package.is_initialized()
-            ):
+            if self._package is not None and not self._package.is_initialized():
                 fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
                 result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._compile_options.package.initialize(
-                        fn_key, None, ignore_inlined_sources=False
-                    )
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
                     try:
-                        self._compile_options.package.initialize(
+                        self._package.initialize(
                             fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._compile_options.package.install(result.backends)
+                        self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._compile_options.package.initialize(
+                        self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
 
@@ -860,7 +855,7 @@ class _TorchDynamoContext:
                     "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
                 )
 
-            if not self._compile_options.fullgraph:
+            if not self.fullgraph:
                 raise RuntimeError(
                     "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
                 )
@@ -875,7 +870,7 @@ class _TorchDynamoContext:
                 example_inputs,
                 hooks=self._hooks,
                 backend=innermost_backend(self.callback),
-                dynamic=self._compile_options.dynamic,
+                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -925,16 +920,19 @@ class _TorchDynamoContext:
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
-        # NOTE [Top-level TorchInGraph functions]
+        # NOTE [Top-level TorchInGraph and polyfilled functions]
         # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
         # when traced inside a frame. When such a function is passed directly to
         # torch.compile, we detect it here so we can force it through wrap_inline.
+        # Similarly, functions registered via substitute_in_graph have a polyfill
+        # that Dynamo can trace, so they also need wrap_inline.
         from .variables import TorchInGraphFunctionVariable
 
         rule = trace_rules.lookup(fn)
         top_level_in_graph = isinstance(rule, type) and issubclass(
             rule, TorchInGraphFunctionVariable
         )
+        has_polyfill = trace_rules.is_polyfilled_callable(fn)
 
         try:
             filename = inspect.getsourcefile(fn)
@@ -943,7 +941,12 @@ class _TorchDynamoContext:
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
-            (filename is None or trace_rules.check(fn) or top_level_in_graph)
+            (
+                filename is None
+                or trace_rules.check(fn)
+                or top_level_in_graph
+                or has_polyfill
+            )
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
@@ -972,11 +975,14 @@ class _TorchDynamoContext:
             # Unlike in eval_frame_cpp.cpp/convert_frame.py, we don't attempt to restore global state
             # due to additional overhead costs.
             prior = set_eval_frame(None)
-            prior_eval_frame_override: _EvalFrameOverride | None = None
-            if self._compile_options.fullgraph:
-                prior_eval_frame_override = set_eval_frame_override(
-                    _get_eval_frame_override()
+            prior_error_on_nested_compile: bool | None = None
+            fullgraph_count_enabled = False
+            if self.fullgraph:
+                prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
+                    torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
                 )
+                if not self.export:
+                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1020,14 +1026,9 @@ class _TorchDynamoContext:
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 prior_error_on_graph_break = None
-                if (
-                    not self._compile_options.fullgraph
-                    and self._compile_options.error_on_graph_break is not None
-                ):
+                if not self.fullgraph and self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
-                    _set_error_on_graph_break(
-                        self._compile_options.error_on_graph_break
-                    )
+                    _set_error_on_graph_break(self.error_on_graph_break)
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -1041,8 +1042,10 @@ class _TorchDynamoContext:
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
+                call_succeeded = False
                 try:
-                    return fn(*args, **kwargs)
+                    result = fn(*args, **kwargs)
+                    call_succeeded = True
                 except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
                     if config.verbose:
                         raise
@@ -1060,10 +1063,20 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    if fullgraph_count_enabled and call_succeeded:
+                        count = set_fullgraph_compiled_frame_count(-1)
+                        if count == 0:
+                            raise RuntimeError(
+                                "torch.compile with fullgraph=True found no compiled frames. "
+                                "The frame was likely skipped (e.g., a non-infra torch dispatch "
+                                "mode was active, dynamo was disabled, or the frame was skipped."
+                            )
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
-                    if prior_eval_frame_override is not None:
-                        set_eval_frame_override(prior_eval_frame_override)
+                    if prior_error_on_nested_compile is not None:
+                        set_fullgraph_error_on_nested_compile(
+                            prior_error_on_nested_compile
+                        )
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -1071,14 +1084,17 @@ class _TorchDynamoContext:
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
                         cleanup()
+                return result
             finally:
+                if fullgraph_count_enabled:
+                    set_fullgraph_compiled_frame_count(-1)
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        if self._compile_options.error_on_graph_break is not None:
+        if self.error_on_graph_break is not None:
             compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
                 external_utils.wrap_inline_with_error_on_graph_break(
-                    fn, self._compile_options.error_on_graph_break
+                    fn, self.error_on_graph_break
                 )
             )
         else:
@@ -1145,8 +1161,13 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor: Callable[[], contextlib.AbstractContextManager[Any]],
         first_ctx: bool = False,
         *,
-        compile_options: DynamoCompileOptions | None = None,
+        fullgraph: bool = False,
+        error_on_graph_break: bool | None = None,
+        export: bool = False,
+        dynamic: bool | None = None,
+        compiler_config: Any | None = None,
         rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
+        package: CompilePackage | None = None,
         hooks: Hooks | None = None,
     ) -> None:
         def on_enter() -> None:
@@ -1158,12 +1179,17 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
-            compile_options=compile_options,
+            fullgraph=fullgraph,
+            error_on_graph_break=error_on_graph_break,
+            export=export,
+            dynamic=dynamic,
+            compiler_config=compiler_config,
+            package=package,
             hooks=hooks,
         )
 
         if config.compiled_autograd:
-            _dynamic = self._compile_options.dynamic
+            _dynamic = self._dynamic
             if _dynamic is None:
                 _dynamic = not torch._dynamo.config.assume_static_by_default
 
@@ -1188,7 +1214,9 @@ class OptimizeContext(_TorchDynamoContext):
             self.__class__,
             (self.callback, self._backend_ctx_ctor, self.first_ctx),
             {
-                "compile_options": self._compile_options,
+                "export": self.export,
+                "dynamic": self._dynamic,
+                "compiler_config": self.compiler_config,
             },
         )
 
@@ -1302,15 +1330,25 @@ def _optimize_catch_errors(
     backend_ctx_ctor: Callable[
         [], contextlib.AbstractContextManager[Any]
     ] = null_context,
-    compile_options: DynamoCompileOptions | None = None,
+    fullgraph: bool = False,
+    error_on_graph_break: bool | None = None,
+    export: bool = False,
+    dynamic: bool | None = None,
+    compiler_config: Any | None = None,
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
+    package: CompilePackage | None = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
-        compile_options=compile_options,
+        fullgraph=fullgraph,
+        error_on_graph_break=error_on_graph_break,
+        export=export,
+        dynamic=dynamic,
+        compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        package=package,
         hooks=hooks,
     )
 
@@ -1495,10 +1533,6 @@ def _optimize(
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
     | None = None,
     disable: bool = False,
-    compile_options: DynamoCompileOptions | None = None,
-    # Individual kwargs below are for backward compat with torch._dynamo.optimize()
-    # callers. When compile_options is provided (e.g. from torch.compile), these
-    # are ignored. New compile options should only be added to DynamoCompileOptions.
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
@@ -1524,8 +1558,9 @@ def _optimize(
             Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
             If `nopython` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
-        compile_options: Pre-constructed DynamoCompileOptions from torch.compile().
-            When provided, individual kwargs (dynamic, package, etc.) are ignored.
+        dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
+            disable all dynamic shapes support (always specialize).  If None, automatically
+            detect when sizes vary and generate dynamic kernels upon recompile.
 
     Example Usage::
 
@@ -1552,26 +1587,14 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    # Construct compile_options from individual kwargs if not provided
-    if compile_options is None:
-        compile_options = DynamoCompileOptions(
+    if nopython and not config.debug_force_graph_break_on_leaf_return:
+        return optimize_assert(
+            backend,
             dynamic=dynamic,
+            hooks=hooks,
+            rebuild_ctx=rebuild_ctx,
             package=package,
             recompile_limit=recompile_limit,
-        )
-
-    fullgraph = compile_options.fullgraph or (
-        nopython and not config.debug_force_graph_break_on_leaf_return
-    )
-
-    if fullgraph:
-        compile_options.fullgraph = True
-        compile_options.one_graph = True
-        return _optimize_assert(
-            rebuild_ctx,
-            backend,
-            hooks=hooks,
-            compile_options=compile_options,
         )
 
     backend = get_compiler_fn(backend)
@@ -1585,32 +1608,31 @@ def _optimize(
 
     # With CachingPrecompile, instantiate an uninitialized CompilePackage
     # which gets initialized by _optimize_catch_errors.__call__ once we have a function
-    if config.caching_precompile and compile_options.package is None:
+    if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        compile_options.package = CompilePackage(
-            fn=None, dynamo=None, ignore_inlined_sources=False
-        )
-
-    compile_options.error_on_graph_break = (
-        error_on_graph_break and not config.debug_force_graph_break_on_leaf_return
-    )
-    compile_options.compiler_config = (
-        backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None
-    )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
             backend,
             hooks,
-            compile_options,
+            package=package,
+            recompile_limit=recompile_limit,
         ),
         hooks,
         backend_ctx_ctor,
-        compile_options=compile_options,
+        fullgraph=False,
+        error_on_graph_break=error_on_graph_break
+        and not config.debug_force_graph_break_on_leaf_return,
+        dynamic=dynamic,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -2441,13 +2463,10 @@ def optimize_assert(*args: Any, **kwargs: Any) -> OptimizeContext:
 
 
 def _optimize_assert(
-    rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator],
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend: str | Callable[..., Any] | None,
     *,
     hooks: Hooks = Hooks(None, None, None),
-    compile_options: DynamoCompileOptions | None = None,
-    # Individual kwargs below are for backward compat with optimize_assert()
-    # callers (e.g. export). When compile_options is provided, these are ignored.
     export: bool = False,
     export_constraints: Any | None = None,
     dynamic: bool | None = None,
@@ -2467,18 +2486,7 @@ def _optimize_assert(
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
-    if compile_options is None:
-        compile_options = DynamoCompileOptions(
-            dynamic=dynamic,
-            fullgraph=True,
-            one_graph=True,
-            export=export,
-            export_constraints=export_constraints,
-            recompile_limit=recompile_limit,
-            package=package,
-        )
-
-    if config.caching_precompile and compile_options.package is None:
+    if config.caching_precompile and package is None:
         # Create an uninitialized package that will be set/filled by
         # _OptimizeContext.__call__
         # We need to instantiate the object here because the same CompilePackage
@@ -2486,19 +2494,23 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        compile_options.package = CompilePackage(
-            fn=None, dynamo=None, ignore_inlined_sources=False
-        )
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
             backend,
-            compile_options,
+            export=export,
+            export_constraints=export_constraints,
+            package=package,
+            recompile_limit=recompile_limit,
         ),
         hooks,
         backend_ctx_ctor,
-        compile_options=compile_options,
+        fullgraph=True,
+        export=export,
+        dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 

@@ -1094,12 +1094,12 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         from torch._library import capture_triton
 
         @triton.jit
-        def my_jit(x):  # noqa: F811
+        def my_jit(x):
             arg_0 = tl.load(x)
             tl.store(x, arg_0 + 1)
 
         @torch._library.triton_op("test::my_triton_op", mutates_args=())
-        def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def my_triton_op(x: torch.Tensor) -> torch.Tensor:
             y = x.clone().detach_().requires_grad_(True)
             capture_triton(my_jit)[1,](y)
             return y
@@ -3224,7 +3224,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):  # noqa: F841
+        def fn2(x):
             y = x.sin()
             z = y.cos()
             return z
@@ -3486,7 +3486,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
         self.assertIn(
-            "WeakValueDictionary.__init__.<locals>.remove",  # noqa: B950
+            "WeakValueDictionary.__init__.<locals>.remove",
             log_context.output[0],
         )
 
@@ -3507,7 +3507,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
         self.assertIn(
-            """AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>""",  # noqa: B950
+            """AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>""",
             log_context.output[0],
         )
         mock_trace.assert_called_once()
@@ -3911,6 +3911,7 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
 
 
+@instantiate_parametrized_tests
 class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
     """
     Verify that the exposed autograd_cache_key API function produces the same
@@ -4010,18 +4011,6 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 ignore_shape_env=True,
             )
 
-    def _standalone_compile_cache_key(
-        self, fx_graph, example_inputs, dynamic_shapes="from_example_inputs"
-    ):
-        """Call standalone_compile.autograd_cache_key, the top-level API
-        that mirrors standalone_compile's dynamic_shapes interface."""
-        with self._tracing_context():
-            return standalone_compile_autograd_cache_key(
-                fx_graph,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-            )
-
     @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -4038,10 +4027,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         gt_key, fx_graph, example_inputs = self._compile_and_capture(fn, x)
         api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
         cfx_key, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
-        sc_key, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
+
         self.assertEqual(gt_key, api_key)
         self.assertEqual(gt_key, cfx_key)
-        self.assertEqual(gt_key, sc_key)
 
     @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -4061,14 +4049,10 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         key2, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
         cfx_key1, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
         cfx_key2, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
-        sc_key1, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
-        sc_key2, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
         self.assertEqual(gt_key, key1)
         self.assertEqual(key1, key2)
         self.assertEqual(gt_key, cfx_key1)
         self.assertEqual(cfx_key1, cfx_key2)
-        self.assertEqual(gt_key, sc_key1)
-        self.assertEqual(sc_key1, sc_key2)
 
     @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -4091,14 +4075,10 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         api_key2, _ = self._aot_autograd_cache_key(graph2, inputs2)
         cfx_key1, _ = self._compile_fx_cache_key(graph1, inputs1)
         cfx_key2, _ = self._compile_fx_cache_key(graph2, inputs2)
-        sc_key1, _ = self._standalone_compile_cache_key(graph1, inputs1)
-        sc_key2, _ = self._standalone_compile_cache_key(graph2, inputs2)
         self.assertEqual(gt_key1, api_key1)
         self.assertEqual(gt_key2, api_key2)
         self.assertEqual(gt_key1, cfx_key1)
         self.assertEqual(gt_key2, cfx_key2)
-        self.assertEqual(gt_key1, sc_key1)
-        self.assertEqual(gt_key2, sc_key2)
         self.assertNotEqual(gt_key1, gt_key2)
 
     @requires_triton()
@@ -4124,14 +4104,10 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         api_key2, _ = self._aot_autograd_cache_key(graph2, inputs2)
         cfx_key1, _ = self._compile_fx_cache_key(graph1, inputs1)
         cfx_key2, _ = self._compile_fx_cache_key(graph2, inputs2)
-        sc_key1, _ = self._standalone_compile_cache_key(graph1, inputs1)
-        sc_key2, _ = self._standalone_compile_cache_key(graph2, inputs2)
         self.assertEqual(gt_key1, api_key1)
         self.assertEqual(gt_key2, api_key2)
         self.assertEqual(gt_key1, cfx_key1)
         self.assertEqual(gt_key2, cfx_key2)
-        self.assertEqual(gt_key1, sc_key1)
-        self.assertEqual(gt_key2, sc_key2)
         self.assertNotEqual(gt_key1, gt_key2)
 
     @requires_triton()
@@ -4156,10 +4132,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         gt_key, fx_graph, example_inputs = self._compile_and_capture(mod, x)
         api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
         cfx_key, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
-        sc_key, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
+
         self.assertEqual(gt_key, api_key)
         self.assertEqual(gt_key, cfx_key)
-        self.assertEqual(gt_key, sc_key)
 
     @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -4167,36 +4142,6 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
-    def test_standalone_compile_cache_key_varies_with_dynamic_shapes(self):
-        """dynamic_shapes controls ignore_shape_env, which affects the key.
-
-        "from_example_inputs" ignores the shape env (ignore_shape_env=True),
-        while "from_graph" and "from_tracing_context" include it
-        (ignore_shape_env=False). This must produce different cache keys.
-        """
-
-        def fn(x):
-            return x.sin() + x.cos()
-
-        x = torch.randn(4, 4)
-        _, fx_graph, example_inputs = self._compile_and_capture(fn, x)
-
-        ei_key, _ = self._standalone_compile_cache_key(
-            fx_graph, example_inputs, dynamic_shapes="from_example_inputs"
-        )
-        fg_key, _ = self._standalone_compile_cache_key(
-            fx_graph, example_inputs, dynamic_shapes="from_graph"
-        )
-        tc_key, _ = self._standalone_compile_cache_key(
-            fx_graph, example_inputs, dynamic_shapes="from_tracing_context"
-        )
-        # "from_graph" and "from_tracing_context" both resolve to
-        # ignore_shape_env=False, so they produce identical keys.
-        self.assertEqual(fg_key, tc_key)
-        # "from_example_inputs" sets ignore_shape_env=True, producing a
-        # different key than the other two options.
-        self.assertNotEqual(ei_key, fg_key)
-
     def test_cache_key_for_multiple_outputs(self):
         """autograd_cache_key matches compilation for multiple outputs."""
 
@@ -4207,10 +4152,86 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         gt_key, fx_graph, example_inputs = self._compile_and_capture(fn, x)
         api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
         cfx_key, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
-        sc_key, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
+
         self.assertEqual(gt_key, api_key)
         self.assertEqual(gt_key, cfx_key)
-        self.assertEqual(gt_key, sc_key)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    @parametrize(
+        "dynamic_shapes",
+        ("from_example_inputs", "from_graph", "from_tracing_context"),
+    )
+    @parametrize("aot", (False, True))
+    def test_standalone_compile_cache_key_matches_standalone_compile(
+        self, dynamic_shapes, aot
+    ):
+        """standalone_compile.autograd_cache_key matches the real key
+        produced when running standalone_compile end-to-end."""
+        from contextlib import nullcontext
+
+        from torch._inductor.standalone_compile import standalone_compile
+
+        # Build an FX graph directly: sin(x) + cos(x)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_x = torch.randn(4, 4)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["example_value"] = fake_x
+        sin = graph.call_method("sin", (x,))
+        sin.meta["example_value"] = fake_x.sin()
+        cos = graph.call_method("cos", (x,))
+        cos.meta["example_value"] = fake_x.cos()
+        add = graph.call_function(operator.add, (sin, cos))
+        add.meta["example_value"] = fake_x.sin() + fake_x.cos()
+        graph.output((add,))
+        fx_graph = GraphModule(torch.nn.Module(), graph)
+        example_inputs = [torch.randn(4, 4)]
+
+        # from_tracing_context requires an ambient TracingContext, simulating
+        # a call from within a torch.compile backend.
+        outer_context = (
+            torch._guards.tracing(torch._guards.TracingContext(fake_mode))
+            if dynamic_shapes == "from_tracing_context"
+            else nullcontext()
+        )
+
+        # Run standalone_compile and capture the real cache key.
+        real_cache_key_fn = autograd_cache.autograd_cache_key
+        captured_key = None
+
+        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+            nonlocal captured_key
+            captured_key, _ = real_cache_key_fn(mod, ei, config, compiler_config_extra)
+            return captured_key, _
+
+        with outer_context:
+            with patch(
+                "torch._functorch._aot_autograd.autograd_cache.autograd_cache_key",
+                side_effect=capturing_cache_key,
+            ):
+                standalone_compile(
+                    fx_graph,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    options={},
+                    aot=aot,
+                )
+
+            self.assertIsNotNone(captured_key)
+
+            sc_key, _ = standalone_compile_autograd_cache_key(
+                fx_graph,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                aot=aot,
+            )
+            self.assertEqual(captured_key, sc_key)
 
 
 if __name__ == "__main__":

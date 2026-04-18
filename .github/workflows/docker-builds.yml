@@ -97,13 +97,10 @@ jobs:
           sudo rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      # [see note: pytorch repo ref]
-      # deep clone (fetch-depth 0) required for git merge-base
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

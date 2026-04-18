@@ -142,6 +142,7 @@ if torch.backends.mps.is_available():
             "nn.functional.triplet_margin_with_distance_loss",
             "nn.functional.unfold",
             "nonzero",
+            "nonzero_static",
             "norm",
             "normfro",
             "norminf",
@@ -925,11 +926,9 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
-            "grid_sampler_2d": None,
             "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues

@@ -60,6 +60,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
 
   libtorch-linux-jammy-cuda12_8-py3_10-gcc11-debug-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda12.8-py3.10-gcc11-debug ') }}
@@ -78,10 +79,14 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') }}
     name: linux-jammy-cuda12.8-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -102,9 +107,12 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
-          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
+          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
     secrets: inherit
 
   # CUDA 12.8 GPU tests moved to periodic.yml to reduce per-commit compute.
@@ -113,7 +121,7 @@ jobs:
   # See P2188981399 for the full CI workflow analysis.
 
   linux-jammy-cuda13_0-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test-cuda13 ') }}
     name: linux-jammy-cuda13.0-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -134,8 +142,14 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
+          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
+          # Test cross-compiled models with Windows libs extracted from wheel (CUDA 13.0)
+          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda13.0-py3" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-test:
@@ -144,14 +158,20 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-cuda13_0-py3_10-gcc11-build
+      - win-vs2022-cuda13_0-py3-build
       - target-determination
       - job-filter
+      - get-label-type
     with:
       timeout-minutes: 360
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
@@ -172,6 +192,10 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   macos-py3-arm64-build:
@@ -213,6 +237,8 @@ jobs:
       disable-monitor: false
     secrets: inherit
 
+  # NB: Windows runners are not available in OSDC, so we run this on Meta account
+  # for now until we get OSDC deployed to LF account
   win-vs2022-cpu-py3-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cpu-py3 ') }}
     name: win-vs2022-cpu-py3
@@ -223,14 +249,14 @@ jobs:
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      runner: windows.4xlarge.nonephemeral
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 4, num_shards: 4, runner: "windows.4xlarge.nonephemeral" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
@@ -249,17 +275,19 @@ jobs:
       disable-monitor: false
     secrets: inherit
 
-  win-vs2022-cuda12_8-py3-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cuda12.8-py3 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test ') }}
-    name: win-vs2022-cuda12.8-py3
+  # NB: Windows runners are not available in OSDC, so we run this on Meta account
+  # for now until we get OSDC deployed to LF account
+  win-vs2022-cuda13_0-py3-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cuda13.0-py3 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test-cuda13 ') }}
+    name: win-vs2022-cuda13.0-py3
     uses: ./.github/workflows/_win-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
-      build-environment: win-vs2022-cuda12.8-py3
-      cuda-version: "12.8"
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      build-environment: win-vs2022-cuda13.0-py3
+      cuda-version: "13.0"
+      runner: windows.4xlarge.nonephemeral
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
@@ -272,7 +300,8 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.10-mi355
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
-      sync-tag: rocm-build
+      # TODO (huydhn): Add this back once other workflow migrates
+      # sync-tag: rocm-build
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1" },
@@ -285,6 +314,8 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
     secrets: inherit
 
   linux-jammy-rocm-py3_10-test:
@@ -309,29 +340,14 @@ jobs:
       - get-label-type
       - job-filter
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0'
-    secrets: inherit
-
-  # Test cross-compiled models with Windows libs extracted from wheel
-  cross-compile-linux-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test ') }}
-    name: cross-compile-linux-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-build
-      - get-label-type
-      - win-vs2022-cuda12_8-py3-build
-      - job-filter
-    with:
-      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda12.8-py3" },
-        ]}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.12"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   verify-cachebench-cpu-build:
@@ -349,6 +365,9 @@ jobs:
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   verify-cachebench-cpu-test:
@@ -359,11 +378,15 @@ jobs:
       - verify-cachebench-cpu-build
       - target-determination
       - job-filter
+      - get-label-type
     with:
       build-environment: ${{ needs.verify-cachebench-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   linux-jammy-py3-clang18-executorch-build:
@@ -410,6 +433,9 @@ jobs:
       runner: linux.r7i.2xlarge
       build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   linux-jammy-aarch64-py3_10-gcc13-build:
@@ -430,14 +456,22 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
     secrets: inherit
 
   linux-jammy-aarch64-py3_10-gcc13-test:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-aarch64-py3_10-gcc13-build
+    needs:
+      - linux-jammy-aarch64-py3_10-gcc13-build
+      - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
     secrets: inherit

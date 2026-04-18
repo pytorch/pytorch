@@ -78,7 +78,7 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta
 
 
 if TYPE_CHECKING:
@@ -758,12 +758,17 @@ def autograd_cache_key(
             pickler = AOTAutogradCachePickler(gm)
             # The prefix distinguishes among the other kinds of objects we cache
             key = "a" + pickler.get_hash(details)
-            debug_lines = pickler.debug_lines(details)
-            log.debug(
-                "Autograd graph cache hash details for key %s:\n%s",
-                key,
-                LazyString(lambda: "\n".join(debug_lines)),
-            )
+            # debug_lines re-hashes every attribute individually and is
+            # expensive. Only compute when debug logging is enabled.
+            if log.isEnabledFor(logging.DEBUG):
+                debug_lines = pickler.debug_lines(details)
+                log.debug(
+                    "Autograd graph cache hash details for key %s:\n%s",
+                    key,
+                    LazyString(lambda: "\n".join(debug_lines)),
+                )
+            else:
+                debug_lines: list[str] = []
             return key, debug_lines
         except Exception:
             # If enable_aot_compile is set, we're in AOT precompile mode where we always
@@ -866,10 +871,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def clear() -> None:
         """Clear the cache"""
-        try:
-            shutil.rmtree(AOTAutogradCache._get_tmp_dir())
-        except FileNotFoundError:
-            pass
+        shutil.rmtree(AOTAutogradCache._get_tmp_dir(), ignore_errors=True)
 
     @staticmethod
     def try_load(
@@ -957,7 +959,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         except Exception as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            log.info("Bypassing autograd cache due to: %s", e)
             cache_state = "bypass"
             cache_event_time = time.time_ns()
             cache_info["cache_bypass_reason"] = str(e)
@@ -1136,7 +1138,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                         ),
                     )
         except Exception as e:
-            log.info("AOTAutograd cache unable to load compiled graph: %s", e)  # noqa: G200
+            log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
                 raise e
         if entry is not None:
@@ -1191,7 +1193,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -1213,10 +1215,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         """Handle exceptions during save, re-raising if strict mode is enabled."""
         if is_bypass:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            log.info("Bypassing autograd cache due to: %s", e)
             bypass_reason = str(e)
         else:
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
             bypass_reason = "Unable to serialize: " + str(e)
         if remote:
             log_cache_bypass("bypass_aot_autograd", bypass_reason)

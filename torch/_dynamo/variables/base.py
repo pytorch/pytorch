@@ -13,16 +13,17 @@ enabling accurate tracking and transformation of Python code into optimized
 computations.
 """
 
+from __future__ import annotations
+
 import collections
+import dataclasses
 import functools
+import linecache
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, TYPE_CHECKING
-
-from torch._guards import Guard
-from torch.fx.proxy import Node
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
@@ -33,6 +34,9 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
+    from torch._guards import Guard
+    from torch.fx.proxy import Node
+
     from ..codegen import PyCodegen
     from ..side_effects import SideEffects
     from ..symbolic_convert import InstructionTranslator
@@ -41,6 +45,28 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceLocation:
+    """Source position of the bytecode instruction that generated a VariableTracker."""
+
+    filename: str
+    lineno: int
+    end_lineno: int | None = None
+    col_offset: int | None = None
+    end_col_offset: int | None = None
+
+    def format(self) -> str:
+        line = linecache.getline(self.filename, self.lineno).rstrip()
+        result = f'  File "{self.filename}", line {self.lineno}\n'
+        if line:
+            result += f"    {line}\n"
+        if line and self.col_offset is not None and self.end_col_offset is not None:
+            num_carets = max(1, self.end_col_offset - self.col_offset)
+            result += "    " + " " * self.col_offset + "^" * num_carets + "\n"
+        return result
+
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
@@ -228,9 +254,9 @@ class NO_SUCH_SUBOBJ:
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
 class AsPythonConstantNotImplementedError(NotImplementedError):
-    vt: "VariableTracker"
+    vt: VariableTracker
 
-    def __init__(self, vt: "VariableTracker", msg: str | None = None) -> None:
+    def __init__(self, vt: VariableTracker, msg: str | None = None) -> None:
         msg = f"{vt} is not a constant" if msg is None else msg
         super().__init__(msg)
         self.vt = vt
@@ -293,12 +319,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "value",
         "guards",
         "source",
+        "source_location",
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
     }
 
-    def clone(self, **kwargs: Any) -> "VariableTracker":
+    def clone(self, **kwargs: Any) -> VariableTracker:
         """Shallow copy with some (optional) changes"""
         args = dict(self.__dict__)
         args.update(kwargs)
@@ -307,10 +334,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     @classmethod
     def visit(
         cls,
-        fn: Callable[["VariableTracker"], None],
+        fn: Callable[[VariableTracker], None],
         value: Any,
         cache: dict[int, Any] | None = None,
-        side_effects: "SideEffects | None" = None,
+        side_effects: SideEffects | None = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances.
@@ -414,6 +441,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
+    def bool_impl(self, tx: InstructionTranslator) -> VariableTracker | None:
+        # Mirrors CPython's tp_as_number->nb_bool slot.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
+        #
+        # Returns None when the type has no nb_bool, causing generic_bool to
+        # fall through to length check, then truthy default.
+        return None
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -436,7 +471,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     # TODO[@lucaskabela] - change this type to `InstructionTranslatorBase`
     # and cascade that (large blast radius)
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx: InstructionTranslator, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
@@ -448,7 +483,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Return True for TensorVariable instances"""
         return False
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -485,7 +520,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Check if this variable references itself (directly or indirectly)."""
         found_self = False
 
-        def check(vt: "VariableTracker") -> None:
+        def check(vt: VariableTracker) -> None:
             nonlocal found_self
             if vt is self:
                 found_self = True
@@ -497,13 +532,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         return found_self
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
+    def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx: Any) -> list["VariableTracker"]:
+    def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx: Any) -> list["VariableTracker"]:
+    def force_unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         # like unpack_var_sequence, but should only be used when it is
         # safe to eagerly (vs. lazily) unpack this variable.
         # e.g. map(f, x) is normally evaluated lazily but sometimes
@@ -527,15 +562,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Only use when it is safe to eagerly unpack this variable (like force_unpack_var_sequence).
     # INVARIANT: variable must satisfy has_force_unpack_var_sequence() == True!
     def force_apply_to_var_sequence(
-        self, tx: Any, fn: Callable[["VariableTracker"], Any]
+        self, tx: Any, fn: Callable[[VariableTracker], Any]
     ) -> None:
         assert self.has_force_unpack_var_sequence(tx)
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
-    ) -> "ConstantVariable":
+        self, tx: InstructionTranslator, name: str
+    ) -> ConstantVariable:
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
@@ -549,9 +584,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_function(
         self,
         tx: Any,
-        args: Sequence["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         unimplemented(
             gb_type="Unsupported function call",
             context=f"call_function {self} {args} {kwargs}",
@@ -562,7 +597,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def sq_length(self, tx: Any) -> "VariableTracker":
+    def sq_length(self, tx: Any) -> VariableTracker:
         """Called when sq_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -570,7 +605,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
-    def mp_length(self, tx: Any) -> "VariableTracker":
+    def mp_length(self, tx: Any) -> VariableTracker:
         """Called when mp_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -578,14 +613,40 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
+        # TODO: raise TypeError for non-subscriptable objects (blocked on
+        # branch 3 __class_getitem__ support for type objects).
+        unimplemented(
+            gb_type="missing_mp_subscript",
+            context=f"mp_subscript_impl not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support subscripting '{self.python_type_name()}'.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: Any,
         name: str,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name == "__len__" and not (args or kwargs):
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__getitem__":
+            if len(args) == 1 and not kwargs:
+                return self.mp_subscript_impl(tx, args[0])
+            from ..utils import raise_args_mismatch
+
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__len__" and not (args or kwargs):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
@@ -598,6 +659,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.var_getattr(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
+        elif name == "__int__" and not args and not kwargs:
+            return self.nb_int_impl(tx)
+        elif name == "__float__" and not args and not kwargs:
+            return self.nb_float_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -638,8 +703,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     args=list(e.args),
                 )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
-        # cannot trace into. Polyfill it for constant VTs so that
-        # copy.deepcopy can trace through its __reduce_ex__ fallback path.
+        # cannot trace into.  Constant-fold it for VTs backed by a real
+        # Python object so that copy.deepcopy can trace through.
         if (
             name == "__reduce_ex__"
             and len(args) == 1
@@ -687,11 +752,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_tree_map(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """Performance optimization to implement optree.tree_map faster than tracing it"""
         is_leaf_var = tree_map_kwargs.get("is_leaf")
         if is_leaf_var is not None and not is_leaf_var.is_constant_none():
@@ -720,11 +785,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_tree_map_branch(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
         return self._tree_map_fallback(
             tx,
@@ -737,11 +802,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def _tree_map_fallback(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
         tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
         log.debug(
@@ -759,12 +824,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_tree_map_with_path(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         """Performance optimization to implement tree_map_with_path faster than tracing it"""
         is_leaf_var = tree_map_kwargs.get("is_leaf")
         if is_leaf_var is not None and not is_leaf_var.is_constant_none():
@@ -798,12 +863,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_tree_map_with_path_branch(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         """Handle tree_map_with_path for leaf nodes (default behavior)"""
         keypath_var = variables.TupleVariable(
             [VariableTracker.build(tx, k) for k in keypath]
@@ -813,12 +878,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def _tree_map_with_path_fallback(
         self,
         tx: Any,
-        tree_map_fn: "UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: Sequence["VariableTracker"],
-        tree_map_kwargs: dict[str, "VariableTracker"],
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
         tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
         log.debug(
@@ -837,11 +902,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def set_name_hint(self, name: str) -> None:
         pass
 
-    def realize(self) -> "VariableTracker":
+    def set_source_location(self, source_location: SourceLocation) -> None:
+        self.source_location = source_location
+
+    def realize(self) -> VariableTracker:
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
 
-    def unwrap(self) -> "VariableTracker":
+    def unwrap(self) -> VariableTracker:
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
         return self
 
@@ -849,7 +917,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx: Any) -> "VariableTracker":
+    def next_variable(self, tx: Any) -> VariableTracker:
         unimplemented(
             gb_type="Unsupported next() call",
             context=f"next({self})",
@@ -954,7 +1022,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def nb_index_impl(
         self,
         tx: Any,
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         """Mirrors CPython's PyNumber_Index / nb_index slot.
 
         https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1411-L1450
@@ -970,14 +1038,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def nb_int_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_int slot.
+
+        Called when type_implements_nb_int returns True for this type.
+        Subclasses override to provide the actual conversion.
+        """
+        unimplemented(
+            gb_type="nb_int_impl not implemented",
+            context=f"{type(self).__name__} has nb_int slot but no nb_int_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_int C slot but "
+            "the corresponding VariableTracker doesn't implement nb_int_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_float_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_float slot.
+
+        Called when type_implements_nb_float returns True for this type.
+        Subclasses override to provide the actual conversion.
+        """
+        unimplemented(
+            gb_type="nb_float_impl not implemented",
+            context=f"{type(self).__name__} has nb_float slot but no nb_float_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_float C slot but "
+            "the corresponding VariableTracker doesn't implement nb_float_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,
         source: Source | None = None,
         mutation_type: MutationType | None = None,
+        source_location: SourceLocation | None = None,
     ) -> None:
         super().__init__()
         self.source = source
+        self.source_location = source_location
         self.mutation_type = mutation_type
 
         # NOTE sometimes mutation_type is set afterwards for implementation
@@ -1035,9 +1139,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @staticmethod
     def _add_call_once_guard(
-        cls: type["VariableTracker"],
+        cls: type[VariableTracker],
         method: str,
-        callback: Callable[["VariableTracker"], Any],
+        callback: Callable[[VariableTracker], Any],
     ) -> None:
         original_method = getattr(cls, method)
 

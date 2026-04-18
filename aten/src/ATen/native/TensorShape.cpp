@@ -1959,7 +1959,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
   auto range_b = range_a + n_dims;
   auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
-  auto permutation = IntArrayRef(stacked.data_ptr<int64_t>(), n_dims * 2);
+  auto permutation = IntArrayRef(stacked.const_data_ptr<int64_t>(), n_dims * 2);
   // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
   urtensor = urtensor.permute(permutation);
   // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]

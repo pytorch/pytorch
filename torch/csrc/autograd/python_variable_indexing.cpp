@@ -38,7 +38,7 @@ namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());

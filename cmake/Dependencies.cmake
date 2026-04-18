@@ -47,14 +47,20 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    if(NOT CAFFE2_USE_NVRTC)
-      caffe2_update_option(USE_NVRTC OFF)
-    endif()
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
+      if(NOT CAFFE2_USE_NVRTC)
+        message(FATAL_ERROR
+          "USE_CUDNN requires USE_NVRTC (required by cudnn_frontend 1.21+). "
+          "Please set -DUSE_NVRTC=ON or disable cuDNN with -DUSE_CUDNN=OFF.")
+      endif()
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::nvrtc_runtime)
     else()
       caffe2_update_option(USE_CUDNN OFF)
+    endif()
+    if(NOT CAFFE2_USE_NVRTC)
+      caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUSPARSELT)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
@@ -1063,6 +1069,8 @@ if(USE_ROCM)
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
+    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
+    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
     set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.

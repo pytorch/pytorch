@@ -34,12 +34,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from . import config
 from ._aot_autograd import autograd_cache
-from ._aot_autograd.autograd_cache import (  # noqa: F401
+from ._aot_autograd.autograd_cache import (
     AOTAutogradCache,
     should_use_local_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
+from ._aot_autograd.collect_metadata_analysis import (
     run_functionalized_fw_and_collect_metadata,
 )
 from ._aot_autograd.descriptors import (
@@ -77,7 +77,7 @@ from ._aot_autograd.graph_capture_wrappers import (  # noqa: F401
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
-from ._aot_autograd.graph_compile import (  # noqa: F401
+from ._aot_autograd.graph_compile import (
     aot_stage1_graph_capture,
     aot_stage2_compile,
     aot_stage2_export,
@@ -792,7 +792,8 @@ def aot_function(
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
             (fake_mode, shape_env) = construct_fake_mode(flat_args, aot_config)
-            fake_flat_args: FakifiedFlatArgs = process_inputs(
+            fake_flat_args: FakifiedFlatArgs
+            fake_flat_args, act_input_indices = process_inputs(
                 flat_args, aot_config, fake_mode, shape_env
             )
             # TODO: We actually could use the pytree path to make better descs.
@@ -810,6 +811,7 @@ def aot_function(
                     fake_mode,
                     shape_env,
                 )
+                aot_state.fw_metadata.act_input_indices = act_input_indices
                 aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
                 compiled_fn, _ = aot_stage2_compile(
                     aot_state,
@@ -916,7 +918,7 @@ def autograd_cache_key(
     )
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args = process_inputs(
+    fake_flat_args, _act_input_indices = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
@@ -1048,6 +1050,7 @@ def prepare_aot_module_simplified(
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
+    list[int],
 ]:
     if not flatten:
         if kwargs is not None:
@@ -1101,7 +1104,7 @@ def prepare_aot_module_simplified(
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
-    fake_flat_args = process_inputs(
+    fake_flat_args, act_input_indices = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
@@ -1117,6 +1120,7 @@ def prepare_aot_module_simplified(
         shape_env,
         in_spec,
         out_spec,
+        act_input_indices,
     )
 
 
@@ -1174,6 +1178,7 @@ def aot_module_simplified(
             shape_env,
             _in_spec,
             _out_spec,
+            act_input_indices,
         ) = prepare_aot_module_simplified(
             mod,
             args,
@@ -1224,6 +1229,7 @@ def aot_module_simplified(
                 fake_mode,
                 shape_env,
             )
+            aot_state.fw_metadata.act_input_indices = act_input_indices
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
             compiled_fn, _ = aot_stage2_compile(
                 aot_state,
@@ -1287,7 +1293,7 @@ def aot_module_simplified(
 def boxed_nop_preserve_node_meta(
     gm: torch.fx.GraphModule, example_inputs: Sequence[InputType]
 ) -> Any:
-    def run(args: Sequence[Any]) -> OutputCode:
+    def run(args: list[Any]) -> OutputCode:
         with torch.fx.traceback.preserve_node_meta():
             return torch.fx.Interpreter(gm).boxed_run(args)
 
@@ -1380,6 +1386,7 @@ def aot_export_joint_with_descriptors(
         shape_env,
         in_spec,
         out_spec,
+        act_input_indices,
     ) = prepare_aot_module_simplified(
         mod,
         args,
@@ -1413,6 +1420,7 @@ def aot_export_joint_with_descriptors(
         fake_mode,
         shape_env,
     )
+    aot_state.fw_metadata.act_input_indices = act_input_indices
 
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
@@ -1826,7 +1834,7 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, _bw_module = default_partition(  # noqa: F821
+        fw_module, _bw_module = default_partition(
             # type: ignore[bad-argument-type]
             fx_g,
             args,
@@ -1915,7 +1923,9 @@ def _aot_export_function(
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
     else:
         shape_env = fake_mode.shape_env
-    fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
+    fake_flat_args, act_input_indices = process_inputs(
+        flat_args, aot_config, fake_mode, shape_env
+    )
     # TODO: Improve the descs here with pytree information
     fake_flat_args_descs: list[AOTInput] = [
         PlainAOTInput(i) for i in range(len(fake_flat_args))
@@ -1931,6 +1941,7 @@ def _aot_export_function(
             fake_mode,
             shape_env,
         )
+        aot_state.fw_metadata.act_input_indices = act_input_indices
         aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
         fx_g, meta = aot_stage2_export(aot_state, aot_graph_capture)
 

@@ -806,6 +806,15 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # When cpp_wrapper is enabled, ensure the required triton config
+        # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
+        # needed because lazy backward compilation may run after the
+        # config.patch context from compile_fx has already exited.
+        # Suppress cudagraph skip logging here; compile_fx already logged it.
+        if kwargs["cpp_wrapper"]:
+            stack.enter_context(
+                config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
+            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -1144,6 +1153,10 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
         compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
+
+        policy = config.cudagraph_policy
+        if policy is not None:
+            compiled_graph = policy.wrap_output(compiled_graph)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -2204,10 +2217,12 @@ def fw_compiler_freezing(
     return wrapper
 
 
-def get_cpp_wrapper_config() -> dict[str, object]:
-    if config.triton.cudagraphs:
+def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
+    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
         log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message("cpp wrapper enabled")
+            format_default_skip_message(
+                "cpp-wrapper does not support graph partition yet"
+            )
         )
 
     autotune_at_compile_time = (
@@ -2219,7 +2234,11 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
-        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.cudagraphs": (
+            config.triton.cudagraphs
+            and not V.aot_compilation
+            and not config.graph_partition
+        ),
         "triton.store_cubin": True,
     }
 
@@ -3179,7 +3198,7 @@ def _aoti_flatten_inputs(
     ]
 
     if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: B904
+        raise ValueError(
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"

@@ -121,6 +121,7 @@ from .virtualized import ops, OpsValue, V
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
+    from torch.types import IntLikeType
 
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
@@ -554,6 +555,7 @@ class IRNode:
     """
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
+    _current_stream_idx: ClassVar[int | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -562,6 +564,8 @@ class IRNode:
     origin_node: torch.fx.Node | None = dataclasses.field(init=False)
     # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
     annotations: dict[str, Any] = dataclasses.field(init=False)
+    # User-annotated stream index from FX node metadata (set during lowering)
+    stream_idx: int | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -572,6 +576,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_origins = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_stream_idx(
+        stream_idx: int | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_stream_idx
+        IRNode._current_stream_idx = stream_idx
+        try:
+            yield
+        finally:
+            IRNode._current_stream_idx = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -604,6 +620,7 @@ class IRNode:
         self._post_init_setattr("origin_node", None)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
+        self._post_init_setattr("stream_idx", self._current_stream_idx)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -887,6 +904,10 @@ class Operation:
     def get_origins(self) -> OrderedSet[Any]:
         assert hasattr(self, "origins")
         return self.origins
+
+    def get_stream_idx(self) -> int | None:
+        assert hasattr(self, "stream_idx")
+        return self.stream_idx
 
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
@@ -2708,13 +2729,18 @@ class Sort(Loops):
         sizevars = V.graph.sizevars
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
 
-        # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        # Heuristic, smallest rblock where triton usually outperforms aten.sort.
         # It also isn't bandwidth bound so fusion is unlikely to help.
-        max_rblock = 512
-        is_persistent_kernel = (
-            config.triton.persistent_reductions
-            and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
-        )
+        # When decompose_sort_ops is enabled, skip the size limit to always
+        # attempt Triton sort (index dtype is widened to int32 in lowering).
+        if config.triton.decompose_sort_ops:
+            is_persistent_kernel = config.triton.persistent_reductions
+        else:
+            max_rblock = 512
+            is_persistent_kernel = (
+                config.triton.persistent_reductions
+                and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
+            )
         if not is_persistent_kernel:
             # We only support persistent triton kernels
             return [None] * len(dtypes)
@@ -6406,7 +6432,11 @@ class ExternKernel(InputsKernel):
         tensor_args: list[IRNode] = []
         non_tensor_args: list[object] = []
         real_non_tensor_args: list[
-            FakeScriptObject | torch._C.Generator | torch._C.ScriptObject | torch.Tensor
+            FakeScriptObject
+            | torch._C.Generator
+            | torch._C.ScriptObject
+            | torch.Tensor
+            | IntLikeType
         ] = []
         for arg in args_flat:
             match arg:
@@ -7020,30 +7050,61 @@ class ExternKernel(InputsKernel):
         return op_name
 
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.size_asserts and not V.graph.cpp_wrapper:
-            # comparing strides for 0 size tensor is tricky. Ignore them for now.
-            if sympy_product(self.get_size()) == 0:
-                return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            op_name = self.get_op_name()
-            wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
-            )
+        if (
+            not config.size_asserts
+            or
+            # skip AOTI ArrayRef mode
+            config.aot_inductor.allow_stack_allocation
+        ):
+            return
+        # comparing strides for 0 size tensor is tricky. Ignore them for now.
+        if sympy_product(self.get_size()) == 0:
+            return
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+        op_name = self.get_op_name()
+        name = self.get_name()
+        if V.graph.cpp_wrapper:
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if isinstance(self.op_overload, torch._ops.OpOverload):
+                if torch.Tag.inplace_view in self.op_overload.tags:
+                    assert isinstance(self.inputs[0], IRNode)
+                    name = self.inputs[0].get_name()
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
-            aligned = name not in V.graph.unaligned_buffers
-            op_name = self.get_op_name()
-            if aligned:
+        if not config.alignment_asserts or config.aot_inductor.allow_stack_allocation:
+            return
+        name = self.get_name()
+        if V.graph.cpp_wrapper:
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if isinstance(self.op_overload, torch._ops.OpOverload):
+                if torch.Tag.inplace_view in self.op_overload.tags:
+                    assert isinstance(self.inputs[0], IRNode)
+                    name = self.inputs[0].get_name()
+        aligned = name not in V.graph.unaligned_buffers
+        op_name = self.get_op_name()
+        if aligned:
+            if V.graph.cpp_wrapper:
+                stmt = f'assert_alignment({name}, {GPU_ALIGN_BYTES}, "{op_name}");'
+                if V.graph.aot_mode:
+                    if V.graph.is_const_graph:
+                        return
+                    wrapper.writeline(
+                        f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+                    )
+                else:
+                    wrapper.writeline(stmt)
+            else:
                 wrapper.writeline(
                     f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
                 )
-            else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
-                )
+        else:
+            wrapper.writeline(
+                f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
+            )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
         """
@@ -9467,6 +9528,7 @@ class StorageBox(MutableBox):
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
+        self.data.stream_idx = self.data.data.stream_idx
         return self.data.name
 
     def realize_hint(self) -> None:

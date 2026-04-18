@@ -246,12 +246,12 @@ def broadcast_shapes(shape1, shape2):
         # s2 = [1] * (len(s1) - len(s2)) + s2
         raise Exception(  # noqa: TRY002
             "Non-equal-rank broadcast is not supported yet."
-        )  # noqa: TRY002
+        )
     if len(s2) > len(s1):
         # s3 = [1] * (len(s2) - len(s1)) + s1
         raise Exception(  # noqa: TRY002
             "Non-equal-rank broadcast is not supported yet."
-        )  # noqa: TRY002
+        )
     ret = []
     for d1, d2 in zip(s1, s2):
         if d1 == 1:
@@ -263,7 +263,7 @@ def broadcast_shapes(shape1, shape2):
         else:
             raise Exception(  # noqa: TRY002
                 f"Cannot broadcast shapes: {shape1} and {shape2}"
-            )  # noqa: TRY002
+            )
     return tuple(ret)
 
 
@@ -420,7 +420,7 @@ class _NnapiSerializer:
         else:
             raise Exception(  # noqa: TRY002
                 f"Can't handle input with dtype '{tensor.dtype}'"
-            )  # noqa: TRY002
+            )
         return Operand(
             shape=tuple(tensor.shape),
             # pyrefly: ignore [bad-argument-type]
@@ -512,7 +512,7 @@ class _NnapiSerializer:
                 # many callsites to support flexible size.
                 raise Exception(  # noqa: TRY002
                     "Flexible size is not supported for this operand."
-                )  # noqa: TRY002
+                )
             if s < 0:
                 # runtime flex
                 LOG.warning("Operand %s has runtime flex shape", oper)
@@ -551,7 +551,7 @@ class _NnapiSerializer:
         if record is None:
             raise Exception(  # noqa: TRY002
                 f"Could not find constant value for '{jitval!r}'."
-            )  # noqa: TRY002
+            )
         ctype, _ = record
         if typekind is not None and ctype.kind() != typekind:
             raise Exception(  # noqa: TRY002
@@ -583,7 +583,7 @@ class _NnapiSerializer:
             else:
                 raise Exception(  # noqa: TRY002
                     "Unknown dim value, dimensions should be >= -1"
-                )  # noqa: TRY002
+                )
             shape_parts.append(",")
         shape_parts.append(")")
         shape_code = "".join(shape_parts)
@@ -611,7 +611,7 @@ class _NnapiSerializer:
 
         raise Exception(  # noqa: TRY002
             f"Unsupported output operand type: {oper.op_type}"
-        )  # noqa: TRY002
+        )
 
     def forward_operand_shape(self, out_op_id, out_dim, in_op_id, in_dim):
         self.compute_operand_shape(out_op_id, out_dim, flex_name(in_op_id, in_dim))
@@ -625,7 +625,7 @@ class _NnapiSerializer:
         if oper.shape[2:] != (1, 1):
             raise Exception(  # noqa: TRY002
                 "Automatic transpose only supported for H,W == 1,1"
-            )  # noqa: TRY002
+            )
 
         out_oper = oper._replace(dim_order=DimOrder.CHANNELS_LAST)
 
@@ -666,7 +666,7 @@ class _NnapiSerializer:
             return value
         raise Exception(  # noqa: TRY002
             f"Can't handle size arg of type '{ctype!r}' for '{jitval!r}'"
-        )  # noqa: TRY002
+        )
 
     def get_conv_pool_args_2d_from_pack(self, kernel_size, packed_config):
         pc = [i.item() for i in packed_config]
@@ -770,7 +770,7 @@ class _NnapiSerializer:
         else:
             raise Exception(  # noqa: TRY002
                 f"Unsupported return type: {retn_input.type()}"
-            )  # noqa: TRY002
+            )
 
         if return_shapes is not None:
             if len(return_shapes) != len(return_values):
@@ -955,7 +955,7 @@ class _NnapiSerializer:
         if not adder:
             raise Exception(  # noqa: TRY002
                 f"Unsupported node kind ({node.kind()!r}) in node {node!r}"
-            )  # noqa: TRY002
+            )
         adder(self, node)
 
     def _identity(self, node):
@@ -1155,7 +1155,7 @@ class _NnapiSerializer:
         if any(dim == 0 for dim in in_oper.shape[start_dim : end_dim + 1]):
             raise Exception(  # noqa: TRY002
                 "Flattening flexible dims is not supported yet"
-            )  # noqa: TRY002
+            )
         non_flattened_dims = in_oper.shape[:start_dim] + in_oper.shape[end_dim + 1 :]
         if non_flattened_dims.count(0) > 1:
             raise Exception("Only 1 dim can be flexible")  # noqa: TRY002
@@ -1220,7 +1220,7 @@ class _NnapiSerializer:
         if start_value >= stop_value:
             raise Exception(  # noqa: TRY002
                 "Slice start value should be less than stop value"
-            )  # noqa: TRY002
+            )
 
         out_len = (stop_value - start_value) // step_value
         out_shape = tuple(
@@ -1513,7 +1513,7 @@ class _NnapiSerializer:
 
         self.add_operation(opcode, inputs, outputs)
 
-    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):  # noqa: D401
+    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):
         """Helper for pointwise binary broadcast ops with superfluous extra args."""
         if node.outputsSize() != 1:
             raise AssertionError(
@@ -1542,7 +1542,7 @@ class _NnapiSerializer:
         else:
             raise Exception(  # noqa: TRY002
                 f"Can't do a NNAPI binary op: {opcode} on two constants"
-            )  # noqa: TRY002
+            )
 
         if in0_oper.op_type != in1_oper.op_type:
             raise AssertionError(
@@ -1597,7 +1597,7 @@ class _NnapiSerializer:
         if alpha != 1:
             raise Exception(  # noqa: TRY002
                 "NNAPI does not support add/sub with alpha."
-            )  # noqa: TRY002
+            )
 
         self._do_add_binary(node, opcode, fuse_code)
 
@@ -1661,7 +1661,7 @@ class _NnapiSerializer:
         if opcode is None:
             raise Exception(  # noqa: TRY002
                 "NNAPI only supports hardtanh with args (-1, 1) or (0, 6)."
-            )  # noqa: TRY002
+            )
 
         inputs = [None] * 1
         inputs[0] = in_id
@@ -1712,7 +1712,7 @@ class _NnapiSerializer:
             elif dim <= 1:
                 raise Exception(  # noqa: TRY002
                     "PReLU requires fixed size for dim 0 and dim 1."
-                )  # noqa: TRY002
+                )
             else:
                 self.forward_operand_shape(out_id, dim, in_id, dim)
 
@@ -2033,7 +2033,7 @@ class _NnapiSerializer:
                 else:
                     raise Exception(  # noqa: TRY002
                         "Size and scale cannot both be None."
-                    )  # noqa: TRY002
+                    )
 
         inputs = [None] * 4
         inputs[0] = image_id
@@ -2507,7 +2507,7 @@ class _NnapiSerializer:
         else:
             raise Exception(  # noqa: TRY002
                 f"Unsupported input type for conv2d: {image_oper.op_type}"
-            )  # noqa: TRY002
+            )
 
         if len(image_oper.shape) != 4:
             raise AssertionError(

@@ -967,11 +967,34 @@ function MemoryPlot(
 function ContextViewer(text, data) {
   let current_selected = null;
 
+  function restore_search_highlight(d) {
+    if (!d) return;
+    const addr = d.attr('data-search-match') === 'true';
+    const frame = d.attr('data-frame-match') === 'true';
+    if (addr && frame) {
+      d.attr('stroke', '#ff00ff')
+        .attr('stroke-width', 3)
+        .attr('stroke-dasharray', '6,3')
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (addr) {
+      d.attr('stroke', 'red')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (frame) {
+      d.attr('stroke', '#2196F3')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    }
+  }
+
   return {
     default_selected: null,
     set_selected: d => {
       if (current_selected !== null) {
-        current_selected.attr('stroke', null).attr('stroke-width', null);
+        current_selected.attr('stroke', null).attr('stroke-width', null).attr('stroke-dasharray', null);
+        restore_search_highlight(current_selected);
       }
       if (d === null) {
         text.text('');
@@ -1113,6 +1136,22 @@ function create_trace_view(
     `Detail: ${max_entries} of ${data.elements_length} entries`,
   );
 
+  d.append('span').text('  |  ');
+  const search_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search address (hex)...')
+    .attr('style', 'width: 180px; margin-left: 4px; font-family: monospace;');
+  const search_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
+
+  d.append('span').text('  |  ');
+  const frame_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search stack frame...')
+    .attr('style', 'width: 200px; margin-left: 4px; font-family: monospace;');
+  const frame_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
+
   const grid_container = dst
     .append('div')
     .attr(
@@ -1149,6 +1188,61 @@ function create_trace_view(
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
+
+  function apply_search_highlights() {
+    const addr_query = search_input.node().value.toLowerCase().trim();
+    const frame_query = frame_input.node().value.toLowerCase().trim();
+    const polygons = plot_svg.selectAll('polygon');
+    let addr_matches = 0;
+    let frame_matches = 0;
+    polygons.each(function () {
+      const dd = d3.select(this).datum();
+      if (!dd || typeof dd.elem !== 'number') {
+        d3.select(this)
+          .attr('data-search-match', null)
+          .attr('data-frame-match', null);
+        return;
+      }
+      const ctx = data.context_for_id(dd.elem);
+      const ctx_lower = ctx.toLowerCase();
+      const addr_hit = addr_query && ctx_lower.includes(addr_query);
+      const frame_hit = frame_query && ctx_lower.includes(frame_query);
+      d3.select(this)
+        .attr('data-search-match', addr_hit ? 'true' : null)
+        .attr('data-frame-match', frame_hit ? 'true' : null);
+      if (addr_hit && frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#ff00ff')
+          .attr('stroke-width', 3)
+          .attr('stroke-dasharray', '6,3')
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (addr_hit) {
+        d3.select(this)
+          .attr('stroke', 'red')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#2196F3')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else {
+        d3.select(this)
+          .attr('stroke', null)
+          .attr('stroke-width', null)
+          .attr('stroke-dasharray', null);
+      }
+      if (addr_hit) addr_matches++;
+      if (frame_hit) frame_matches++;
+    });
+    search_label.text(addr_query ? `${addr_matches} match${addr_matches !== 1 ? 'es' : ''}` : '');
+    frame_label.text(frame_query ? `${frame_matches} match${frame_matches !== 1 ? 'es' : ''}` : '');
+  }
+
+  search_input.on('input', apply_search_highlights);
+  frame_input.on('input', apply_search_highlights);
 }
 
 function create_settings_view(dst, snapshot, device) {

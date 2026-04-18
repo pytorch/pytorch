@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -22,6 +21,7 @@ from dataclasses import dataclass
 from typing import (
     Any,
     Concatenate,
+    Literal,
     overload,
     Protocol,
     TYPE_CHECKING,
@@ -76,6 +76,7 @@ from torch.utils._python_dispatch import (
     _unset_infra_mode,
     autograd_would_have_decomposed,
     TorchDispatchMode,
+    TraceableWrapperSubclass,
 )
 from torch.utils._stats import count
 from torch.utils._thunk import Thunk
@@ -109,6 +110,7 @@ __all__ = [
 ]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
+_TracingMode: TypeAlias = Literal["real", "fake", "symbolic"]
 
 _AnyScriptObject = (torch.ScriptObject, FakeScriptObject)
 _AnyScriptObjectType = torch.ScriptObject | FakeScriptObject
@@ -119,9 +121,9 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: contextvars.ContextVar[Mapping[OpOverload, Callable]] = (
-    contextvars.ContextVar("CURRENT_DECOMPOSITION_TABLE")
-)
+CURRENT_DECOMPOSITION_TABLE: contextvars.ContextVar[
+    Mapping[OpOverload, Callable[..., Any]]
+] = contextvars.ContextVar("CURRENT_DECOMPOSITION_TABLE")
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -161,8 +163,8 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
 
 @contextmanager
 def decompose(
-    decomposition_table: Mapping[OpOverload, Callable] | None,
-) -> Generator[Mapping[OpOverload, Callable], None, None]:
+    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+) -> Generator[Mapping[OpOverload, Callable[..., Any]], None, None]:
     table = decomposition_table or {}
     token = CURRENT_DECOMPOSITION_TABLE.set(table)
     try:
@@ -454,7 +456,7 @@ def get_proxy_slot(
     obj: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
     tracer: _ProxyTracer,
     default: object = no_default,
-    transform: Callable = lambda x: x,
+    transform: Callable[..., Any] = lambda x: x,
 ) -> object:
     tracker: Any
     if isinstance(obj, Tensor):
@@ -505,11 +507,11 @@ def get_proxy_slot(
     return res
 
 
-# Recursively traverses tensor subclasses,
+# Recursively traverses traceable wrapper subclasses,
 # returnining an (unordered) list of Proxy objects that are tracked
 # for all inner tensors, given the current extant proxy mode.
 # Returns an empty list if no proxy mode is active.
-def _get_proxies(t: torch.Tensor) -> list[Proxy]:
+def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     proxies = []
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if mode is None:
@@ -1328,7 +1330,13 @@ def proxy_call(
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(
+        out,
+        proxy_out,
+        # pyrefly: ignore[bad-argument-type]
+        constant=constant,
+        tracer=tracer,
+    )
     _maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
@@ -1492,8 +1500,15 @@ class PythonKeyTracer(Tracer):
         if result is None:
             return None
 
-        # result is a Proxy from dispatching through a custom op.
-        # The op dispatch already registered the output in opaque_tracker.
+        # The reconstruct_fn dispatches through a custom op with a Proxy
+        # argument, which goes through Proxy.__torch_function__.  That path
+        # creates a graph node but does NOT populate meta["val"] (unlike the
+        # ProxyTorchDispatchMode.__torch_dispatch__ path which calls
+        # track_tensor_tree).  Set it here so downstream consumers (e.g. the
+        # min-cut partitioner) can classify the node correctly.
+        if "val" not in result.node.meta:
+            set_meta(result, a)
+
         # Also register for the *input* object so dedup works for re-encounters.
         set_proxy_slot(a, self, result)
         if id(real_obj) not in self._opaque_real_obj_proxy:
@@ -1652,9 +1667,9 @@ def _make_temp_remove_mode_context_manager(
 
 @torch._disable_dynamo
 def dispatch_trace(
-    root: Module | Callable,
+    root: Module | Callable[..., Any],
     tracer: Tracer,
-    concrete_args: tuple[Any, ...] | None = None,
+    concrete_args: tuple[object, ...] | None = None,
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)  # type: ignore[arg-type]
 
@@ -1802,7 +1817,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
     def __torch_function__(
         self,
-        func: OpOverload | Callable,
+        func: OpOverload | Callable[..., Any],
         types: tuple[torch._C._TensorMeta, ...],
         args: tuple[object, ...] = (),
         kwargs: dict[str, object] | None = None,
@@ -1869,7 +1884,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(
         self,
         tracer: _ProxyTracer,
-        tracing_mode: str,
+        tracing_mode: _TracingMode,
         pre_dispatch: bool = False,
         _allow_fake_constant: bool = False,
         _error_on_data_dependent_ops: bool = True,
@@ -2037,7 +2052,7 @@ class DecompositionInterpreter(fx.Interpreter):
         self,
         module: fx.GraphModule,
         new_graph: fx.Graph,
-        decomposition_table: Mapping[OpOverload, Callable] | None = None,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
         **kwargs: object,
     ) -> None:
         super().__init__(module, **kwargs)  # type: ignore[arg-type]
@@ -2104,7 +2119,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         self,
         module: fx.GraphModule,
         should_decompose: Callable[[fx.Node], bool],
-        decomposition_table: Mapping[OpOverload, Callable],
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
         **kwargs: object,
     ) -> None:
         """
@@ -2119,7 +2134,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
     def recursive_wrap(
         gm: fx.GraphModule,
         should_decompose: Callable[[fx.Node], bool],
-        decomposition_table: Mapping[OpOverload, Callable],
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
         **kwargs: object,
     ) -> _SelectiveDecomposeInterpreter:
         """
@@ -2150,7 +2165,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
             gm, should_decompose, decomposition_table, **kwargs
         )
 
-    def run_node(self, n):
+    def run_node(self, n: fx.Node) -> Any:
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
@@ -2161,9 +2176,9 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
 
 def selective_decompose(
     joint_gm: fx.GraphModule,
-    *args,
-    decomposition,
-    should_decompose,
+    *args: object,
+    decomposition: Mapping[OpOverload, Callable[..., Any]] | None,
+    should_decompose: Callable[..., bool],
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
@@ -2172,13 +2187,13 @@ def selective_decompose(
         # the arg name, primals and tangents, are important.
         # make_fx keeps the name in the traced graph and partitioner later relies
         # on the name to partition joint graph correctly.
-        def wrap_fn(primals: list[Any], tangents: list[Any]):
+        def wrap_fn(primals: list[Any], tangents: list[Any]) -> Any:
             return _SelectiveDecomposeInterpreter.recursive_wrap(
                 joint_gm, should_decompose, decomposition
             ).run(*args)
     else:
 
-        def wrap_fn(*args):
+        def wrap_fn(*args: Any) -> Any:
             return _SelectiveDecomposeInterpreter.recursive_wrap(
                 joint_gm, should_decompose, decomposition
             ).run(*args)
@@ -2383,7 +2398,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         return self.attr_proxy_map[attr_val]
 
     def trace(  # type: ignore[override]
-        self, root: Module | Callable, concrete_args: dict[str, object] | None
+        self, root: Module | Callable[..., Any], concrete_args: dict[str, object] | None
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
 
@@ -2454,7 +2469,7 @@ class _ModuleStackTracer(PythonKeyTracer):
     def call_module(
         self,
         m: Module,
-        forward: Callable,
+        forward: Callable[..., Any],
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> None:
@@ -2529,8 +2544,8 @@ class _ModuleStackTracer(PythonKeyTracer):
 class _MakefxTracer:
     def __init__(
         self,
-        decomposition_table: Mapping[OpOverload, Callable] | None,
-        tracing_mode: str,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+        tracing_mode: _TracingMode,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
         record_module_stack: bool,
@@ -2543,13 +2558,13 @@ class _MakefxTracer:
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
-        self.decomposition_table: dict[OpOverload, Callable] = dict(
+        self.decomposition_table: dict[OpOverload, Callable[..., Any]] = dict(
             decomposition_table or {}
         )
         self.decomposition_table.setdefault(
             torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel
         )
-        self.tracing_mode: str = tracing_mode
+        self.tracing_mode: _TracingMode = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
         self.record_module_stack: bool = record_module_stack
@@ -2561,13 +2576,13 @@ class _MakefxTracer:
         # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: FakeTensorMode | None = None
-        self.proxy_mode: nullcontext | ProxyTorchDispatchMode = nullcontext()
-        self.proxy_function_mode: nullcontext | PreDispatchTorchFunctionMode = (
+        self.proxy_mode: nullcontext[None] | ProxyTorchDispatchMode = nullcontext()
+        self.proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode = (
             nullcontext()
         )
         self.fx_tracer: PythonKeyTracer | None = None
-        self.python_dispatcher_mode: nullcontext | Any = nullcontext()
-        self.torch_fn_metadata_mode: nullcontext | TorchFunctionMetadataMode = (
+        self.python_dispatcher_mode: nullcontext[None] | Any = nullcontext()
+        self.torch_fn_metadata_mode: nullcontext[None] | TorchFunctionMetadataMode = (
             nullcontext()
         )
         self.record_stack_traces = record_stack_traces
@@ -2588,11 +2603,11 @@ class _MakefxTracer:
     def _restore_modes(
         self,
         prev_fake_tensor_mode: FakeTensorMode | None,
-        prev_proxy_mode: nullcontext | ProxyTorchDispatchMode,
-        prev_proxy_function_mode: nullcontext | PreDispatchTorchFunctionMode,
+        prev_proxy_mode: nullcontext[None] | ProxyTorchDispatchMode,
+        prev_proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode,
         prev_fx_tracer: PythonKeyTracer | None,
-        prev_python_dispatcher_mode: nullcontext | Any,
-        prev_torch_fn_metadata_mode: nullcontext | TorchFunctionMetadataMode,
+        prev_python_dispatcher_mode: nullcontext[None] | Any,
+        prev_torch_fn_metadata_mode: nullcontext[None] | TorchFunctionMetadataMode,
     ) -> None:
         self.fake_tensor_mode = prev_fake_tensor_mode
         self.proxy_mode = prev_proxy_mode
@@ -2603,7 +2618,7 @@ class _MakefxTracer:
 
     @contextmanager
     def _init_modes_from_inputs(
-        self, f: Callable, args: tuple[object, ...]
+        self, f: Callable[..., Any], args: tuple[object, ...]
     ) -> Generator[None, None, None]:
         prev_modes = self._checkpoint_modes()
         try:
@@ -2768,7 +2783,7 @@ class _MakefxTracer:
 
         return pytree.tree_map(inner_wrap_fake, args)
 
-    def _trace_inner(self, f: Callable, *args: object) -> GraphModule:
+    def _trace_inner(self, f: Callable[..., Any], *args: object) -> GraphModule:
         # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
         # because dispatch_trace will introduce the lazy import of torch._dynamo,
         # and some contexts set before calling dispatch_trace will cause problems with the import of torch._dynamo,
@@ -2782,7 +2797,7 @@ class _MakefxTracer:
 
         # FX doesn't support varargs, so we gotta fake up a wrapper
         # TODO: Would be nice to fix this at the source...
-        func: Callable = f
+        func: Callable[..., Any] = f
         if (
             not hasattr(inspect.unwrap(f), "__code__")
             or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS
@@ -2848,7 +2863,7 @@ class _MakefxTracer:
             t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
-    def trace(self, f: Callable, *args: object) -> fx.GraphModule:
+    def trace(self, f: Callable[..., Any], *args: object) -> fx.GraphModule:
         with self._init_modes_from_inputs(f, args):
             return self._trace_inner(f, *args)
 
@@ -2857,8 +2872,8 @@ class _MakefxTracer:
 
     def _make_sub_tracer(
         self,
-        decomp_table: Mapping[OpOverload, Callable] | None = None,
-        tracing_mode: str = "real",
+        decomp_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+        tracing_mode: _TracingMode = "real",
     ) -> _MakefxTracer:
         return _MakefxTracer(
             decomp_table if decomp_table is not None else self.decomposition_table,
@@ -2871,13 +2886,16 @@ class _MakefxTracer:
             parent_tracer=self,
         )
 
-    def trace_subgraph(self, f: Callable, *args: object) -> GraphModule:
+    def trace_subgraph(self, f: Callable[..., Any], *args: object) -> GraphModule:
         sub_tracer = self._make_sub_tracer()
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
     def trace_subgraph_custom_decomp(
-        self, f: Callable, decomp_table: Mapping[OpOverload, Callable], *args: object
+        self,
+        f: Callable[..., Any],
+        decomp_table: Mapping[OpOverload, Callable[..., Any]],
+        *args: object,
     ) -> GraphModule:
         if not isinstance(decomp_table, Mapping):
             raise AssertionError(f"Expected Mapping, got {type(decomp_table)}")
@@ -2901,9 +2919,9 @@ def _set_make_fx_tracer(tracer: _MakefxTracer) -> Generator[None, None, None]:
 
 
 def make_fx(
-    f: Callable,
-    decomposition_table: Mapping[OpOverload, Callable] | None = None,
-    tracing_mode: str = "real",
+    f: Callable[..., Any],
+    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+    tracing_mode: _TracingMode = "real",
     _allow_non_fake_inputs: bool = False,
     *,
     pre_dispatch: bool = False,
@@ -3026,11 +3044,11 @@ def maybe_handle_decomp(
 
 
 def get_isolated_graphmodule(
-    func: Callable,
+    func: Callable[..., Any],
     args: tuple[object, ...],
     kwargs: dict[str, object],
-    tracing_mode: str = "real",
-    decomposition_table: Mapping[OpOverload, Callable] | None = None,
+    tracing_mode: _TracingMode = "real",
+    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
 ) -> GraphModule:
     """A helper function used to get the GraphModule for the given func.
 

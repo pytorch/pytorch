@@ -1061,7 +1061,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-static PyObject* copy_misaligned(PyObject* dummy, PyObject* item) {
+static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
   /*
    * If the tensor's data pointer is not 16-byte aligned, return a
    * clone that preserves strides. Otherwise return the original
@@ -1225,7 +1225,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
-    {"copy_misaligned", copy_misaligned, METH_O, nullptr},
+    {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
     {"dict_version", dict_version, METH_O, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cpu_pinned",
@@ -3015,6 +3015,7 @@ class GuardManager {
       if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
         PyCapsule_SetName(e.cap, "DeadGuardManager");
       }
+      Py_DECREF(e.cap);
       Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
     _tag_safe_entries.clear();
@@ -3455,6 +3456,7 @@ class GuardManager {
       return false;
     }
     // These will be decrefed in destructor
+    Py_INCREF(capsule);
     _tag_safe_entries.push_back({wr, capsule});
     return true;
   }

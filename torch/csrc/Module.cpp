@@ -1310,6 +1310,31 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setCuDNNDepthwiseKernel(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkString(arg),
+      "set_cudnn_depthwise_kernel expects a string, "
+      "but got ",
+      THPUtils_typename(arg));
+  std::string mode = THPUtils_unpackString(arg);
+  at::globalContext().setCuDNNDepthwiseKernel(at::str2cudnn_depthwise(mode));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_getCuDNNDepthwiseKernel(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto mode =
+      at::cudnn_depthwise2str(at::globalContext().cudnnDepthwiseKernel());
+  return THPUtils_packString(mode);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setImmediateMiopen(
     PyObject* _unused,
     PyObject* arg) {
@@ -1936,6 +1961,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
+    {"_get_cudnn_depthwise_kernel",
+     THPModule_getCuDNNDepthwiseKernel,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cudnn_depthwise_kernel",
+     THPModule_setCuDNNDepthwiseKernel,
+     METH_O,
+     nullptr},
     {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
     {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -2732,6 +2765,9 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
+  });
+  py_module.def("_get_blas_default_backend", []() {
+    return at::globalContext().blasDefaultBackend();
   });
 
   py::enum_<at::blas::ScalingType>(

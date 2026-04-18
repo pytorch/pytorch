@@ -136,7 +136,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -423,7 +423,7 @@ class GraphModule(torch.nn.Module):
             sin_1: "f32[]" = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
             sub: "f32[]" = add - sin_1;  add = sin_1 = None
             return (sub,)
-""",  # NOQA: B950
+""",
         )
 
     def test_wrap_pytree_args_with_symint_constant(self):
@@ -3090,7 +3090,7 @@ def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt,
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(batched_outputs_3, 1, l_d_, 0);  batched_outputs_3 = l_d_ = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
-    return (_remove_batch_dim_3,)""",  # noqa: B950
+    return (_remove_batch_dim_3,)""",
             )
 
     def test_cond_pytree_operands(self):
@@ -3156,7 +3156,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_));  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
     getitem = cond[0];  cond = None
-    return (getitem,)""",  # noqa: B950
+    return (getitem,)""",
         )
 
     def test_cond_pytree_operands_with_non_tensor_leaves(self):
@@ -3471,9 +3471,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y.grad, y_eager.grad)
 
 
-class HigherOrderOpVmapGuardTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
-):
+class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3742,9 +3740,7 @@ class HigherOrderOpVmapGuardTests(
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -3771,7 +3767,7 @@ class FuncTorchHigherOrderOpTests(
 
     def test_teardown_resets_nested_graph_breaks(self):
         expected_nested_state = getattr(
-            self, "prev_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
+            self, "_prior_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
         )
 
         def _check_flag():
@@ -6838,9 +6834,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7230,7 +7224,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(

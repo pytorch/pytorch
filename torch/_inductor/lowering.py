@@ -80,6 +80,7 @@ from .ir import (
 )
 from .utils import (
     ceildiv,
+    convert_symint_to_expr,
     decode_device,
     is_dynamic,
     is_gpu,
@@ -1982,6 +1983,85 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     )
 
 
+def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | None:
+    """If all cat inputs share a common upstream reduction buffer whose
+    only consumers feed into this cat, return its name so it can be
+    excluded from the can_fuse_reduction check.
+
+    Checks common reads for an IR reduction whose numel matches the cat
+    output, then verifies via FX origins that all of the reduction's
+    consumers feed into the cat inputs."""
+    if len(inputs) < 2:
+        return None
+
+    common_reads = inputs[0].get_read_names()
+    for inp in inputs[1:]:
+        common_reads = common_reads & inp.get_read_names()
+    if not common_reads:
+        return None
+
+    # Find a common read that is an IR reduction buffer whose input
+    # numel matches the cat output numel.
+    cat_out_numel = convert_symint_to_expr(V.graph.current_node.meta["val"].numel())
+    reduction_name = None
+    reduction_buf = None
+    for name in common_reads:
+        buf = V.graph.try_get_buffer(name)
+        if (
+            buf is not None
+            and isinstance(buf, ir.ComputedBuffer)
+            and isinstance(buf.data, ir.Reduction)
+        ):
+            reduction_numel = sympy_product(buf.data.get_size()) * sympy_product(
+                buf.data.get_reduction_size()
+            )
+            if V.graph.sizevars.statically_known_equals(cat_out_numel, reduction_numel):
+                reduction_name = name
+                reduction_buf = buf
+                break
+
+    if reduction_name is None:
+        return None
+
+    # Verify the reduction doesn't have consumers outside this cat's
+    # computation. Each IR node tracks which FX nodes produced it
+    # (origins). Collect the FX origins of all cat inputs, then check
+    # that every FX user of the reduction's origins feeds into one of
+    # the cat inputs.
+    #
+    # We also tried checking IR-level users via V.graph.name_to_users,
+    # but at lowering time the cat inputs are unrealized TensorBox
+    # wrappers (not named buffers), so name_to_users entries can't be
+    # correlated back to the cat's input chain.
+    #
+    # TODO: origins is a set of FX nodes attached to IR nodes during
+    # lowering — using it for correctness is fragile. A proper
+    # buffer→FX node mapping would be better.
+    origins = getattr(reduction_buf, "origins", None)
+    if not origins:
+        return None
+
+    cat_input_origins: OrderedSet[torch.fx.Node] = OrderedSet()
+    for inp in inputs:
+        inp_origins = getattr(inp, "origins", None)
+        if inp_origins:
+            cat_input_origins.update(inp_origins)
+
+    # Check that the reduction FX node's users all feed into the cat.
+    # origins may include non-reduction nodes (e.g. pow that feeds into
+    # mean), so filter to only reduction ops via torch.Tag.reduction.
+    for origin in origins:
+        if (
+            origin.op == "call_function"
+            and isinstance(origin.target, torch._ops.OpOverload)
+            and torch.Tag.reduction in origin.target.tags
+            and not all(u in cat_input_origins for u in origin.users)
+        ):
+            return None
+
+    return reduction_name
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
@@ -2021,20 +2101,26 @@ def cat(inputs, dim=0):
     def is_reduction(t):
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
-    def can_fuse_reduction(t):
+    def can_fuse_reduction(t, exclude: OrderedSet[str] = OrderedSet()):
         if isinstance(t, (TensorBox, ir.StorageBox)):
-            return can_fuse_reduction(unwrap_tensor(t))
+            return can_fuse_reduction(unwrap_tensor(t), exclude)
         return (
             is_reduction(t)
             or isinstance(t, ir.Pointwise)
             and any(
-                can_fuse_reduction(V.graph.get_buffer(read))
+                read not in exclude
+                and can_fuse_reduction(V.graph.get_buffer(read), exclude)
                 for read in t.get_read_names()
             )
         )
 
-    # fusing reducutions into computed concat buffer can cause regressions.
-    fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
+    # Pointwise cat evaluates every input's computation for each
+    # output element (masked), so fusing reductions in is wasteful.
+    # Exception: when inputs just recombine a reduction's output
+    # (e.g. qknorm → RoPE → cat), we do not duplicate computation
+    recombined = _cat_inputs_recombine_reduction(inputs, dim)
+    exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
+    fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
     def should_lower_cat_input(x) -> bool:
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
@@ -2137,12 +2223,11 @@ def cat(inputs, dim=0):
 
         has_multi_consumers = any_input_has_multi_consumers()
 
-        horizontal_fuse_cat = all(
-            should_lower_cat_input(inp) for inp in inputs
-        ) and not any(can_fuse_reduction(t) for t in inputs)
-        if not has_multi_consumers and (
-            fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction)
-        ):
+        horizontal_fuse_cat = (
+            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+        )
+
+        if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -3360,12 +3445,6 @@ make_fallback(aten._pdist_backward, require_contiguous)
 # 5) Impossible (missing triton/CPU features)
 
 # Sorting / Sorting-like
-make_fallback(aten.sort)
-make_fallback(aten.sort.stable)
-make_fallback(aten.kthvalue)
-make_fallback(aten.topk)
-make_fallback(aten.mode)
-make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
 # see: https://github.com/pytorch/pytorch/pull/121354
@@ -3571,6 +3650,30 @@ def iota(
         dtype=dtype,
         inner_fn=fn,
         ranges=[length],
+    )
+
+
+@register_lowering(aten.arange.start_step, type_promotion_kind=None)
+def arange_start_step(
+    start,
+    end,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    assert dtype is not None
+    length = ceildiv(end - start, step)
+    return iota(
+        length,
+        start=start,
+        step=step,
+        dtype=dtype,
+        device=device if device is not None else "cpu",
+        requires_grad=requires_grad,
     )
 
 
@@ -3867,7 +3970,7 @@ def tensor_constructor(fill_value):
     ):
         assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -3877,7 +3980,14 @@ def tensor_constructor(fill_value):
         for s in size:
             assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        full_pointwise = _full(fill_value, decode_device(device), dtype, size)
+
+        if pin_memory:
+            # Realize the buffer
+            full_pointwise.realize()
+            full_pointwise.data.data.get_layout().is_pinned = True
+
+        return full_pointwise
 
     return inner
 
@@ -7298,11 +7408,18 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return clone(x), _full(0, device, torch.int64, shape)
 
     dim_size = shape[dim] if len(shape) else 1
-    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
+    # Use int32 indices when decompose_sort_ops is enabled, allowing sort
+    # dimensions up to 2^31-1.  Default int16 keeps register pressure low
+    # on GPU where the bitonic network holds all indices in-block.
+    if config.triton.decompose_sort_ops:
+        idx_dtype = torch.int32
+    else:
+        idx_dtype = torch.int16
+    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(idx_dtype).max):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     indices = iota(
-        dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
+        dim_size, start=0, step=1, dtype=idx_dtype, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
     if len(shape):
@@ -7329,6 +7446,199 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
 @register_lowering(aten.sort.default, type_promotion_kind=None)
 def sort(x, dim=-1, descending=False):
     return sort_stable(x, stable=False, dim=dim, descending=descending)
+
+
+# Sort-based op lowerings
+# When config.triton.decompose_sort_ops is enabled, decompose into sort-based
+# ops so Inductor generates Triton kernels via ir.Sort.
+# Otherwise, fall back to ATen eager.
+topk_fallback = fallback_handler(aten.topk.default, add_to_fallback_set=False)
+kthvalue_fallback = fallback_handler(aten.kthvalue.default, add_to_fallback_set=False)
+median_fallback = fallback_handler(aten.median.default, add_to_fallback_set=False)
+median_dim_fallback = fallback_handler(aten.median.dim, add_to_fallback_set=False)
+mode_fallback = fallback_handler(aten.mode.default, add_to_fallback_set=False)
+
+# sort/sort.stable already have register_lowering above (sort_stable, sort).
+# They use ir.Sort directly and fall back when the dimension is too large.
+# When decompose_sort_ops is enabled, the size limit is lifted (int32 indices).
+
+
+@register_lowering(aten.median.default, type_promotion_kind=None)
+def median_default(self):
+    if not config.triton.decompose_sort_ops:
+        return median_fallback(self)
+    size = self.get_size()
+    numel = functools.reduce(operator.mul, size, sympy.Integer(1))
+    flat = view(self, [numel])
+    sorted_vals, _ = sort_stable(flat, dim=0)
+    k = (numel - 1) // 2
+    return select(sorted_vals, 0, k)
+
+
+@register_lowering(aten.median.dim, type_promotion_kind=None)
+def median_dim(self, dim, keepdim=False):
+    if not config.triton.decompose_sort_ops:
+        return median_dim_fallback(self, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    n = shape[dim]
+    k = (n - 1) // 2
+    values = select(sorted_vals, dim, k)
+    indices = select(sorted_idxs, dim, k)
+    if keepdim:
+        values = unsqueeze(values, dim)
+        indices = unsqueeze(indices, dim)
+    return values, indices
+
+
+@register_lowering(aten.mode.default, type_promotion_kind=None)
+def mode_default(self, dim=-1, keepdim=False):
+    """Lower aten.mode via sort-based decomposition or fallback."""
+    if not config.triton.decompose_sort_ops:
+        return mode_fallback(self, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    device = self.get_device()
+    if ndim == 0:
+        return clone(self), _full(0, device, torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    n = shape[dim]
+
+    # Position indices along dim: [0, 1, ..., n-1]
+    positions = iota(
+        n, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+    )
+    pos_view_shape = [sympy.Integer(1)] * ndim
+    pos_view_shape[dim] = n
+    positions = view(positions, pos_view_shape)
+    positions = expand(positions, shape)
+
+    # Shift positions by -1, clamp to 0 for position 0
+    positions_loader0 = positions.make_loader()
+
+    def prev_pos_fn(idx):
+        return ops.maximum(
+            ops.sub(positions_loader0(idx), ops.constant(1, torch.int64)),
+            ops.constant(0, torch.int64),
+        )
+
+    prev_positions = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=prev_pos_fn,
+        ranges=shape,
+    )
+
+    # Gather shifted values and compare for run boundaries
+    shifted_vals = gather(sorted_vals, dim, prev_positions)
+
+    sorted_loader = sorted_vals.make_loader()
+    shifted_loader = shifted_vals.make_loader()
+    positions_loader = positions.make_loader()
+
+    # is_boundary = (sorted != shifted) | (position == 0)
+    def is_boundary_fn(idx):
+        return ops.or_(
+            ops.ne(sorted_loader(idx), shifted_loader(idx)),
+            ops.eq(positions_loader(idx), ops.constant(0, torch.int64)),
+        )
+
+    is_boundary = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.bool,
+        inner_fn=is_boundary_fn,
+        ranges=shape,
+    )
+
+    # boundary_pos = where(is_boundary, position, -1)
+    is_boundary_loader = is_boundary.make_loader()
+    positions_loader2 = positions.make_loader()
+
+    def boundary_pos_fn(idx):
+        return ops.where(
+            is_boundary_loader(idx),
+            positions_loader2(idx),
+            ops.constant(-1, torch.int64),
+        )
+
+    boundary_pos = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=boundary_pos_fn,
+        ranges=shape,
+    )
+
+    # Propagate boundary positions forward with cummax
+    last_boundary, _ = cummax(boundary_pos, dim)
+
+    # run_len = position - last_boundary + 1
+    positions_loader3 = positions.make_loader()
+    last_boundary_loader = last_boundary.make_loader()
+
+    def run_len_fn(idx):
+        return ops.add(
+            ops.sub(positions_loader3(idx), last_boundary_loader(idx)),
+            ops.constant(1, torch.int64),
+        )
+
+    run_len = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=run_len_fn,
+        ranges=shape,
+    )
+
+    # argmax returns first maximum -> end of leftmost longest run
+    max_pos = reduce_argmax(run_len, axis=dim, keepdims=True)
+    mode_vals = gather(sorted_vals, dim, max_pos)
+    mode_idxs = gather(sorted_idxs, dim, max_pos)
+
+    if not keepdim:
+        mode_vals = squeeze(mode_vals, dim)
+        mode_idxs = squeeze(mode_idxs, dim)
+
+    return mode_vals, mode_idxs
+
+
+@register_lowering(aten.topk.default, type_promotion_kind=None)
+def topk(self, k, dim=-1, largest=True, sorted=True):
+    if not config.triton.decompose_sort_ops:
+        return topk_fallback(self, k, dim, largest, sorted)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(
+        self, stable=True, dim=dim, descending=largest
+    )
+    values = slice_(sorted_vals, dim, 0, k)
+    indices = slice_(sorted_idxs, dim, 0, k)
+    return values, indices
+
+
+@register_lowering(aten.kthvalue.default, type_promotion_kind=None)
+def kthvalue(self, k, dim=-1, keepdim=False):
+    if not config.triton.decompose_sort_ops:
+        return kthvalue_fallback(self, k, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    # k is 1-based
+    values = select(sorted_vals, dim, k - 1)
+    indices = select(sorted_idxs, dim, k - 1)
+    if keepdim:
+        values = unsqueeze(values, dim)
+        indices = unsqueeze(indices, dim)
+    return values, indices
 
 
 def register_pointwise_numeric(op, name=None, triton_fallback=None):

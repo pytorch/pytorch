@@ -1291,12 +1291,17 @@ def register_op_strategy_map(
                 placements=tuple(input_tgt_placements),
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
+                use_strided_shard_as_shard_order=False,
             )
             redistribute_costs: list[list[float]] = [
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
-            output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
+            output_spec = DTensorSpec(
+                mesh=mesh,
+                placements=tuple(output_placements),
+                use_strided_shard_as_shard_order=False,
+            )
             output_strategy.strategies.append(
                 OpSpec(
                     output_specs=output_spec,

@@ -407,10 +407,13 @@ graph():
 
         x = torch.ones(5)
         with YoloMode():
-            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
-
+            out = torch.compile(torch.add, backend=backend, fullgraph=False)(x, x)
         self.assertEqual(out.sum().item(), 5.0)
         self.assertEqual(len(backend.graphs), 0)
+
+        with YoloMode():
+            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
 
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
@@ -570,7 +573,7 @@ graph():
                 return False
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                out = torch.compile(func, backend=backend, fullgraph=True)(
+                out = torch.compile(func, backend=backend, fullgraph=False)(
                     *args, **kwargs
                 )
                 return out
@@ -4386,6 +4389,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
         self.assertEqual(o, x * y)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -4596,6 +4600,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result, correct)
         # Verify deepcopy didn't mutate original
         self.assertEqual(cfg.inner.scale, 2.0)
+
+    def test_deepcopy_with_getattribute_override(self):
+        # Regression test: classes that override __getattribute__ (like
+        # HuggingFace PretrainedConfig) caused a graph break on
+        # __reduce_ex__ because SuperVariable.call_method for
+        # object.__getattribute__ bypassed the polyfill detection in
+        # resolve_type_attr.
+        class Config:
+            attribute_map = {}
+
+            def __init__(self, hidden_size=768, num_layers=6):
+                self.hidden_size = hidden_size
+                self.num_layers = num_layers
+
+            def __getattribute__(self, key):
+                if key != "attribute_map" and key in super().__getattribute__(
+                    "attribute_map"
+                ):
+                    key = super().__getattribute__("attribute_map")[key]
+                return super().__getattribute__(key)
+
+        def fn(x, config):
+            c = copy.deepcopy(config)
+            return x * c.hidden_size + c.num_layers
+
+        x = torch.randn(3)
+        config = Config()
+        correct = fn(x, config)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, config)
+        self.assertEqual(result, correct)
 
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
@@ -7631,7 +7665,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def f1(a, b):
-            f2(a, b)
+            try:
+                f2(a, b)
+            finally:
+                pass
 
         def f2(a, b):
             c = a + b
@@ -7640,7 +7677,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def g1(a, b):
-            g2(a, b)
+            try:
+                g2(a, b)
+            finally:
+                pass
 
         def g2(a, b):
             c = a + b
@@ -9010,6 +9050,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -15285,6 +15326,76 @@ def forward(self, L_x_ : torch.Tensor):
         ret1 = fn()
         ret2 = compilefn()
         self.assertEqual(ret1, ret2)
+
+    def test_constant_subclass_guard_recompiles(self):
+        class MyInt(int):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        class MyFloat(float):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        class MyStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        # int subclass
+        @torch.compile(backend=cnt)
+        def f(x, y):
+            return x + y
+
+        r1 = f(torch.tensor(1), MyInt(5))
+        self.assertEqual(r1.item(), 6)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r2 = f(torch.tensor(1), MyInt(10))
+        self.assertEqual(r2.item(), 11)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r3 = f(torch.tensor(1), MyInt(5))
+        self.assertEqual(r3.item(), 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # float subclass
+        cnt.clear()
+
+        @torch.compile(backend=cnt)
+        def g(x, y):
+            return x + y
+
+        r4 = g(torch.tensor(1.0), MyFloat(2.5))
+        self.assertEqual(r4.item(), 3.5)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r5 = g(torch.tensor(1.0), MyFloat(3.5))
+        self.assertEqual(r5.item(), 4.5)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r6 = g(torch.tensor(1.0), MyFloat(2.5))
+        self.assertEqual(r6.item(), 3.5)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # str subclass
+        cnt.clear()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def h(x, s):
+            return x + len(s)
+
+        r7 = h(torch.tensor(1), MyStr("abc"))
+        self.assertEqual(r7.item(), 4)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r8 = h(torch.tensor(1), MyStr("abcde"))
+        self.assertEqual(r8.item(), 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r9 = h(torch.tensor(1), MyStr("abc"))
+        self.assertEqual(r9.item(), 4)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

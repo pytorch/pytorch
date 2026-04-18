@@ -1814,6 +1814,22 @@ class TestTorchDeviceType(TestCase):
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
+
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
@@ -4955,6 +4971,27 @@ class TestTorchDeviceType(TestCase):
     # in this case the strategy is to purposefully cause a graph break to happen
     # in-between the two write operations, by adding checks between them, so
     # that they have to materialize in the expected order.
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_const_data_ptr(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+
+        # For a regular tensor, const_data_ptr and data_ptr return the same address
+        self.assertEqual(t.const_data_ptr(), t.data_ptr())
+
+        clone = t._lazy_clone()
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        # const_data_ptr should not trigger COW materialization
+        addr = clone.const_data_ptr()
+        self.assertEqual(addr, t.const_data_ptr())
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+    # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):

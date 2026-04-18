@@ -6,7 +6,7 @@ import itertools
 import pickle
 import weakref
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any, NewType, TypeVar
 from typing_extensions import override, Self
 
@@ -15,7 +15,7 @@ from torch.utils._import_utils import import_dill
 
 dill = import_dill()
 if dill is not None:
-    pickle = dill  # noqa: F811
+    pickle = dill
 
 import torch
 import torch.utils._pytree as pytree
@@ -75,7 +75,7 @@ def _unpickle_as_none() -> None:
     return None
 
 
-def _unpickle_as_weakref(referent: object) -> weakref.ref:
+def _unpickle_as_weakref(referent: object) -> weakref.ref[object]:
     return weakref.ref(referent)
 
 
@@ -84,7 +84,7 @@ def _unpickle_as_dead_weakref() -> Callable[[], None]:
 
 
 @contextlib.contextmanager
-def patch_pytree_map_over_slice():
+def patch_pytree_map_over_slice() -> Generator[None]:
     if slice in pytree.SUPPORTED_NODES:
         yield
         return
