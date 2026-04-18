@@ -662,15 +662,27 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
   // backed by a physical grid of shape
   // (sum(chunk_size), num_chunks / chunks_per_block).
   // A block can find its split_idx via block_idx_to_split_idx.
-  std::vector<int64_t> block_idx_to_split_idx;
-  std::vector<int64_t> blocks_cumsums{0};
-  block_idx_to_split_idx.reserve(num_blocks);
+  std::vector<int64_t> blocks_per_split(split_sizes.size());
+  int64_t total_blocks = 0;
   for (size_t split_idx = 0; split_idx < split_sizes.size(); ++split_idx) {
-    const auto blocks = detail::div_up(
+    blocks_per_split[split_idx] = detail::div_up(
         split_chunk_sizes[split_idx],
         detail::BLOCK_SIZE * detail::BYTES_PER_THREAD * iters_per_chunk);
-    block_idx_to_split_idx.insert(
-        block_idx_to_split_idx.end(), blocks, split_idx);
+    total_blocks += blocks_per_split[split_idx];
+  }
+
+  // Size this vector exactly to total_blocks so size() == capacity(); a
+  // reserve()-then-insert() pattern here leaves capacity > size after the
+  // iters_per_chunk scaling, which trips ASAN container-overflow when
+  // pack_vecs memcpys from vec->data().
+  std::vector<int64_t> block_idx_to_split_idx(total_blocks);
+  std::vector<int64_t> blocks_cumsums{0};
+  int64_t off = 0;
+  for (size_t split_idx = 0; split_idx < split_sizes.size(); ++split_idx) {
+    const auto blocks = blocks_per_split[split_idx];
+    std::fill_n(
+        block_idx_to_split_idx.begin() + off, blocks, int64_t(split_idx));
+    off += blocks;
     blocks_cumsums.push_back(blocks_cumsums.back() + blocks);
   }
 
