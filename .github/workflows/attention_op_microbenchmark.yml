@@ -19,6 +19,17 @@ permissions:
   actions: read
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
+
   attn-microbenchmark-build:
     if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
@@ -45,13 +56,15 @@ jobs:
       test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
     secrets: inherit
 
-  # B200 runner
+  # B200 runner (OSDC), always use OSDC runner to test this workflow
   opmicrobenchmark-build-b200:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build-b200
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
-      runner: linux.12xlarge.memory
+      runner_prefix: "mt-"
+      runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '10.0'
@@ -59,16 +72,25 @@ jobs:
         { include: [
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
     secrets: inherit
 
   opmicrobenchmark-test-b200:
     name: opmicrobenchmark-test-b200
     uses: ./.github/workflows/_linux-test.yml
-    needs: opmicrobenchmark-build-b200
+    needs:
+      - opmicrobenchmark-build-b200
+      - get-label-type
     with:
       timeout-minutes: 500
       build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
-      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
     secrets: inherit
