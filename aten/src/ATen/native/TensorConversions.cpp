@@ -2133,8 +2133,8 @@ static Tensor _compressed_to_block_compressed_cpu(
             plain_dim,
             compressed_blocksize,
             plain_blocksize,
-            input_compressed_indices.data_ptr<index_t>(),
-            input_plain_indices.data_ptr<index_t>());
+            input_compressed_indices.const_data_ptr<index_t>(),
+            input_plain_indices.const_data_ptr<index_t>());
       });
   DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
   DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
