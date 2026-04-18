@@ -703,6 +703,21 @@ if(USE_FBGEMM)
     set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
 
+    # Fix LTO bug
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT MSVC)
+      set_source_files_properties(
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx2.cc"
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx512.cc"
+        "${FBGEMM_SOURCE_DIR}/src/FbgemmFP16UKernelsAvx512_256.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx2.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx512.cc"
+        "${FBGEMM_SOURCE_DIR}/src/fp32/FbgemmFP32UKernelsAvx512_256.cc"
+        DIRECTORY "${FBGEMM_SOURCE_DIR}"
+        PROPERTIES
+          COMPILE_OPTIONS "-masm=intel;-fno-lto"
+      )
+    endif()
+
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
       target_compile_options_if_supported(fbgemm -Wno-extra-semi)
