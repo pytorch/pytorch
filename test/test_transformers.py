@@ -5248,6 +5248,8 @@ else:
 if TEST_XPU:
     device_types += ("xpu", )
 
+device_types += ("privateuse1", )
+
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
