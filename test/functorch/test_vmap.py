@@ -3284,6 +3284,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(2, 0),
         )
 
+    def test_view_dtype(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        op = torch.ops.aten.view.dtype
+
+        test(op, (torch.rand(2, 3, 4), torch.uint8), in_dims=(1, None), out_dims=1)
+        test(op, (torch.rand(5), torch.int32), in_dims=(0, None), out_dims=0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"dim\(\) cannot be 0 to view Float as Byte"
+        ):
+            vmap(op, in_dims=(0, None))(torch.rand(6), torch.uint8)
+
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
