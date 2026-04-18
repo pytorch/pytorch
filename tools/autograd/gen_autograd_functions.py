@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
 
 from torchgen.api.autograd import (
     Derivative,
@@ -20,7 +20,6 @@ from torchgen.api.types import (
     ArrayRefCType,
     BaseCppType,
     BaseCType,
-    Binding,
     boolT,
     doubleT,
     intArrayRefT,
@@ -45,10 +44,6 @@ from torchgen.model import Argument, FunctionSchema
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 FUNCTION_DECLARATION = CodeTemplate(
@@ -529,6 +524,426 @@ def get_infos_with_derivatives_list(
     return list(filter(lambda info: info.args_with_derivatives, diff_info_list))
 
 
+@dataclass
+class BackwardInputLayout:
+    # Maps differentiable forward inputs onto grad_inputs / needs_input_grad slots.
+    input_name_to_idx: dict[str, int] = field(default_factory=dict)
+    compute_index_ranges: list[str] = field(default_factory=list)
+    needs_input_grad_masks: list[str] = field(default_factory=list)
+    saved_list_sizes: list[str] = field(default_factory=list)
+    apply_functional_args: list[str] = field(default_factory=list)
+    apply_functional_arg_types: list[str] = field(default_factory=list)
+
+    @property
+    def num_inputs(self) -> int:
+        return len(self.input_name_to_idx)
+
+
+@dataclass
+class SavedVariableCodegen:
+    saved_variables: list[str] = field(default_factory=list)
+    release_variables: list[str] = field(default_factory=list)
+    unpacks: list[str] = field(default_factory=list)
+    asserts: list[str] = field(default_factory=list)
+    getter_definitions: list[str] = field(default_factory=list)
+    py_getsetdef_structs: list[str] = field(default_factory=list)
+    compiled_args: list[str] = field(default_factory=list)
+    apply_with_saved_before: list[str] = field(default_factory=list)
+    apply_with_saved_after: list[str] = field(default_factory=list)
+    apply_functional_args: list[str] = field(default_factory=list)
+    apply_functional_arg_types: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EmittedDerivative:
+    code: str
+    requires_any_grad_defined: bool
+
+
+def build_backward_input_layout(info: DifferentiabilityInfo) -> BackwardInputLayout:
+    layout = BackwardInputLayout()
+    for idx, arg in enumerate(info.args_with_derivatives):
+        if arg.type in TENSOR_LIST_LIKE_CTYPES:
+            size = f"{arg.name}_size_"
+            layout.saved_list_sizes.append(f"size_t {arg.name}_size_;")
+            layout.apply_functional_args.append(size)
+            layout.apply_functional_arg_types.append("size_t")
+        else:
+            size = "1"
+        layout.compute_index_ranges.append(f"auto {arg.name}_ix = gen.range({size});")
+        layout.needs_input_grad_masks.append(
+            f"task_should_compute_output({{ {arg.name}_ix }}),"
+        )
+        layout.input_name_to_idx[arg.name] = idx
+    return layout
+
+
+def build_saved_variable_codegen(info: DifferentiabilityInfo) -> SavedVariableCodegen:
+    codegen = SavedVariableCodegen()
+
+    def save_var(var: SavedAttribute, is_output: bool) -> None:
+        name = var.nctype.name
+        type = var.nctype.type
+        should_append_getsetdef = True
+        should_append_raw_getsetdef = False
+        visit_name = name
+        uses_cpp_saved_variable_cls = False
+        unpacked_ref_type = None
+
+        if (
+            type == BaseCType(tensorT)
+            or type == OptionalCType(BaseCType(tensorT))
+            or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
+            or (type == BaseCType(scalarT) and is_output)
+        ):
+            uses_cpp_saved_variable_cls = True
+            codegen.saved_variables.append(f"SavedVariable {name}_;")
+            codegen.release_variables.append(f"{name}_.reset_data();")
+            ptr = "shared_from_this()" if is_output else ""
+            codegen.unpacks.append(f"auto {name} = {name}_.unpack({ptr});")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_SAVEDVAR
+                )
+            )
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR
+                )
+            )
+            should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
+            unpacked_ref_type = "Tensor&"
+        elif (
+            type == BaseCType(tensorListT)
+            or type == BaseCType(iTensorListRefT)
+            or type == VectorCType(BaseCType(tensorT))
+        ):
+            # note(crcrpar): [nuanced return type of out-of-place foreach functions]
+            # When an out-of-place foreach function whose return signature is `Tensor[]`
+            # spells out its backward definitions in `derivatives.yaml`, and some of them depend on
+            # `result`, `result`'s type is interpreted and treated as `std::vector<Tensor>`.
+            # An out-of-place foreach whose backwards rely on their output doesn't suffer from this
+            # difference if the definitions are codegen'ed.
+            # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
+            # as of https://github.com/pytorch/pytorch/pull/105504.
+            if type == VectorCType(BaseCType(tensorT)):
+                if not (
+                    info.func.func.name.name.base.startswith("_foreach") and is_output
+                ):
+                    raise AssertionError(
+                        "VectorCType(BaseCType(tensorT)) requires foreach function and is_output"
+                    )
+            uses_cpp_saved_variable_cls = True
+            codegen.saved_variables.append(f"std::vector<SavedVariable> {name}_;")
+            codegen.saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            codegen.release_variables.append(f"{name}_.clear();")
+            codegen.release_variables.append(f"{name}_released_ = true;")
+            ptr = "shared_from_this()" if is_output else "nullptr"
+            codegen.unpacks.append(f"auto {name} = unpack_list({name}_, {ptr});")
+            codegen.asserts.append(
+                f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);"
+            )
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
+                )
+            )
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
+                )
+            )
+            should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
+            unpacked_ref_type = "std::vector<Tensor>&"
+        elif type == ListCType(OptionalCType(BaseCType(tensorT))):
+            uses_cpp_saved_variable_cls = True
+            codegen.saved_variables.append(f"std::vector<SavedVariable> {name}_;")
+            codegen.saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            codegen.release_variables.append(f"{name}_.clear();")
+            codegen.release_variables.append(f"{name}_released_ = true;")
+            codegen.unpacks.append(f"auto {name} = unpack_opt_list({name}_);")
+            codegen.asserts.append(
+                f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);"
+            )
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
+                )
+            )
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
+                )
+            )
+            should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
+            unpacked_ref_type = "torch::List<std::optional<Tensor>>&"
+        elif type == BaseCType(intArrayRefT):
+            codegen.saved_variables.append(f"std::vector<int64_t> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == BaseCType(symIntArrayRefT):
+            codegen.saved_variables.append(f"std::vector<c10::SymInt> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
+        elif type == BaseCType(optionalIntArrayRefT):
+            codegen.saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == BaseCType(optionalSymIntArrayRefT):
+            codegen.saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
+        elif type == OptionalCType(BaseCType(intArrayRefT)):
+            codegen.saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == OptionalCType(BaseCType(symIntArrayRefT)):
+            codegen.saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
+        elif type == OptionalCType(ArrayRefCType(BaseCType(doubleT))):
+            codegen.saved_variables.append(f"c10::OptionalArray<double> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE
+                )
+            )
+        elif type == BaseCType(longT):
+            codegen.saved_variables.append(f"{type.cpp_type()} {name} = 0;")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_INT64_T
+                )
+            )
+        elif type == BaseCType(SymIntT):
+            codegen.saved_variables.append(f"c10::SymInt {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_SYMINT
+                )
+            )
+        elif type == BaseCType(stringT):
+            codegen.saved_variables.append(f"std::string {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_STRING
+                )
+            )
+        elif type == OptionalCType(BaseCType(stringT)):
+            codegen.saved_variables.append(f"std::optional<std::string> {name};")
+            codegen.getter_definitions.append(
+                GETTER_DEFINITION_OPT.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_STRING
+                )
+            )
+        elif type == ArrayRefCType(
+            elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+        ):
+            codegen.saved_variables.append(f"std::vector<at::Scalar> {name};")
+            unpacked_ref_type = "std::vector<at::Scalar>&"
+            codegen.saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            codegen.release_variables.append(f"{name}.clear();")
+            codegen.getter_definitions.append(
+                CodeTemplate(
+                    """\
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name};
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+                            """
+                ).substitute(
+                    op=info.op,
+                    name=name,
+                    body=GETTER_BODY_VEC_SCALAR,
+                )
+            )
+        else:
+            # Check for indicators that you're putting a non-owning reference
+            # into the saved variable field.  If this is spuriously firing,
+            # edit this field.  Otherwise, you probably need to add a case
+            # above.
+            if not (
+                "ref" not in type.cpp_type().lower()
+                and "view" not in type.cpp_type().lower()
+                and "*" not in type.cpp_type()
+                and "&" not in type.cpp_type()
+            ):
+                raise AssertionError(
+                    f"{type.cpp_type()} looks like it contains a non-owning reference"
+                )
+            codegen.saved_variables.append(f"{type.cpp_type()} {name};")
+
+            if type in MISC_GETTER_DEFS:
+                # pyrefly: ignore [bad-index, index-error]
+                getter_def, body = MISC_GETTER_DEFS[type]
+                codegen.getter_definitions.append(
+                    getter_def.substitute(op=info.op, name=name, body=body)
+                )
+            else:
+                # Types we don't expose python bindings to yet:
+                #   TypeAndSize, at::ScalarType, TensorOptions, TensorGeometry,
+                #   std::vector<std::vector<int64_t>>, std::vector<at::ScalarType>
+                should_append_getsetdef = False
+
+        if should_append_getsetdef:
+            codegen.py_getsetdef_structs.append(
+                PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
+            )
+        if should_append_raw_getsetdef:
+            codegen.py_getsetdef_structs.append(
+                PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
+            )
+
+        if uses_cpp_saved_variable_cls:
+            codegen.compiled_args.append(
+                f"args.collect({visit_name}, {'true' if is_output else 'false'});"
+            )
+        else:
+            codegen.compiled_args.append(f"args.collect({visit_name});")
+        codegen.apply_with_saved_before.append(f"saved.before({visit_name});")
+        codegen.apply_with_saved_after.append(f"saved.after({visit_name});")
+
+        if unpacked_ref_type is None:
+            unpacked_ref_type = f"{codegen.saved_variables[-1].split(' ')[0]}&"
+        codegen.apply_functional_args.append(str(name))
+        codegen.apply_functional_arg_types.append(unpacked_ref_type)
+
+    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
+        save_var(var, is_output=False)
+    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
+        save_var(var, is_output=True)
+
+    return codegen
+
+
+def emit_derivative(
+    info: DifferentiabilityInfo,
+    derivative: Derivative,
+    input_layout: BackwardInputLayout,
+) -> EmittedDerivative:
+    formula = derivative.formula
+    var_names = derivative.var_names
+
+    if len(var_names) == 1:
+        requires_any_grad_defined = False
+        if "not_implemented" not in formula:
+            matching_args = [
+                arg
+                for arg in info.args_with_derivatives
+                if arg.name == var_names[0]
+            ]
+            if len(matching_args) == 1:
+                # We can add undefined grad support if the input variable is a Tensor.
+                arg = matching_args[0]
+                if isinstance(arg.argument, Argument) and str(arg.argument.type) in (
+                    "Tensor",
+                    "Tensor?",
+                ):
+                    formula = f"any_grad_defined ? ({formula}) : Tensor()"
+                    requires_any_grad_defined = True
+        derivative_template = (
+            DERIVATIVE_SINGLE_FOREACH
+            if info.name.startswith("_foreach_")
+            else DERIVATIVE_SINGLE
+        )
+        return EmittedDerivative(
+            code=derivative_template.substitute(
+                name=var_names[0],
+                derivative=formula,
+                idx=input_layout.input_name_to_idx[var_names[0]],
+            ),
+            requires_any_grad_defined=requires_any_grad_defined,
+        )
+
+    if "grad_input_mask" in formula:
+        masks = [
+            f"needs_input_grad[{input_layout.input_name_to_idx[name]}],"
+            for name in var_names
+        ]
+        grad_input_mask = GRAD_INPUT_MASK.substitute(n=len(var_names), masks=masks)
+    else:
+        grad_input_mask = ""
+    needs_input_grad = " || ".join(
+        f"needs_input_grad[{input_layout.input_name_to_idx[name]}]"
+        for name in var_names
+    )
+    copy_ranges = [
+        DERIVATIVE_MULTI_COPY_RANGE.substitute(
+            name=name,
+            i=i,
+            idx=input_layout.input_name_to_idx[name],
+        )
+        for i, name in enumerate(var_names)
+    ]
+    return EmittedDerivative(
+        code=DERIVATIVE_MULTI.substitute(
+            needs_input_grad=needs_input_grad,
+            copy_ranges=copy_ranges,
+            derivative=formula,
+            grad_input_mask=grad_input_mask,
+        ),
+        requires_any_grad_defined=False,
+    )
+
+
+def build_derivative_body(
+    info: DifferentiabilityInfo,
+    input_layout: BackwardInputLayout,
+) -> list[str]:
+    body: list[str] = []
+
+    if uses_single_grad(info):
+        body.append("const auto& grad = grads[0];")
+    else:
+        # Generate aliases for gradients named for returned values.
+        body.extend(
+            f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
+            for name in sorted(info.used_named_gradients)
+        )
+
+    emitted_derivatives = [
+        emit_derivative(info, derivative, input_layout) for derivative in info.derivatives
+    ]
+    if any(item.requires_any_grad_defined for item in emitted_derivatives):
+        body.append("bool any_grad_defined = any_variable_defined(grads);")
+    body.extend(item.code for item in emitted_derivatives)
+    return body
+
+
 def gen_autograd_functions_lib(
     out: str,
     differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
@@ -610,307 +1025,20 @@ def gen_autograd_functions_python(
 
 
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
-    saved_variables: list[str] = []
-    release_variables: list[str] = []
-    saved_list_sizes: list[str] = []
-    unpack: list[str] = []
-    asserts: list[str] = []
-    compute_index_ranges: list[str] = []
-    getter_definitions: list[str] = []
-    py_getsetdef_structs: list[str] = []
-    compiled_args: list[str] = []
-    apply_with_saved_before: list[str] = []
-    apply_with_saved_after: list[str] = []
-    apply_functional_args: list[str] = []
-    apply_functional_args_ref_types: list[str] = []
-    # Maps the name of an input (to the original forward operator;
-    # examples are "self", "other") to the order in which they appear in the
-    # operator.
-    # For example; if the operator is foo(Tensor self, int64_t k, Tensor other),
-    # the mapping is: {"self": 0, "other": 1}.
-    # We use this mapping to populate needs_input_grad in some order and then grab
-    # values from it.
-    input_name_to_idx: dict[str, int] = {}
-
-    for idx, arg in enumerate(info.args_with_derivatives):
-        if arg.type in TENSOR_LIST_LIKE_CTYPES:
-            size = f"{arg.name}_size_"
-            saved_list_sizes.append(f"size_t {arg.name}_size_;")
-            apply_functional_args.append(f"{arg.name}_size_")
-            apply_functional_args_ref_types.append("size_t")
-        else:
-            size = "1"
-        compute_index_ranges.append(f"auto {arg.name}_ix = gen.range({size});")
-        input_name_to_idx[arg.name] = idx
-
-    def save_var(var: SavedAttribute, is_output: bool) -> None:
-        name = var.nctype.name
-        type = var.nctype.type
-        should_append_getsetdef = True
-        should_append_raw_getsetdef = False
-        visit_name = name
-        uses_cpp_saved_variable_cls = False
-        unpacked_ref_type = None
-
-        if (
-            type == BaseCType(tensorT)
-            or type == OptionalCType(BaseCType(tensorT))
-            or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
-            or (type == BaseCType(scalarT) and is_output)
-        ):
-            uses_cpp_saved_variable_cls = True
-            saved_variables.append(f"SavedVariable {name}_;")
-            release_variables.append(f"{name}_.reset_data();")
-            ptr = "shared_from_this()" if is_output else ""
-            unpack.append(f"auto {name} = {name}_.unpack({ptr});")
-            getter_definitions.append(
-                GETTER_DEFINITION_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_SAVEDVAR
-                )
-            )
-            getter_definitions.append(
-                GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR
-                )
-            )
-            should_append_raw_getsetdef = True
-            visit_name = f"{name}_"
-            unpacked_ref_type = "Tensor&"
-        elif (
-            type == BaseCType(tensorListT)
-            or type == BaseCType(iTensorListRefT)
-            or type == VectorCType(BaseCType(tensorT))
-        ):
-            # note(crcrpar): [nuanced return type of out-of-place foreach functions]
-            # When an out-of-place foreach function whose return signature is `Tensor[]`
-            # spells out its backward definitions in `derivatives.yaml`, and some of them depend on
-            # `result`, `result`'s type is interpreted and treated as `std::vector<Tensor>`.
-            # An out-of-place foreach whose backwards rely on their output doesn't suffer from this
-            # difference if the definitions are codegen'ed.
-            # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
-            # as of https://github.com/pytorch/pytorch/pull/105504.
-            if type == VectorCType(BaseCType(tensorT)):
-                if not (
-                    info.func.func.name.name.base.startswith("_foreach") and is_output
-                ):
-                    raise AssertionError(
-                        "VectorCType(BaseCType(tensorT)) requires foreach function and is_output"
-                    )
-            uses_cpp_saved_variable_cls = True
-            saved_variables.append(f"std::vector<SavedVariable> {name}_;")
-            saved_variables.append(f"bool {name}_released_ = false;")
-            # Just clear() is sufficient, we don't need to loop and clear each variable.
-            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
-            release_variables.append(f"{name}_.clear();")
-            release_variables.append(f"{name}_released_ = true;")
-            ptr = "shared_from_this()" if is_output else "nullptr"
-            unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
-            asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
-            getter_definitions.append(
-                GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
-                )
-            )
-            getter_definitions.append(
-                GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
-                )
-            )
-            should_append_raw_getsetdef = True
-            visit_name = f"{name}_"
-            unpacked_ref_type = "std::vector<Tensor>&"
-        elif type == ListCType(OptionalCType(BaseCType(tensorT))):
-            uses_cpp_saved_variable_cls = True
-            saved_variables.append(f"std::vector<SavedVariable> {name}_;")
-            saved_variables.append(f"bool {name}_released_ = false;")
-            # Just clear() is sufficient, we don't need to loop and clear each variable.
-            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
-            release_variables.append(f"{name}_.clear();")
-            release_variables.append(f"{name}_released_ = true;")
-            unpack.append(f"auto {name} = unpack_opt_list({name}_);")
-            asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
-            getter_definitions.append(
-                GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
-                )
-            )
-            getter_definitions.append(
-                GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
-                )
-            )
-            should_append_raw_getsetdef = True
-            visit_name = f"{name}_"
-            unpacked_ref_type = "torch::List<std::optional<Tensor>>&"
-        elif type == BaseCType(intArrayRefT):
-            saved_variables.append(f"std::vector<int64_t> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
-                )
-            )
-        elif type == BaseCType(symIntArrayRefT):
-            saved_variables.append(f"std::vector<c10::SymInt> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
-                )
-            )
-        elif type == BaseCType(optionalIntArrayRefT):
-            saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
-                )
-            )
-        elif type == BaseCType(optionalSymIntArrayRefT):
-            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
-                )
-            )
-        elif type == OptionalCType(BaseCType(intArrayRefT)):
-            saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
-                )
-            )
-        elif type == OptionalCType(BaseCType(symIntArrayRefT)):
-            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
-                )
-            )
-        elif type == OptionalCType(ArrayRefCType(BaseCType(doubleT))):
-            saved_variables.append(f"c10::OptionalArray<double> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE
-                )
-            )
-        elif type == BaseCType(longT):
-            saved_variables.append(f"{type.cpp_type()} {name} = 0;")
-            getter_definitions.append(
-                GETTER_DEFINITION.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_INT64_T
-                )
-            )
-        elif type == BaseCType(SymIntT):
-            saved_variables.append(f"c10::SymInt {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_SYMINT
-                )
-            )
-        elif type == BaseCType(stringT):
-            saved_variables.append(f"std::string {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_STRING
-                )
-            )
-        elif type == OptionalCType(BaseCType(stringT)):
-            saved_variables.append(f"std::optional<std::string> {name};")
-            getter_definitions.append(
-                GETTER_DEFINITION_OPT.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_STRING
-                )
-            )
-        elif type == ArrayRefCType(
-            elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
-        ):
-            saved_variables.append(f"std::vector<at::Scalar> {name};")
-            unpacked_ref_type = "std::vector<at::Scalar>&"
-            saved_variables.append(f"bool {name}_released_ = false;")
-            # Just clear() is sufficient, we don't need to loop and clear each variable.
-            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
-            release_variables.append(f"{name}.clear();")
-            # release_variables.append(f"{name}_released_ = true;")
-            # unpack.append(f"auto {name} = unpack_list({name}_);")
-            # asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
-            getter_definitions.append(
-                CodeTemplate(
-                    """\
-static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
-  HANDLE_TH_ERRORS
-  const auto *node = static_cast<${op}*>(self->cdata.get());
-  const auto& prop = node->${name};
-  if (node->${name}_released_) {
-    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
-    return nullptr;
-  }
-  ${body}
-  END_HANDLE_TH_ERRORS
-}
-                            """
-                ).substitute(
-                    op=info.op,
-                    name=name,
-                    body=GETTER_BODY_VEC_SCALAR,
-                )
-            )
-        else:
-            # Check for indicators that you're putting a non-owning reference
-            # into the saved variable field.  If this is spuriously firing,
-            # edit this field.  Otherwise, you probably need to add a case
-            # above.
-            if not (
-                "ref" not in type.cpp_type().lower()
-                and "view" not in type.cpp_type().lower()
-                and "*" not in type.cpp_type()
-                and "&" not in type.cpp_type()
-            ):
-                raise AssertionError(
-                    f"{type.cpp_type()} looks like it contains a non-owning reference"
-                )
-            saved_variables.append(f"{type.cpp_type()} {name};")
-
-            if type in MISC_GETTER_DEFS:
-                # pyrefly: ignore [bad-index, index-error]
-                getter_def, body = MISC_GETTER_DEFS[type]
-                getter_definitions.append(
-                    getter_def.substitute(op=info.op, name=name, body=body)
-                )
-            else:
-                # Types we don't expose python bindings to yet:
-                #   TypeAndSize, at::ScalarType, TensorOptions, TensorGeometry,
-                #   std::vector<std::vector<int64_t>>, std::vector<at::ScalarType>
-                should_append_getsetdef = False
-
-        if should_append_getsetdef:
-            py_getsetdef_structs.append(
-                PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
-            )
-        if should_append_raw_getsetdef:
-            py_getsetdef_structs.append(
-                PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
-            )
-
-        if uses_cpp_saved_variable_cls:
-            compiled_args.append(
-                f"args.collect({visit_name}, {'true' if is_output else 'false'});"
-            )
-        else:
-            compiled_args.append(f"args.collect({visit_name});")
-        apply_with_saved_before.append(f"saved.before({visit_name});")
-        apply_with_saved_after.append(f"saved.after({visit_name});")
-
-        if unpacked_ref_type is None:
-            unpacked_ref_type = f"{saved_variables[-1].split(' ')[0]}&"
-        apply_functional_args.append(str(name))
-        apply_functional_args_ref_types.append(unpacked_ref_type)
-
-    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
-        save_var(var, is_output=False)
-    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
-        save_var(var, is_output=True)
+    input_layout = build_backward_input_layout(info)
+    saved_variable_codegen = build_saved_variable_codegen(info)
+    apply_functional_args = [
+        *input_layout.apply_functional_args,
+        *saved_variable_codegen.apply_functional_args,
+    ]
+    apply_functional_args_ref_types = [
+        *input_layout.apply_functional_arg_types,
+        *saved_variable_codegen.apply_functional_arg_types,
+    ]
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
     # see Note [Thread Safety on Autograd Node]
-    if len(release_variables) > 0:
+    if len(saved_variable_codegen.release_variables) > 0:
         thread_lock = "std::lock_guard<std::mutex> lock(mutex_);"
     else:
         thread_lock = ""
@@ -922,100 +1050,7 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     else:
         will_release_variables = ""
 
-    body: list[str] = []
-
-    if uses_single_grad(info):
-        body.append("const auto& grad = grads[0];")
-    else:
-        # Generate aliases for gradients named for returned values.
-        body.extend(
-            f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
-            for name in sorted(info.used_named_gradients)
-        )
-
-    def emit_derivative(
-        derivative: Derivative,
-        args_with_derivatives: Sequence[Binding],
-    ) -> tuple[bool, str]:
-        formula = derivative.formula
-        var_names = derivative.var_names
-
-        if len(var_names) == 1:
-            checks_any_grad_defined = False
-            if "not_implemented" not in formula:
-                matching_args = [
-                    arg for arg in args_with_derivatives if arg.name == var_names[0]
-                ]
-                if len(matching_args) == 1:
-                    # We can add undefined grad support if the input variable is a Tensor
-                    arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(
-                        arg.argument.type
-                    ) in ("Tensor", "Tensor?"):
-                        formula = "any_grad_defined ? (" + formula + ") : Tensor()"
-                        checks_any_grad_defined = True
-            if info.name.startswith("_foreach_"):
-                derivative_template = DERIVATIVE_SINGLE_FOREACH
-            else:
-                derivative_template = DERIVATIVE_SINGLE
-            return (
-                checks_any_grad_defined,
-                derivative_template.substitute(
-                    name=var_names[0],
-                    derivative=formula,
-                    idx=input_name_to_idx[var_names[0]],
-                ),
-            )
-
-        else:
-            if "grad_input_mask" in formula:
-                masks = [
-                    f"needs_input_grad[{input_name_to_idx[name]}],"
-                    for name in var_names
-                ]
-                grad_input_mask = GRAD_INPUT_MASK.substitute(
-                    n=len(var_names), masks=masks
-                )
-            else:
-                grad_input_mask = ""
-            needs_input_grad = [
-                f"needs_input_grad[{input_name_to_idx[name]}]" for name in var_names
-            ]
-            needs_input_grad = " || ".join(needs_input_grad)
-            copy_ranges: list[str] = []
-            for i, n in enumerate(var_names):
-                copy_ranges.append(
-                    DERIVATIVE_MULTI_COPY_RANGE.substitute(
-                        name=n, i=i, idx=input_name_to_idx[n]
-                    )
-                )
-            return False, DERIVATIVE_MULTI.substitute(
-                needs_input_grad=needs_input_grad,
-                copy_ranges=copy_ranges,
-                derivative=formula,
-                grad_input_mask=grad_input_mask,
-            )
-
-    masks = []
-
-    need_any_grad_defined_var = False
-    for derivative in info.derivatives:
-        checks_any_grad_defined, derivative_text = emit_derivative(
-            derivative, info.args_with_derivatives
-        )
-        body.append(derivative_text)
-        need_any_grad_defined_var |= checks_any_grad_defined
-
-    for name in input_name_to_idx:
-        masks.append(f"task_should_compute_output({{ {name}_ix }}),")
-
-    # Since single-output derivative formulas need to check if grads are
-    # defined, only perform the check once, before all the formulas
-    if need_any_grad_defined_var:
-        body.insert(
-            -len(info.derivatives),
-            "bool any_grad_defined = any_variable_defined(grads);",
-        )
+    body = build_derivative_body(info, input_layout)
 
     if info.name in UNTRACEABLE_FUNCTIONS:
         superclass = "Node"
@@ -1023,12 +1058,16 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         superclass = "TraceableFunction"
 
     all_getsetdef_structs = (
-        ",\n".join(py_getsetdef_structs) + "," if len(py_getsetdef_structs) != 0 else ""
+        ",\n".join(saved_variable_codegen.py_getsetdef_structs) + ","
+        if len(saved_variable_codegen.py_getsetdef_structs) != 0
+        else ""
     )
-    all_getter_definitions = "\n".join(getter_definitions)
+    all_getter_definitions = "\n".join(saved_variable_codegen.getter_definitions)
 
     compute_needs_input_grad = COMPUTE_NEEDS_INPUT_GRAD.substitute(
-        n=len(masks), compute_index_ranges=compute_index_ranges, masks=masks
+        n=input_layout.num_inputs,
+        compute_index_ranges=input_layout.compute_index_ranges,
+        masks=input_layout.needs_input_grad_masks,
     )
     apply_functional_args_signature = [
         f"{T} {x}"
@@ -1043,7 +1082,7 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         # pyrefly: ignore [bad-argument-type]
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
-    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    schema_args = [f"std::array<bool, {input_layout.num_inputs}>"]
     for typ in apply_functional_args_ref_types:
         typ = typ.removesuffix("&")
         typ = typ.removeprefix("const")
@@ -1056,27 +1095,27 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     compute_schema.append("};")
 
     return template.substitute(
-        unpacks="\n".join(unpack),
+        unpacks="\n".join(saved_variable_codegen.unpacks),
         op=info.op,
         compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
-        num_inputs=len(input_name_to_idx),
+        num_inputs=input_layout.num_inputs,
         unpack_ivalues="\n".join(unpack_ivalues),
-        compute_index_ranges=compute_index_ranges,
-        saved_variables=saved_variables,
-        release_variables=release_variables,
-        saved_list_sizes=saved_list_sizes,
-        asserts=asserts,
+        compute_index_ranges=input_layout.compute_index_ranges,
+        saved_variables=saved_variable_codegen.saved_variables,
+        release_variables=saved_variable_codegen.release_variables,
+        saved_list_sizes=input_layout.saved_list_sizes,
+        asserts=saved_variable_codegen.asserts,
         thread_lock=thread_lock,
         will_release_variables=will_release_variables,
         body=body,
         superclass=superclass,
         all_getter_definitions=all_getter_definitions,
         all_getsetdef_structs=all_getsetdef_structs,
-        compiled_args=compiled_args,
-        apply_with_saved_before=apply_with_saved_before,
-        apply_with_saved_after=apply_with_saved_after,
+        compiled_args=saved_variable_codegen.compiled_args,
+        apply_with_saved_before=saved_variable_codegen.apply_with_saved_before,
+        apply_with_saved_after=saved_variable_codegen.apply_with_saved_after,
         get_packed_args=get_packed_args,
     )

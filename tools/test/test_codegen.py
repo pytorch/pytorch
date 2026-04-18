@@ -192,6 +192,82 @@ class TestGenAutogradFunctions(unittest.TestCase):
                 "grad_z should map to grads[1] in nested_tensor_definition"
             )
 
+    def test_build_backward_input_layout_tracks_tensor_lists(self) -> None:
+        specification = "func(Tensor[] tensors, Tensor other) -> Tensor"
+        schema = FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
+
+        _, differentiability_info = load_derivatives.create_differentiability_info(
+            defn_dict={
+                "name": specification,
+                "dispatch": {
+                    "Default": {
+                        "tensors": 'not_implemented("tensors")',
+                        "other": "grad",
+                    }
+                },
+            },
+            functions_by_signature={schema.signature(): [native_function]},
+            functions_by_schema={specification: native_function},
+            op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
+        )
+
+        layout = gen_autograd_functions.build_backward_input_layout(
+            differentiability_info["Default"]
+        )
+
+        self.assertEqual(layout.input_name_to_idx, {"tensors": 0, "other": 1})
+        self.assertEqual(layout.saved_list_sizes, ["size_t tensors_size_;"])
+        self.assertEqual(layout.apply_functional_args, ["tensors_size_"])
+        self.assertEqual(
+            layout.compute_index_ranges,
+            [
+                "auto tensors_ix = gen.range(tensors_size_);",
+                "auto other_ix = gen.range(1);",
+            ],
+        )
+
+    def test_build_derivative_body_hoists_any_grad_defined_once(self) -> None:
+        specification = "func(Tensor a, Tensor b) -> Tensor"
+        schema = FunctionSchema.parse(specification)
+        native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
+
+        _, differentiability_info = load_derivatives.create_differentiability_info(
+            defn_dict={
+                "name": specification,
+                "dispatch": {
+                    "Default": {
+                        "a": "a_backward(grad)",
+                        "b": "b_backward(grad)",
+                    }
+                },
+            },
+            functions_by_signature={schema.signature(): [native_function]},
+            functions_by_schema={specification: native_function},
+            op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
+        )
+
+        body = "\n".join(
+            gen_autograd_functions.build_derivative_body(
+                differentiability_info["Default"],
+                gen_autograd_functions.build_backward_input_layout(
+                    differentiability_info["Default"]
+                ),
+            )
+        )
+
+        self.assertEqual(
+            body.count("bool any_grad_defined = any_variable_defined(grads);"), 1
+        )
+        self.assertLess(
+            body.index("bool any_grad_defined = any_variable_defined(grads);"),
+            body.index("if (needs_input_grad[/*a*/0])"),
+        )
+        self.assertIn("any_grad_defined ? (a_backward(grad)) : Tensor()", body)
+        self.assertIn("any_grad_defined ? (b_backward(grad)) : Tensor()", body)
+
     def test_register_bogus_dispatch_key(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"
         schema = FunctionSchema.parse(specification)
