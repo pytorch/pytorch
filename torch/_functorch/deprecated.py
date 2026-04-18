@@ -105,9 +105,17 @@ def jvp(
     *,
     strict: bool = False,
     has_aux: bool = False,
+    track_tangent_grad: bool = True,
 ) -> Any:
     warn_deprecated("jvp")
-    return _impl.jvp(func, primals, tangents, strict=strict, has_aux=has_aux)
+    return _impl.jvp(
+        func,
+        primals,
+        tangents,
+        strict=strict,
+        has_aux=has_aux,
+        track_tangent_grad=track_tangent_grad,
+    )
 
 
 def jacrev(

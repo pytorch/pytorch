@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <c10/core/AutogradState.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/input_metadata.h>
@@ -265,6 +266,10 @@ void AutogradMeta::set_fw_grad(
       new_grad = res;
     }
 
+    // With track_tangent_grad=False, we store the tangent in a detached state
+    if (c10::AutogradState::get_tls_state().get_fw_grad_tangent_not_tracked()) {
+      new_grad = new_grad.detach();
+    }
     fw_grad_->set_value(new_grad, level);
   }
 }

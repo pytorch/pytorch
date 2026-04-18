@@ -16,13 +16,15 @@ struct C10_API AutogradState {
       bool grad_mode,
       bool inference_mode,
       bool fw_grad_mode,
-      bool multithreading_enabled)
+      bool multithreading_enabled,
+      bool fw_grad_tangent_not_tracked = false)
       : graph_exec_group_(std::nullopt),
         grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
         multithreading_enabled_(multithreading_enabled),
-        view_replay_enabled_(false) {}
+        view_replay_enabled_(false),
+        fw_grad_tangent_not_tracked_(fw_grad_tangent_not_tracked) {}
 
   void set_grad_mode(bool enabled) {
     grad_mode_ = enabled;
@@ -42,6 +44,10 @@ struct C10_API AutogradState {
 
   void set_view_replay_enabled(bool view_replay_enabled) {
     view_replay_enabled_ = view_replay_enabled;
+  }
+
+  void set_fw_grad_tangent_not_tracked(bool enabled) {
+    fw_grad_tangent_not_tracked_ = enabled;
   }
 
   void set_graph_exec_group(std::optional<SafePyObject> group) {
@@ -68,6 +74,10 @@ struct C10_API AutogradState {
     return view_replay_enabled_;
   }
 
+  bool get_fw_grad_tangent_not_tracked() const {
+    return fw_grad_tangent_not_tracked_;
+  }
+
   const std::optional<SafePyObject>& get_graph_exec_group() const {
     return graph_exec_group_;
   }
@@ -80,6 +90,7 @@ struct C10_API AutogradState {
   bool multithreading_enabled_ : 1;
   // NOLINTNEXTLINE(cppcoreguidelines-use-default-member-init)
   bool view_replay_enabled_ : 1;
+  bool fw_grad_tangent_not_tracked_ : 1;
 };
 
 } // namespace c10
