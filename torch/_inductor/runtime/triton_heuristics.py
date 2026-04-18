@@ -991,6 +991,17 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+
+            # Validate argument count to provide a clear error message instead of
+            # a confusing "got multiple values for argument" error
+            if len(cloned_args) > len(launcher.def_args):
+                raise TypeError(
+                    f"launcher() expected at most {len(launcher.def_args)} positional "
+                    f"argument(s) but got {len(cloned_args)}. If you are passing extra "
+                    f"arguments (e.g., grid values) as positional args, please pass "
+                    f"them as keyword arguments instead."
+                )
+
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -1755,6 +1766,16 @@ class CachingAutotuner(KernelInterface):
                 _dump_launch_tensors(
                     args, self.filename, self.kernel_hash, self.fn.__name__
                 )
+
+        # Validate argument count to provide a clear error message instead of
+        # a confusing "got multiple values for argument" error
+        if len(args) > len(launcher.def_args):
+            raise TypeError(
+                f"launcher() expected at most {len(launcher.def_args)} positional "
+                f"argument(s) but got {len(args)}. If you are passing extra "
+                f"arguments (e.g., grid values) as positional args, please pass "
+                f"them as keyword arguments instead."
+            )
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
