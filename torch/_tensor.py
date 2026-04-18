@@ -1256,7 +1256,7 @@ class Tensor(torch._C.TensorBase):
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
-    def __array_wrap__(self, array):
+    def __array_wrap__(self, array, context=None, return_scalar=None):
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.__array_wrap__, (self,), self, array=array
