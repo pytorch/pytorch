@@ -1482,6 +1482,12 @@ Tensor& nanmean_out(
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
+  if (opt_dtype.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
+        "nanmean(): Optional dtype must be either a floating point or complex dtype. Got: ",
+        toString(opt_dtype.value()));
+  }
   // Check if dtype is an integral type or Bool and raise an error
   TORCH_CHECK(
     !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
@@ -1500,6 +1506,12 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
+  if (opt_dtype.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
+        "nanmean(): Optional dtype must be either a floating point or complex dtype. Got: ",
+        toString(opt_dtype.value()));
+  }
   TORCH_CHECK(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
