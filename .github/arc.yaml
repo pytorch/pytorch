@@ -91,3 +91,5 @@ runner_mapping:
 
   linux.idc.xpu: linux.idc.xpu
   linux.rocm.gpu.2: linux.rocm.gpu.2
+  linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
+  linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2

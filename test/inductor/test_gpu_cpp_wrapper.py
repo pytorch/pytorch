@@ -250,7 +250,6 @@ class TestGpuWrapper(InductorTestCase):
         for p, e in zip(params, expected):
             self.assertEqual(p, e)
 
-
     def test_cpp_wrapper_backward_lazy_compile(self):
         """Test that options={"cpp_wrapper": True} works with backward pass.
 
@@ -274,12 +273,15 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+
 instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.
 _LAZY_COMPILE_COLLISION_SCRIPT = """\
 import torch
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
 from torch._inductor import config
 
 config.cpp_wrapper = True
@@ -295,7 +297,7 @@ def fn(x, y, z, w):
     d = (c * w).cos()
     return d.sum()
 
-args = [torch.randn(32, device="cuda", requires_grad=True) for _ in range(4)]
+args = [torch.randn(32, device=GPU_TYPE, requires_grad=True) for _ in range(4)]
 ref_args = [a.detach().clone().requires_grad_(True) for a in args]
 ref = fn(*ref_args)
 ref.backward()

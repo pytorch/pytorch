@@ -13,6 +13,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint
 from functorch.compile import (
     default_partition,
@@ -2814,6 +2815,103 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     detach_6 = torch.ops.aten.detach.default(add);  add = None
     return (detach_6,)""",
         )
+
+    def test_chunked_loss_remat(self):
+        """Chunked loss pattern: multiple backward regions from chunk_loss.backward()
+        calls, but only the final x.backward() region needs remat. The pass should
+        skip the chunk backwards and only rematerialize for the final one."""
+        dim = 32
+        chunksz = 4
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class ChunkedLoss(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+                self.head = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x, y):
+                x = self.block(x)
+                x_detached = x.detach().requires_grad_()
+                total = 0
+                for start in range(0, x_detached.shape[0], chunksz):
+                    end = start + chunksz
+                    chunk_loss = (
+                        F.mse_loss(
+                            self.head(x_detached[start:end]),
+                            y[start:end],
+                            reduction="sum",
+                        )
+                        / x_detached.shape[0]
+                    )
+                    chunk_loss.backward()
+                    total = total + chunk_loss.detach()
+                x.backward(x_detached.grad)
+                return total
+
+        model = ChunkedLoss()
+        x = torch.randn(12, dim)
+        y = torch.randn(12, dim)
+
+        result_with, gm_with = self._compile_and_capture(model, True, (x, y))
+        result_without, gm_without = self._compile_and_capture(model, False, (x, y))
+
+        torch.testing.assert_close(result_with, result_without)
+
+        # Without remat, gelu appears once (forward only).
+        # With remat, gelu is duplicated into the backward region.
+        gelu_without = self.count_op(gm_without, torch.ops.aten.gelu.default)
+        gelu_with = self.count_op(gm_with, torch.ops.aten.gelu.default)
+        self.assertEqual(gelu_without, 1)
+        self.assertEqual(gelu_with, 2, "gelu should be recomputed in backward")
+
+    def test_two_backward_regions_needing_remat_errors(self):
+        """Two independent backward calls that both need recompute should error."""
+        dim = 32
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class TwoBackwards(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block1 = Block()
+                self.block2 = Block()
+
+            def forward(self, x):
+                y = self.block1(x)
+                z = self.block2(y)
+                z.sum().backward(retain_graph=True)
+                y.sum().backward()
+                return z.detach()
+
+        x = torch.randn(8, dim, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "require recomputation",
+        ):
+            self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
 devices = ["cuda", "hpu"]
