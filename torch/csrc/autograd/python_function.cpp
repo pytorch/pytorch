@@ -1965,9 +1965,7 @@ PyTypeObject THPFunctionType = {
 };
 
 bool THPFunction_initModule(PyObject* module) {
-  if (PyType_Ready(&THPFunctionType) < 0)
+  if (PyModule_AddType(module, &THPFunctionType) < 0)
     return false;
-  Py_INCREF(&THPFunctionType);
-  PyModule_AddObject(module, "_FunctionBase", (PyObject*)&THPFunctionType);
   return true;
 }

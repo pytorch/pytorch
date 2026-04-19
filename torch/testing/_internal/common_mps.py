@@ -344,7 +344,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "frexp": None,
             "geqrf": None,
-            "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -831,6 +830,10 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
+            # MPS uses float32 intermediates (opmath_t) while CPU uses native
+            # half/bfloat16 precision, causing unbounded divergence.
+            # Half precision is covered by test_grid_sampler_3d_half_precision.
+            "nn.functional.grid_sample": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -926,7 +929,6 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
-            "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
