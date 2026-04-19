@@ -977,7 +977,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() {}
+  AccumulationBuffer() = default;
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;

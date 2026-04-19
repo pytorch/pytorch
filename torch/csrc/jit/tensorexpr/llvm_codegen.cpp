@@ -186,7 +186,7 @@ using FunctionCallee = llvm::FunctionCallee;
 #elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
 
 struct FunctionCallee {
-  FunctionCallee() {}
+  FunctionCallee() = default;
 
   FunctionCallee(llvm::Constant* fn)
       : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
