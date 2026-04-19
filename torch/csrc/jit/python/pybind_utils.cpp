@@ -74,7 +74,7 @@ static IValue listToIValue(py::handle obj) {
 IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
-      if (obj.ptr() == Py_None) {
+      if (Py_IsNone(obj.ptr())) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }

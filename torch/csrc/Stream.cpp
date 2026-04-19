@@ -237,7 +237,7 @@ static PyObject* THPStream_record_event(
           &_event)) {
     TORCH_CHECK(false, "parse record_event arg fails");
   }
-  if (_event != Py_None) {
+  if (!Py_IsNone(_event)) {
     // We expect it to be an explicit torch.Event instance.
     TORCH_CHECK(
         Py_TYPE(_event) == THPEventClass,
@@ -379,7 +379,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   PyObject* top = PyList_GET_ITEM(self->context, stack_size - 1);
 
   // Sentinel: this __enter__ was a no-op, nothing to restore.
-  if (top == Py_None) {
+  if (Py_IsNone(top)) {
     if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) <
         0) {
       throw python_error();
@@ -434,7 +434,7 @@ static PyObject* THPStream_richcompare(
     PyObject* other,
     int op) {
   PyObject* result = nullptr;
-  if (other == Py_None) {
+  if (Py_IsNone(other)) {
     result = Py_False;
   } else {
     switch (op) {
