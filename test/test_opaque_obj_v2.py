@@ -439,6 +439,11 @@ class TensorWithCounter(torch.Tensor):
 
 class TestOpaqueObject(TestCase):
     def setUp(self):
+        # Must run first: super().setUp() can raise SkipTest (e.g. under
+        # PYTORCH_TEST_SKIP_FAST), and unittest skips tearDown when setUp
+        # raises. Any registrations before this would leak into the next test.
+        super().setUp()
+
         self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
         self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
@@ -881,8 +886,6 @@ class TestOpaqueObject(TestCase):
         @torch.library.register_fake("_TestOpaqueObject::counter_start", lib=self.lib)
         def counter_start_fake(a: Counter) -> torch.Tensor:
             return torch.scalar_tensor(0, dtype=torch.int64)
-
-        super().setUp()
 
     def tearDown(self):
         self.lib._destroy()
