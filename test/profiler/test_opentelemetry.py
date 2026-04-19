@@ -3,12 +3,10 @@
 """Tests for OpenTelemetry trace export support."""
 
 import threading
-import typing
 import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
-from torch.autograd.profiler import profile as _profile
 from torch.profiler import kineto_available, profile, ProfilerActivity
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -162,7 +160,9 @@ class TestOpenTelemetryExport(TestCase):
             prof.step()
 
         spans = exporter.get_finished_spans()
-        self.assertTrue(len(spans) > 0, "Expected at least one OTel span to be exported")
+        self.assertTrue(
+            len(spans) > 0, "Expected at least one OTel span to be exported"
+        )
 
         # Verify span attributes
         for span in spans:
@@ -219,7 +219,7 @@ class TestOpenTelemetryExport(TestCase):
         ) as prof:
             # Do operations that create parent-child relationships
             x = torch.randn(20, 20)
-            y = torch.mm(x, x)
+            _y = torch.mm(x, x)
             prof.step()
 
         spans = exporter.get_finished_spans()
@@ -232,8 +232,11 @@ class TestOpenTelemetryExport(TestCase):
         }
         # Some spans should reference other spans as parents
         # (not all, since root spans have no parent)
-        has_children = len(parent_ids & span_ids) > 0 or len(spans) <= 1
-        # This is a soft check - profiler event trees may vary
+        if len(spans) > 1:
+            self.assertTrue(
+                len(parent_ids & span_ids) > 0,
+                "Expected at least one parent-child relationship between spans",
+            )
         self.assertTrue(len(spans) > 0)
 
     @unittest.skipIf(not _otel_available(), "opentelemetry not installed")
@@ -278,10 +281,10 @@ class TestOpenTelemetryExport(TestCase):
         self.assertTrue(len(spans) > 0)
 
         for span in spans:
-            # Span start should be after we started profiling (with some tolerance)
-            # and end should be before now
             self.assertGreater(span.start_time, 0)
             self.assertGreaterEqual(span.end_time, span.start_time)
+            self.assertLessEqual(span.end_time, after_ns)
+            self.assertGreaterEqual(span.start_time, before_ns - 5_000_000_000)
 
 
 class TestOpenTelemetryExportPublicAPI(TestCase):

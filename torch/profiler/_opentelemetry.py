@@ -33,8 +33,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SpanExporter
+    from opentelemetry.sdk.trace import TracerProvider  # pyrefly: ignore [missing-import]
+    from opentelemetry.sdk.trace.export import SpanExporter  # pyrefly: ignore [missing-import]
 
     from torch.autograd.profiler_util import FunctionEvent
     from torch.profiler.profiler import _KinetoProfile
@@ -149,6 +149,7 @@ def _build_span_attributes(event: FunctionEvent) -> dict[str, Any]:
 # Event tree reconstruction
 # ---------------------------------------------------------------------------
 
+
 def _build_event_tree(
     events: Sequence[FunctionEvent],
 ) -> list[FunctionEvent]:
@@ -163,6 +164,7 @@ def _build_event_tree(
 # ---------------------------------------------------------------------------
 # Span creation
 # ---------------------------------------------------------------------------
+
 
 def _export_event_as_span(
     event: FunctionEvent,
@@ -184,7 +186,6 @@ def _export_event_as_span(
     parent_context:
         Optional OTel ``Context`` to set as the parent.
     """
-    from opentelemetry import context as otel_context
     from opentelemetry import trace as otel_trace
 
     attrs = _build_span_attributes(event)
