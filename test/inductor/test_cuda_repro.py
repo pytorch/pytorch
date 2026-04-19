@@ -1796,15 +1796,15 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_dont_inplace_disjoint_accesses(self):
         # TODO - would not need mms if we could annotate donated buffer..
-        def forward(
-            arg0_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
-            arg1_1: f"bf16[8, 4096, 2048][8388608, 2048, 1]{device_type}:0",
-            arg2_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
-            arg3_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
-            arg4_1: f"bf16[2048][1]{device_type}:0",
-            arg5_1: f"bf16[2048][1]{device_type}:0",
-            arg6_1: f"f32[4096, 128][128, 1]{device_type}:0",
-            arg7_1: f"f32[4096, 128][128, 1]{device_type}:0",
+        def forward(  # noqa: F821, F722
+            arg0_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
+            arg1_1: f"bf16[8, 4096, 2048][8388608, 2048, 1]{device_type}:0",  # noqa: F821, F722
+            arg2_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
+            arg3_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
+            arg4_1: f"bf16[2048][1]{device_type}:0",  # noqa: F821, F722
+            arg5_1: f"bf16[2048][1]{device_type}:0",  # noqa: F821, F722
+            arg6_1: f"f32[4096, 128][128, 1]{device_type}:0",  # noqa: F821, F722
+            arg7_1: f"f32[4096, 128][128, 1]{device_type}:0",  # noqa: F821, F722
         ):
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
             arg0_1 = None
@@ -2326,7 +2326,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     tmp0 = tl.load(in_ptr0 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
     tmp1 = tl.load(in_ptr1 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
-    tl.store(out_ptr0 + (x3), tmp2, xmask)""",
+    tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")

@@ -374,7 +374,7 @@ class TestFX(JitTestCase):
 
     def test_args_kwargs_no_self(self):
         class T(torch.nn.Module):
-            def forward(*args, **kwargs):
+            def forward(*args, **kwargs):  # noqa: B902
                 self = args[0]
                 return torch.relu(args[1])
 

@@ -176,16 +176,16 @@ class TestGenerator(JitTestCase):
 
                 try:
                     self.assertEqual(out1, out2)
-                except:
+                except:  # noqa: B001, E722
                     print(f"Iteration {i}:\n{out1=}\n{out2=}")
                     raise
 
                 try:
                     self.assertEqual(r1, r2)
-                except:
+                except:  # noqa: B001, E722
                     print(f"Iteration {i}:\n{r1=}\n{r2=}")
                     raise
-        except:
+        except:  # noqa: B001, E722
             print(loaded_module.forward.code)
             raise
 

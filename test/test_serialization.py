@@ -60,7 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_MTIA,
     TestCase,
 )
-from torch.testing._internal.two_tensor import TwoTensor
+from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
 from torch.utils._import_utils import import_dill
 from pickle import UnpicklingError
 
@@ -4673,7 +4673,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             try:
                 old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
-                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()
+                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807
                 unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
                 self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
             finally:

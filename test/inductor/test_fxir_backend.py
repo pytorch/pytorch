@@ -1043,7 +1043,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",
+    return [buf1, buf2]""",  # noqa: B950
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):

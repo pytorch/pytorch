@@ -14,15 +14,15 @@ from torch._inductor import config
 
 
 try:
-    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:device_interface
+    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:device_interface  # noqa: B950
         DeviceInterface,
     )
-    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend
+    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         CPUDeviceOpOverrides,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
-    from extension_backends.triton.extension_triton_heuristics import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics
+    from extension_backends.triton.extension_triton_heuristics import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics  # noqa: B950
         EXTENSION_TRITON_META_FIELD,
     )
 except ImportError:

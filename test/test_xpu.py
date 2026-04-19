@@ -628,7 +628,7 @@ print(torch.xpu.is_initialized())
     def test_out_of_memory(self):
         if self.expandable_segments:
             self.skipTest("Skipping OOM test for expandable segments allocator.")
-        tensor = torch.zeros(1024, device="xpu")
+        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
@@ -2084,7 +2084,7 @@ if __name__ == "__main__":
         g = torch.xpu.XPUGraph()
         with self.assertRaisesRegex(
             RuntimeError,
-            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",
+            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
         ):
             with torch.xpu.graph(g):
                 torch.xpu.manual_seed(1)
@@ -2440,14 +2440,14 @@ if __name__ == "__main__":
             try:
                 with torch.xpu.stream(stream):
                     mem = torch.xpu.caching_allocator_alloc(1024)
-            except BaseException:
+            except BaseException:  # noqa: B036
                 if mem is None:
                     return
             try:
                 torch.xpu.caching_allocator_delete(mem)
                 mem = None
                 return None
-            except BaseException:
+            except BaseException:  # noqa: B036
                 pass
 
         def throws_on_xpu_event():

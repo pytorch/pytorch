@@ -181,7 +181,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -277,7 +277,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -900,7 +900,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -990,7 +990,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass

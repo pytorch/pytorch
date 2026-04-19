@@ -342,7 +342,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         sin: "f32[10][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
         cos: "f32[10][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
         add: "f32[10][1]cpu" = torch.ops.aten.add.Tensor(cos, 2);  cos = None
-        return (add,)""",
+        return (add,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )

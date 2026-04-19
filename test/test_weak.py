@@ -175,11 +175,11 @@ class WeakTest(TestCase):
 
         # Cannot give these slots as weakrefs weren't supported
         # on these objects until later versions of Python
-        class DummyKey:
+        class DummyKey:  # noqa: B903
             def __init__(self, ctr):
                 self.ctr = ctr
 
-        class DummyValue:
+        class DummyValue:  # noqa: B903
             def __init__(self, ctr):
                 self.ctr = ctr
 

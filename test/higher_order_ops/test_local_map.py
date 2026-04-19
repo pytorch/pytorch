@@ -1,4 +1,5 @@
 # Owner(s): ["module: higher order operators"]
+# flake8: noqa: B950
 
 
 import functools

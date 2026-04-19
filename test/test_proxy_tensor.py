@@ -656,7 +656,7 @@ def forward(self, x_1):
 
                 self.layer_norm = torch.nn.LayerNorm(input_dim)
 
-            def forward(mod_self, x):
+            def forward(mod_self, x):  # noqa: B902
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
                 y = mod_self.layer_norm(x)
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
@@ -1212,7 +1212,7 @@ def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
-    return cumsum"""
+    return cumsum"""  # noqa: B950
         )
 
 
@@ -1229,7 +1229,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
     index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
-    return index_select"""
+    return index_select"""  # noqa: B950
         )
 
     def test_arange_unbacked_output_size(self):
@@ -1242,7 +1242,7 @@ def forward(self, x_1, y_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return arange"""
+    return arange"""  # noqa: B950
         )
 
     def test_adv_index_batch(self):
@@ -1347,7 +1347,7 @@ def forward(self, a_1):
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return empty"""
+    return empty"""  # noqa: B950
         )
 
 
@@ -1366,7 +1366,7 @@ def forward(self, x_1):
     scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
     copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
-    return x_1"""
+    return x_1"""  # noqa: B950
         )
 
     def test_dynamic_pointwise_scalar(self):
@@ -1422,7 +1422,7 @@ def forward(self, crop_camera_1, mask_1):
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
-    return None""")
+    return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
         def f(x, m):
@@ -1501,7 +1501,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
-    return add""")
+    return add""")  # noqa: B950
 
     def test_reshape_divisibility_unbacked(self):
         def f(x):
@@ -1545,7 +1545,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = zeros = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")
+    return add""")  # noqa: B950
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
@@ -1569,7 +1569,7 @@ def forward(self, x_1, y_1):
         gm.recompile()
         r = str(gm.code).strip()
         # self.assertExpectedInline(
-        #     r, """"""
+        #     r, """"""  # noqa: B950
         # )
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
@@ -1624,7 +1624,7 @@ def forward(self, lengths_1, values_1):
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
     getitem_2 = split_with_sizes[2];  split_with_sizes = None
-    return (getitem, getitem_1, getitem_2)""")
+    return (getitem, getitem_1, getitem_2)""")  # noqa: B950
 
     def test_invalidate_nonzero(self):
         ok = False
@@ -1792,7 +1792,7 @@ def forward(self, a_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return zeros""")
+    return zeros""")  # noqa: B950
 
     def test_expand(self):
         def f(a):
@@ -1870,12 +1870,12 @@ def forward(self, x_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=False)),
-            """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=False)),  # noqa: B950
+            """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=True)),
-            """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=True)),  # noqa: B950
+            """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
 
     def test_guard_upperbound_range_refinement(self):

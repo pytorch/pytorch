@@ -77,8 +77,8 @@ _ref_test_ops = tuple(
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
     print('MPS not available, skipping tests', file=sys.stderr)
-    TestCase = NoTest
-    NNTestCase = NoTest
+    TestCase = NoTest  # noqa: F811
+    NNTestCase = NoTest  # noqa: F811
 
 total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 

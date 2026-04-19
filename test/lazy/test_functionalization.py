@@ -97,7 +97,7 @@ IR {
   %0 = [Float[3]] lazy_tensors::device_data(), device=CPU0
   %1 = [BFloat16[3]] aten::_to_copy(%0), dtype=BFloat16, layout=null, device=null, pin_memory=null, non_blocking=0, memory_format=null, ROOT=0
 }
-""",
+""",  # noqa: B950
         )
 
 

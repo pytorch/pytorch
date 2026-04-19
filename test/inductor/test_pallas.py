@@ -9,7 +9,7 @@ import numpy as np
 
 import torch
 import torch._dynamo
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
