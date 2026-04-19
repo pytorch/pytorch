@@ -356,6 +356,7 @@ c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
   at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args, return_by_ref);
 
   c10::SmallVector<at::Tensor> outputs;
+  outputs.reserve(num_outputs);
   for (int i = 0; i < num_outputs; ++i) {
     outputs.emplace_back(iter.output(i));
   }
