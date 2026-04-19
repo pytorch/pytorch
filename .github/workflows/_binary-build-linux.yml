@@ -181,6 +181,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           path: pytorch
           show-progress: false

@@ -1,0 +1,101 @@
+name: linux-manywheel-test
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        required: true
+        type: string
+        description: JSON array of python version objects [{tag, abi, version}]
+      test-configs:
+        required: true
+        type: string
+        description: JSON array of GPU test config objects
+
+permissions:
+  id-token: write
+
+env:
+  PYTORCH_ROOT: /pytorch
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+
+jobs:
+  test:
+    if: github.repository_owner == 'pytorch'
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ${{ fromJSON(inputs.python-versions) }}
+        gpu_config: ${{ fromJSON(inputs.test-configs) }}
+
+    runs-on: ${{ matrix.gpu_config.runs_on }}
+    container:
+      image: ${{ matrix.gpu_config.container_image }}
+      options: ${{ matrix.gpu_config.gpu_arch_type == 'cuda' && '--gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video' || ' ' }}
+
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Download wheel
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: wheels-${{ matrix.gpu_config.name }}-${{ matrix.python_version.abi }}
+          path: artifacts/
+
+      - name: Test wheel
+        env:
+          DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+          DESIRED_PYTHON: ${{ matrix.python_version.version }}
+          GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+          PACKAGE_TYPE: manywheel
+          PYTORCH_BUILD_NUMBER: 1
+        run: |
+          set -eux
+          export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
+
+          export PYTORCH_BUILD_VERSION=$(basename artifacts/*.whl | sed 's/^torch-//;s/-.*//')
+          if [[ "$PYTORCH_BUILD_VERSION" == *dev* ]]; then
+            CHANNEL="nightly"
+          else
+            CHANNEL="test"
+          fi
+
+          pip install artifacts/*.whl \
+            --index-url "https://download.pytorch.org/whl/${CHANNEL}/${DESIRED_CUDA}" -v
+
+          python_nodot="$(echo $DESIRED_PYTHON | tr -d m.u)"
+          if [[ "$python_nodot" = *311* ]]; then
+            pip install -q numpy==1.23.5 protobuf typing-extensions
+          elif [[ "$python_nodot" = *312* ]]; then
+            pip install -q protobuf typing-extensions
+          else
+            pip install -q numpy protobuf typing-extensions
+          fi
+
+          export OMP_NUM_THREADS=4
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/usr/local/nvidia/lib64"
+
+          # Binary integrity checks (GCC ABI, library deps, MKL, XNNPACK, CUDA)
+          .ci/pytorch/check_binary.sh
+
+          # Functional smoke tests (torch.compile, version checks, etc.)
+          torch_pkg_size=$(stat -c%s artifacts/*.whl 2>/dev/null || echo 0)
+          if [[ "$torch_pkg_size" -gt 1500000000 ]]; then
+            python .ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled --pypi-pkg-check disabled
+          else
+            python .ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+          fi
+
+          # OpenMP checks (skip on aarch64)
+          if [[ "$GPU_ARCH_TYPE" != *aarch64* ]]; then
+            python .ci/pytorch/smoke_test/check_gomp.py
+          fi
