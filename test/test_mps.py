@@ -13127,7 +13127,7 @@ class TestConsistency(TestCaseMPS):
 
     # The CPU impl of grid_sampler_3d gives a large amount of error for half
     # precision types. So instead of testing MPS-vs-CPU outputs, test
-    # full-vs-half precision dtypes for MPS.
+    # full-vs-half precision dtypes for MPS (both forward and backward).
     @dtypes(torch.float16, torch.bfloat16)
     def test_grid_sampler_3d_half_precision(self, device, dtype):
         op = next((op for op in test_consistency_op_db if op.name == "grid_sampler_3d"), None)
@@ -13146,17 +13146,31 @@ class TestConsistency(TestCaseMPS):
             half_input = half_sample.input
             half_grid, mode, padding_mode, align_corners = half_sample.args
 
-            full_input = half_input.to(torch.float).detach()
-            full_grid = half_grid.to(torch.float).detach()
+            full_input = half_input.to(torch.float).detach().requires_grad_(True)
+            full_grid = half_grid.to(torch.float).detach().requires_grad_(True)
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 half_out = op(half_input, half_grid, mode, padding_mode, align_corners)
                 full_out = op(full_input, full_grid, mode, padding_mode, align_corners)
 
-            atol, rtol = 1e-4, 1e-4
-
+            atol, rtol = (1e-4, 1e-4) if dtype == torch.float16 else (5e-3, 5e-3)
             self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
+
+            grad_output = torch.rand_like(half_out)
+            full_grad_output = grad_output.to(torch.float)
+
+            half_grad_input, half_grad_grid = torch.autograd.grad(
+                half_out, [half_input, half_grid], grad_outputs=grad_output)
+            full_grad_input, full_grad_grid = torch.autograd.grad(
+                full_out, [full_input, full_grid], grad_outputs=full_grad_output)
+
+            # grad_grid uses direct stores — same tolerance as forward
+            self.assertEqual(half_grad_grid, full_grad_grid.to(dtype), atol=atol, rtol=rtol)
+            # grad_input uses atomic half-precision accumulation, which is
+            # non-deterministic and introduces more rounding than forward
+            bwd_atol, bwd_rtol = (5e-3, 2e-2) if dtype == torch.float16 else (1e-1, 5e-1)
+            self.assertEqual(half_grad_input, full_grad_input.to(dtype), atol=bwd_atol, rtol=bwd_rtol)
 
     def test_grid_sampler_3d_nan(self, device):
         input = torch.ones(1, 1, 3, 3, 3)
