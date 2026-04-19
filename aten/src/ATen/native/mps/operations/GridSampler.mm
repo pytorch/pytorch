@@ -13,6 +13,7 @@
 #include <ATen/ops/grid_sampler_2d.h>
 #include <ATen/ops/grid_sampler_2d_backward_native.h>
 #include <ATen/ops/grid_sampler_2d_native.h>
+#include <ATen/ops/grid_sampler_3d_backward_native.h>
 #include <ATen/ops/grid_sampler_3d_native.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -145,9 +146,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
 
   switch (interpolation_mode) {
     case GridSamplerInterpolation::Bilinear:
-      break;
     case GridSamplerInterpolation::Nearest:
-      TORCH_CHECK(false, op_name, ": Unsupported Nearest interpolation");
       break;
     case GridSamplerInterpolation::Bicubic:
       TORCH_CHECK(false, op_name, ": Unsupported Bicubic interpolation");
@@ -181,8 +180,10 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("grid_sampler_3d_{}_{}", padding_to_string(padding_mode), scalarToMetalTypeString(input)));
+      auto pso = lib.getPipelineStateForFunc(fmt::format("grid_sampler_3d_{}_{}_{}",
+                                                         interp_to_string(interpolation_mode),
+                                                         padding_to_string(padding_mode),
+                                                         scalarToMetalTypeString(input)));
 
       getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
       [computeEncoder setComputePipelineState:pso];
@@ -317,6 +318,119 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
         mtl_dispatch1DJob(computeEncoder, grid_pso, num_threads);
         getMPSProfiler().endProfileKernel(grid_pso);
       }
+    }
+  });
+
+  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
+}
+
+std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_output,
+                                                        const Tensor& input,
+                                                        const Tensor& grid,
+                                                        int64_t interpolation_mode,
+                                                        int64_t padding_mode,
+                                                        bool align_corners,
+                                                        std::array<bool, 2> output_mask) {
+  using namespace mps;
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_3d(input, grid, interpolation_mode);
+
+  TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
+                              "grid_sampler_3d backward on MPS only supports bilinear and nearest interpolation");
+
+  TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
+              "expected input and grid to have the same type, but got ",
+              input.scalar_type(),
+              " and ",
+              grid.scalar_type());
+
+  auto input_requires_grad = output_mask[0];
+  int32_t interp_mode = static_cast<int32_t>(interpolation_mode);
+  int32_t pad_mode = static_cast<int32_t>(padding_mode);
+
+  Tensor grad_input;
+  if (input_requires_grad) {
+    grad_input = at::zeros_like(input);
+  }
+  // Always allocate grad_grid, matching CPU/CUDA and the 2D MPS backward.
+  // Autograd requires a defined tensor for every output declared in the
+  // derivative, even when the corresponding input doesn't require grad.
+  auto grad_grid = interp_mode == 1 ? at::zeros_like(grid, MemoryFormat::Contiguous)
+                                    : at::empty_like(grid, MemoryFormat::Contiguous);
+
+  const auto& input_contiguous = input.contiguous();
+  const auto& grid_contiguous = grid.contiguous();
+  const auto& grad_output_contiguous = grad_output.contiguous();
+
+  auto N = input_contiguous.size(0);
+  auto C = input_contiguous.size(1);
+  auto in_D = input_contiguous.size(2);
+  auto in_H = input_contiguous.size(3);
+  auto in_W = input_contiguous.size(4);
+  auto out_D = grid_contiguous.size(1);
+  auto out_H = grid_contiguous.size(2);
+  auto out_W = grid_contiguous.size(3);
+
+  bool run_grad_input = input_requires_grad;
+  bool run_grad_grid = interp_mode != 1;
+
+  if (!run_grad_input && !run_grad_grid) {
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
+  }
+
+  // The combined kernel needs a valid buffer pointer for grad_input even when
+  // it is not requested, so allocate a dummy with the expected rank so stride
+  // queries below remain in range.
+  auto grad_input_buf = run_grad_input ? grad_input : at::zeros({1, 1, 1, 1, 1}, input.options());
+
+  GridSampler3DBackwardParams params;
+  params.interpolation_mode = interp_mode;
+  params.padding_mode = pad_mode;
+  params.align_corners = align_corners;
+  params.compute_grad_input = run_grad_input;
+  params.compute_grad_grid = run_grad_grid;
+  params.input_sizes = {safe_downcast<int32_t, int64_t>(N),
+                        safe_downcast<int32_t, int64_t>(C),
+                        safe_downcast<int32_t, int64_t>(in_D),
+                        safe_downcast<int32_t, int64_t>(in_H),
+                        safe_downcast<int32_t, int64_t>(in_W)};
+  params.output_sizes = {safe_downcast<int32_t, int64_t>(N),
+                         safe_downcast<int32_t, int64_t>(C),
+                         safe_downcast<int32_t, int64_t>(out_D),
+                         safe_downcast<int32_t, int64_t>(out_H),
+                         safe_downcast<int32_t, int64_t>(out_W)};
+  for (int i = 0; i < 5; i++) {
+    params.grid_strides[i] = safe_downcast<int32_t, int64_t>(grid_contiguous.stride(i));
+    params.grad_output_strides[i] = safe_downcast<int32_t, int64_t>(grad_output_contiguous.stride(i));
+    params.input_strides[i] = safe_downcast<int32_t, int64_t>(input_contiguous.stride(i));
+    params.grad_input_strides[i] = safe_downcast<int32_t, int64_t>(grad_input_buf.stride(i));
+    params.grad_grid_strides[i] = safe_downcast<int32_t, int64_t>(grad_grid.stride(i));
+  }
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+      auto pso =
+          lib.getPipelineStateForFunc(fmt::format("grid_sampler_3d_backward_{}", scalarToMetalTypeString(input)));
+
+      getMPSProfiler().beginProfileKernel(
+          pso,
+          "grid_sampler_3d_backward",
+          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid});
+
+      [computeEncoder setComputePipelineState:pso];
+
+      mtl_setArgs(
+          computeEncoder, grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid, params);
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
+      MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+      [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+
+      getMPSProfiler().endProfileKernel(pso);
     }
   });
 
