@@ -1514,6 +1514,15 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
   if(USE_MKLDNN)
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+    # MSVC LTO breaks the oneDNN static library build, so keep IPO enabled
+    # globally and disable it only for the dnnl target.
+    # See https://github.com/uxlfoundation/oneDNN/issues/3383.
+    if(MSVC AND TARGET dnnl)
+      get_target_property(_mkldnn_type dnnl TYPE)
+      if(_mkldnn_type STREQUAL "STATIC_LIBRARY")
+        set_property(TARGET dnnl PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
+      endif()
+    endif()
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
