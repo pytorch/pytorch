@@ -469,7 +469,7 @@ at::Tensor tensor_from_cuda_array_interface(
     if (PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) < 0) {
       throw python_error();
     }
-    if (py_strides != nullptr && py_strides != Py_None) {
+    if (py_strides != nullptr && !Py_IsNone(py_strides)) {
       if (PySequence_Length(py_strides) == -1 ||
           static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
         TORCH_CHECK_TYPE(

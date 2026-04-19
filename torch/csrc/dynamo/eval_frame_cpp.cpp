@@ -550,13 +550,13 @@ PyObject* dynamo__custom_eval_frame(
   if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(maybe_cached_code != Py_None);
+    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
     if (!py::cast<bool>(res)) {
       maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
-  if (maybe_cached_code != Py_None) {
+  if (!Py_IsNone(maybe_cached_code)) {
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
@@ -635,7 +635,7 @@ PyObject* dynamo__custom_eval_frame(
     extra_state_set_exec_strategy(extra, new_strategy);
   }
 
-  if (guarded_code != Py_None) {
+  if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
     // NB: We could use extract_cache_entry to get the cache_entry, but

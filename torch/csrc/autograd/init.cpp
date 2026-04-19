@@ -815,7 +815,7 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_cpu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('cpu', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kCPU, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kCPU, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -841,7 +841,7 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_ipu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('ipu', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kIPU, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kIPU, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -867,7 +867,7 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
       ")");
   TORCH_WARN_DEPRECATION(
       "torch.set_autocast_xla_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('xla', enabled) instead.")
-  at::autocast::set_autocast_enabled(at::kXLA, arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kXLA, Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1018,7 +1018,7 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_autocast_cache_enabled(arg == Py_True);
+  at::autocast::set_autocast_cache_enabled(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1062,7 +1062,7 @@ static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1282,7 +1282,7 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
 
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
   } else {
     Py_INCREF(obj);
@@ -1396,7 +1396,7 @@ static PyObject* push_on_torch_function_stack(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg != Py_None) {
+  if (!Py_IsNone(arg)) {
     Py_INCREF(arg);
     at::impl::PythonTorchFunctionTLS::push_onto_stack(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
@@ -1447,7 +1447,7 @@ static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg != Py_None) {
+  if (!Py_IsNone(arg)) {
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
@@ -1481,7 +1481,7 @@ static PyObject* pop_torch_dispatch_stack(
   // When the shared_ptr is destroyed, ~SafePyObject will Py_DECREF, so we must
   // Py_INCREF first to give the caller a valid reference.
   std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> mode;
-  if (maybe_mode_key != Py_None) {
+  if (!Py_IsNone(maybe_mode_key)) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
         c10::impl::TorchDispatchModeTLS::unset_mode(mode_key.value());
@@ -1525,7 +1525,7 @@ static PyObject* get_dispatch_stack_at(
 
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(mode != Py_None);
+  TORCH_CHECK(!Py_IsNone(mode));
 
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
@@ -1545,7 +1545,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
 
 static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(arg != Py_None);
+  TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
@@ -1560,7 +1560,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
 
 static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(arg != Py_None);
+  TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
