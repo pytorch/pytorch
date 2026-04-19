@@ -580,6 +580,20 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with XNNPACK's
+      # armv8.2-a+fp16 target flags, so configure XNNPACK without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_xnnpack_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_xnnpack_had_ipo TRUE)
+      else()
+        set(_xnnpack_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+
     if(WIN32)
       # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
       # Windows runtime has provided the math functions - #134989
@@ -594,6 +608,16 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
           target_compile_options(${xnn_tgt} PRIVATE -Wno-error=incompatible-pointer-types)
       endforeach()
+    endif()
+
+    if(DEFINED _xnnpack_had_ipo)
+      if(_xnnpack_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_xnnpack_saved_ipo})
+        unset(_xnnpack_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_xnnpack_had_ipo)
     endif()
 
     # Revert to whatever it was before
@@ -1575,7 +1599,29 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_KLEIDIAI_ENABLED 1)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with KleidiAI's
+      # armv8.2-a+fp16 target flags, so configure KleidiAI without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_kleidiai_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_kleidiai_had_ipo TRUE)
+      else()
+        set(_kleidiai_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
     add_subdirectory(${KLEIDIAI_SRC})
+    if(DEFINED _kleidiai_had_ipo)
+      if(_kleidiai_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_kleidiai_saved_ipo})
+        unset(_kleidiai_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_kleidiai_had_ipo)
+    endif()
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
