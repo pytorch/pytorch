@@ -138,7 +138,7 @@ class TestFP8Types(TestCase):
 
         x_shape = (16, 16)
         x = torch.rand(*x_shape, device=device, dtype=dtype).to(e4m3_type)
-        y_fp8 = compiled_fp8_matmul(x)  # noqa: F841
+        y_fp8 = compiled_fp8_matmul(x)
 
         x_shape = (15, 16)
         x = torch.rand(*x_shape, device=device, dtype=dtype).to(e4m3_type)
