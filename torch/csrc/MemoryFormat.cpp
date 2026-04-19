@@ -80,14 +80,7 @@ PyTypeObject THPMemoryFormatType = {
 };
 
 void THPMemoryFormat_init(PyObject* module) {
-  if (PyType_Ready(&THPMemoryFormatType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPMemoryFormatType);
-  if (PyModule_AddObject(
-          module,
-          "memory_format",
-          reinterpret_cast<PyObject*>(&THPMemoryFormatType)) != 0) {
+  if (PyModule_AddType(module, &THPMemoryFormatType) < 0) {
     throw python_error();
   }
 }
