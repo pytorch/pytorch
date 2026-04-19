@@ -714,7 +714,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   c10::cuda::MempoolId_t mempool_id = {0, 0};
   bool include_traces = true;
 
-  if (arg && arg != Py_None) {
+  if (arg && !Py_IsNone(arg)) {
     TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
 
@@ -739,7 +739,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
           PyBool_Check(traces.get()), "include_traces must be a boolean");
       mempool_id = c10::cuda::MempoolId_t(
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
-      include_traces = (traces.get() == Py_True);
+      include_traces = (Py_IsTrue(traces.get()));
     } else {
       TORCH_CHECK(false, "Expected tuple of size 2 or 3");
     }

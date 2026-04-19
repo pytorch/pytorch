@@ -536,14 +536,14 @@ static PyObject* view_func_impl(
 
         // Determine new SymInt / tensor state as needed.
         std::optional<std::vector<c10::SymInt>> new_symints = std::nullopt;
-        if (symint_visitor_fn != Py_None) {
+        if (!Py_IsNone(symint_visitor_fn)) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
         std::optional<std::vector<at::Tensor>> new_tensors = std::nullopt;
-        if (tensor_visitor_fn != Py_None) {
+        if (!Py_IsNone(tensor_visitor_fn)) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
               view_func.get_tensors());
@@ -2722,7 +2722,7 @@ static int THPVariable_set_grad_fn(
     return handle_torch_function_setter(self, "_grad_fn", obj);
   }
   TORCH_CHECK(obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
-  TORCH_CHECK(obj == Py_None, "_grad_fn can be only set to None");
+  TORCH_CHECK(Py_IsNone(obj), "_grad_fn can be only set to None");
   THPVariable_Unpack(self).detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2766,7 +2766,7 @@ static int THPVariable_set_grad(
     return handle_torch_function_setter(self, "grad", py_grad);
   }
   const auto& var = THPVariable_Unpack(self);
-  if (!py_grad || py_grad == Py_None) {
+  if (!py_grad || Py_IsNone(py_grad)) {
     var.mutable_grad().reset();
     return 0;
   }
@@ -2948,7 +2948,7 @@ static int THPVariable_set_names(
     return handle_torch_function_setter((THPVariable*)self, "names", names);
   }
   const auto& var = THPVariable_Unpack(self);
-  if (names == Py_None) {
+  if (Py_IsNone(names)) {
     at::internal_set_names_inplace(var, std::nullopt);
   } else {
     TORCH_CHECK(
@@ -2970,10 +2970,10 @@ static int THPVariable_set_requires_grad(
   }
   TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
-  auto requires_grad = (obj == Py_True);
+  auto requires_grad = (Py_IsTrue(obj));
   if (!var.is_leaf()) {
     THPUtils_setError(
-        autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
+        autograd::utils::requires_grad_leaf_error(Py_IsTrue(obj)).c_str());
     return -1;
   }
   if (requires_grad &&
@@ -3023,7 +3023,7 @@ static int THPVariable_set_backwards_hooks(
     return handle_torch_function_setter(self, "_backward_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _backwards_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3064,7 +3064,7 @@ static int THPVariable_set_post_accumulate_grad_hooks(
         self, "_post_accumulate_grad_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3335,10 +3335,10 @@ static int THPVariable_set_grad_dtype(
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(
-      THPDtype_Check(obj) || obj == Py_None,
+      THPDtype_Check(obj) || Py_IsNone(obj),
       "grad_dtype must be a torch.dtype or None, but got ",
       Py_TYPE(obj)->tp_name);
-  if (var.grad().defined() && obj != Py_None) {
+  if (var.grad().defined() && !Py_IsNone(obj)) {
     auto new_dtype = reinterpret_cast<THPDtype*>(obj);
     TORCH_CHECK(
         var.grad().dtype() == new_dtype->scalar_type,
@@ -3350,7 +3350,7 @@ static int THPVariable_set_grad_dtype(
         "or ensure the new grad_dtype matches the existing gradient's dtype.");
   }
   std::optional<at::ScalarType> new_dtype;
-  if (obj != Py_None) {
+  if (!Py_IsNone(obj)) {
     auto* dtype = reinterpret_cast<THPDtype*>(obj);
     new_dtype = dtype->scalar_type;
   }

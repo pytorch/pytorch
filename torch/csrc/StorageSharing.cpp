@@ -588,7 +588,7 @@ static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
 
 static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg == Py_None) {
+  if (Py_IsNone(arg)) {
     Py_RETURN_NONE;
   }
   TORCH_CHECK(

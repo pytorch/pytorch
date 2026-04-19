@@ -270,7 +270,7 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
   HANDLE_TH_ERRORS
   THPGenerator_manualSeed(_self, PyTuple_GET_ITEM(state, 0));
   auto& offset = PyTuple_GET_ITEM(state, 1);
-  if (offset != Py_None) {
+  if (!Py_IsNone(offset)) {
     THPGenerator_setOffset(_self, offset);
   }
   THPGenerator_setState(_self, PyTuple_GET_ITEM(state, 2));

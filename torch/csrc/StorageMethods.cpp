@@ -405,12 +405,13 @@ static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   TORCH_CHECK(
       !invalid, "Attempted to call _write_file() on an invalid python storage.")
   PyObject* file = PyTuple_GetItem(args, 0);
-  bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
-  bool save_size = PyTuple_GetItem(args, 2) == Py_True;
+  bool is_real_file = Py_IsTrue(PyTuple_GetItem(args, 1));
+  bool save_size = Py_IsTrue(PyTuple_GetItem(args, 2));
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 3);
 
   TORCH_CHECK(
-      element_size_obj != Py_None, "_write_file: need to specify element size");
+      !Py_IsNone(element_size_obj),
+      "_write_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
   if (!is_real_file) {
@@ -441,7 +442,7 @@ static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
       "descriptor from given object");
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 1);
   TORCH_CHECK(
-      element_size_obj != Py_None,
+      !Py_IsNone(element_size_obj),
       "_new_with_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
@@ -458,12 +459,12 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   const auto& storage = THPStorage_Unpack(self);
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
-  bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
+  bool is_real_file = Py_IsTrue(PyTuple_GET_ITEM(args, 2));
 
   PyObject* element_size_obj = PyTuple_GET_ITEM(args, 3);
 
   TORCH_CHECK(
-      element_size_obj != Py_None,
+      !Py_IsNone(element_size_obj),
       "_set_from_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
@@ -471,7 +472,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
     // offset can be implemented with a call to the Python object's seek()
     // but it is currently unnecessary to support this.
     TORCH_CHECK(
-        offset == Py_None,
+        Py_IsNone(offset),
         "_set_from_file: offset is NYI for filelike objects");
 
     auto self_storage_impl = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
@@ -488,7 +489,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   // file is backed by a fd
   const int fd = PyObject_AsFileDescriptor(file);
   const auto fd_original_pos = LSEEK(fd, 0, SEEK_CUR);
-  if (offset != Py_None) {
+  if (!Py_IsNone(offset)) {
     LSEEK(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
   TORCH_CHECK(
