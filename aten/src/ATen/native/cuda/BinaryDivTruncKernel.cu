@@ -21,7 +21,12 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cuda", [&]() {
       gpu_kernel_with_scalars(
           iter,
-          [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t { return a / b; });
+          [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            if (b == 0) {
+              return static_cast<scalar_t>(0);
+            }
+            return a / b;
+          });
     });
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU

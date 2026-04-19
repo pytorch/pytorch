@@ -26,6 +26,10 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
           if (b == 0) {
             return std::numeric_limits<uint8_t>::max();
           }
+        } else {
+          if (b == 0) {
+            return static_cast<scalar_t>(0);
+          }
         }
         scalar_t r = a % b;
         if (r != 0 && c10::signs_differ(r, b)) {
@@ -37,6 +41,9 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
 #else
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if (b == 0) {
+          return static_cast<scalar_t>(0);
+        }
         scalar_t r = a % b;
         if (r != 0 && c10::signs_differ(r, b)) {
           r += b;
@@ -63,6 +70,9 @@ void fmod_kernel_cuda(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if (b == 0) {
+          return static_cast<scalar_t>(0);
+        }
         return a % b;
       });
     });
