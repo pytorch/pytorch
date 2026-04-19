@@ -232,8 +232,7 @@ Tensor nested_from_padded_generic(
   std::vector<at::Tensor> masks;
   std::vector<at::Tensor> all_sizes = sizes.unbind();
   for (const auto& size : all_sizes) {
-    IntArrayRef sizes_i(
-        size.const_data_ptr<int64_t>(), size.const_data_ptr<int64_t>() + size.numel());
+    IntArrayRef sizes_i(size.const_data_ptr<int64_t>(), size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
         sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
@@ -430,7 +429,7 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   auto self_ptr = get_nested_tensor_impl(self);
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
                            strides = NestedTensor_get_strides(self_ptr);
-  int64_t *offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t *offsets_ptr = self_ptr->get_storage_offsets().const_data_ptr<int64_t>();
   const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
   int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());
   int64_t ntensors = self_ptr->size(0);
