@@ -133,8 +133,6 @@ RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4) {                              
 NVRTC_STUB2(nvrtcVersion, int*, int*)
 NVRTC_STUB2(nvrtcAddNameExpression, nvrtcProgram, const char * const)
 
-// Workaround nvrtcCreateProgram changing the locale until 12.6.2
-#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
 nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
                                const char *src,
                                const char *name,
@@ -148,6 +146,8 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
   return fn(prog, src, name, numHeaders, headers, includeNames);
 }
 
+// Workaround nvrtcCompileProgram changing the locale until 12.6.2
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
 nvrtcResult nvrtcCompileProgram_wrapped(nvrtcProgram prog,
                                         int numOptions,
                                         const char * const *options) {
