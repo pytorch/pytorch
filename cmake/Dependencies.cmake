@@ -1559,11 +1559,13 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
   if(USE_MKLDNN)
-    # MSVC LTO breaks the oneDNN static library build. Disable IPO while the
-    # oneDNN subdirectory is configuring so its object libraries are created
-    # without /GL, then restore the global setting afterwards.
+    # Disable IPO while the oneDNN subdirectory is configuring so its object
+    # libraries are created without whole-program optimization. MSVC LTO breaks
+    # the oneDNN static library build, and GNU AArch64 LTO rejects oneDNN's
+    # -mcpu=generic objects when they are merged with more specialized ISA
+    # objects elsewhere in the build.
     # See https://github.com/uxlfoundation/oneDNN/issues/3383.
-    if(MSVC)
+    if(MSVC OR (CMAKE_COMPILER_IS_GNUCXX AND CPU_AARCH64 AND NOT USE_NATIVE_ARCH))
       if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
         set(_mkldnn_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
         set(_mkldnn_had_ipo TRUE)
@@ -1573,7 +1575,7 @@ if(NOT INTERN_BUILD_MOBILE)
       set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
     endif()
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
-    if(MSVC)
+    if(MSVC OR (CMAKE_COMPILER_IS_GNUCXX AND CPU_AARCH64 AND NOT USE_NATIVE_ARCH))
       if(_mkldnn_had_ipo)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_mkldnn_saved_ipo})
         unset(_mkldnn_saved_ipo)
