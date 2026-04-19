@@ -701,7 +701,29 @@ if(USE_FBGEMM)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64"
+       AND NOT USE_NATIVE_ARCH)
+      # GCC LTO rejects mixing oneDNN's -mcpu=generic with FBGEMM's
+      # armv8.2-a+fp16 target flags, so configure FBGEMM without IPO here.
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_fbgemm_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_fbgemm_had_ipo TRUE)
+      else()
+        set(_fbgemm_had_ipo FALSE)
+      endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    if(DEFINED _fbgemm_had_ipo)
+      if(_fbgemm_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_fbgemm_saved_ipo})
+        unset(_fbgemm_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_fbgemm_had_ipo)
+    endif()
 
     # Fix LTO bug
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT MSVC)
@@ -1513,15 +1535,28 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
   if(USE_MKLDNN)
-    include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
-    # MSVC LTO breaks the oneDNN static library build, so keep IPO enabled
-    # globally and disable it only for the dnnl target.
+    # MSVC LTO breaks the oneDNN static library build. Disable IPO while the
+    # oneDNN subdirectory is configuring so its object libraries are created
+    # without /GL, then restore the global setting afterwards.
     # See https://github.com/uxlfoundation/oneDNN/issues/3383.
-    if(MSVC AND TARGET dnnl)
-      get_target_property(_mkldnn_type dnnl TYPE)
-      if(_mkldnn_type STREQUAL "STATIC_LIBRARY")
-        set_property(TARGET dnnl PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
+    if(MSVC)
+      if(DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(_mkldnn_saved_ipo ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
+        set(_mkldnn_had_ipo TRUE)
+      else()
+        set(_mkldnn_had_ipo FALSE)
       endif()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
+    include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+    if(MSVC)
+      if(_mkldnn_had_ipo)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${_mkldnn_saved_ipo})
+        unset(_mkldnn_saved_ipo)
+      else()
+        unset(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+      endif()
+      unset(_mkldnn_had_ipo)
     endif()
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
@@ -1611,8 +1646,9 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-# Keep fmt's header-only type layout stable across mixed C++ modes by forcing
-# one no_unique_address spelling for all translation units.
+# Keep fmt's header-only type layout stable across mixed C++ modes. Otherwise
+# LTO can diagnose ODR violations when some TUs enable [[no_unique_address]]
+# and others don't.
 if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(_fmt_no_unique_address "[[msvc::no_unique_address]]")
 else()
