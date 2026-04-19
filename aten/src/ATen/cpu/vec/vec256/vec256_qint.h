@@ -359,7 +359,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m256i vals_) {
     vals = vals_;
@@ -566,7 +566,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
  public:
   using Vectorizedqi::Vectorizedqi;
 
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(__m256i vals_) {
     vals = vals_;
   }
@@ -778,7 +778,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m256i vals_) {
     vals = vals_;

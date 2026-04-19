@@ -34,7 +34,7 @@ struct TORCH_API MPSGuardImpl final
   static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
-  MPSGuardImpl() {}
+  MPSGuardImpl() = default;
   explicit MPSGuardImpl(c10::DeviceType t) {
     TORCH_CHECK(
         t == DeviceType::MPS,
