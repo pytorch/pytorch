@@ -1,3 +1,4 @@
+
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
@@ -1215,9 +1216,12 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
-  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
-    # Remove below when XNNPack fixing linking issues
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    # Remove below when XNNPack/oneDNN/FBGEMM fix their GNU LTO warnings.
     append_cxx_flag_if_supported("-Wno-error=lto-type-mismatch" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=odr" CMAKE_CXX_FLAGS)
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
