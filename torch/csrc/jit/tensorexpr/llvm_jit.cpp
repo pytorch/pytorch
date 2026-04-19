@@ -180,11 +180,19 @@ class TORCH_API PytorchLLVMJITImpl {
 #if LLVM_VERSION_MAJOR < 21
                                                   ,
                                                   const Triple& TT
+#elif LLVM_VERSION_MAJOR >= 23
+                                                  ,
+                                                  jitlink::JITLinkMemoryManager&
+                                                      JLMM
 #endif
                                               ) {
+#if LLVM_VERSION_MAJOR >= 23
+                  return std::make_unique<ObjectLinkingLayer>(ES, JLMM);
+#else
                   return std::make_unique<ObjectLinkingLayer>(
                       ES,
                       assertSuccess(jitlink::InProcessMemoryManager::Create()));
+#endif
                 })
 #endif
                 .create())) {
