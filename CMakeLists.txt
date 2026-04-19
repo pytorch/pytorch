@@ -1259,6 +1259,13 @@ else()
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
   # inconsistent dll linkage
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
+  if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    # Limit LTCG parallelism to reduce peak linker memory usage for large
+    # Windows targets such as torch_cpu.dll.
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /CGTHREADS:1")
+  endif()
 endif()
 
 # Add code coverage flags to supported compilers
