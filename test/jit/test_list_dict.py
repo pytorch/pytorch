@@ -252,7 +252,7 @@ class TestList(JitTestCase):
         self.checkScript(foo, ())
 
         def foo2():
-            x: List[int] = list()
+            x: List[int] = list()  # noqa: C408
             x.append(1)
             return (x,)
 
@@ -328,7 +328,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_is_correctly_typed(self):
         def fn():
-            x: Dict[str, int] = dict()
+            x: Dict[str, int] = dict()  # noqa: C408
             x["foo"] = 1
             return x
 
@@ -2027,7 +2027,7 @@ class TestDict(JitTestCase):
         test_func(no_args, ())
 
         def test_dict_constructor():
-            a = dict()
+            a = dict()  # noqa: C408
             a["one"] = torch.tensor(1)
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
@@ -2043,7 +2043,7 @@ class TestDict(JitTestCase):
         test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
-            a = dict()
+            a = dict()  # noqa: C408
             a[1] = 2
             return a
 

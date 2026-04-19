@@ -19,7 +19,7 @@ if not _IS_MONKEYTYPE_INSTALLED:
         "monkeytype is not installed. Skipping tests for Profile-Directed Typing",
         file=sys.stderr,
     )
-    JitTestCase = NoTest  # type: ignore[misc, assignment]
+    JitTestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
 
 
 class TestPDT(JitTestCase):

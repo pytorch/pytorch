@@ -1156,7 +1156,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "multiple times"):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: torch.Tensor) -> torch.Tensor:
+            def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
                 raise NotImplementedError
 
         # Unless we delete the original op.
@@ -1164,14 +1164,14 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         # Smoke test
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
+        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
             raise NotImplementedError
 
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
+        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
             raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
@@ -1775,7 +1775,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
     numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
-    return numpy_view_copy""",
+    return numpy_view_copy""",  # noqa: B950
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")

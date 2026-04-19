@@ -1,5 +1,6 @@
 # Owner(s): ["module: functorch"]
 # ruff: noqa: F841
+# flake8: noqa: B950
 import unittest
 from collections import deque
 from functools import partial
@@ -137,7 +138,7 @@ def forward(self, arg1_1):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-    return (add,)""",
+    return (add,)""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
@@ -161,7 +162,7 @@ def forward(self, arg0_1, arg1_1):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
@@ -1033,7 +1034,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1, arg8_1
     with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
     getitem_6 = with_effects[0];  with_effects = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_6]);  getitem_6 = _sink_tokens_default = None
-    return (getitem_5,)""",
+    return (getitem_5,)""",  # noqa: B950
                 )
                 self.assertExpectedInline(
                     str(gm.repeated_subgraph0.code).strip(),
@@ -1048,7 +1049,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     t_1 = torch.ops.aten.t.default(arg4_1);  arg4_1 = None
     addmm_1 = torch.ops.aten.addmm.default(arg5_1, relu, t_1);  arg5_1 = relu = t_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem]);  getitem = _sink_tokens_default = None
-    return (addmm_1,)""",
+    return (addmm_1,)""",  # noqa: B950
                 )
 
         recorded_list.clear()
@@ -1102,7 +1103,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, primals_1);  primals_1 = None
     sum_1 = torch.ops.aten.sum.default(mul);  mul = None
-    return (sum_1,)""",
+    return (sum_1,)""",  # noqa: B950
             )
 
             self.assertExpectedInline(
@@ -1113,7 +1114,7 @@ def forward(self, tangents_1, tangents_token):
     with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.mylib.log_grad.default, expand);  tangents_token = expand = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    return (getitem_1, getitem)""",
+    return (getitem_1, getitem)""",  # noqa: B950
             )
 
     def test_with_effects_through_functional_tensor_mode(self):

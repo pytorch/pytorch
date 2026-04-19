@@ -18,7 +18,7 @@ class TestGetDefaultAttr(JitTestCase):
             def forward(self, x):
                 y = getattr(self, "init_attr_val")  # noqa: B009
                 w: list[float] = [1.0]
-                z = getattr(self, "missing", w)
+                z = getattr(self, "missing", w)  # noqa: B009
                 z.append(y)
                 return z
 

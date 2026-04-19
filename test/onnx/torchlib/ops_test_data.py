@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+# flake8: noqa: B950
 """Test op correctness by comparing with PyTorch results.
 
 ## Usage

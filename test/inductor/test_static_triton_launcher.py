@@ -231,7 +231,7 @@ class TestStaticTritonLauncher(TestCase):
         def triton_red_fused_any_isinf_0(
             in_ptr0,
             out_ptr0,
-            xnumel,
+            xnumel,  # noqa: F841
             r0_numel,
             XBLOCK: tl.constexpr,
             R0_BLOCK: tl.constexpr,

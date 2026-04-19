@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 import torch
-from torch._dynamo import device_interface
+from torch._dynamo import device_interface  # noqa: PLC2701 import-private-name
 
 
 class DeviceProperties:
@@ -48,7 +48,7 @@ class DeviceInterface(device_interface.DeviceInterface):
         def synchronize(self) -> None:
             pass
 
-    class device:
+    class device:  # noqa: N801 invalid-class-name # pyright: ignore [reportIncompatibleVariableOverride]
         def __init__(self, device) -> None:
             self.device = device
 

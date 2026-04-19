@@ -31,7 +31,8 @@ class TestLiteScriptModule(TestCase):
             return e
 
     def test_versioned_div_tensor(self):
-        def div_tensor_0_3(self, other):
+        # noqa: F841
+        def div_tensor_0_3(self, other):  # noqa: F841
             if self.is_floating_point() or other.is_floating_point():
                 return self.true_divide(other)
             return self.divide(other, rounding_mode="trunc")

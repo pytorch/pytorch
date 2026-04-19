@@ -977,7 +977,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
         if not use_relu:
 
-            def relu_op(x):
+            def relu_op(x):  # noqa: F811
                 return x
 
         if freeze_bn:

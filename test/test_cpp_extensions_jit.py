@@ -1552,7 +1552,7 @@ except RuntimeError as e:
                         self.assertIn(
                             "C++ CapturedTraceback:",
                             error_message,
-                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",
+                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
                         )
                     self.assertRegex(
                         error_message,
@@ -1562,7 +1562,7 @@ except RuntimeError as e:
                     self.assertNotIn(
                         "C++ CapturedTraceback:",
                         error_message,
-                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
+                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",  # noqa: B950
                     )
 
 
