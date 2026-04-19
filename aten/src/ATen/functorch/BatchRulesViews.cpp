@@ -528,6 +528,18 @@ std::tuple<std::vector<Tensor>, std::optional<int64_t>> unsafe_split_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<std::vector<Tensor>, std::optional<int64_t>> unbind_copy_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  dim = maybe_wrap_dim(dim, logical_rank) + 1;
+  auto result = at::unbind_copy(self_, dim);
+  return std::make_tuple(std::move(result), 0);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> diag_embed_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, int64_t offset, int64_t dim1, int64_t dim2) {
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -583,6 +595,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diagonal_backward, diagonal_backward_batch_rule);
   VMAP_SUPPORT(select_backward, select_backward_batch_rule);
   VMAP_SUPPORT(slice_backward, slice_backward_batch_rule);
+  VMAP_SUPPORT2(unbind_copy, int, unbind_copy_batch_rule);
   VMAP_SUPPORT(view, view_batching_rule);
   VMAP_SUPPORT2(view, dtype, view_dtype_batch_rule);
   VMAP_SUPPORT(view_copy, view_copy_batch_rule);
