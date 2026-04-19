@@ -270,7 +270,7 @@ def forward(self, arg0_1):
     detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_11);  view_copy_11 = None
     return detach_copy_1
     """,
-        )  # noqa: B950
+        )
 
     def test_simple(self):
         def f(x):
@@ -561,7 +561,7 @@ def forward(self, arg0_1):
     getitem_5 = _fused_moving_avg_obs_fq_helper_functional[5];  _fused_moving_avg_obs_fq_helper_functional = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_5);  arg0_1 = getitem_5 = copy_ = None
     return (getitem, getitem_1)
-    """,  # noqa: B950
+    """,
         )
 
     def test_as_strided(self):
@@ -820,7 +820,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -852,7 +852,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
     """,
-        )  # noqa: B950
+        )
 
     def test_split_with_sizes(self):
         def f(x):
@@ -892,7 +892,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -924,7 +924,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
     """,
-        )  # noqa: B950
+        )
 
     def test_slice(self):
         def f(x):
@@ -955,7 +955,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -980,7 +980,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_view_inplace(self):
         def f(x):
@@ -1012,7 +1012,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -1037,7 +1037,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_unbind(self):
         def f(x):
@@ -1073,7 +1073,7 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
-        )  # noqa: B950
+        )
 
         # NB: even with reapply_views=True, we expect to see scatter op
         reinplaced_logs = self.get_logs(
@@ -1102,7 +1102,7 @@ def forward(self, arg0_1):
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
-        )  # noqa: B950
+        )
 
     def test_optional_tensor_list(self):
         def f(x):
@@ -1132,7 +1132,7 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, view_copy_1);  arg0_1 = view_copy_1 = copy_ = None
     return view_copy_2
     """,
-        )  # noqa: B950
+        )
 
     def test_scalars(self):
         def f(x):
@@ -1205,7 +1205,7 @@ def forward(self, arg0_1):
     _to_copy = torch.ops.aten._to_copy.default(ge, dtype = torch.float32, layout = torch.strided);  ge = None
     return _to_copy
     """,
-        )  # noqa: B950
+        )
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_metadata_change_out_op(self):
@@ -1318,7 +1318,7 @@ def forward(self, arg0_1):
     add_2 = torch.ops.aten.add.Tensor(select_copy_1, view_copy_13);  select_copy_1 = view_copy_13 = add_2 = None
     return getitem_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(4, 2), reapply_views=True, run_reinplace=True
@@ -1535,7 +1535,7 @@ def forward(self, arg0_1):
     diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
     return diagonal_copy_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(2, dtype=torch.long), reapply_views=True, run_reinplace=True
@@ -1555,7 +1555,7 @@ def forward(self, arg0_1):
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
-        )  # noqa: B950
+        )
 
         # Test 4: copy_() with different dtype, different shape
         self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
@@ -1577,7 +1577,7 @@ def forward(self, arg0_1):
     diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
     return diagonal_copy_2
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(1, dtype=torch.long), reapply_views=True, run_reinplace=True
@@ -1597,7 +1597,7 @@ def forward(self, arg0_1):
     diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
     return diagonal_2
     """,
-        )  # noqa: B950
+        )
 
     def test_expand_symint(self):
         # Once some existing SymInt bugs are ironed out, we should update
@@ -1700,7 +1700,7 @@ def forward(self, arg0_1):
     as_strided_copy_3 = torch.ops.aten.as_strided_copy.default(view_copy_7, [3, 3], [3, 1]);  view_copy_7 = None
     add_2 = torch.ops.aten.add.Tensor(as_strided_copy_3, 1);  as_strided_copy_3 = None
     return add_2
-    """,  # noqa: B950
+    """,
         )
 
         reinplaced_logs = self.get_logs(
@@ -1888,7 +1888,7 @@ def forward(self, arg0_1):
     select_copy_1 = torch.ops.aten.select_copy.int(select_scatter, 0, 5);  select_copy_1 = None
     return select_scatter
     """,
-        )  # noqa: B950
+        )
 
         reinplaced_logs = self.get_logs(
             f, torch.ones(2), reapply_views=True, run_reinplace=True
@@ -1970,7 +1970,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, alias_copy_1);  arg1_1 = alias_copy_1 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_copy_4);  arg2_1 = alias_copy_4 = copy__1 = None
     return view_copy_5
-    """,  # noqa: B950
+    """,
             )
 
             reinplaced_logs = self.get_logs(
@@ -2016,7 +2016,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, alias_1);  arg1_1 = alias_1 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_4);  arg2_1 = alias_4 = copy__1 = None
     return view_5
-    """,  # noqa: B950
+    """,
             )
 
     def test_mutation_overlapping_mem(self):
@@ -2064,7 +2064,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = copy__1 = None
     return getitem
-    """,  # noqa: B950
+    """,
         )
 
         reinplaced_logs = self.get_logs(
@@ -2092,7 +2092,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = copy__1 = None
     return getitem
-    """,  # noqa: B950
+    """,
         )
 
     # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
