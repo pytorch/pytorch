@@ -311,17 +311,27 @@ class TestFFT(TestCase):
                 torch.half: torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
+                # bfloat16 is promoted to float32 on CUDA/XPU, yielding complex64
+                torch.bfloat16: torch.complex64,
             }
-            C = torch.fft.rfft(t)
-            self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+            device_type = torch.device(device).type
+            if dtype is torch.bfloat16 and device_type not in ('cuda', 'xpu'):
+                pass  # bfloat16 FFT only supported on CUDA/XPU, skip on CPU
+            elif dtype in PROMOTION_MAP_R2C:
+                C = torch.fft.rfft(t)
+                self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        sample = first_sample(self, op.sample_inputs(device, dtype))
+        # bfloat16 is supported on CUDA/XPU via promotion to float32, so
+        # only expect an error on other device types (e.g. CPU).
         device_type = torch.device(device).type
+        if dtype is torch.bfloat16 and device_type in ('cuda', 'xpu'):
+            return
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
@@ -330,9 +340,31 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
+    @onlyCUDA
+    @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
+         allowed_dtypes=[torch.bfloat16])
+    def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
+        # bfloat16 inputs should be silently promoted to float32 on CUDA,
+        # producing complex64 output without raising an error.
+        # See: promote_type_fft() in SpectralOps.cpp
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        result = op(sample.input, *sample.args, **sample.kwargs)
+        # Output must be complex64 (bfloat16 -> float32 -> complex64)
+        self.assertTrue(
+            result.dtype in (torch.complex64, torch.float32),
+            f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
+        )
+
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
+        # complex32 (chalf) is now promoted to complex64 on CUDA/XPU
+        # (via promote_type_fft / _promote_type_fft), so it no longer hits the
+        # "cuFFT only supports powers of two" constraint.  Only float16 (half)
+        # still has that constraint; skip chalf on CUDA/XPU.
+        device_type = torch.device(device).type
+        if dtype == torch.chalf and device_type in ('cuda', 'xpu'):
+            return
         t = make_tensor(13, 13, device=device, dtype=dtype)
         err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
         with self.assertRaisesRegex(RuntimeError, err_msg):
