@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
-    skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -70,7 +69,6 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
-skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
 
 requires_vectorization = unittest.skipUnless(
     cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
@@ -140,7 +138,6 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
-    @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
             return torch.linalg.qr(x)[:1]
@@ -230,8 +227,6 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @skipIfNoLapack
-    @skip_if_cpp_wrapper("conj issue, to be fixed")
     def test_complex_cholesky_mh_view_fallback(self):
         torch.manual_seed(0)
 
