@@ -60,6 +60,11 @@ def _promote_type_fft(
 ) -> torch.dtype:
     """Helper to promote a dtype to one supported by the FFT primitives"""
     if dtype.is_complex:
+        # complex32 ("chalf") has no native FFT kernel on CUDA/XPU.
+        # Upcast to complex64 so the downstream prims can execute.
+        # complex64 and complex128 are kept as-is.
+        if dtype == torch.complex32:
+            return torch.complex64
         return dtype
 
     # Promote integral to default float type
@@ -71,6 +76,10 @@ def _promote_type_fft(
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
+        # bfloat16 is supported for FFT on CUDA/XPU devices.
+        # corresponding_complex_dtype(bfloat16) == complex64, so the
+        # intermediate complex tensor will be complex64 (not complex32).
+        allowed_types.append(torch.bfloat16)
     torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
     if require_complex:

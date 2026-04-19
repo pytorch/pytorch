@@ -69,9 +69,18 @@ namespace {
 // Promote inputs to FFT functions
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
-// * Raises an error for half-precision dtypes to allow future support
+// * float16/bfloat16 on XPU: promoted to float32 (no native XPU FFT kernel)
+// * float16 on CUDA: passed through; cuFFT handles natively (SM53+, pow2)
+// * bfloat16 on CUDA: passed through; cuFFT handles natively (SM80+, pow2)
+//   or falls back to float32 promotion for older hardware
+// * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
+    // complex32 ("chalf") has no native FFT kernel on CUDA/XPU.
+    // Upcast to complex64 so the downstream kernel can execute.
+    if (type == kComplexHalf) {
+      return kComplexFloat;
+    }
     return type;
   }
   // Promote integral to default float type
@@ -85,7 +94,14 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    // XPU has no native float16 or bfloat16 FFT kernel; promote both to float32.
+    // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
+    // so we leave them unchanged here and let the cuFFT planner decide.
+    if ((type == kHalf || type == kBFloat16) && device.is_xpu()) {
+      type = kFloat;
+    }
+    TORCH_CHECK(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
+                "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
@@ -99,6 +115,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
+  // bfloat16 on CUDA: cuFFT produces CUDA_C_16BF which is upcast to ComplexFloat.
+  // Returning kComplexFloat keeps output-tensor allocation consistent.
+  case kBFloat16: return kComplexFloat;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
   }
 }
