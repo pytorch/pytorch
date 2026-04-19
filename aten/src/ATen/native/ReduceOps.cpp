@@ -1500,10 +1500,24 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
+  auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+
+  if (!at::isFloatingType(in_dtype) && !at::isComplexType(in_dtype)) {
+    std::string what = "Input";
+    std::string dtype_str = toString(self.scalar_type());
+
+    if (opt_dtype.has_value()) {
+      what = "Optional";
+      dtype_str = toString(opt_dtype.value());
+    }
+
+    TORCH_CHECK(
+        false,
+        "nanmean(): could not infer output dtype. ",
+        what, " dtype must be either a floating point or complex dtype. ",
+        "Got: ", dtype_str);
+  }
+
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
