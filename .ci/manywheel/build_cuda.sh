@@ -4,6 +4,12 @@ set -ex
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
+if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
+    echo "ERROR: PYTORCH_EXTRA_INSTALL_REQUIREMENTS is not set."
+    echo "CUDA wheels rely on nvidia pypi packages; this variable must define the runtime dependencies."
+    exit 1
+fi
+
 export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
