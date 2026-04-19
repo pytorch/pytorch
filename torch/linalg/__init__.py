@@ -3018,7 +3018,7 @@ Examples::
 _powsum = _add_docstr(
     _linalg.linalg__powsum,
     r"""
-linalg._powsum(x, ord, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg._powsum(x, ord, dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 Computes the sum of the absolute values raised to the power ``ord``.
 
@@ -3040,7 +3040,6 @@ Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
           If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. Default: ``None``.
-    out (Tensor, optional): output tensor. Ignored if ``None``. Default: ``None``.
 
 Returns:
     A real-valued tensor, even when :attr:`x` is complex.
