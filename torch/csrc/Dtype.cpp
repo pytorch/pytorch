@@ -205,12 +205,7 @@ void THPDtype_init(PyObject* module) {
   }
   THPDtypeType.tp_dict = dict.release();
 
-  if (PyType_Ready(&THPDtypeType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPDtypeType);
-  if (PyModule_AddObject(
-          module, "dtype", reinterpret_cast<PyObject*>(&THPDtypeType)) != 0) {
+  if (PyModule_AddType(module, &THPDtypeType) < 0) {
     throw python_error();
   }
 }
