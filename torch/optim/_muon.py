@@ -3,7 +3,7 @@
 """Implementation of the Muon optimizer."""
 
 import math
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping, Sequence
 
 import torch
 from torch import Tensor
@@ -17,7 +17,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon"]
+__all__ = ["Muon", "param_groups_for_muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -48,7 +48,10 @@ def _zeropower_via_newtonschulz(
             "Number of steps must be less than 100 for computational efficiency"
         )
     if len(grad.shape) != 2:
-        raise ValueError("Input tensor gradient must be a 2D matrix")
+        raise ValueError(
+            "internal: Newton-Schulz iteration requires a 2D matrix "
+            "(callers must flatten higher-rank tensors first)"
+        )
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
@@ -71,8 +74,14 @@ def _zeropower_via_newtonschulz(
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
-    """Default learning rate adjustment used by Muon."""
-    A, B = param_shape[:2]
+    """Default learning rate adjustment used by Muon.
+
+    For higher-rank tensors (e.g. Conv2d weights of shape ``[Cout, Cin, kH, kW]``)
+    the adjustment is computed on the effective matrix ``[fan_out, fan_in]`` with
+    ``fan_out = shape[0]`` and ``fan_in = prod(shape[1:])``.
+    """
+    A = param_shape[0]
+    B = math.prod(param_shape[1:]) if len(param_shape) > 1 else 1
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
         # pyrefly: ignore [no-matching-overload]
@@ -127,9 +136,10 @@ class Muon(Optimizer):
 
         for group in self.param_groups:
             for p in group["params"]:
-                if p.ndim != 2:
+                if p.ndim < 2:
                     raise ValueError(
-                        f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
+                        f"Muon requires parameters with ndim >= 2 (matrix or tensor "
+                        f"flattenable to a matrix); got shape {p.size()}"
                     )
 
     def _init_group(
@@ -254,13 +264,23 @@ Muon.__doc__ = (
     implementation, and "match_rms_adamw", which refers to Moonshot's implementation. This gives users the
     flexibility to choose between the two. If `adjust_lr_fn` is not specified, the default is "original".
 
+    For tensors with ``ndim > 2`` (e.g. Conv2d weights ``[Cout, Cin, kH, kW]``), Muon flattens
+    all dimensions except the first into a 2D matrix ``[fan_out, fan_in]`` with
+    ``fan_in = prod(shape[1:])`` before the Newton-Schulz iteration, then reshapes the update
+    back to the parameter's original shape before applying. The learning rate adjustment uses
+    the effective ``(fan_out, fan_in)`` pair.
+
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
     and `Muon is Scalable for LLM Training`_.
     """
     + rf"""
     Args:
-        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. Other
-            parameters, such as bias, and embedding, should be optimized by a standard method such as AdamW.
+        {_params_doc}. Note that Muon is an optimizer for matrix-shaped parameters (``ndim >= 2``)
+            of neural network hidden layers. Higher-rank tensors such as conv filters are flattened
+            internally. Other parameters (biases, LayerNorm/BatchNorm scales, embeddings, and the final
+            LM head) should be optimized by a standard method such as AdamW. The helper
+            :func:`torch.optim.param_groups_for_muon` produces this partition when called with
+            ``exclude_name_patterns=("embed", "lm_head")``.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
         weight_decay (float, optional): weight decay (L2 penalty). (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
@@ -275,15 +295,11 @@ Muon.__doc__ = (
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> # Muon only supports 2D params; use a standard optimizer
-        >>> # such as AdamW for biases, embeddings, and other non-2D
-        >>> # parameters.
-        >>> muon_params = [
-        ...     p for p in model.parameters() if p.ndim == 2
-        ... ]
-        >>> other_params = [
-        ...     p for p in model.parameters() if p.ndim != 2
-        ... ]
+        >>> # Partition params using the conventional Muon split: matrix-shaped
+        >>> # hidden-layer weights -> Muon; biases, norms, embeddings, lm_head -> AdamW.
+        >>> muon_params, other_params = torch.optim.param_groups_for_muon(
+        ...     model, exclude_name_patterns=("embed", "lm_head")
+        ... )
         >>> optim_muon = torch.optim.Muon(
         ...     muon_params, lr=0.02, momentum=0.95
         ... )
@@ -326,14 +342,25 @@ def _single_tensor_muon(
 
     for i, param in enumerate(params):
         grad = grads[i]
-        if grad.ndim != 2:
-            raise ValueError("Param gradient must be a 2D matrix")
+        if grad.ndim < 2:
+            raise ValueError(
+                f"Muon gradient must have ndim >= 2, got shape {grad.shape}"
+            )
 
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
+        # Flatten all dims except the first for higher-rank tensors (e.g. conv
+        # filters) so Newton-Schulz operates on a 2D [fan_out, fan_in] matrix.
+        orig_shape = update.shape
+        if update.ndim > 2:
+            update = update.reshape(orig_shape[0], -1)
+
         update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+
+        if len(orig_shape) > 2:
+            update = update.reshape(orig_shape)
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
@@ -381,3 +408,74 @@ def muon(
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
+
+
+def param_groups_for_muon(
+    module: torch.nn.Module,
+    *,
+    exclude_name_patterns: Sequence[str] | None = None,
+    exclude_predicate: Callable[[str, torch.nn.Parameter], bool] | None = None,
+) -> tuple[list[torch.nn.Parameter], list[torch.nn.Parameter]]:
+    r"""Partition module parameters into a Muon group and an other group.
+
+    Muon is designed for hidden-layer matrix parameters. Biases and normalization
+    scales (``ndim < 2``) are always routed to ``other_params``. Token/position
+    embeddings and the final LM head, although matrix-shaped, are conventionally
+    trained with a standard optimizer such as AdamW (see Keller Jordan's Muon
+    and Microsoft Dion); however, since naming conventions vary across models,
+    this helper does **not** exclude them by default. Callers should pass
+    ``exclude_name_patterns`` (typically ``("embed", "lm_head")``) explicitly to
+    obtain that partition.
+
+    A parameter is routed to ``other_params`` if any of the following holds:
+
+    * ``p.ndim < 2`` — biases and 1D norm parameters lack matrix structure.
+    * ``exclude_name_patterns`` is given and ``name`` contains any substring in it.
+    * ``exclude_predicate(name, p)`` returns ``True`` (when provided).
+
+    Otherwise it is routed to ``muon_params``. Parameters with
+    ``requires_grad=False`` are skipped.
+
+
+    Args:
+        module (torch.nn.Module): the model whose parameters are to be partitioned.
+        exclude_name_patterns (Sequence[str], optional): fully-qualified parameter
+            names containing any of these substrings are routed to ``other_params``.
+            For the conventional Muon partition, pass ``("embed", "lm_head")`` (or
+            the substrings matching your model's embedding / output head names).
+            ``None`` and ``()`` both disable name-based exclusions. (default: None)
+        exclude_predicate (Callable[[str, torch.nn.Parameter], bool], optional):
+            additional user-supplied predicate. When it returns ``True`` for a
+            parameter, that parameter is routed to ``other_params``. Useful for
+            routing transposed-conv weights (whose ``[Cin, Cout, kH, kW]`` layout
+            is incompatible with Muon's flatten rule) away from Muon.
+            (default: None)
+
+    Returns:
+        A tuple ``(muon_params, other_params)`` of two lists of parameters.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Conventional partition: exclude embeddings and lm_head from Muon.
+        >>> muon_params, other_params = torch.optim.param_groups_for_muon(
+        ...     model, exclude_name_patterns=("embed", "lm_head")
+        ... )
+        >>> optim_muon = torch.optim.Muon(muon_params, lr=0.02)
+        >>> optim_adamw = torch.optim.AdamW(other_params, lr=3e-4)
+
+    .. _Building Parameter Groups:
+        https://github.com/microsoft/dion?tab=readme-ov-file#building-parameter-groups
+    """
+    patterns: tuple[str, ...] = tuple(exclude_name_patterns or ())
+    muon_params: list[torch.nn.Parameter] = []
+    other_params: list[torch.nn.Parameter] = []
+    for name, p in module.named_parameters():
+        if not p.requires_grad:
+            continue
+        is_other = (
+            p.ndim < 2
+            or any(pat in name for pat in patterns)
+            or (exclude_predicate is not None and exclude_predicate(name, p))
+        )
+        (other_params if is_other else muon_params).append(p)
+    return muon_params, other_params
