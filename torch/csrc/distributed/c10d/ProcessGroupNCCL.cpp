@@ -2954,6 +2954,17 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   }
 }
 
+std::vector<std::string> ProcessGroupNCCL::buildScalableInitStoreKeys(
+    size_t numRoots,
+    uint64_t commCounter) {
+  std::vector<std::string> storeKeys;
+  storeKeys.reserve(numRoots);
+  for (size_t r = 0; r < numRoots; r++) {
+    storeKeys.emplace_back(c10::str("UniqueNCCLID:", commCounter, ":", r));
+  }
+  return storeKeys;
+}
+
 // We want to all-gather unique NCCL IDs from all roots using TCPStore.
 // This is first done by setting the ID by each root and then `multiGet` by all
 // ranks.
@@ -2976,11 +2987,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       size_); // worldSize
-  std::string commCounterStr = std::to_string(ncclCommCounter_++);
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
-    storeKeys.emplace_back(
-        "UniqueNCCLID:" + commCounterStr + std::to_string(r));
-  }
+  storeKeys = buildScalableInitStoreKeys(ncclIDs.size(), ncclCommCounter_++);
   // For non-root rank, rootIdx is set to -1.
   if (rootIdx >= 0) {
     auto vec = std::vector<uint8_t>(
