@@ -1210,6 +1210,11 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
+- name: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
+  self: aminmax_backward(self, dim, keepdim, grad_min, grad_max, min, max)
+  min: aminmax_jvp(self_p, self_t, min, dim, keepdim)
+  max: aminmax_jvp(self_p, self_t, max, dim, keepdim)
+
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), 1)
@@ -1315,8 +1320,9 @@
   reserve: not_implemented("batch_norm_backward reserve")
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
-  self: not_implemented("nextafter")
-  other: not_implemented("nextafter")
+  self: at::where(self != other, grad, 0)
+  other: zeros_like(other)
+  result: at::where(self_p != other_p, self_t, 0)
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)

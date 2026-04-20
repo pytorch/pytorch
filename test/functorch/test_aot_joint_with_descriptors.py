@@ -289,7 +289,7 @@ class inner_f(torch.nn.Module):
             None,  # None
             None,  # None
         ], self._out_spec)
-""",  # noqa: B950
+""",
             )
 
             # Compile the result
@@ -475,7 +475,7 @@ class inner_f(torch.nn.Module):
             as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear2.bias'))
             None,  # None
         ], self._out_spec)
-""",  # noqa: B950
+""",
             )
 
             # Compile the result
@@ -1237,7 +1237,7 @@ class inner_f(torch.nn.Module):
             cos: "f32[4, 3]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
             mul_2: "f32[4, 3]" = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
             return (mul_2, mul)
-""",  # noqa: B950
+""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1254,7 +1254,7 @@ class inner_f(torch.nn.Module):
 ('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
 [('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('placeholder', 'arg1_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'}), ('call_function', 'cos', {'mod_name': 'bar'}), ('call_function', 'mul_2', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
 ('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
-('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",
         )
 
 

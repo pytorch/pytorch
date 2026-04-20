@@ -116,7 +116,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             # replace the meta of downstream users. eg. one bug we've seen is:
             #
             # _local_scalar_dense_11: "Sym(u14)" = torch.ops.aten._local_scalar_dense.default(select_10);
-            # sym_sum_2: "Sym(u19 + u20 + u21)" = torch.sym_sum((_local_scalar_dense_11, _local_scalar_dense_12, _local_scalar_dense_13)) # noqa: B950
+            # sym_sum_2: "Sym(u19 + u20 + u21)" = torch.sym_sum((_local_scalar_dense_11, _local_scalar_dense_12, _local_scalar_dense_13))
             #
             # Notice how _local_scalar_dense_11 is u14 but sym_sum_2's meta is incorrectly the old
             # pre-cse value of u19.

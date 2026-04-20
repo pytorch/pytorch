@@ -7,6 +7,7 @@ http_archive(
     name = "rules_cc",
     patches = [
         "//:tools/rules_cc/cuda_support.patch",
+        "//:tools/rules_cc/cc_library_shim.patch",
     ],
     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
     urls = [
@@ -135,6 +136,11 @@ new_local_repository(
     path = "third_party/cpuinfo",
 )
 
+http_archive(
+    name = "rules_license",
+    urls = ["https://github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz"],
+)
+
 new_local_repository(
     name = "asmjit",
     build_file = "//third_party:fbgemm/external/asmjit.BUILD",
@@ -210,11 +216,8 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    # TODO Fix bazel linter to support hashes for release tarballs.
-    #
-    # sha256 = "94750828b18044533e98a129003b6a68001204038dc4749f40b195b24c38f49f",
-    strip_prefix = "rules_python-0.21.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.21.0/rules_python-0.21.0.tar.gz",
+    strip_prefix = "rules_python-0.31.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.31.0/rules_python-0.31.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
@@ -236,6 +239,13 @@ pip_parse(
     name = "pip_deps",
     python_interpreter_target = interpreter,
     requirements_lock = "//:tools/build/bazel/requirements.txt",
+    extra_pip_args = [
+        "--index-url",
+        "${PIP_INDEX_URL}",
+        "--trusted-host",
+        "${PIP_TRUSTED_HOST}",
+    ],
+    envsubst = ["PIP_INDEX_URL", "PIP_TRUSTED_HOST"],
 )
 
 load("@pip_deps//:requirements.bzl", "install_deps")

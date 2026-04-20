@@ -96,7 +96,7 @@ static inline int getOptionalIntAttr(
     int sentinel = -1) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return (val.get() != Py_None) ? _THPUtils_unpackInt(val) : sentinel;
+  return (!Py_IsNone(val.get())) ? _THPUtils_unpackInt(val) : sentinel;
 }
 
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
@@ -161,7 +161,11 @@ static inline LazyKernelCompileResult runTritonKernelWithAutotune(
     AOTI_TORCH_CHECK(py_arg, "Failed to convert argument");
     PyList_SetItem(py_args_list, idx++, py_arg);
   };
-  (add_arg(convertArgToPython(kernel_args)), ...);
+  // Use array pack-expansion instead of a fold expression to avoid
+  // hitting the compiler's expression-nesting limit when there are
+  // hundreds of kernel arguments (e.g. combo kernels).
+  int dummy[] = {0, (add_arg(convertArgToPython(kernel_args)), 0)...};
+  (void)dummy;
 
   RAIIPyObject call_args = PyTuple_Pack(
       4,

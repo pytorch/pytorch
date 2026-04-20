@@ -77,7 +77,7 @@ class GraphModule(torch.nn.Module):
         sub: "f32[2, 3]" = l_x_ - 1;  l_x_ = None
         sin: "f32[2, 3]" = torch.sin(sub);  sub = None
         return (sin,)
-""",  # NOQA: B950
+""",
         )
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")

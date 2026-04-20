@@ -97,6 +97,9 @@ class ExprPrinter(StrPrinter):
             f"_print_NegativeInfinity not implemented for {type(self)}"
         )
 
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        raise NotImplementedError(f"_print_NaN not implemented for {type(self)}")
+
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
 
@@ -175,6 +178,9 @@ class PythonPrinter(ExprPrinter):
 
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return "-math.inf"
+
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "math.nan"
 
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
@@ -655,3 +661,6 @@ class CppPrinter(ExprPrinter):
 
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return f"-{self._print_Infinity(expr)}"
+
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::quiet_NaN()"

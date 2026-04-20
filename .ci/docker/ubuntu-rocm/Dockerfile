@@ -57,6 +57,9 @@ RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
+COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
+RUN rm install_rocSHMEM.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
@@ -82,11 +85,6 @@ ENV LC_ALL C.UTF-8
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
-
-COPY ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
-ENV OPENSSL_DIR /opt/openssl
 
 ARG INDUCTOR_BENCHMARKS
 ARG ANACONDA_PYTHON_VERSION

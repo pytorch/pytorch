@@ -1651,6 +1651,33 @@ class DistMathOpsTest(DTensorTestBase):
         result = torch.linalg.solve(dt_A, dt_B)
         self.assertEqual(result.full_tensor(), expected)
 
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_interpolation_upsample_ops(self):
+        device_mesh = self.build_device_mesh()
+        F = torch.nn.functional
+
+        inp = torch.randn(8, 3, 16, 16, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+
+        # F.interpolate with nearest mode
+        expected = F.interpolate(inp, size=(8, 8), mode="nearest")
+        result = F.interpolate(dt_inp, size=(8, 8), mode="nearest")
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # F.interpolate with area mode
+        expected = F.interpolate(inp, size=(8, 8), mode="area")
+        result = F.interpolate(dt_inp, size=(8, 8), mode="area")
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # F.adaptive_avg_pool2d
+        expected = F.adaptive_avg_pool2d(inp, (4, 4))
+        result = F.adaptive_avg_pool2d(dt_inp, (4, 4))
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,

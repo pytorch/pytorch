@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This is where the local pytorch install in the docker image is located
-pt_checkout="/var/lib/jenkins/workspace"
+pt_checkout="${GITHUB_WORKSPACE:-/var/lib/jenkins/workspace}"
 
 # Since we're cat-ing this file, we need to escape all $'s
 echo "cpp_doc_push_script.sh: Invoked with $*"
@@ -104,6 +104,7 @@ cp -r "${pt_checkout}"/docs/cpp/build/html/* .
 # Copy back _config.yml
 rm -rf _config.yml
 mv /tmp/cppdocs-sync/* .
+touch .nojekyll
 
 # Make a new commit
 git add . || true

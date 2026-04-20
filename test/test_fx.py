@@ -71,9 +71,12 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    xfailIf,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -2054,6 +2057,7 @@ class TestFX(JitTestCase):
                         f"got {tensor_meta[1].shape}"
                     )
 
+    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
@@ -4479,8 +4483,29 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         else:
             kernel_event = "cudaLaunchKernel"
             kernel_event_relu = "cudaLaunchKernel"
-
-        expected = f"""\
+        if IS_WINDOWS:
+            expected = f"""\
+event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event={kernel_event_relu} node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
+        else:
+            expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)

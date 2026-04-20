@@ -85,6 +85,29 @@ std::string precision2str(Float32Precision prec) {
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
 
+CuDNNDepthwiseKernel str2cudnn_depthwise(const std::string& name) {
+  if (name == "auto")
+    return CuDNNDepthwiseKernel::AUTO;
+  else if (name == "cudnn")
+    return CuDNNDepthwiseKernel::CUDNN;
+  else if (name == "native")
+    return CuDNNDepthwiseKernel::NATIVE;
+  TORCH_CHECK(false, "Unknown cuDNN depthwise kernel mode: ", name,
+              ". Expected one of: auto, cudnn, native");
+}
+
+std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
+  switch (k) {
+    case CuDNNDepthwiseKernel::AUTO:
+      return "auto";
+    case CuDNNDepthwiseKernel::CUDNN:
+      return "cudnn";
+    case CuDNNDepthwiseKernel::NATIVE:
+      return "native";
+  }
+  TORCH_CHECK(false, "Invalid enum CuDNNDepthwiseKernel(", static_cast<int>(k), ")");
+}
+
 #ifdef USE_ROCM
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
 #endif
@@ -180,6 +203,14 @@ bool Context::userEnabledNNPACK() const {
 
 void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
+}
+
+CuDNNDepthwiseKernel Context::cudnnDepthwiseKernel() const {
+  return depthwise_kernel_cudnn;
+}
+
+void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
+  depthwise_kernel_cudnn = k;
 }
 
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
@@ -452,29 +483,29 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() {
-  // Rather than put logic for interpreting what Default means at every
-  // call site for blasPreferredBackend(), we set it to an actual value.
-  if (blas_preferred_backend == at::BlasBackend::Default) {
-    blas_preferred_backend = at::BlasBackend::Cublas;
-    // This logic sits in the getter because it needs to validate
-    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
-    // which initialize the backend without calling the setter
+at::BlasBackend Context::blasDefaultBackend() {
+  at::BlasBackend result = at::BlasBackend::Cublas;
 #ifdef USE_ROCM
-    // AMD Instinct targets prefer hipblaslt
-    static const bool hipblaslt_preferred = []() {
-      const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          return false;
-        }
+  // AMD Instinct targets prefer hipblaslt
+  static const bool hipblaslt_preferred = []() {
+    const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
+        return false;
       }
-      return true;
-    }();
-    if (hipblaslt_preferred) {
-      blas_preferred_backend = at::BlasBackend::Cublaslt;
     }
+    return true;
+  }();
+  if (hipblaslt_preferred) {
+    result = at::BlasBackend::Cublaslt;
+  }
 #endif
+  return result;
+}
+
+at::BlasBackend Context::blasPreferredBackend() {
+  if (blas_preferred_backend == at::BlasBackend::Default) {
+    blas_preferred_backend = blasDefaultBackend();
   }
 
 #ifdef USE_ROCM
@@ -691,7 +722,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kONEDNN;
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && defined(__x86_64__)
     if (fbgemm::fbgemmSupportedCPU()) {
       /* X86 is enabled if and only if fbgemm is available.
        * It combines goodness of fbgemm and onednn by dispatching.
@@ -730,7 +761,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kONEDNN);
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && defined(__x86_64__)
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
       // The X86 qengine is available if and only if FBGEMM is available

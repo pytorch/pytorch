@@ -9,7 +9,7 @@ import torch
 from torch._dynamo.utils import warn_once
 from torch.utils._triton import has_triton
 
-from ._triton_ops_meta import get_meta
+from ._triton_ops_meta import _get_device_name, get_meta
 
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
@@ -31,7 +31,7 @@ def check_bsr_layout(f_name, t):
 
 def check_device(f_name, t, device):
     check(
-        t.device == device and t.device.type == "cuda",
+        t.device == device and t.device.type in ("cuda", "xpu"),
         f"{f_name}(): all inputs are expected to be on the same GPU device.",
     )
 
@@ -529,7 +529,7 @@ def scatter_mm_meta(
     **extra,
 ):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         meta = get_meta(
             "scatter_mm",
             (M, K, N, Ms, Ks),
@@ -785,7 +785,7 @@ def bsr_dense_addmm_meta(
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         if dtype is out_dtype:
             version_dtype = dtype

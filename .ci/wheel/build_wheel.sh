@@ -132,20 +132,12 @@ CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=false
 VERIFY_WHEELNAME=true
 case $desired_python in
-    3.14t)
-        echo "Using 3.14 deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
+    3.14*)
+        echo "Using ${desired_python} deps"
+        NUMPY_PINNED_VERSION="==2.3.4"
         ;;
-    3.14)
-        echo "Using 3.14t deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
-        ;;
-    3.13t)
-        echo "Using 3.13t deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
-        ;;
-    3.13)
-        echo "Using 3.13 deps"
+    3.13*)
+        echo "Using ${desired_python} deps"
         NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)

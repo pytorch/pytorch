@@ -31,6 +31,7 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
@@ -286,6 +287,56 @@ class CudaReproTests(TestCase):
             ).run(code[0])
 
             self.assertEqual(out, f(*inputs))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mha_mem_eff_attention_backward_large_batch_compile(self):
+        torch.manual_seed(0)
+
+        eager = nn.MultiheadAttention(
+            embed_dim=8,
+            num_heads=1,
+            batch_first=True,
+            device=device_type,
+            dtype=torch.float16,
+        )
+        compiled = copy.deepcopy(eager)
+        compiled = torch.compile(compiled)
+
+        q = torch.rand(2**16, 1, 8, device=device_type, dtype=torch.float16)
+        kv = torch.rand(2**16, 2, 8, device=device_type, dtype=torch.float16)
+        mask = torch.randint(0, 2, (2**16, 2), device=device_type, dtype=torch.bool)
+
+        eager_q = q.detach().clone().requires_grad_(True)
+        eager_kv = kv.detach().clone().requires_grad_(True)
+        compiled_q = q.detach().clone().requires_grad_(True)
+        compiled_kv = kv.detach().clone().requires_grad_(True)
+
+        eager_out = eager(
+            query=eager_q,
+            key=eager_kv,
+            value=eager_kv,
+            key_padding_mask=mask,
+            attn_mask=None,
+            need_weights=False,
+        )[0]
+        eager_out.sum().backward()
+
+        compiled_out = compiled(
+            query=compiled_q,
+            key=compiled_kv,
+            value=compiled_kv,
+            key_padding_mask=mask,
+            attn_mask=None,
+            need_weights=False,
+        )[0]
+        compiled_out.sum().backward()
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_q.grad, eager_q.grad)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad)
 
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -1560,11 +1611,36 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_explicit_precision_cast(
+        self, lowp_dtype
+    ):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        x = torch.randn(4, 32, 32, device=device_type, dtype=torch.float32)
+        w = torch.randn(32, 32, device=device_type, dtype=torch.float32)
+
+        def fn(x, w):
+            x = torch.matmul(x, w)
+            x = x.to(lowp_dtype).float()
+            x = x * torch.sigmoid(x)
+            return x.sum(dim=1)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x, w)
+        actual, (code,) = run_and_get_code(opt_fn, x.clone(), w.clone())
+        self.assertEqual(expected, actual)
+        self.assertIn("args = (%convert_element_type, torch.float32)", code)
+        self.assertIn(f".to(tl.{lowp_name})", code)
+
     @torch._inductor.config.patch(emulate_precision_casts=True)
     @torch._inductor.config.patch(pattern_matcher=False)
     def test_emulate_precision_casts_convert_element_type(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0)
+        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
 
         x = torch.rand(1000, device=device_type, dtype=torch.float32)
 

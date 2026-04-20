@@ -1058,6 +1058,11 @@ def xfail_if_triton_cpu(fn):
     return fn
 
 
+def xfail_if_pallas(fn):
+    fn._expected_failure_pallas = True
+    return fn
+
+
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -2604,6 +2609,8 @@ class CommonTemplate:
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
         k = 128
@@ -2640,6 +2647,8 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     def test__dyn_quant_pack_4bit_weight_bf16(self):
         k = 128
         n = 128
@@ -2678,6 +2687,8 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
+    @xfail_if_pallas
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):
@@ -3189,6 +3200,15 @@ class CommonTemplate:
         )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
+
+    def test_arange7(self):
+        def fn(x):
+            # Test aten.arange.start_step lowering with integer dtypes
+            return x + torch.ops.aten.arange.start_step(
+                0, 10, 2, dtype=torch.int64, device=x.device
+            )
+
+        self.common(fn, (torch.zeros(5, dtype=torch.int64),), check_lowp=False)
 
     def test_linspace1(self):
         def fn(x):
@@ -6811,7 +6831,6 @@ class CommonTemplate:
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
 
-    @xfail_if_mps  # 'NullHandler' object has no attribute 'wrapper_code'
     def test_masked_scatter(self):
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
@@ -7832,6 +7851,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_fmod_uint8_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: uint8 Inductor integer divide-by-zero RuntimeError check"
+            )
+        torch.manual_seed(0)
+        device = self.device
+        divisor = torch.randint(0, 255, (8,), dtype=torch.uint8, device=device)
+        inp = torch.randint(1, 255, (16, 8), dtype=torch.uint8, device=device)
+        divisor[2] = 0  # ensure a divisor is 0
+
+        torch._dynamo.reset()
+        opt = torch.compile(torch.fmod, fullgraph=True, backend="inductor", mode=None)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            opt(inp, divisor)
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_remainder_uint8_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: uint8 Inductor integer divide-by-zero RuntimeError check"
+            )
+        torch.manual_seed(0)
+        device = self.device
+        divisor = torch.randint(0, 255, (8,), dtype=torch.uint8, device=device)
+        inp = torch.randint(1, 255, (16, 8), dtype=torch.uint8, device=device)
+        divisor[2] = 0  # ensure a divisor is 0
+
+        torch._dynamo.reset()
+        opt = torch.compile(
+            torch.remainder, fullgraph=True, backend="inductor", mode=None
+        )
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            opt(inp, divisor)
 
     def test_zeros(self):
         def fn(a):
@@ -9458,6 +9517,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @skip_if_gpu_halide  # accuracy issue
+    def test_slice_scatter_backward_with_overlapping_base(self):
+        def fn(x, y):
+            return torch.slice_scatter(x, y, dim=1, start=0, end=6).sum(dim=1)
+
+        torch.manual_seed(0)
+        x = torch.randn(4, 13, 33, device=self.device, requires_grad=True)
+        y = torch.randn(4, 6, 33, device=self.device, requires_grad=True)
+        grad = torch.randn(4, 33, device=self.device)
+
+        x_ref = x.detach().clone().requires_grad_(True)
+        y_ref = y.detach().clone().requires_grad_(True)
+
+        out_ref = fn(x_ref, y_ref)
+        out_ref.backward(grad)
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        out = compiled_fn(x, y)
+        out.backward(grad)
+
+        self.assertEqual(out, out_ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(y.grad, y_ref.grad)
+
     def test_slice_scatter2(self):
         def fn(a, b):
             return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
@@ -9820,6 +9903,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=check_lowp,
             )
 
+    def test_scatter_reduce_fused_broadcast_non_power_of_2(self):
+        # https://github.com/pytorch/pytorch/issues/178871
+        # When inductor fuses a scalar broadcast with scatter_reduce("sum"),
+        # the store index may simplify to a constant (e.g., output size 1).
+        # For non-power-of-2 input sizes, XBLOCK > numel causes OOB threads
+        # to execute tl.atomic_add without a mask, adding stale values.
+        def fn(x, bias, idx):
+            src = x + bias
+            out = torch.zeros(1, 1, device=x.device, dtype=x.dtype)
+            return out.scatter_reduce(
+                0, idx.unsqueeze(-1).expand_as(src), src, "sum", include_self=True
+            )
+
+        check_lowp = self.device != "xpu"
+        for N in [3, 5, 7, 9, 17, 33, 48]:
+            self.common(
+                fn,
+                [
+                    torch.randn(N, 1),
+                    torch.tensor([0.5]),
+                    torch.zeros(N, dtype=torch.long),
+                ],
+                check_lowp=check_lowp,
+                atol=1e-3,
+                rtol=0.01,
+            )
+
     @skip_if_gpu_halide
     def test_dense_mask_index(self):
         r"""
@@ -9858,18 +9968,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
     @parametrize(
-        "constructor",
-        [torch.empty, torch.ones, torch.zeros, torch.rand, torch.randn],
-        name_fn=lambda constructor: constructor.__name__,
+        "constructor_and_args",
+        [
+            (torch.empty, ([1, 128, 128],)),
+            (torch.ones, ([1, 128, 128],)),
+            (torch.zeros, ([1, 128, 128],)),
+            (
+                torch.full,
+                (
+                    [1, 128, 128],
+                    2,
+                ),
+            ),
+            (torch.rand, ([1, 128, 128],)),
+            (torch.randn, ([1, 128, 128],)),
+        ],
+        name_fn=lambda constructor_and_args: constructor_and_args[0].__name__,
     )
-    def test_constructors_pin_memory(self, constructor):
+    def test_constructors_pin_memory(self, constructor_and_args):
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
 
-        failing_constructors = [torch.rand, torch.ones, torch.zeros]
+        constructor, args = constructor_and_args
+
+        failing_constructors = [
+            torch.rand,
+        ]
 
         def fn():
-            return constructor([1, 128, 128], pin_memory=True, device=self.device)
+            return constructor(*args, pin_memory=True, device=self.device)
 
         result = torch.compile(fn, backend="inductor")()
         if constructor in failing_constructors:
@@ -13525,7 +13652,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, code = run_and_get_code(torch.compile(fn), x, y, z)
         # z's alignment check should appear between the two mm calls:
         # first mm (uses x, y) -> alignment clone (for z) -> second mm (uses z)
-        FileCheck().check("extern_kernels.mm(").check("copy_misaligned").check(
+        FileCheck().check("extern_kernels.mm(").check("copy_if_misaligned").check(
             "extern_kernels.mm("
         ).run(code[0])
 
@@ -13541,30 +13668,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         _, code = run_and_get_code(torch.compile(fn), x, y)
         # cpp_wrapper should NOT contain Python-syntax alignment copies
-        self.assertNotIn("copy_misaligned", code[0])
+        self.assertNotIn("copy_if_misaligned", code[0])
 
-    def test_copy_misaligned_returns_same_tensor_when_aligned(self):
+    def test_copy_if_misaligned_returns_same_tensor_when_aligned(self):
         import weakref
 
-        from torch._C._dynamo.guards import copy_misaligned
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         x = torch.randn(32, 32, device=self.device)
         ref = weakref.ref(x)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertIs(result, x)
         del x, result
         self.assertIsNone(ref(), "aligned tensor should be freed")
 
-    def test_copy_misaligned_clones_when_misaligned(self):
+    def test_copy_if_misaligned_clones_when_misaligned(self):
         import weakref
 
-        from torch._C._dynamo.guards import copy_misaligned
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         big = torch.randn(32 * 32 + 1, device=self.device)
         x = big[1:].reshape(32, 32)
         self.assertNotEqual(x.data_ptr() % 16, 0)
         ref_orig = weakref.ref(x)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertIsNot(result, x)
         self.assertEqual(result.data_ptr() % 16, 0)
         self.assertEqual(result, x)
@@ -13577,11 +13704,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         del big
         self.assertIsNone(ref_orig(), "original tensor should be freed")
 
-    def test_copy_misaligned_empty_tensor(self):
-        from torch._C._dynamo.guards import copy_misaligned
+    def test_copy_if_misaligned_empty_tensor(self):
+        from torch._C._dynamo.guards import copy_if_misaligned
 
         x = torch.randn(0, device=self.device)
-        result = copy_misaligned(x)
+        result = copy_if_misaligned(x)
         self.assertEqual(result.size(), x.size())
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -17996,6 +18123,83 @@ if RUN_GPU:
             # There's no pointwise work to do, so xnumel should be 1...
             fc.check("xnumel = 1")
             fc.run(code[0])
+
+        @config.patch({"triton.decompose_sort_ops": True})
+        def test_median_decompose_sort_ops(self):
+            def fn_default(a):
+                return torch.median(a)
+
+            def fn_dim(a):
+                return torch.median(a, dim=1)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            for fn in (fn_default, fn_dim):
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(fn), inp)
+                self.assertIn(
+                    "sort_with_index",
+                    " ".join(code),
+                    "Expected Triton sort codegen for median",
+                )
+                torch.testing.assert_close(result, fn(inp))
+
+        @config.patch({"triton.decompose_sort_ops": True})
+        def test_mode_decompose_sort_ops(self):
+            def fn(a):
+                return torch.mode(a, dim=1)
+
+            # Use integers so ties are common, exercising run-length logic
+            inp = torch.randint(
+                0, 5, size=[8, 16], dtype=torch.float32, device=GPU_TYPE
+            )
+            torch._dynamo.reset()
+            result, code = run_and_get_code(torch.compile(fn), inp)
+            self.assertIn(
+                "sort_with_index",
+                " ".join(code),
+                "Expected Triton sort codegen for mode",
+            )
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        @config.patch({"triton.decompose_sort_ops": True})
+        def test_topk_decompose_sort_ops(self):
+            def fn(a):
+                return torch.topk(a, 3, dim=-1)
+
+            def fn_largest_false(a):
+                return torch.topk(a, 3, dim=-1, largest=False)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            for test_fn in (fn, fn_largest_false):
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(test_fn), inp)
+                self.assertIn(
+                    "sort_with_index",
+                    " ".join(code),
+                    "Expected Triton sort codegen for topk",
+                )
+                expected = test_fn(inp)
+                torch.testing.assert_close(result[0], expected[0])
+                torch.testing.assert_close(result[1], expected[1])
+
+        @config.patch({"triton.decompose_sort_ops": True})
+        def test_kthvalue_decompose_sort_ops(self):
+            def fn(a):
+                return torch.kthvalue(a, 3, dim=-1)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            result, code = run_and_get_code(torch.compile(fn), inp)
+            self.assertIn(
+                "sort_with_index",
+                " ".join(code),
+                "Expected Triton sort codegen for kthvalue",
+            )
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

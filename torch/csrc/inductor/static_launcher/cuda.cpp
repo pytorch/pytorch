@@ -64,7 +64,7 @@ CUdeviceptr getPointer(PyObject* obj) {
 
     return data_ptr;
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     // valid nullptr
     return data_ptr;
   }
