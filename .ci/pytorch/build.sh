@@ -221,187 +221,168 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUI
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e -o pipefail
+# check that setup.py would fail with bad arguments
+echo "The next three invocations are expected to fail with invalid command error messages."
+( ! get_exit_code python setup.py bad_argument )
+( ! get_exit_code python setup.py clean] )
+( ! get_exit_code python setup.py clean bad_argument )
 
-  get_bazel
-  python3 tools/optional_submodules.py checkout_eigen
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+  # rocm builds fail when WERROR=1
+  # XLA test build fails when WERROR=1
+  # set only when building other architectures
+  # or building non-XLA tests.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+    # TODO: Remove me and may be just focus on numpy-2.x testing
+    if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      # In relality it's only needed for numpy_2_x and vllm shards (where vllm depends on numpy-2)
+      python -mpip install numpy==2.0.2
+    fi
 
-  # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
-  # the runner
-  BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
-  BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
+    WERROR=1 python setup.py clean
 
-  if [[ "$CUDA_VERSION" == "cpu" ]]; then
-    # Build torch, the Python module, and tests for CPU-only
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
+    WERROR=1 python -m build --wheel --no-isolation
   else
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
+    python setup.py clean
+    if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+      source .ci/pytorch/install_cache_xla.sh
+    fi
+    python -m build --wheel --no-isolation
   fi
-else
-  # check that setup.py would fail with bad arguments
-  echo "The next three invocations are expected to fail with invalid command error messages."
-  ( ! get_exit_code python setup.py bad_argument )
-  ( ! get_exit_code python setup.py clean] )
-  ( ! get_exit_code python setup.py clean bad_argument )
+  pip_install_whl "$(echo dist/*.whl)"
+  if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+    # Regression test for https://github.com/pytorch/pytorch/issues/164297
+    # Torch should be importable and that's about it
+    pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+  fi
 
-  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-    # rocm builds fail when WERROR=1
-    # XLA test build fails when WERROR=1
-    # set only when building other architectures
-    # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
-      # TODO: Remove me and may be just focus on numpy-2.x testing
-      if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        # In relality it's only needed for numpy_2_x and vllm shards (where vllm depends on numpy-2)
-        python -mpip install numpy==2.0.2
-      fi
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+    install_torchvision
+  fi
 
-      WERROR=1 python setup.py clean
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+    install_torchaudio
+  fi
 
-      WERROR=1 python -m build --wheel --no-isolation
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+    install_torchrec_and_fbgemm
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+    install_torchao
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+    echo "Checking that xpu is compiled"
+    pushd dist/
+    if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
+      echo "XPU support is compiled in."
     else
-      python setup.py clean
-      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
-        source .ci/pytorch/install_cache_xla.sh
+      echo "XPU support is NOT compiled in."
+      exit 1
+    fi
+    popd
+  fi
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  assert_git_not_dirty
+  # Copy ninja build logs to dist folder
+  mkdir -p dist
+  if [ -f build/.ninja_log ]; then
+    cp build/.ninja_log dist
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+    sudo rm -f /opt/cache/bin/cc
+    sudo rm -f /opt/cache/bin/c++
+    sudo rm -f /opt/cache/bin/gcc
+    sudo rm -f /opt/cache/bin/g++
+    # Restore original clang compilers that were backed up during sccache wrapping.
+    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
+    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
+    if [[ -d /opt/rocm/llvm/bin ]]; then
+      pushd /opt/rocm/llvm/bin
+      if [[ -d original ]]; then
+        sudo mv original/clang .
+        sudo mv original/clang++ .
       fi
-      python -m build --wheel --no-isolation
-    fi
-    pip_install_whl "$(echo dist/*.whl)"
-    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
-      # Regression test for https://github.com/pytorch/pytorch/issues/164297
-      # Torch should be importable and that's about it
-      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
-    fi
-
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
-      install_torchvision
-    fi
-
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
-      install_torchaudio
-    fi
-
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
-      install_torchrec_and_fbgemm
-    fi
-
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
-      install_torchao
-    fi
-
-    if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
-      echo "Checking that xpu is compiled"
-      pushd dist/
-      if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
-        echo "XPU support is compiled in."
-      else
-        echo "XPU support is NOT compiled in."
-        exit 1
-      fi
+      sudo rm -rf original
       popd
     fi
-
-    # TODO: I'm not sure why, but somehow we lose verbose commands
-    set -x
-
-    assert_git_not_dirty
-    # Copy ninja build logs to dist folder
-    mkdir -p dist
-    if [ -f build/.ninja_log ]; then
-      cp build/.ninja_log dist
-    fi
-
-    if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-      # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-      sudo rm -f /opt/cache/bin/cc
-      sudo rm -f /opt/cache/bin/c++
-      sudo rm -f /opt/cache/bin/gcc
-      sudo rm -f /opt/cache/bin/g++
-      # Restore original clang compilers that were backed up during sccache wrapping.
-      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-      if [[ -d /opt/rocm/llvm/bin ]]; then
-        pushd /opt/rocm/llvm/bin
-        if [[ -d original ]]; then
-          sudo mv original/clang .
-          sudo mv original/clang++ .
-        fi
-        sudo rm -rf original
-        popd
-      fi
-    fi
-
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
-    CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
-    CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
-    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
-
-    # Build custom operator tests.
-    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
-
-    mkdir -p "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build jit hook tests
-    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
-    mkdir -p "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir -p "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-  else
-    # Test no-Python build
-    echo "Building libtorch"
-
-    # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
-    # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
-    # 16 CPUs
-    MAX_JOBS=$(nproc --ignore=4)
-    export MAX_JOBS
-
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    # Build outside the source tree so the artifacts don't interfere with
-    # the workspace. /tmp is writable on both EC2 and OSDC runners.
-    mkdir -p /tmp/cpp-build/caffe2
-    pushd /tmp/cpp-build/caffe2
-    WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
-    popd
   fi
+
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
+  CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
+  CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
+  mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+
+  mkdir -p "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+
+  # Build jit hook tests
+  JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+  JIT_HOOK_TEST="$PWD/test/jit_hooks"
+  python --version
+  SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+  mkdir -p "$JIT_HOOK_BUILD"
+  pushd "$JIT_HOOK_BUILD"
+  cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+
+  # Build custom backend tests.
+  CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+  CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+  python --version
+  mkdir -p "$CUSTOM_BACKEND_BUILD"
+  pushd "$CUSTOM_BACKEND_BUILD"
+  cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+else
+  # Test no-Python build
+  echo "Building libtorch"
+
+  # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
+  # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
+  # 16 CPUs
+  MAX_JOBS=$(nproc --ignore=4)
+  export MAX_JOBS
+
+  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  # Build outside the source tree so the artifacts don't interfere with
+  # the workspace. /tmp is writable on both EC2 and OSDC runners.
+  mkdir -p /tmp/cpp-build/caffe2
+  pushd /tmp/cpp-build/caffe2
+  WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
+  popd
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   PYTHONPATH=. python tools/stats/export_test_times.py
 fi
-# don't do this for bazel or s390x or riscv64 as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+# don't do this for s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
   print_sccache_stats
 fi
