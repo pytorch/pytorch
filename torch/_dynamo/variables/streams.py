@@ -555,10 +555,8 @@ class CudaStreamVariable(StreamVariable):
             if hasattr(self.value, "cuda_stream"):
                 return ConstantVariable.create(self.value.cuda_stream)
 
-            assert hasattr(self.value, "native_handle"), (
-                f"Address for stream {self.value} could not be determined."
-            )
-            return ConstantVariable.create(self.value.native_handle)
+            if hasattr(self.value, "native_handle"):
+                return ConstantVariable.create(self.value.native_handle)
 
         return super().var_getattr(tx, name)
 
