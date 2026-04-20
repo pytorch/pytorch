@@ -1721,7 +1721,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             torch._cslt_sparse_mm(compressed, B_fp8, out_dtype=out_dtype)
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
-    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for=("cuda", "xpu"))
 if "cutlass" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
     instantiate_device_type_tests(
         TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda"
