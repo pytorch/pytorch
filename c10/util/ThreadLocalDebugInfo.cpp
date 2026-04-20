@@ -26,7 +26,8 @@ const DebugInfoKind DebugInfoKind::TEST_INFO(&kTestInfoName);
 const DebugInfoKind DebugInfoKind::TEST_INFO_2(&kTestInfo2Name);
 
 DebugInfoKind::DebugInfoKind(DebugInfoKind::value_type value) : value_(value) {
-  CHECK(value_ != nullptr)  // Crash OK as this indicates a bug in C++ code.
+  // Crash OK as this indicates a bug in C++ code.
+  TORCH_INTERNAL_ASSERT(value_ != nullptr)
       << "DebugInfoKind must be initialized with a non-null pointer.";
 }
 
