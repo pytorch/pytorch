@@ -2,7 +2,6 @@
 // Light-weight version of CUDAContext.h with fewer transitive includes
 
 #include <cstdint>
-#include <functional>
 #include <map>
 #include <unordered_map>
 #include <utility>
@@ -27,6 +26,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/hash.h>
 
 namespace c10 {
 struct Allocator;
@@ -95,12 +95,7 @@ TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
 // No mutex is needed because cuBLAS handles are unique per thread
 // (guaranteed by DeviceThreadHandlePool), so each thread's workspace
 // map is only ever accessed by that thread.
-struct WorkspaceMapHash {
-  size_t operator()(const std::pair<int, void*>& p) const {
-    return std::hash<int>{}(p.first) ^ std::hash<void*>{}(p.second);
-  }
-};
-using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>, WorkspaceMapHash>;
+using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>, c10::hash<std::pair<int, void*>>>;
 
 TORCH_CUDA_CPP_API WorkspaceMap& cublas_stream_to_workspace();
 TORCH_CUDA_CPP_API WorkspaceMap& cublaslt_stream_to_workspace();
