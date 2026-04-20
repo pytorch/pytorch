@@ -508,7 +508,7 @@ class DistributedDataParallel(Module, Joinable):
         >>> torch.distributed.init_process_group(
         >>>     backend=vendor_backend, world_size=N, init_method='...'
         >>> )
-        >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
+        >>> model = DistributedDataParallel(model, device_ids=[i])
 
     Or you can use the latest API for initialization:
 
@@ -686,11 +686,11 @@ class DistributedDataParallel(Module, Joinable):
                    both the input data for the forward pass and the actual module
                    must be placed on the correct device.
                    (default: ``None``)
-        output_device (int or torch.device): Device location of output for
-                      single-device CUDA modules. For multi-device modules and
-                      CPU modules, it must be ``None``, and the module itself
-                      dictates the output location. (default: ``device_ids[0]``
-                      for single-device modules)
+        output_device (int or torch.device): This argument has no effect on
+                      DDP behavior. Unlike ``DataParallel``, DDP does not
+                      perform scatter/gather and each process runs its own
+                      forward pass on its assigned device. Retained for
+                      backward compatibility. (default: ``None``)
         broadcast_buffers (bool): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
                           function. (default: ``True``)
@@ -2014,7 +2014,7 @@ class DistributedDataParallel(Module, Joinable):
             >>>     torch.cuda.set_device(rank)
             >>>     model = nn.Linear(1, 1, bias=False).to(rank)
             >>>     model = torch.nn.parallel.DistributedDataParallel(
-            >>>         model, device_ids=[rank], output_device=rank
+            >>>         model, device_ids=[rank]
             >>>     )
             >>>     # Rank 1 gets one more input than rank 0.
             >>>     inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
