@@ -37,8 +37,11 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-:: cmake 3.27.9 with ADD_CMAKE_TO_PATH=System is pre-installed on the AMI
-:: (see pytorch/test-infra#7986). This is required for MKL detection.
+:: Update CMake
+:: TODO: Investigate why this helps MKL detection, even when CMake from choco is not used
+call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 
 :: TODO: Move to .ci/docker/requirements-ci.txt
 call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0

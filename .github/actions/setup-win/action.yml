@@ -109,9 +109,9 @@ runs:
         # that it doesn't interfere
         Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
 
-    - name: Print file locks on runner workspace
+    - name: Install sysinternals handle tool
       continue-on-error: true
       shell: powershell
       run: |
-        # handle.exe is pre-installed on the AMI (pytorch/test-infra#7986)
+        choco install handle -y
         handle C:\actions-runner\_work\
