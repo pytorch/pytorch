@@ -2611,7 +2611,7 @@ def calc_conv_nd_return_shape(
             dilation[i] * (kernel_size[i] - 1) + 1 for i in range(len(dims))
         ]
         torch._check(
-            sym_and(*[p >= k for p, k in zip(padded_input, effective_kernel)]),
+            sym_and(*[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]),
             lambda: (
                 f"Calculated padded input size per channel: "
                 f"({' x '.join(str(x) for x in padded_input)}). "
