@@ -167,8 +167,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # disallow creating reference-type opaque objects in the middle of the
         # program
         if is_opaque_reference_type(self.value):
-            # Skip __init__ to prevent dynamo from tracing it during resume
-            skip_code(self.value.__init__.__code__)
+            # Skip __init__ to prevent dynamo from tracing it during resume.
+            # C extension types (e.g. torch._C.Generator) have wrapper_descriptor
+            # __init__ without __code__, so guard the skip_code call.
+            if hasattr(self.value.__init__, "__code__"):
+                skip_code(self.value.__init__.__code__)
 
             unimplemented(
                 gb_type="An opaque object was created in the middle of the program.",

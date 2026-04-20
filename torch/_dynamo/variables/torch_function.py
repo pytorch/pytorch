@@ -576,7 +576,7 @@ def dispatch_torch_function(
     unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
-        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        explanation=f"All __torch_function__ overrides for function {fn} returned NotImplemented",
         hints=[
             *graph_break_hints.USER_ERROR,
         ],

@@ -2602,7 +2602,7 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: builtins.bool | None = None,
-    backend: str | _Callable = "inductor",
+    backend: str | _Callable | None = None,
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
@@ -2722,6 +2722,11 @@ def compile(
             "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
             "Please use Python 3.13.3+."
         )
+
+    if backend is None:
+        from torch._dynamo.backends.registry import get_default_backend
+
+        backend = get_default_backend()
 
     # Decorator mode
     if model is None:

@@ -307,8 +307,15 @@ class TritonSymbols:
                 ]
                 assert len(tree_match) == 1, "# of Match expected to 1"
 
-                shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
-                var_shape = tuple(shape)
+                if tree_match[0].tensor_dim is None:
+                    # tree has no tensor dimension (e.g. no_x_dim mode),
+                    # treat as scalar
+                    var_shape = ()
+                else:
+                    shape[tree_match[0].tensor_dim] = str(
+                        cls.get_block_size(tree_match[0])
+                    )
+                    var_shape = tuple(shape)
 
             # Union current variable shape
             expr_shape = get_broadcasted_shape(expr_shape, var_shape)
