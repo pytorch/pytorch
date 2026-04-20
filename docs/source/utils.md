@@ -155,14 +155,12 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.iter.routeddecoder
 .. py:module:: torch.utils.data.datapipes.iter.selecting
 .. py:module:: torch.utils.data.datapipes.iter.sharding
-.. py:module:: torch.utils.data.datapipes.iter.streamreader
 .. py:module:: torch.utils.data.datapipes.iter.utils
 .. py:module:: torch.utils.data.datapipes.map.callable
 .. py:module:: torch.utils.data.datapipes.map.combinatorics
 .. py:module:: torch.utils.data.datapipes.map.combining
 .. py:module:: torch.utils.data.datapipes.map.grouping
 .. py:module:: torch.utils.data.datapipes.map.utils
-.. py:module:: torch.utils.data.datapipes.utils.common
 .. py:module:: torch.utils.data.datapipes.utils.decoder
 .. py:module:: torch.utils.data.datapipes.utils.snapshot
 .. py:module:: torch.utils.data.dataset
