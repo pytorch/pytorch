@@ -125,36 +125,29 @@ function test_pool_free_without_alloc_no_inflation() {
     traces: [
       // No alloc — it happened before recording started or got replaced in ring buffer
       // Only the free_completed event is matched (free_requested is ignored).
-      // Note: real trace events never have segment_pool_id; pool is resolved via find_pool_id
-      // from the segment address ranges.
-      { action: 'free_completed', addr: 5000, size: 1000, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x788c2000000, size: 94371840, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x788c2000000, size: 256, frames: [], stream: 0 },
     ],
     segments: [{
-      device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId,
+      device: 0, address: 0x788c0000000, total_size: 83886080, segment_pool_id: poolId,
       stream: 0, blocks: [],
     }],
   });
 
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
   // The free_completed creates an element in initially_allocated + actions.
-  // The fix pre-loads it into the pool (pool.active=1000, envelope grows to 1000).
-  // Then in actions, it's recognized as a free (pool.active goes to 0).
-  // Peak should be 1000 (the initial state), NOT 2000.
-  assert(result.max_size <= 1000,
-    `pool free-without-alloc should not inflate peak: got ${result.max_size}`);
+  // Pre-loaded into pool: pool.active=90M, envelope=max(90M, 80M reserved)=90M.
+  // Then freed (pool.active=0), then small alloc (pool.active=256).
+  // Peak should be 94371840 (max of active and reserved), NOT double-counted.
+  assertEqual(result.max_size, 94371840,
+    'pool free-without-alloc peak should be max(active, reserved)');
 
-  // 1 element: the free_completed event that created an initially_allocated entry
-  assertEqual(result.elements_length, 1, 'should have 1 element');
+  assertEqual(result.elements_length, 2, 'should have 2 elements');
 
-  // max_at_time should show the pool envelope at 1000, then dropping after the free
   assert(result.max_at_time.length > 0, 'max_at_time should not be empty');
-  assertEqual(Math.max(...result.max_at_time), 1000,
-    'max_at_time peak should be 1000 (envelope high-water mark)');
+  assertEqual(Math.max(...result.max_at_time), 94371840,
+    'max_at_time peak should be max(active, reserved)');
 
-  // allocations_over_time should contain:
-  //   - pool envelope (elem = "pool:1,42")
-  //   - stripe for the block (elem = 0, the element index)
-  //   - summarized_mem
   const envelopes = result.allocations_over_time.filter(
     d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
   assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
@@ -162,8 +155,9 @@ function test_pool_free_without_alloc_no_inflation() {
 
   const stripes = result.allocations_over_time.filter(
     d => typeof d.elem === 'number' && d.opacity === 0.5);
-  assertEqual(stripes.length, 1, 'should have 1 pool stripe');
-  assertEqual(stripes[0].size, 1000, 'stripe size matches block size');
+  assertEqual(stripes.length, 2, 'should have 2 pool stripes');
+  assertEqual(stripes[0].size, 94371840, 'first stripe: pre-loaded block (freed later)');
+  assertEqual(stripes[1].size, 256, 'second stripe: small alloc after free');
 }
 
 function test_pool_alloc_then_free_normal() {
@@ -182,7 +176,8 @@ function test_pool_alloc_then_free_normal() {
   });
 
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
-  assertEqual(result.max_size, 500, 'normal pool alloc/free peak should be 500');
+  // Envelope = segment reserved (8192), which is the pool's GPU footprint
+  assertEqual(result.max_size, 8192, 'pool envelope should be segment reserved (8192)');
 }
 
 function test_multiple_pool_frees_without_alloc() {
@@ -204,11 +199,11 @@ function test_multiple_pool_frees_without_alloc() {
   });
 
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
-  // 3 blocks of 500 each were initially allocated. Pool envelope = 1500.
-  // Then all 3 are freed. Peak should be 1500 (the initial state).
-  // BUG would give 3000+ (each free treated as a new alloc).
-  assert(result.max_size <= 1500,
-    `multiple pool frees should not inflate: got ${result.max_size}, expected <= 1500`);
+  // 3 blocks of 500 each were initially allocated. Pool envelope = 16384 (segment reserved).
+  // Then all 3 are freed. Peak should be 16384 (segment reserved, the initial state).
+  // BUG would give 32768+ (double-counted).
+  assert(result.max_size <= 16384,
+    `multiple pool frees should not inflate: got ${result.max_size}, expected <= 16384`);
 }
 
 function test_non_pool_free_without_alloc() {
@@ -254,8 +249,8 @@ function test_mixed_pool_and_nonpool() {
   });
 
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
-  // Peak: 200 (non-pool) + 400 (pool envelope) = 600
-  assertEqual(result.max_size, 600, 'mixed pool+nonpool peak should be 600');
+  // Peak: 200 (non-pool) + 8192 (pool envelope = segment reserved) = 8392
+  assertEqual(result.max_size, 8392, 'mixed pool+nonpool peak: 200 + 8192 segment reserved');
 }
 
 function test_include_private_inactive_false_ignores_pools() {
@@ -859,15 +854,19 @@ function test_ghost_blocks_private_pool() {
   assertEqual(default_ghost.timesteps[1], pool_ghost.timesteps.at(-1),
     'both ghosts end at the same final timestep');
 
-  // Pool envelope only for (0,1) — default pool ghosts are at global bottom
+  // Pool envelope only for (0,1) — default pool ghosts are at global bottom.
+  // Both pool segments use stream 0, so there should be exactly 1 envelope
+  // (not split by stream, and not "snull" from annotate_snapshot eliding streams).
   const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
   assertEqual(envelopes.length, 1, '1 pool envelope');
-  assertContains(envelopes[0].elem, '0,1', 'envelope for pool (0,1)');
+  assertContains(envelopes[0].elem, '0,1,s0', 'envelope for pool (0,1)');
 
-  // Envelope initial size at timestep 0 should already include the ghost block
+  // Envelope initial size at timestep 0 = total pool reserved from snapshot
+  // (ghost segment 2 MiB + traced segment ~20 MiB = ~22 MiB)
+  const pool_reserved = 2097152 + 20971520;  // sum of pool (0,1) segment total_sizes
   const env = envelopes[0];
   assertEqual(env.timesteps[0], 0, 'envelope starts at timestep 0');
-  assertEqual(env.size[0], 1048576, 'envelope initial size = ghost (1 MiB)');
+  assertEqual(env.size[0], pool_reserved, 'envelope initial size = total pool reserved');
 
   // Ghost stripe should fit within the envelope
   const env_offset = env.offsets[0];
@@ -876,11 +875,11 @@ function test_ghost_blocks_private_pool() {
   assert(ghost_offset + 1048576 <= env_offset + env.size[0],
     'ghost stripe fits within envelope at timestep 0');
 
-  // Pool envelope max size should include both ghost (1 MiB) + traced (3 MiB) = 4 MiB
+  // Pool envelope max = total pool reserved (same as initial since no segment events)
   const env_max_size = Array.isArray(env.size)
     ? Math.max(...env.size)
     : env.size;
-  assertEqual(env_max_size, 1048576 + 3145728, 'pool envelope max = ghost + traced');
+  assertEqual(env_max_size, pool_reserved, 'pool envelope max = total pool reserved');
 
   // With include_private_inactive=false, ghosts still exist but no pool envelope
   const result_false = process_alloc_data(snapshot, 0, false, 15000, false);
@@ -965,20 +964,22 @@ function test_ghost_stripe_offset_with_multiple_pools() {
 
 function test_full_snapshot_private_pools() {
   console.log('test_full_snapshot_private_pools');
+  // 512 KiB allocs so they're visible relative to the 2 MiB envelope
+  const S = 524288;
   const snapshot = makeSnapshot({
     traces: [
       { action: 'segment_alloc', addr: 0x7f08cde00000, size: 2097152, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
       { action: 'segment_alloc', addr: 0x7f08d2800000, size: 2097152, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
-      { action: 'free_requested', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
-      { action: 'free_completed', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
-      { action: 'free_requested', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
-      { action: 'free_completed', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08d2800400, size: 1024, frames: [], stream: 0 },
-      { action: 'alloc', addr: 0x7f08cde00400, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2880000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde80000, size: S, frames: [], stream: 0 },
     ],
     segments: [
       { device: 0, address: 0x7f08cde00000, total_size: 2097152,
@@ -991,11 +992,21 @@ function test_full_snapshot_private_pools() {
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
 
   assertEqual(result.elements_length, 6, 'should have 6 elements');
-  assertEqual(result.max_size, 4096, 'peak memory should be 4096');
+  assertEqual(result.max_size, 2 * S + 2097152, 'peak = 2 default pool blocks + 2M envelope');
 
+  // Timeline (envelope = 2M from segment reserved, never shrinks):
+  //   alloc 512K in default pool       → 512K
+  //   alloc 512K in private pool       → 512K + 2M envelope = 2.5M
+  //   free 512K from default pool      → 2M (envelope stays)
+  //   free 512K stripe in pool         → 2M (stripe gone, envelope stays)
+  //   alloc 512K in default pool       → 2M + 512K = 2.5M
+  //   alloc 512K stripe in pool        → 2.5M (within envelope)
+  //   alloc 512K stripe in pool        → 2.5M (within envelope)
+  //   alloc 512K in default pool       → 2M + 2*512K = 3M
   const expected_max_at_time = [
-    1024, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048,
-    1024, 2048, 2048, 3072, 3072, 3072, 3072, 4096,
+    S, S+2097152, S+2097152, S+2097152, S+2097152, S+2097152,
+    S+2097152, S+2097152, S+2097152,
+    2097152, S+2097152, S+2097152, S+2097152, 2*S+2097152,
   ];
   assertEqual(result.max_at_time.length, expected_max_at_time.length,
     'max_at_time length');
@@ -1005,12 +1016,15 @@ function test_full_snapshot_private_pools() {
   }
 
   const aot = result.allocations_over_time;
-  assertEqual(aot[0].elem, 0, 'first entry is element 0');
-  assertEqual(aot[0].size, 1024, 'element 0 size');
 
   const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
   assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
   assertEqual(envelopes[0].elem, 'pool:0,1,s0', 'envelope key matches pool (0,1)');
+
+  // Envelope size is driven by segment reserved (2 MiB), not just active allocs
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 2097152, 'envelope = segment reserved (2 MiB)');
 
   const stripes = aot.filter(d => typeof d.elem === 'number' && d.opacity === 0.5);
   assertEqual(stripes.length, 3, 'should have 3 pool stripes (elements 1, 3, 4)');
@@ -1085,6 +1099,156 @@ function test_full_snapshot_no_private_pools() {
 }
 
 // ============================================================
+// Pool envelope reserved-memory tests
+// ============================================================
+
+function test_envelope_grows_on_segment_map() {
+  console.log('test_envelope_grows_on_segment_map');
+  // When a private pool alloc triggers segment_map (fragmentation), the envelope
+  // should grow to the reserved size, not just the active allocation size.
+  // Scenario: alloc 500, free 500, alloc 400 triggers segment_map of 400
+  // (can't reuse fragmented free blocks). Reserved = 500 + 400 = 900.
+  const poolId = [1, 10];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'segment_map', addr: 0x1200, size: 400, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 400, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x1000, total_size: 900, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Envelope should be 900 (reserved), not 500 (peak active)
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 900, 'envelope should be 900 (reserved), not 500 (peak active)');
+
+  // Stripes inside the envelope should reflect individual block sizes (500, 400),
+  // not grow to the envelope size.
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, 'should have 2 pool stripes');
+  const stripe_sizes = stripes.map(s => s.size).sort();
+  assertEqual(stripe_sizes[0], 400, 'stripe for second alloc = 400');
+  assertEqual(stripe_sizes[1], 500, 'stripe for first alloc = 500');
+}
+
+function test_envelope_from_initial_reserved() {
+  console.log('test_envelope_from_initial_reserved');
+  // Segment reserved is 2000 but only 300 is actively allocated.
+  // No segment events in trace — initial reserved = snapshot reserved.
+  // Envelope should be 2000 (reserved), not 300 (active).
+  const poolId = [1, 20];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x2000, size: 300, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x2000, total_size: 2000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 2000, 'envelope should be 2000 (segment reserved)');
+}
+
+function test_envelope_segment_map_no_double_count() {
+  console.log('test_envelope_segment_map_no_double_count');
+  // Segment_map events in trace + snapshot reserved should not double-count.
+  // Trace has segment_map of 600. Snapshot total = 600. So initial reserved = 0.
+  // Envelope grows to 600 from the segment_map event.
+  const poolId = [1, 30];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x3000, size: 600, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x3000, size: 600, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x3000, total_size: 600, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  // Should be 600, not 1200 (double-counted)
+  assertEqual(env_max, 600, 'envelope should be 600 (no double count)');
+}
+
+function test_envelope_active_exceeds_reserved() {
+  console.log('test_envelope_active_exceeds_reserved');
+  // Edge case: active > reserved (e.g., segment events lost from ring buffer).
+  // Envelope should use max(active, reserved).
+  // Scenario: segment_map of 500 in trace, snapshot total = 800.
+  // initial reserved = 800 - 500 = 300. After segment_map, reserved = 800.
+  // Then alloc of 800 → active=800 = reserved=800 → envelope=800.
+  // Now a second alloc of 200 with no segment event → active=1000 > reserved=800.
+  // Envelope should grow to 1000 (active exceeds reserved).
+  const poolId = [1, 40];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x4000, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x4000, size: 800, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x4400, size: 200, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x4000, total_size: 1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  // active=1000 > reserved at time of second alloc (800), envelope = 1000
+  assertEqual(env_max, 1000, 'envelope should be 1000 (active exceeds earlier reserved)');
+}
+
+function test_envelope_default_pool_unaffected() {
+  console.log('test_envelope_default_pool_unaffected');
+  // Default pool (0,0) should NOT get envelope treatment regardless of segment events.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 100, size: 5000, frames: [], stream: 0 },
+      { action: 'alloc', addr: 100, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 100, size: 200, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 5000, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 0, 'default pool should not have envelope');
+  assertEqual(result.max_size, 200, 'default pool peak = active only');
+}
+
+// ============================================================
 // Run all tests
 // ============================================================
 
@@ -1126,6 +1290,11 @@ test_ghost_blocks_private_pool();
 test_ghost_stripe_offset_with_multiple_pools();
 test_full_snapshot_private_pools();
 test_full_snapshot_no_private_pools();
+test_envelope_grows_on_segment_map();
+test_envelope_from_initial_reserved();
+test_envelope_segment_map_no_double_count();
+test_envelope_active_exceeds_reserved();
+test_envelope_default_pool_unaffected();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

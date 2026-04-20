@@ -802,14 +802,6 @@ function annotate_snapshot(snapshot) {
     }
   }
   snapshot.device_traces = new_traces;
-  // if every event was on the default stream, we elide stream printing
-  if (next_stream == 1) {
-    for (const device_trace of snapshot.device_traces) {
-      for (const t of device_trace) {
-        t.stream = null;
-      }
-    }
-  }
 
   for (const seg of snapshot.segments) {
     seg.stream = stream_name(seg.stream);
@@ -908,7 +900,10 @@ function MemoryPlot(
     .append('polygon')
     .attr('points', format_points)
     .attr('fill', d => colors[d.color % colors.length])
-    .attr('opacity', d => d.opacity ?? 1);
+    .attr('opacity', d => d.opacity ?? 1)
+    .attr('stroke', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'black' : null)
+    .attr('stroke-width', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 3 : null)
+    .attr('vector-effect', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'non-scaling-stroke' : null);
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
@@ -993,7 +988,13 @@ function ContextViewer(text, data) {
     default_selected: null,
     set_selected: d => {
       if (current_selected !== null) {
-        current_selected.attr('stroke', null).attr('stroke-width', null).attr('stroke-dasharray', null);
+        const prev = current_selected.datum();
+        const is_pool = prev && typeof prev.elem === 'string' && prev.elem.startsWith('pool:');
+        current_selected
+          .attr('stroke', is_pool ? 'black' : null)
+          .attr('stroke-width', is_pool ? 3 : null)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', is_pool ? 'non-scaling-stroke' : null);
         restore_search_highlight(current_selected);
       }
       if (d === null) {
@@ -1012,8 +1013,9 @@ function ContextViewer(text, data) {
         } else {
           text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`);
         }
+        const is_pool_sel = typeof dd.elem === 'string' && dd.elem.startsWith('pool:');
         d.attr('stroke', 'black')
-          .attr('stroke-width', 1)
+          .attr('stroke-width', is_pool_sel ? 5 : 1)
           .attr('vector-effect', 'non-scaling-stroke');
       }
       current_selected = d;
