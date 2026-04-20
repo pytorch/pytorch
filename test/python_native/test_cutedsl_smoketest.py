@@ -16,6 +16,7 @@ import torch
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 
+
 try:
     import cuda.bindings.driver as cuda
 except ImportError:
@@ -44,8 +45,12 @@ def _build_elementwise_add():
         blkC = gC[blk_coord]
         blkCrd = cC[blk_coord]
 
-        copy_atom_load = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), gA.element_type)
-        copy_atom_store = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), gC.element_type)
+        copy_atom_load = cute.make_copy_atom(
+            cute.nvgpu.CopyUniversalOp(), gA.element_type
+        )
+        copy_atom_store = cute.make_copy_atom(
+            cute.nvgpu.CopyUniversalOp(), gC.element_type
+        )
 
         tiled_copy_A = cute.make_tiled_copy_tv(copy_atom_load, thr_layout, val_layout)
         tiled_copy_B = cute.make_tiled_copy_tv(copy_atom_load, thr_layout, val_layout)
@@ -123,9 +128,16 @@ def _build_sgemm():
             )
 
         @cute.jit
-        def __call__(self, mA, mB, mC,
-                     epilogue_op: cutlass.Constexpr = lambda x: x,
-                     stream: cuda.CUstream = cuda.CUstream(cuda.CUstream_flags.CU_STREAM_DEFAULT)):
+        def __call__(
+            self,
+            mA,
+            mB,
+            mC,
+            epilogue_op: cutlass.Constexpr = lambda x: x,
+            stream: cuda.CUstream = cuda.CUstream(
+                cuda.CUstream_flags.CU_STREAM_DEFAULT
+            ),
+        ):
             self.a_major_mode = utils.LayoutEnum.from_tensor(mA)
             self.b_major_mode = utils.LayoutEnum.from_tensor(mB)
             self.c_major_mode = utils.LayoutEnum.from_tensor(mC)
@@ -150,17 +162,20 @@ def _build_sgemm():
             vA = cute.make_layout((1, 1))
             vB = cute.make_layout((1, 1))
             atom_async_copy_A = cute.make_copy_atom(
-                cute.nvgpu.cpasync.CopyG2SOp(), mA.element_type,
+                cute.nvgpu.cpasync.CopyG2SOp(),
+                mA.element_type,
                 num_bits_per_copy=mA.element_type.width,
             )
             atom_async_copy_B = cute.make_copy_atom(
-                cute.nvgpu.cpasync.CopyG2SOp(), mA.element_type,
+                cute.nvgpu.cpasync.CopyG2SOp(),
+                mA.element_type,
                 num_bits_per_copy=mB.element_type.width,
             )
             if cutlass.const_expr(self.a_major_mode == utils.LayoutEnum.COL_MAJOR):
                 num_vectorized = 4 if (mA.layout[0].max_alignment % 16 == 0) else 1
                 atom_async_copy_A = cute.make_copy_atom(
-                    cute.nvgpu.cpasync.CopyG2SOp(), mA.element_type,
+                    cute.nvgpu.cpasync.CopyG2SOp(),
+                    mA.element_type,
                     num_bits_per_copy=mA.element_type.width * num_vectorized,
                 )
                 major_mode_size = self._bM // num_vectorized
@@ -172,7 +187,8 @@ def _build_sgemm():
             if cutlass.const_expr(self.b_major_mode == utils.LayoutEnum.COL_MAJOR):
                 num_vectorized = 4 if (mB.layout[0].max_alignment % 16 == 0) else 1
                 atom_async_copy_B = cute.make_copy_atom(
-                    cute.nvgpu.cpasync.CopyG2SOp(), mA.element_type,
+                    cute.nvgpu.cpasync.CopyG2SOp(),
+                    mA.element_type,
                     num_bits_per_copy=mB.element_type.width * num_vectorized,
                 )
                 major_mode_size = self._bN // num_vectorized
@@ -200,14 +216,22 @@ def _build_sgemm():
                 (atoms_layout.shape[1], 4), stride=(4, 1)
             )
             tiled_mma = cute.make_tiled_mma(
-                op, atoms_layout,
+                op,
+                atoms_layout,
                 permutation_mnk=(permutation_tiler_M, permutation_tiler_N, None),
             )
 
             grid_dim = *cute.ceil_div(mC.shape, (self._bM, self._bN)), 1
             self.kernel(
-                mA, mB, mC, sA_layout, sB_layout,
-                tiled_copy_A, tiled_copy_B, tiled_mma, epilogue_op,
+                mA,
+                mB,
+                mC,
+                sA_layout,
+                sB_layout,
+                tiled_copy_A,
+                tiled_copy_B,
+                tiled_mma,
+                epilogue_op,
             ).launch(
                 grid=grid_dim,
                 block=[cute.size(atoms_layout), 1, 1],
@@ -215,17 +239,32 @@ def _build_sgemm():
             )
 
         @cute.kernel
-        def kernel(self, mA, mB, mC, sA_layout, sB_layout,
-                   tiled_copy_A, tiled_copy_B, tiled_mma,
-                   epilogue_op: cutlass.Constexpr = lambda x: x):
+        def kernel(
+            self,
+            mA,
+            mB,
+            mC,
+            sA_layout,
+            sB_layout,
+            tiled_copy_A,
+            tiled_copy_B,
+            tiled_mma,
+            epilogue_op: cutlass.Constexpr = lambda x: x,
+        ):
             tidx, tidy, tidz = cute.arch.thread_idx()
             bidx, bidy, bidz = cute.arch.block_idx()
             tiler_coord = (bidx, bidy, None)
             thr_mma = tiled_mma.get_slice(tidx)
 
-            gA = cute.local_tile(mA, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, None, 1))
-            gB = cute.local_tile(mB, tiler=self._cta_tiler, coord=tiler_coord, proj=(None, 1, 1))
-            gC = cute.local_tile(mC, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, 1, None))
+            gA = cute.local_tile(
+                mA, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, None, 1)
+            )
+            gB = cute.local_tile(
+                mB, tiler=self._cta_tiler, coord=tiler_coord, proj=(None, 1, 1)
+            )
+            gC = cute.local_tile(
+                mC, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, 1, None)
+            )
 
             residue_k = mA.shape[1] - self._bK * gA.shape[2]
             gA = cute.domain_offset((0, residue_k, 0), gA)
@@ -243,8 +282,12 @@ def _build_sgemm():
 
             mcA = cute.make_identity_tensor(mA.shape)
             mcB = cute.make_identity_tensor(mB.shape)
-            cA = cute.local_tile(mcA, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, None, 1))
-            cB = cute.local_tile(mcB, tiler=self._cta_tiler, coord=tiler_coord, proj=(None, 1, 1))
+            cA = cute.local_tile(
+                mcA, tiler=self._cta_tiler, coord=tiler_coord, proj=(1, None, 1)
+            )
+            cB = cute.local_tile(
+                mcB, tiler=self._cta_tiler, coord=tiler_coord, proj=(None, 1, 1)
+            )
             cA = cute.domain_offset((0, residue_k, 0), cA)
             cB = cute.domain_offset((0, residue_k, 0), cB)
             tAcA = thr_copy_A.partition_S(cA)
@@ -252,33 +295,55 @@ def _build_sgemm():
 
             tApA = cute.make_rmem_tensor(
                 cute.make_layout(
-                    (tAsA.shape[0][1], cute.size(tAsA, mode=[1]), cute.size(tAsA, mode=[2])),
+                    (
+                        tAsA.shape[0][1],
+                        cute.size(tAsA, mode=[1]),
+                        cute.size(tAsA, mode=[2]),
+                    ),
                     stride=(cute.size(tAsA, mode=[1]), 1, 0),
-                ), cutlass.Boolean,
+                ),
+                cutlass.Boolean,
             )
             tBpB = cute.make_rmem_tensor(
                 cute.make_layout(
-                    (tBsB.shape[0][1], cute.size(tBsB, mode=[1]), cute.size(tBsB, mode=[2])),
+                    (
+                        tBsB.shape[0][1],
+                        cute.size(tBsB, mode=[1]),
+                        cute.size(tBsB, mode=[2]),
+                    ),
                     stride=(cute.size(tBsB, mode=[1]), 1, 0),
-                ), cutlass.Boolean,
+                ),
+                cutlass.Boolean,
             )
             tApA_residue_k = cute.make_rmem_tensor(
                 cute.make_layout(
-                    (tAsA.shape[0][1], cute.size(tAsA, mode=[1]), cute.size(tAsA, mode=[2])),
+                    (
+                        tAsA.shape[0][1],
+                        cute.size(tAsA, mode=[1]),
+                        cute.size(tAsA, mode=[2]),
+                    ),
                     stride=(
                         cute.size(tAsA, mode=[1]) * cute.size(tAsA, mode=[2]),
-                        cute.size(tAsA, mode=[2]), 1,
+                        cute.size(tAsA, mode=[2]),
+                        1,
                     ),
-                ), cutlass.Boolean,
+                ),
+                cutlass.Boolean,
             )
             tBpB_residue_k = cute.make_rmem_tensor(
                 cute.make_layout(
-                    (tBsB.shape[0][1], cute.size(tBsB, mode=[1]), cute.size(tBsB, mode=[2])),
+                    (
+                        tBsB.shape[0][1],
+                        cute.size(tBsB, mode=[1]),
+                        cute.size(tBsB, mode=[2]),
+                    ),
                     stride=(
                         cute.size(tBsB, mode=[1]) * cute.size(tBsB, mode=[2]),
-                        cute.size(tBsB, mode=[2]), 1,
+                        cute.size(tBsB, mode=[2]),
+                        1,
                     ),
-                ), cutlass.Boolean,
+                ),
+                cutlass.Boolean,
             )
 
             for rest_v in range(tApA.shape[0]):
@@ -310,10 +375,18 @@ def _build_sgemm():
             k_pipe_max = cute.size(tAsA, mode=[3])
             k_tile_count = cute.size(tAgA, mode=[3])
             gmem_pipe_read = cutlass.Int32(0)
-            cute.copy(tiled_copy_A, tAgA[None, None, None, gmem_pipe_read],
-                      tAsA[None, None, None, 0], pred=tApA_residue_k)
-            cute.copy(tiled_copy_B, tBgB[None, None, None, gmem_pipe_read],
-                      tBsB[None, None, None, 0], pred=tBpB_residue_k)
+            cute.copy(
+                tiled_copy_A,
+                tAgA[None, None, None, gmem_pipe_read],
+                tAsA[None, None, None, 0],
+                pred=tApA_residue_k,
+            )
+            cute.copy(
+                tiled_copy_B,
+                tBgB[None, None, None, gmem_pipe_read],
+                tBsB[None, None, None, 0],
+                pred=tBpB_residue_k,
+            )
             cute.arch.cp_async_commit_group()
             gmem_pipe_read = (
                 gmem_pipe_read + 1
@@ -322,10 +395,18 @@ def _build_sgemm():
             )
             for k_tile in range(1, k_pipe_max - 1):
                 if k_tile < k_tile_count:
-                    cute.copy(tiled_copy_A, tAgA[None, None, None, gmem_pipe_read],
-                              tAsA[None, None, None, k_tile], pred=tApA)
-                    cute.copy(tiled_copy_B, tBgB[None, None, None, gmem_pipe_read],
-                              tBsB[None, None, None, k_tile], pred=tBpB)
+                    cute.copy(
+                        tiled_copy_A,
+                        tAgA[None, None, None, gmem_pipe_read],
+                        tAsA[None, None, None, k_tile],
+                        pred=tApA,
+                    )
+                    cute.copy(
+                        tiled_copy_B,
+                        tBgB[None, None, None, gmem_pipe_read],
+                        tBsB[None, None, None, k_tile],
+                        pred=tBpB,
+                    )
                 gmem_pipe_read = (
                     gmem_pipe_read + 1
                     if gmem_pipe_read + 1 < k_tile_count
@@ -371,19 +452,36 @@ def _build_sgemm():
                         self.cta_sync_barrier.arrive_and_wait()
 
                     k_block_next = (k_block + 1) % k_block_max
-                    cute.autovec_copy(tCsA_p[None, None, k_block_next], tCrA[None, None, k_block_next])
-                    cute.autovec_copy(tCsB_p[None, None, k_block_next], tCrB[None, None, k_block_next])
+                    cute.autovec_copy(
+                        tCsA_p[None, None, k_block_next], tCrA[None, None, k_block_next]
+                    )
+                    cute.autovec_copy(
+                        tCsB_p[None, None, k_block_next], tCrB[None, None, k_block_next]
+                    )
 
                     if k_block == 0:
-                        cute.copy(tiled_copy_A, tAgA[None, None, None, gmem_pipe_read],
-                                  tAsA[None, None, None, smem_pipe_write], pred=tApA)
+                        cute.copy(
+                            tiled_copy_A,
+                            tAgA[None, None, None, gmem_pipe_read],
+                            tAsA[None, None, None, smem_pipe_write],
+                            pred=tApA,
+                        )
 
-                    cute.gemm(tiled_mma, tCrC, tCrA[None, None, k_block],
-                              tCrB[None, None, k_block], tCrC)
+                    cute.gemm(
+                        tiled_mma,
+                        tCrC,
+                        tCrA[None, None, k_block],
+                        tCrB[None, None, k_block],
+                        tCrC,
+                    )
 
                     if k_block == 0:
-                        cute.copy(tiled_copy_B, tBgB[None, None, None, gmem_pipe_read],
-                                  tBsB[None, None, None, smem_pipe_write], pred=tBpB)
+                        cute.copy(
+                            tiled_copy_B,
+                            tBgB[None, None, None, gmem_pipe_read],
+                            tBsB[None, None, None, smem_pipe_write],
+                            pred=tBpB,
+                        )
                         cute.arch.cp_async_commit_group()
                         smem_pipe_write = smem_pipe_read
                         smem_pipe_read = smem_pipe_read + 1
@@ -445,7 +543,9 @@ def _build_cta_norm():
         def __call__(self, mY, mX, mWeight, mBias, eps: cutlass.Float32 = 1e-6):
             M, _ = mX.shape
             atom_copy = cute.make_copy_atom(
-                cute.nvgpu.CopyUniversalOp(), mX.element_type, num_bits_per_copy=128,
+                cute.nvgpu.CopyUniversalOp(),
+                mX.element_type,
+                num_bits_per_copy=128,
             )
             t_layout = cute.make_layout(self.threads_per_cta)
             v_layout = cute.make_layout(self.elems_per_thread)
@@ -512,7 +612,9 @@ def _build_cta_norm():
                 acc[warp_id] = val
             cute.arch.sync_threads()
             if warp_id == 0:
-                val = acc[lane_id] if lane_id < self.warps_per_cta else cutlass.Float32(0)
+                val = (
+                    acc[lane_id] if lane_id < self.warps_per_cta else cutlass.Float32(0)
+                )
                 val = self.warp_reduce(val)
                 acc[self.warps_per_cta] = val
             cute.arch.sync_threads()
@@ -567,6 +669,7 @@ def _build_cta_norm():
 # Tests
 # ===========================================================================
 
+
 @skipIfNoCuteDSL
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuteDSLSmoketest(TestCase):
@@ -601,12 +704,27 @@ class TestCuteDSLSmoketest(TestCase):
         import cutlass.cute as cute
 
         M, N, K = 256, 256, 256
-        a = (torch.empty(K, M, dtype=torch.int32).random_(-5, 5)
-             .to(dtype=torch.float32).permute(1, 0).cuda())
-        b = (torch.empty(K, N, dtype=torch.int32).random_(-5, 5)
-             .to(dtype=torch.float32).permute(1, 0).cuda())
-        c = (torch.empty(N, M, dtype=torch.int32).random_(-5, 5)
-             .to(dtype=torch.float32).permute(1, 0).cuda())
+        a = (
+            torch.empty(K, M, dtype=torch.int32)
+            .random_(-5, 5)
+            .to(dtype=torch.float32)
+            .permute(1, 0)
+            .cuda()
+        )
+        b = (
+            torch.empty(K, N, dtype=torch.int32)
+            .random_(-5, 5)
+            .to(dtype=torch.float32)
+            .permute(1, 0)
+            .cuda()
+        )
+        c = (
+            torch.empty(N, M, dtype=torch.int32)
+            .random_(-5, 5)
+            .to(dtype=torch.float32)
+            .permute(1, 0)
+            .cuda()
+        )
 
         a_cute = from_dlpack(a, assumed_align=16)
         b_cute = from_dlpack(b, assumed_align=16)
@@ -641,8 +759,7 @@ class TestCuteDSLSmoketest(TestCase):
         _y = from_dlpack(y, assumed_align=16, enable_tvm_ffi=True)
 
         norm = CtaNorm(N, "rms")
-        compiled = cute.compile(norm, _y, _x, _w, None,
-                                options="--enable-tvm-ffi")
+        compiled = cute.compile(norm, _y, _x, _w, None, options="--enable-tvm-ffi")
         compiled(y, x, weight, None, eps)
         torch.cuda.synchronize()
 
@@ -671,8 +788,7 @@ class TestCuteDSLSmoketest(TestCase):
         _y = from_dlpack(y, assumed_align=16, enable_tvm_ffi=True)
 
         norm = CtaNorm(N, "layer")
-        compiled = cute.compile(norm, _y, _x, _w, _b,
-                                options="--enable-tvm-ffi")
+        compiled = cute.compile(norm, _y, _x, _w, _b, options="--enable-tvm-ffi")
         compiled(y, x, weight, bias, eps)
         torch.cuda.synchronize()
 
