@@ -1485,6 +1485,14 @@ class ComplexWrapper(CompilerWrapper):
                     raise RuntimeError(
                         f"For wrapped complex arg {idx}, mutating or aliasing data is not supported."
                     )
+            for idx, out_info in enumerate(fw_metadata.output_info):
+                if out_info.output_type in (
+                    OutputType.is_input,
+                    OutputType.alias_of_input,
+                ):
+                    raise RuntimeError(
+                        f"For wrapped complex output {idx}, aliasing input data is not supported."
+                    )
             wrapped_args_descs = [
                 ComplexWrappedAOTInput(inp_desc)
                 if i in self.wrapped_arg_indices
