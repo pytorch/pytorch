@@ -1,7 +1,8 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 import torch
 import torch._dynamo.test_case
-import torch._dynamo.testing
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
@@ -53,6 +54,36 @@ class ComplexTests(ComplexDynamoTestCase):
         b = torch.randn(2, 2, dtype=torch.complex64)
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
+
+    def test_aliasing_semantics(self):
+        def f(a):
+            out = torch.view_as_real(a)
+            a[...] = torch.zeros_like(a)
+            return out
+
+        fn_c = torch.compile(f, fullgraph=True)
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        with self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed,
+            msg=r"For wrapped complex arg \d+, mutating data is not supported.",
+        ):
+            fn_c(a)
+
+    @unittest.expectedFailure
+    def test_aliasing_semantics_2(self):
+        def f(a):
+            return a
+
+        def mutate(f):
+            a = torch.ones(2, 2, dtype=torch.complex64)
+            out = f(a)
+            a[...] = torch.zeros_like(a)
+            return out
+
+        fn_c = torch.compile(f, fullgraph=True)
+
+        self.assertEqual(mutate(fn_c), mutate(f))
 
 
 instantiate_parametrized_tests(ComplexTests)

@@ -1463,6 +1463,12 @@ class ComplexWrapper(CompilerWrapper):
                 for i, arg in enumerate(wrapped_args)
                 if isinstance(arg, ComplexTensor)
             }
+            for idx in self.wrapped_arg_indices:
+                idx_info = fw_metadata.input_info[idx]
+                if idx_info.mutation_type != MutationType.NOT_MUTATED:
+                    raise RuntimeError(
+                        f"For wrapped complex arg {idx}, mutating or aliasing data is not supported."
+                    )
             wrapped_args_descs = [
                 ComplexWrappedAOTInput(inp_desc)
                 if i in self.wrapped_arg_indices
