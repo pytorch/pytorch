@@ -18,7 +18,6 @@ class PublicBindings(HeuristicInterface):
     additional_files = ["test/allowlist_for_publicAPI.json"]
 
     def __init__(self, **kwargs: dict[str, Any]) -> None:
-        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

@@ -97,10 +97,8 @@ def add_view_copy_derivatives(
         # prefer manually-defined derivatives if any
         # pyrefly: ignore [unbound-name]
         if len(view_copy_differentiability_infos) > 0 and fn_schema not in infos:
-            # pyrefly: ignore [unbound-name]
             if fn_schema is None:
                 raise AssertionError("Expected fn_schema to be non-None")
-            # pyrefly: ignore [unbound-name]
             view_infos[fn_schema] = view_copy_differentiability_infos
 
     infos.update(view_infos)
@@ -409,7 +407,6 @@ def postprocess_forward_derivatives(
             for arg_name in all_arg_names:
                 if arg_name in diff_arg_names:
                     arg_name = arg_name + "_t"
-                # pyrefly: ignore [bad-argument-type]
                 new_args.append(arg_name)
 
             # TODO we are trolling
@@ -961,7 +958,6 @@ def saved_variables(
             + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
         )
     for nctype in nctypes:
-        # pyrefly: ignore [bad-assignment]
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         )
