@@ -4,6 +4,7 @@ import logging
 
 import torch
 from torch.utils._ordered_set import OrderedSet
+import typing
 
 
 log = logging.getLogger(__name__)
@@ -45,10 +46,12 @@ def replace_collectives_with_low_contention(
 
     # Some group names can't be resolved at compile time — skip them.
     from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+    from torch.distributed.distributed_c10d import GroupName
 
     valid_groups: OrderedSet[str] = OrderedSet()
     for group_name in groups:
-        if is_symm_mem_enabled_for_group(group_name):
+        group_name_ = typing.cast(GroupName, group_name)
+        if is_symm_mem_enabled_for_group(group_name_):
             valid_groups.add(group_name)
 
     # Filter to collectives whose groups we can actually resolve
