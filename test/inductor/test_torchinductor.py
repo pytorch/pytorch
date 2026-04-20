@@ -17719,15 +17719,8 @@ if RUN_GPU:
 
         @torch._functorch.config.patch("donated_buffer", True)
         # The inplace updating does not happen after we fused the
-        # layernorm backward, or if we do cooperative reductions (due to the change in
-        # optimal peak memory ordering).
-        @torch._inductor.config.patch(
-            {
-                "triton.cooperative_reductions": False,
-                "triton.force_cooperative_reductions": False,
-                "triton.mix_order_reduction": False,
-            }
-        )
+        # layernorm backward.
+        @torch._inductor.config.patch({"triton.mix_order_reduction": False})
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
