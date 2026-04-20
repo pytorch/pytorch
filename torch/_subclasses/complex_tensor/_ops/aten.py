@@ -732,7 +732,11 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
             " tensor so you can view it as real, use self.resolve_conj(); however, be warned that "
             "the resulting tensor will NOT alias the original."
         )
-    # NOTE: Doesn't take into account view semantics, but is needed for backprop to work.
+    warnings.warn(
+        "`view_as_real` doesn't respect aliasing semantics under `torch.compile`.",
+        category=RuntimeWarning,
+        stacklevel=1,
+    )
     out = torch.stack([self._re, self._im], dim=-1)
     if self.is_neg():
         out = torch._neg_view(out)
