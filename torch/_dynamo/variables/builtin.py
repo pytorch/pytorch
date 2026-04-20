@@ -89,7 +89,6 @@ from .base import (
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
-    DefaultDictVariable,
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
@@ -1680,7 +1679,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             (
                 RangeVariable,
                 ConstDictVariable,
-                DefaultDictVariable,
+                variables.DefaultDictVariable,
                 OrderedSetClassVariable,
                 DictViewVariable,
             ),
@@ -3180,9 +3179,19 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 )
                 return result
             elif user_cls is defaultdict:
-                return DefaultDictVariable(
-                    items, user_cls, mutation_type=ValueMutationNew()
+                from .builder import SourcelessBuilder
+                from .user_defined import DefaultDictVariable
+
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    SourcelessBuilder.create(tx, dict),
+                    SourcelessBuilder.create(tx, defaultdict),
+                    [],
                 )
+                assert isinstance(result, DefaultDictVariable)
+                result._base_vt = ConstDictVariable(
+                    items, mutation_type=ValueMutationNew()
+                )
+                return result
             else:
                 return ConstDictVariable(items, mutation_type=ValueMutationNew())
 

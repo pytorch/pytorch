@@ -1291,6 +1291,37 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(f, backend="eager", fullgraph=True)(t)
         self.assertEqual(ref, res)
 
+    def test_ordered_dict_as_python_constant_preserves_type(self):
+        """as_python_constant should return OrderedDict, not plain dict."""
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            # Enum functional API calls as_python_constant on the OrderedDict
+            import enum
+
+            E = enum.Enum("E", od)
+            return x + E.a.value
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_default_dict_as_python_constant_preserves_type(self):
+        """as_python_constant should return defaultdict, not plain dict."""
+
+        def f(x):
+            dd = defaultdict(int, a=1, b=2)
+            # isinstance triggers as_python_constant internally for
+            # constant folding the type check
+            assert isinstance(dd, defaultdict)  # noqa: S101
+            return x + dd["a"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
     @parametrize("op", ["or_", "and_", "xor", "sub"])
     def test_dict_keys_binop(self, op):
         op = getattr(operator, op)

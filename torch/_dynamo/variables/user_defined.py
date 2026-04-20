@@ -95,7 +95,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
-from .dicts import ConstDictVariable, DefaultDictVariable
+from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .sets import SetVariable
 
@@ -787,26 +787,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable(*args, **kwargs)
         elif self.value is collections.defaultdict:
-            if len(args) == 0:
-                default_factory = variables.ConstantVariable.create(None)
-            elif len(args) == 1:
-                # In the case the argument is a builtin, then we can take the callable as the factory method.
-                # Otherwise, it must be a ConstantVariable holding None.
-                if not DefaultDictVariable.is_supported_arg(args[0]):
-                    raise_observed_exception(TypeError, tx, args=[args[0]])
-                default_factory = args[0]
-                args = []
-            else:
-                default_factory, *args = args
-            dict_vt = variables.DictBuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
+            # defaultdict construction — use track_new_user_defined_object
+            # which creates DefaultDictVariable. __init__ handler extracts
+            # default_factory and populates items.
+            from .builder import SourcelessBuilder
+
+            result = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, dict),
+                self,
+                [],
             )
-            return DefaultDictVariable(
-                dict_vt.items,  # type: ignore[attr-defined]
-                collections.defaultdict,
-                default_factory,
-                mutation_type=ValueMutationNew(),
-            )
+            result.call_method(tx, "__init__", list(args), kwargs)
+            return result
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:  # type: ignore[attr-defined]
                 unimplemented(
@@ -3153,7 +3145,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
 
     def as_python_constant(self) -> Any:
         assert self._base_vt is not None
-        return self._base_vt.as_python_constant()
+        return collections.OrderedDict(self._base_vt.as_python_constant())
 
     def call_method(
         self,
@@ -3200,6 +3192,217 @@ class OrderedDictVariable(UserDefinedDictVariable):
             self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
             tx.output.side_effects.mutation(self._base_vt)
             return variables.TupleVariable([k.vt, v])
+        return super().call_method(tx, name, args, kwargs)
+
+
+# TODO: move to dicts.py alongside ConstDictVariable.
+# Currently blocked by circular imports (dicts.py ↔ user_defined.py).
+class DefaultDictVariable(UserDefinedDictVariable):
+    """
+    Represents collections.defaultdict instances.
+
+    CPython's defaultdict is implemented in C:
+    https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2177-L2180
+
+    default_factory is a field on the C struct (defdictobject.default_factory),
+    not a Python instance attribute, so we model it as a field on the VT.
+
+    Dict storage is delegated to _base_vt (a ConstDictVariable) via
+    UserDefinedDictVariable.
+    """
+
+    _cpython_type = collections.defaultdict
+
+    def __init__(
+        self,
+        value: object,
+        default_factory: VariableTracker | None = None,
+        dict_vt: ConstDictVariable | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if dict_vt is None:
+            from .dicts import ConstDictVariable
+
+            dict_vt = ConstDictVariable(
+                {},
+                mutation_type=ValueMutationNew(),
+            )
+        super().__init__(value, dict_vt=dict_vt, **kwargs)
+        if default_factory is None:
+            from .constant import ConstantVariable
+
+            default_factory = ConstantVariable.create(None)
+        self.default_factory = default_factory
+
+    @staticmethod
+    def is_supported_factory(arg: VariableTracker) -> bool:
+        """Check if arg is a valid default_factory (callable or None).
+
+        CPython's defaultdict.__init__ checks ``callable(factory)`` and
+        raises TypeError if not.  We mirror this by checking the
+        underlying Python value when possible.
+        """
+        if isinstance(arg, variables.ConstantVariable):
+            return arg.value is None
+        # Check the real Python value for callable()
+        try:
+            val = arg.as_python_constant()
+            return val is None or callable(val)
+        except Exception:
+            pass
+        # Callables (functions, builtins, classes) are supported
+        return isinstance(
+            arg,
+            (
+                variables.BaseBuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+                variables.UserDefinedClassVariable,
+            ),
+        )
+
+    def is_python_constant(self) -> bool:
+        assert self._base_vt is not None
+        # An empty defaultdict with a non-constant factory can't be
+        # constant-folded (we can't serialize the factory).
+        if not self.default_factory.is_python_constant() and not self._base_vt.items:  # type: ignore[union-attr]
+            return False
+        return self._base_vt.is_python_constant()
+
+    def as_python_constant(self) -> Any:
+        assert self._base_vt is not None
+        factory = None
+        if self.default_factory.is_python_constant():
+            factory = self.default_factory.as_python_constant()
+        return collections.defaultdict(factory, self._base_vt.as_python_constant())
+
+    def debug_repr(self) -> str:
+        assert self.default_factory is not None
+        assert self._base_vt is not None
+        return (
+            f"defaultdict({self.default_factory.debug_repr()}, "
+            f"{self._base_vt.debug_repr()})"
+        )
+
+    def var_getattr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+    ) -> VariableTracker:
+        if name == "default_factory":
+            return self.default_factory
+        return super().var_getattr(tx, name)
+
+    def _missing_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        """defaultdict.__missing__: auto-vivification via default_factory.
+
+        https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2233-L2254
+        """
+        from .constant import ConstantVariable
+
+        if (
+            istype(self.default_factory, ConstantVariable)
+            and self.default_factory.value is None
+        ):
+            raise_observed_exception(KeyError, tx, args=[key])
+        default_var = self.default_factory.call_function(tx, [], {})
+        assert self._base_vt is not None
+        self._base_vt.call_method(tx, "__setitem__", [key, default_var], {})
+        return default_var
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
+        assert self._base_vt is not None
+        if key in self._base_vt:  # type: ignore[operator]
+            return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
+        return self._missing_impl(tx, key)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if name == "__init__":
+            # defaultdict.__init__(self, default_factory=None, *args, **kwargs)
+            # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2072
+            # Extract default_factory, delegate rest to dict.__init__
+            if len(args) >= 1:
+                if self.is_supported_factory(args[0]):
+                    self.default_factory = args[0]
+                    tx.output.side_effects.store_attr(
+                        self,
+                        "default_factory",
+                        self.default_factory,
+                    )
+                    args = list(args[1:])
+                else:
+                    # CPython raises TypeError for non-callable first arg
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=["first argument must be callable or None"],
+                    )
+            assert self._base_vt is not None
+            return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        elif name == "__getitem__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+            return self.mp_subscript_impl(tx, args[0])
+        elif name == "__missing__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+            return self._missing_impl(tx, args[0])
+        elif name == "copy":
+            # defaultdict.copy() creates a new defaultdict with same factory
+            # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
+            from .builder import SourcelessBuilder
+
+            assert self._base_vt is not None
+            new_dd = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, dict),
+                SourcelessBuilder.create(tx, collections.defaultdict),
+                [],
+            )
+            assert isinstance(new_dd, DefaultDictVariable)
+            new_dd.default_factory = self.default_factory
+            new_dd._base_vt = self._base_vt.clone(
+                mutation_type=ValueMutationNew(),
+                source=None,
+            )
+            tx.output.side_effects.store_attr(
+                new_dd, "default_factory", new_dd.default_factory
+            )
+            return new_dd
+        elif name == "__setattr__":
+            if len(args) != 2:
+                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            if (
+                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+            ) and self.is_supported_factory(args[1]):
+                self.default_factory = args[1]
+                tx.output.side_effects.store_attr(
+                    self, "default_factory", self.default_factory
+                )
+                return ConstantVariable.create(None)
+            return super().call_method(tx, name, args, kwargs)
+        elif name == "__eq__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
