@@ -737,7 +737,7 @@ std::vector<std::string> TCPStore::listKeys() {
   for (auto i = 0; i < numKeys; ++i) {
     auto bits = client_->receiveBits();
     std::string str(bits.begin(), bits.end());
-    if (str.starts_with(keyPrefix_)) {
+    if (str.find(keyPrefix_) == 0) {
       str = str.substr(keyPrefix_.size());
     } else {
       continue;

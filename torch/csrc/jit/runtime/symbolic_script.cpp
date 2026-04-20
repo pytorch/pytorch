@@ -1541,7 +1541,7 @@ static std::string overloadedSchemaString(const FunctionSchema& schema) {
 
 static bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
-  return method_name.starts_with(helper_prefix);
+  return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
 static void loadModule(const CompilationUnit& module) {

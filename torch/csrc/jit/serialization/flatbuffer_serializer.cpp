@@ -284,7 +284,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   for (const TypePtr& t : code.types_) {
     auto type_str = realType(t)->annotation_str();
-    if (type_str.starts_with(torch_prefix)) {
+    if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"

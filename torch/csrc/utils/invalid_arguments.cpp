@@ -143,14 +143,14 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
     result = std::make_unique<MultiType>(MultiType{"float", "int", "long"});
   } else if (type_name == "int") {
     result = std::make_unique<MultiType>(MultiType{"int", "long"});
-  } else if (type_name.starts_with("tuple[")) {
+  } else if (type_name.find("tuple[") == 0) {
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
     for (auto& type : _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
     result = std::make_unique<TupleType>(std::move(types));
-  } else if (type_name.starts_with("sequence[")) {
+  } else if (type_name.find("sequence[") == 0) {
     auto subtype = type_name.substr(9);
     subtype.pop_back();
     result = std::make_unique<SequenceType>(_buildType(subtype, false));

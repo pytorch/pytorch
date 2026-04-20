@@ -230,7 +230,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           get_named_tuple_str_or_default(compilation_unit, t, type_str);
       types.emplace_back(named_tuple_str);
       continue;
-    } else if (type_str.starts_with(torch_prefix)) {
+    } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
