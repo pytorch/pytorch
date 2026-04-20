@@ -546,8 +546,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // Only render the largest max_entries elements individually;
-  // everything else goes into the summarized band
+  // Only render the largest max_entries elements individually (across all
+  // pools). Pools with larger allocations naturally get more of the budget.
+  // Remaining pool elements go into per-pool summarized stripes; remaining
+  // non-pool elements go into the global summarized band.
   const sizes = elements
     .map((x, i) => [x.size, i])
     .sort(([x, _xi], [y, _yi]) => y - x);
@@ -599,7 +601,9 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   function get_or_create_pool(pool_key) {
     if (!(pool_key in pools)) {
       pools[pool_key] = {
-        max: 0, active: 0, reserved: 0, envelope_data: null,
+        max: 0, active: 0, reserved: 0,
+        drawn_active: 0, summarized_active: 0,
+        envelope_data: null, summarized_data: null,
         block_stack: [],  // [{elem, size, inner_offset, stripe_data}]
       };
     }
@@ -620,6 +624,38 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       s.offsets.push(s.offsets.at(-1));
       s.timesteps.push(timestep + 3);
       s.offsets.push(s.offsets.at(-1) + delta);
+    }
+    if (pool.summarized_data) {
+      const sd = pool.summarized_data;
+      sd.timesteps.push(timestep);
+      sd.offsets.push(sd.offsets.at(-1));
+      sd.size.push(sd.size.at(-1));
+      sd.timesteps.push(timestep + 3);
+      sd.offsets.push(sd.offsets.at(-1) + delta);
+      sd.size.push(sd.size.at(-1));
+    }
+  }
+
+  // Update or create the per-pool summarized stripe. Sits on top of drawn
+  // stripes (offset = envelope base + drawn_active), size = summarized_active.
+  function update_pool_summary(pool, ts) {
+    if (!pool.envelope_data) return;
+    const base = pool.envelope_data.offsets.at(-1) + pool.drawn_active;
+    if (pool.summarized_data === null) {
+      pool.summarized_data = {
+        elem: 'summarized',
+        timesteps: [ts],
+        offsets: [base],
+        size: [pool.summarized_active],
+        color: 0,
+        opacity: 0.3,
+      };
+      data.push(pool.summarized_data);
+    } else {
+      const sd = pool.summarized_data;
+      sd.timesteps.push(ts);
+      sd.offsets.push(base);
+      sd.size.push(pool.summarized_active);
     }
   }
 
@@ -716,7 +752,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         data.push(env);
       }
 
-      const inner_offset = pool.active;
       pool.active += size;
 
       // Grow envelope to fit: use max(active, reserved) because active can
@@ -733,18 +768,23 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         shift_above_pool_no_anim(pk, delta);
       }
 
-      // Create a colored stripe inside the envelope for this block
-      const stripe = {
-        elem,
-        timesteps: [0],
-        offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
-        size,
-        color: elem_color(elem),
-        opacity: 0.5,
-        ghost: elements[elem].ghost || false,
-      };
-      pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
-      data.push(stripe);
+      if (elem in draw_elem) {
+        const inner_offset = pool.drawn_active;
+        pool.drawn_active += size;
+        const stripe = {
+          elem,
+          timesteps: [0],
+          offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
+          size,
+          color: elem_color(elem),
+          opacity: 0.5,
+          ghost: elements[elem].ghost || false,
+        };
+        pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
+        data.push(stripe);
+      } else {
+        pool.summarized_active += size;
+      }
       continue;
     }
     // Non-pool element: render individually or add to global summarized band
@@ -759,6 +799,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   // Fix up pool stripe offsets — stripes are not in current_data so they
   // don't get shifted when other pools grow during initially_allocated
   // processing. Recompute from the envelope's final offset.
+  // Also create per-pool summarized data for initial non-drawn elements.
   for (const pk in pools) {
     const p = pools[pk];
     if (!p.envelope_data) continue;
@@ -768,6 +809,17 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       for (let i = 0; i < s.offsets.length; i++) {
         s.offsets[i] = env_offset + block.inner_offset;
       }
+    }
+    if (p.summarized_active > 0) {
+      p.summarized_data = {
+        elem: 'summarized',
+        timesteps: [0],
+        offsets: [env_offset + p.drawn_active],
+        size: [p.summarized_active],
+        color: 0,
+        opacity: 0.3,
+      };
+      data.push(p.summarized_data);
     }
   }
 
@@ -868,7 +920,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           data.push(env);
         }
 
-        const inner_offset = pool.active;
         pool.active += size;
 
         const envelope_target = Math.max(pool.active, pool.reserved);
@@ -876,16 +927,27 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           grow_pool_envelope(pool, pool_key, envelope_target);
         }
 
-        const stripe = {
-          elem,
-          timesteps: [timestep],
-          offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
-          size,
-          color: elem_color(elem),
-          opacity: 0.5,
-        };
-        pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
-        data.push(stripe);
+        if (elem in draw_elem) {
+          const inner_offset = pool.drawn_active;
+          pool.drawn_active += size;
+          const stripe = {
+            elem,
+            timesteps: [timestep],
+            offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
+            size,
+            color: elem_color(elem),
+            opacity: 0.5,
+          };
+          pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
+          data.push(stripe);
+          // Shift summarized stripe up (it sits on top of drawn stripes)
+          if (pool.summarized_data) {
+            update_pool_summary(pool, timestep);
+          }
+        } else {
+          pool.summarized_active += size;
+          update_pool_summary(pool, timestep);
+        }
         advance(1);
         elements[elem].max_allocated_mem = total_mem + total_summarized_mem;
       } else {
@@ -894,6 +956,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         const pool = pools[pool_key];
         const block_idx = pool.block_stack.findIndex(b => b.elem === elem);
         if (block_idx >= 0) {
+          // Drawn stripe freed
           advance(1);
           const block = pool.block_stack[block_idx];
           block.stripe_data.timesteps.push(timestep);
@@ -901,8 +964,11 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
           pool.block_stack.splice(block_idx, 1);
           pool.active -= size;
+          pool.drawn_active -= size;
 
-          if (block_idx < pool.block_stack.length) {
+          // Shift drawn stripes above and the summarized stripe down
+          const need_shift = block_idx < pool.block_stack.length || pool.summarized_data;
+          if (need_shift) {
             for (let j = block_idx; j < pool.block_stack.length; j++) {
               const b = pool.block_stack[j];
               b.inner_offset -= size;
@@ -912,10 +978,16 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
               s.timesteps.push(timestep + 3);
               s.offsets.push(pool.envelope_data.offsets.at(-1) + b.inner_offset);
             }
+            if (pool.summarized_data) {
+              update_pool_summary(pool, timestep);
+            }
             advance(3);
           }
         } else {
+          // Non-drawn element freed — summarized stripe shrinks on top
           pool.active -= size;
+          pool.summarized_active -= size;
+          update_pool_summary(pool, timestep);
           advance(1);
         }
         delete pool_active_elems[elem];
@@ -986,6 +1058,12 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       const s = block.stripe_data;
       s.timesteps.push(timestep);
       s.offsets.push(s.offsets.at(-1));
+    }
+    if (pools[pk].summarized_data) {
+      const sd = pools[pk].summarized_data;
+      sd.timesteps.push(timestep);
+      sd.offsets.push(sd.offsets.at(-1));
+      sd.size.push(sd.size.at(-1));
     }
   }
   data.push(summarized_mem);
