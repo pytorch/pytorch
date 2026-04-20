@@ -31,7 +31,7 @@ def check_bsr_layout(f_name, t):
 
 def check_device(f_name, t, device):
     check(
-        t.device == device and t.device.type == "cuda",
+        t.device == device and t.device.type in ("cuda", "xpu"),
         f"{f_name}(): all inputs are expected to be on the same GPU device.",
     )
 

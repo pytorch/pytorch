@@ -7236,12 +7236,14 @@
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_out_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_out_sparse_csr_cpu
+    SparseCsrXPU: sparse_sampled_addmm_out_sparse_csr_xpu
 
 - func: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
+    SparseCsrXPU: sparse_sampled_addmm_sparse_csr_xpu
 
 - func: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
   python_module: sparse
