@@ -317,8 +317,6 @@ bool IntraNodeComm::rendezvous() {
   const std::string name = groupName_.empty()
       ? "IntraNodeComm" + std::to_string(intraNodeCommIdx++)
       : groupName_;
-  set_group_info(
-      name, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
   symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, name);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
