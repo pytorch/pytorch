@@ -129,6 +129,19 @@ def is_standard_delattr(val: object) -> bool:
     return val in (object.__delattr__, BaseException.__delattr__)
 
 
+PY_TPFLAGS_HEAPTYPE = 1 << 9
+
+
+def is_opaque_heap_type_getset_descriptor(descriptor: object) -> bool:
+    owner = getattr(descriptor, "__objclass__", None)
+    return (
+        inspect.isgetsetdescriptor(descriptor)
+        and getattr(descriptor, "__name__", None) != "__dict__"
+        and isinstance(owner, type)
+        and bool(getattr(owner, "__flags__", 0) & PY_TPFLAGS_HEAPTYPE)
+    )
+
+
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
 
@@ -1750,6 +1763,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if directly_update_dict:
             self.get_dict_vt(tx).setitem(name_str, value)
         else:
+            descriptor = self.lookup_class_mro_attr(name_str)
             tmp = self.try_get_descritor_and_setter_py_func(name_str)
             if tmp:
                 descriptor, setter = tmp
@@ -1772,8 +1786,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Handle Python property descriptors whose __set__ is a C slot
             # wrapper (not a Python function), which the above check misses.
             # Mirrors the property getter handling in var_getattr.
-            descriptor = inspect.getattr_static(type(self.value), name_str, None)
-            if isinstance(descriptor, property) and descriptor.fset is not None:
+            descriptor = None if descriptor is NO_SUCH_SUBOBJ else descriptor
+            if isinstance(descriptor, property):
+                if descriptor.fset is None:
+                    raise_observed_exception(AttributeError, tx)
                 fset_source = None
                 if self.cls_source:
                     fset_source = AttrSource(
@@ -1783,6 +1799,33 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, descriptor.fset, source=fset_source
                 )
                 return fset_var.call_function(tx, [self, value], {})
+
+            # Heap-type getset descriptors like __weakref__ are part of
+            # CPython's instance layout and can raise immediately in eager
+            # mode. Deferring them until side-effect replay changes try/except
+            # behavior, so fall back to a graph break until Dynamo can trace
+            # them directly. Keep __dict__ writes on the old path: they are
+            # writable and relied on by code such as functools.partial
+            # __setstate__. Static C-extension descriptors keep the prior
+            # deferred behavior to avoid regressing existing cases like
+            # autograd Function context mutation.
+            setter = (
+                inspect.getattr_static(type(descriptor), "__set__", None)
+                if descriptor is not None
+                else None
+            )
+            if (
+                setter is not None
+                and not inspect.isfunction(setter)
+                and is_opaque_heap_type_getset_descriptor(descriptor)
+            ):
+                unimplemented(
+                    gb_type="C-level data descriptor setattr on user-defined object",
+                    context=f"object={self}, name={name}, value={value}",
+                    explanation="Dynamo cannot safely delay writes to C-level data descriptors "
+                    "because their setters may raise immediately and change exception handling.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
             # NOTE: else we assume the descriptor (if any) has a
             # side-effect-free `__set__` as far as Dynamo tracing is concerned.
@@ -2843,6 +2886,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             )
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
+            # Fall through so the deferred STORE_ATTR replay still mutates the
+            # real exception object after execution.
         elif name == "with_traceback":
             return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)

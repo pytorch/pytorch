@@ -5773,6 +5773,20 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_user_defined_setstate_replaces_dict(self):
+        class Holder:
+            def __setstate__(self, namespace):
+                self.__dict__ = namespace
+
+        def fn(x):
+            holder = Holder()
+            holder.__setstate__({"scale": 3})
+            return x + holder.__dict__["scale"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_functional_compile(self):
         def get_torch_functional_functions():
             s = set()

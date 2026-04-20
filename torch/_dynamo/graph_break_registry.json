@@ -199,6 +199,16 @@
       "Hints": []
     }
   ],
+  "GB0743": [
+    {
+      "Gb_type": "C-level data descriptor setattr on user-defined object",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "Dynamo cannot safely delay writes to C-level data descriptors because their setters may raise immediately and change exception handling.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0020": [
     {
       "Gb_type": "BUILD_STRING key conflict",
