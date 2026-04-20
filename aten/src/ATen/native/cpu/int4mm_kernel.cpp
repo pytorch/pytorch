@@ -619,7 +619,7 @@ void weight_to_int4pack_kernel(
     const Tensor& weight) {
 
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.data_ptr<int32_t>();
+  const auto weight_data = weight.const_data_ptr<int32_t>();
 
   int N = weight.size(0);
   int K = weight.size(1);

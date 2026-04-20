@@ -2455,7 +2455,7 @@ Tensor index_select_sparse_cpu(
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
-      auto* ptr_index = index_contiguous.data_ptr<int64_t>();
+      const auto* ptr_index = index_contiguous.const_data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
       at::parallel_for(
           0,
