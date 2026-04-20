@@ -34,6 +34,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
+    DEVICE_TYPE,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
@@ -905,7 +906,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         context = (
             (
                 self.assertRaisesRegex(
-                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+                    ValueError, f"Inconsistent.*{DEVICE_TYPE}:{self.rank} vs {DEVICE_TYPE}:0"
                 )
             )
             if self.rank != 0
@@ -1087,7 +1088,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module unexpectedly has parameters on cpu. Make "
-            "sure to move the module to cuda:0 before training.",
+            f"sure to move the module to {DEVICE_TYPE}:0 before training.",
         ):
             fsdp_model(inp)
 
@@ -1099,7 +1100,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module with parameter CPU offloading enabled has "
-            "parameters on cuda:0. Make sure to not move the module from CPU "
+            f"parameters on {DEVICE_TYPE}:0. Make sure to not move the module from CPU "
             "when offloading parameters.",
         ):
             fsdp_model(inp)

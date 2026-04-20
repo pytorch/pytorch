@@ -48,7 +48,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return "nccl"
+        return dist.Backend.default_device_backend_map.get(DEVICE_TYPE, "nccl")
 
     @classmethod
     def device_type(cls) -> str:
