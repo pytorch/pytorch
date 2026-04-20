@@ -496,6 +496,18 @@ bool check_cudnn_dropout(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
+  constexpr int64_t max_cudnn_dim_size = 65535;
+  const auto b = params.query.sym_size(0);
+  const auto h = params.query.sym_size(1);
+  if (b > max_cudnn_dim_size || h > max_cudnn_dim_size) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA does not support batch size or num_heads greater than ",
+          max_cudnn_dim_size,
+          ". Got batch size: ", b, ", num_heads: ", h);
+    }
+    return false;
+  }
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
