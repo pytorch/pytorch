@@ -2217,6 +2217,32 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
+    @requires_cuda
+    def test_stream_pointer_extraction_edge_cases(self):
+        def get_ptrs(stream_a, stream_b, default_stream):
+            return (
+                stream_a.cuda_stream,
+                stream_b.cuda_stream,
+                default_stream.cuda_stream,
+            )
+
+        s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
+        default_s = torch.cuda.default_stream()
+        expected_s1, expected_s2 = s1.cuda_stream, s2.cuda_stream
+
+        self.assertNotEqual(expected_s1, expected_s2)
+        self.assertGreater(expected_s1, 1000)
+
+        opt_get_ptrs = torch.compile(get_ptrs, backend="inductor")
+
+        s3 = torch.cuda.Stream()
+        with torch.cuda.stream(s3):
+            actual_s1, actual_s2, actual_default = opt_get_ptrs(s1, s2, default_s)
+
+        self.assertEqual(actual_s1, expected_s1)
+        self.assertEqual(actual_s2, expected_s2)
+        self.assertEqual(actual_default, default_s.cuda_stream)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

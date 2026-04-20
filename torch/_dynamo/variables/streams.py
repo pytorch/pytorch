@@ -559,17 +559,21 @@ class CudaStreamVariable(StreamVariable):
     def python_type(self) -> type:
         return torch.cuda.Stream
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from . import ConstantVariable
+
         if name == "cuda_stream":
             from ..guards import GuardBuilder, install_guard
 
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            if isinstance(self.value, torch.cuda.Stream):
+
+            if hasattr(self.value, "cuda_stream"):
                 return ConstantVariable.create(self.value.cuda_stream)
-            # For torch.Stream values (e.g. from torch.accelerator.current_stream),
-            # the default stream has cuda_stream == stream_id == 0.
-            return ConstantVariable.create(self.value.stream_id)
+
+            if hasattr(self.value, "native_handle"):
+                return ConstantVariable.create(self.value.native_handle)
+
         return super().var_getattr(tx, name)
 
 
