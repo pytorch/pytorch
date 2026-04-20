@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
+import typing
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-import typing
 
 
 log = logging.getLogger(__name__)
