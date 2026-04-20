@@ -1,6 +1,8 @@
 #pragma once
 
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Deprecated.h>
@@ -137,6 +139,24 @@ inline void pop(Stack& stack, Types&... args) {
 template <typename... Types>
 inline void pop(Stack* stack, Types&... args) {
   pop(*stack, args...);
+}
+// tuple-returning pop:
+// auto [a, b] = pop<int64_t, at::Tensor>(stack);
+template <typename... Types>
+  requires(sizeof...(Types) > 0)
+inline std::tuple<Types...> pop(Stack& stack) {
+  constexpr size_t N = sizeof...(Types);
+  auto result = [&]<size_t... Is>(std::index_sequence<Is...>) {
+    return std::tuple<Types...>{
+        std::move(peek(stack, Is, N)).template to<Types>()...};
+  }(std::index_sequence_for<Types...>{});
+  drop(stack, N);
+  return result;
+}
+template <typename... Types>
+  requires(sizeof...(Types) > 0)
+inline std::tuple<Types...> pop(Stack* stack) {
+  return pop<Types...>(*stack);
 }
 template <typename Type>
 inline void push_one(Stack& stack, Type&& arg) {
