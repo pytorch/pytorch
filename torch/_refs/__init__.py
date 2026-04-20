@@ -4017,7 +4017,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Special-cases tensors with no elements
     if a.numel() == 0:
-        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
+        return torch.as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
     if a.ndim == 0:
