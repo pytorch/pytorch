@@ -45,12 +45,9 @@ struct ZeIpcApi {
   OpenIpcHandleFn open_ipc_handle{nullptr};
   CloseIpcHandleFn close_ipc_handle{nullptr};
   void* lib_handle{nullptr};
+  std::once_flag init_once;
 
-  bool available() {
-    if (get_ipc_handle && open_ipc_handle && close_ipc_handle) {
-      return true;
-    }
-
+  void init() {
     get_ipc_handle = reinterpret_cast<GetIpcHandleFn>(
         dlsym(RTLD_DEFAULT, "zeMemGetIpcHandle"));
     open_ipc_handle = reinterpret_cast<OpenIpcHandleFn>(
@@ -59,17 +56,15 @@ struct ZeIpcApi {
         dlsym(RTLD_DEFAULT, "zeMemCloseIpcHandle"));
 
     if (get_ipc_handle && open_ipc_handle && close_ipc_handle) {
-      return true;
+      return;
     }
 
+    lib_handle = dlopen("libze_loader.so.1", RTLD_LAZY | RTLD_LOCAL);
     if (!lib_handle) {
-      lib_handle = dlopen("libze_loader.so.1", RTLD_LAZY | RTLD_LOCAL);
-      if (!lib_handle) {
-        lib_handle = dlopen("libze_loader.so", RTLD_LAZY | RTLD_LOCAL);
-      }
+      lib_handle = dlopen("libze_loader.so", RTLD_LAZY | RTLD_LOCAL);
     }
     if (!lib_handle) {
-      return false;
+      return;
     }
 
     get_ipc_handle = reinterpret_cast<GetIpcHandleFn>(
@@ -78,6 +73,12 @@ struct ZeIpcApi {
         dlsym(lib_handle, "zeMemOpenIpcHandle"));
     close_ipc_handle = reinterpret_cast<CloseIpcHandleFn>(
         dlsym(lib_handle, "zeMemCloseIpcHandle"));
+  }
+
+  bool available() {
+    std::call_once(init_once, [this]() {
+      init();
+    });
     return get_ipc_handle && open_ipc_handle && close_ipc_handle;
   }
 };
