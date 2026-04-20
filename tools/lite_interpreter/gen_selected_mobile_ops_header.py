@@ -73,7 +73,6 @@ def get_selected_kernel_dtypes_code(
         for kernel_tag, dtypes in selective_builder.kernel_metadata.items():
             conditions = ["scalar_type == at::ScalarType::" + x for x in dtypes]
             body_parts.append(
-                # pyrefly: ignore [bad-argument-type]
                 if_condition_template.substitute(
                     kernel_tag_name=kernel_tag,
                     dtype_checks=" || ".join(conditions),
