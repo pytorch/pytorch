@@ -100,6 +100,9 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           # Disable shellcheck warning for GPU_FLAG
           # shellcheck disable=SC2086
+          # setup-linux checks out pytorch directly at GITHUB_WORKSPACE, but
+          # llm-target-determinator@v0.0.2 expects `pytorch/` as a sibling of
+          # its own checkout, so remap the layout inside the container.
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -110,12 +113,14 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace/pytorch" \
+            -v "${GITHUB_WORKSPACE}/codellama:/var/lib/jenkins/workspace/codellama" \
+            -v "${GITHUB_WORKSPACE}/llm-target-determinator:/var/lib/jenkins/workspace/llm-target-determinator" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
           chmod +x .github/scripts/td_llm_indexer.sh
-          docker exec -t "${container_name}" sh -c '.github/scripts/td_llm_indexer.sh'
+          docker exec -t "${container_name}" sh -c 'pytorch/.github/scripts/td_llm_indexer.sh'
 
       - name: Upload to s3
         shell: bash -l {0}
