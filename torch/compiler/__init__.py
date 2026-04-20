@@ -21,6 +21,8 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_default_backend",
+    "get_default_backend",
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
@@ -256,6 +258,39 @@ def disable(fn=None, recursive=True, *, reason=None):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive, reason=reason)
+
+
+def set_default_backend(backend: str | Callable[..., Any] | None) -> None:
+    """Set the default backend for ``torch.compile`` when no ``backend`` argument is specified.
+
+    Passing ``None`` resets the default back to ``"inductor"``.
+
+    Args:
+        backend: A backend name (string), a callable backend, or ``None``.
+
+    Example::
+
+        >>> torch.compiler.set_default_backend("eager")
+        >>> torch.compiler.get_default_backend()
+        'eager'
+        >>> torch.compiler.set_default_backend(None)  # reset
+        >>> torch.compiler.get_default_backend()
+        'inductor'
+    """
+    from torch._dynamo.backends.registry import set_default_backend
+
+    set_default_backend(backend)
+
+
+def get_default_backend() -> str | Callable[..., Any]:
+    """Return the current default backend for ``torch.compile``.
+
+    Returns:
+        The current default backend (string or callable). Initially ``"inductor"``.
+    """
+    from torch._dynamo.backends.registry import get_default_backend
+
+    return get_default_backend()
 
 
 def set_stance(

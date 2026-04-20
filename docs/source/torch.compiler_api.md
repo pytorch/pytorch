@@ -20,6 +20,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      assume_constant_result
      list_backends
      disable
+     set_default_backend
+     get_default_backend
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
