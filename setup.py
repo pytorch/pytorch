@@ -279,7 +279,6 @@ import subprocess
 import sysconfig
 import tempfile
 import textwrap
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -503,75 +502,6 @@ TORCH_VERSION = get_torch_version()
 report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
-
-
-def get_submodule_folders() -> list[Path]:
-    git_modules_file = CWD / ".gitmodules"
-    default_modules_path = [
-        THIRD_PARTY_DIR / name
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "onnx",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
-    if not git_modules_file.exists():
-        return default_modules_path
-    with git_modules_file.open(encoding="utf-8") as f:
-        return [
-            CWD / line.partition("=")[-1].strip()
-            for line in f
-            if line.strip().startswith("path")
-        ]
-
-
-def check_submodules() -> None:
-    def check_for_files(folder: Path, files: list[str]) -> None:
-        if not any((folder / f).exists() for f in files):
-            report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    def not_exists_or_empty(folder: Path) -> bool:
-        return not folder.exists() or (
-            folder.is_dir() and next(folder.iterdir(), None) is None
-        )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
-    folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
-    for folder in folders:
-        check_for_files(
-            folder,
-            [
-                "CMakeLists.txt",
-                "Makefile",
-                "setup.py",
-                "LICENSE",
-                "LICENSE.md",
-                "LICENSE.txt",
-            ],
-        )
-    check_for_files(
-        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
-        ["CMakeLists.txt"],
-    )
 
 
 # Windows has very bad support for symbolic links.
@@ -1027,7 +957,6 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
