@@ -1114,10 +1114,6 @@ class TORCH_API StaticRuntime {
     IValueArray() = default;
     explicit IValueArray(size_t size) : array_(size) {}
 
-    IValue* data() {
-      return array_.empty() ? nullptr : array_.data();
-    }
-
     const IValue* data() const {
       return array_.empty() ? nullptr : array_.data();
     }
