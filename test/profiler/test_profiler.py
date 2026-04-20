@@ -3783,7 +3783,11 @@ class TestPrivateUse1ProfilerState(TestCase):
 
 
 class TestProfilerEarlyAbort(TestCase):
-    """Tests for early abort of profiling when GPU collection is stopped."""
+    """Tests for early abort of profiling. Note that the common case in
+    in production will actually be GPU profiling. But because we're mocking
+    the exit condition, we can just use CPU only profiling.
+
+    For all of these tests, `ProfilerAction.NONE` indicates an early return."""
 
     PATCH_TARGET = "torch.autograd._is_stopped"
 
@@ -3794,20 +3798,18 @@ class TestProfilerEarlyAbort(TestCase):
         )
 
     def test_step_early_abort_from_warmup(self):
+        p = self._make_profiler(wait=0, warmup=2, active=2)
         with patch(self.PATCH_TARGET, return_value=True):
-            p = self._make_profiler(wait=0, warmup=2, active=2)
             p.start()
-            # step 0 -> 1: WARMUP -> WARMUP, _is_stopped returns True but
-            # current_action is WARMUP (not NONE), so no override yet because
-            # the schedule still says WARMUP and we only abort when the schedule
-            # would keep us in an active state.
+            # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_stopped
+            # returns True so we override current_action to NONE.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
     def test_step_early_abort_from_record(self):
+        p = self._make_profiler(wait=0, warmup=1, active=3)
         with patch(self.PATCH_TARGET, return_value=False):
-            p = self._make_profiler(wait=0, warmup=1, active=3)
             p.start()
             # step 0 -> 1: WARMUP -> RECORD (normal)
             p.step()
@@ -3820,8 +3822,8 @@ class TestProfilerEarlyAbort(TestCase):
             p.stop()
 
     def test_step_early_abort_from_record_and_save(self):
+        p = self._make_profiler(wait=0, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=False):
-            p = self._make_profiler(wait=0, warmup=1, active=1)
             p.start()
             # step 0 -> 1: WARMUP -> RECORD_AND_SAVE (normal)
             p.step()
@@ -3835,27 +3837,30 @@ class TestProfilerEarlyAbort(TestCase):
             p.stop()
 
     def test_step_no_abort_when_none(self):
+        p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
-            p = self._make_profiler(wait=2, warmup=1, active=1)
             p.start()
-            # step 0 -> 1: NONE -> NONE, _is_stopped is True but prev_action
-            # is NONE so no abort should trigger.
+            # step 0 -> 1: NONE -> NONE. _is_stopped is True, but since
+            # the result is NONE either way, we can't distinguish whether the
+            # early abort path fired — we just verify the profiler lands in
+            # the expected state.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
     def test_step_no_abort_when_already_stopping(self):
+        p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
         with patch(self.PATCH_TARGET, return_value=False):
-            p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
             p.start()
             # step 0 -> 1: WARMUP -> RECORD_AND_SAVE
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD_AND_SAVE -> NONE (schedule naturally stops),
-            # _is_stopped is True but current_action is already NONE so no
-            # override happens — the normal transition fires.
+            # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_stopped is True,
+            # but the schedule naturally transitions to NONE here too, so we
+            # can't distinguish the cause — we just verify the profiler lands
+            # in the expected state.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
