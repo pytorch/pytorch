@@ -2083,13 +2083,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend == dist.Backend.XCCL:
                 if not dist.is_xccl_available():
                     continue
-            elif backend == dist.Backend.PRIVATEUSE1:
-                if not dist.is_backend_available(str(backend)):
-                    continue
-            # Multi-threaded PG is defined as a pure python class.
-            # Its pg.name() does not going through Pybind, so its backend name
-            # is still "threaded" instead of "custom".
-            elif backend != "threaded":
+            elif backend == "threaded":
+                pass
+            elif not dist.is_backend_available(str(backend)):
+                continue
+            else:
                 excepted_backend = "custom"
 
             store = dist.FileStore(self.file_name, self.world_size)
