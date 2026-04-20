@@ -12668,6 +12668,27 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
+    def test_lstm_eval_after_train_same_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180744
+        # The MPS LSTM graph cache key did not include the `train` flag, so a
+        # graph built with dropout during train() was reused in eval() at the
+        # same input shape, silently applying dropout during inference
+        torch.manual_seed(0)
+        lstm = nn.LSTM(
+            input_size=2, hidden_size=4, num_layers=2,
+            dropout=0.1, batch_first=True,
+        ).to("mps")
+        opt = torch.optim.SGD(lstm.parameters(), lr=1e-2)
+        lstm(torch.randn(3, 5, 2, device="mps"))[0].mean().backward()
+        opt.step()
+
+        lstm.eval()
+        probe = torch.randn(10, 5, 2, device="mps")
+        with torch.no_grad():
+            full = lstm(probe)[0]
+            part = lstm(probe[:3])[0]
+        self.assertEqual(full[:3], part)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size, device='mps')
