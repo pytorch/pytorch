@@ -1169,7 +1169,7 @@ class GraphModule(torch.nn.Module):
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
-""",  # noqa: B950
+""",
         )
 
         wrapper_body = _extract_wrapper_body(code)

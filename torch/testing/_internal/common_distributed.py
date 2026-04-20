@@ -970,7 +970,7 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
         except unittest.SkipTest as se:
-            logger.info(  # noqa: G200
+            logger.info(
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
@@ -1309,7 +1309,7 @@ def spawn_threads_and_init_comms(
             )
             try:
                 callback()
-            except BaseException as ex:  # noqa: B036
+            except BaseException as ex:
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
                 ProcessLocalGroup.exception_handle(
@@ -1470,7 +1470,7 @@ class MultiThreadedTestCase(TestCase):
 
         try:
             getattr(self, test_name)()
-        except BaseException as ex:  # noqa: B036
+        except BaseException as ex:
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(
                 ex
@@ -1841,7 +1841,7 @@ class MultiProcContinuousTest(TestCase):
             try:
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
-            except BaseException as ex:  # noqa: B036
+            except BaseException as ex:
                 if isinstance(ex, SystemExit):
                     # Get exit code from the process
                     exit_code = getattr(ex, "code", None)
@@ -1906,7 +1906,7 @@ class MultiProcContinuousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.debug("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
+            logger.debug("Started process %s with pid %s", rank, process.pid)
 
     @classmethod
     def _get_world_size(cls, device_type: str) -> int:
@@ -2063,7 +2063,7 @@ class MultiProcContinuousTest(TestCase):
                     if isinstance(rv, BaseException):
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
-                            f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
+                            f"skipping rest of tests in Test class: {self.__class__.__name__}"
                         )
                         self.__class__.poison_pill = True
                         deferred_exception = rv

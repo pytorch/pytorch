@@ -263,6 +263,7 @@ select = [
     "RUF033", # default values __post_init__ dataclass
     "RUF041", # simplify nested Literal
     "RUF048", # properly parse `__version__`
+    "RUF100", # unused noqa
     "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
