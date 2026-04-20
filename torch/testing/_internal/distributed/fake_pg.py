@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import FakeProcessGroup
 
@@ -27,9 +28,14 @@ def _create_fake_pg(common_opts, backend_opts):
     )
 
 
+_fake_pg_devices = ["cpu", "cuda", "hpu", "xpu"]
+_pu1_backend = torch._C._get_privateuse1_backend_name()
+if _pu1_backend != "privateuseone":
+    _fake_pg_devices.append(_pu1_backend)
+
 dist.Backend.register_backend(
     dist.Backend.FAKE,
     _create_fake_pg,
     extended_api=True,
-    devices=["cpu", "cuda", "hpu", "xpu"],
+    devices=_fake_pg_devices,
 )
