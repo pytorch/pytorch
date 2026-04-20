@@ -815,6 +815,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "cuda:ncclx",
             "hccl",
             "xccl",
+            "cpu:gloo,xpu:xccl",
             "fake",
             "cpu:gloo,xpu:xccl",
         ]:

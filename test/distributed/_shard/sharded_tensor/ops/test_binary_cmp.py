@@ -7,13 +7,17 @@ import torch.distributed as dist
 from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -45,20 +49,20 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
 
         alt_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:1/cuda:1",
-                "rank:0/cuda:0",
-                "rank:3/cuda:3",
-                "rank:2/cuda:2",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         return spec, alt_spec
@@ -117,15 +121,15 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         ):
             cmp_op(st1, st2)
 
-    @with_comms
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_torch_equal_tensor_specs(self):
         self._test_common_failures(torch.equal)
 
-    @with_comms
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_torch_equal(self):
         """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
@@ -133,15 +137,15 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
-    @with_comms
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_torch_allclose_tensor_specs(self):
         self._test_common_failures(torch.allclose)
 
-    @with_comms
+    @with_comms(backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_torch_allclose(self):
         """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 

@@ -7,13 +7,17 @@ import torch.optim as optim
 from torch.distributed._shard import shard_parameter, sharded_tensor
 from torch.distributed._shard.sharded_optim import ShardedOptimizer
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 class MyShardedModel(torch.nn.Module):
     def __init__(self, spec=None, group=None):
@@ -47,27 +51,27 @@ class MyShardedLinear(torch.nn.Module):
         self.gelu = torch.nn.GELU()
 
         if rank:
-            self.linear1.cuda(rank)
-            self.linear2.cuda(rank)
+            self.linear1.to(rank)
+            self.linear2.to(rank)
 
     def shard_parameter(self):
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
 
         colwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
 
@@ -79,21 +83,21 @@ class MyShardedLinear(torch.nn.Module):
 
 
 class TestShardedOptimizer(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_optim(self):
         rowwise_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
-        local_model = MyShardedModel().cuda()
-        sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
+        local_model = MyShardedModel().to(device_type)
+        sharded_model = MyShardedModel(spec=rowwise_spec).to(device_type)
 
         # copy the parameters from local model
         sharded_model.sharded_param.local_shards()[0].tensor = (
@@ -109,7 +113,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
         before_update = deepcopy(sharded_optim.named_params)
 
-        inp = torch.rand([5, 10]).cuda(self.rank).requires_grad_()
+        inp = torch.rand([5, 10]).to(self.rank).requires_grad_()
 
         # run forward
         local_output = local_model(inp)
@@ -138,27 +142,27 @@ class TestShardedOptimizer(ShardedTensorTestBase):
                 self.assertNotEqual(val, new_val)
                 self.assertEqual(new_val, local_model.param)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_named_params_with_sharded_tensor(self):
         rowwise_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
-        sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
+        sharded_model = MyShardedModel(spec=rowwise_spec).to(device_type)
         sharded_model_params = dict(sharded_model.named_parameters())
         param_keys = list(sharded_model_params.keys())
         self.assertEqual(len(param_keys), 2)
         self.assertTrue("param" in param_keys)
         self.assertTrue("sharded_param" in param_keys)
 
-        sharded_linear = MyShardedLinear(rank=self.rank).cuda()
+        sharded_linear = MyShardedLinear(rank=self.rank).to(device_type)
         sharded_linear.shard_parameter()
         sharded_linear_params = dict(sharded_linear.named_parameters())
         param_keys = list(sharded_linear_params.keys())
