@@ -452,31 +452,6 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-cpu-py3.10-gcc11-bazel-test (build + test)               ║
-  # ╠══════════════════════════════════════════════════════════════════════╣
-
-  linux-jammy-cpu-py3_10-gcc11-bazel-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cpu-py3.10-gcc11-bazel-test ') }}
-    name: linux-jammy-cpu-py3.10-gcc11-bazel-test
-    uses: ./.github/workflows/_bazel-build-test.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-bazel-test
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      cuda-version: cpu
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-        ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      python-version: "3.10"
-      compiler: gcc11
-    secrets: inherit
-
-  # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch (build only)    ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 

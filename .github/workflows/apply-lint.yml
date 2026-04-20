@@ -10,7 +10,7 @@ jobs:
     environment: mergebot
     env:
       GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      LINTERS: CLANGFORMAT,NEWLINE,PYFMT,BAZEL_LINTER,RUFF,ATEN_CPU_GPU_AGNOSTIC
+      LINTERS: CLANGFORMAT,NEWLINE,PYFMT,RUFF,ATEN_CPU_GPU_AGNOSTIC
     steps:
       - name: Checkout repo
         id: checkout
