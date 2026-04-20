@@ -270,10 +270,6 @@ class DispatchKeySet final {
       : repr_(keys_to_repr(ks)) {}
 
   explicit constexpr DispatchKeySet(std::initializer_list<BackendComponent> ks)
-      // Note: for some reason, putting this logic directly in the constructor
-      // appears to fail to compile on CUDA 10.1.
-      // See an example internal failure at
-      // https://www.internalfb.com/intern/skycastle/run/76561193669136035/artifact/actionlog.76561193742069401.stderr
       : repr_(backend_bits_to_repr(ks)) {}
 
   // Test if a DispatchKey is in the set
