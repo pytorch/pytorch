@@ -44,16 +44,16 @@ struct C10_API PyObjectSlot {
     // NB: This is a no-op on x86/x86-64
     std::atomic_thread_fence(std::memory_order_acquire);
     PyObject* obj = load_pyobj();
-    load_pyobj_interpreter()->incref(obj);
+    (*c10::impl::getGlobalPyInterpreter())->incref(obj);
   }
 
   void decref() const noexcept {
     PyObject* obj = load_pyobj();
-    load_pyobj_interpreter()->decref(obj);
+    (*c10::impl::getGlobalPyInterpreter())->decref(obj);
   }
 
   bool try_incref() const noexcept {
-    PyInterpreter* interp = pyobj_interpreter();
+    PyInterpreter* interp = c10::impl::getGlobalPyInterpreter();
     if (C10_UNLIKELY(!interp)) {
       return false;
     }
