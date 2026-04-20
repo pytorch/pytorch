@@ -372,14 +372,19 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y_{i,j} = \frac{x_{i,j}}{\mathrm{RMS}(x)_i} \cdot \gamma_j, \quad
-        \text{where} \quad \text{RMS}(x)_i =
-          \sqrt{\epsilon + \frac{1}{n} \sum_{\text{all }j} x_{i,j}^2}
+        y = \frac{x}{\mathrm{RMS}(x)} \cdot \gamma
 
-    where :math:`j=(i_{D-d}, i_{D-d+1}, \dots, i_{D-1})` are the last `d` dimension
-    indices of input `x`, :math:`i=(i_0, i_1, \dots, i_{D-d-1})` are all other
-    indices, `D` is the dimension of input `x`, and `n` is the number of terms in
-    the sum.
+    where
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(i_0,\dots,i_{D-d-1}, i_{D-d},\dots,i_{D-1})  \\
+          \mathrm{RMS}[x] &=& \mathrm{RMS}[x] &(i_0,\dots,i_{D-d-1} \phantom{,i_{D-d},\dots,i_{D-1}}) =
+                                \sqrt{\epsilon + \frac{1}{n} \sum_{i_{D-d},\dots,i_{D-1}} x_{i_0,\dots,i_{D-1}}^2}  \\
+          \gamma          &=& \gamma          &(\phantom{i_0,\dots,i_{D-d-1},} i_{D-d},\dots,i_{D-1})
+        \end{alignat*}
+
+    and `n` is the number of terms in the sum.
 
     The RMS is taken over the last `d` dimensions, where `d`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
