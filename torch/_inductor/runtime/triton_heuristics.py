@@ -3563,7 +3563,12 @@ def _reduction_configs(
         num_warps = None
 
         # Try to use all SMs with small x
-        if x <= 1024:
+        if triton_meta.get("launch_cooperative_grid", False):
+            # Cooperative launches are 2-D and have x <= 16.  We gain memory access
+            # efficiency by accessing all the x elements contiguously in a single block.
+            x_block = x
+            outer_r_block = max(1, min(rnumel, 512))
+        elif x <= 1024:
             x_block = max(min(x // 128, 8), 2)
             outer_r_block = min(rnumel, 64)
         # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
@@ -3615,8 +3620,8 @@ def _reduction_configs(
     )
 
     outer_config = make_config(64, 8, register_intensive=register_intensive)
-    # TODO (paulzhan): Test heuristic on AMD and internal testing
-    # for correctness
+
+    # TODO (paulzhan): Test heuristic on AMD and internal testing for correctness
     if not torch.version.hip:
         outer_config = outer_config_opt()
 
@@ -3964,7 +3969,7 @@ def cooperative_reduction(
     # the GPU, we want to create as many CTAs as possible, while keeping things
     # in powers of 2.
     target = last_power_of_2(triton_meta["device"].multi_processor_count)
-    split = max(1, min((rnumel, target // xnumel, TRITON_MAX_RSPLIT)))
+    split = max(1, min(rnumel, target // xnumel))
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
             {"x": xnumel, "r0_": rnumel // split},
@@ -3979,8 +3984,11 @@ def cooperative_reduction(
             triton_meta=triton_meta,
         )
     for config in configs:
-        config.kwargs["RSPLIT"] = split
-    # TODO(jansel): add more configs in max_autotune
+        # Compensate for XBLOCK > 1.  For very small reductions, this will spawn more
+        # threads than needed, but those reductions should complete quickly anyway.
+        config.kwargs["RSPLIT"] = min(
+            split * config.kwargs["XBLOCK"], TRITON_MAX_RSPLIT
+        )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
