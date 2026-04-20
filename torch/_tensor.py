@@ -1258,8 +1258,13 @@ class Tensor(torch._C.TensorBase):
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
     def __array_wrap__(self, array, context=None, return_scalar=None):
         if has_torch_function_unary(self):
+            kwargs = {"array": array}
+            if context is not None:
+                kwargs["context"] = context
+            if return_scalar is not None:
+                kwargs["return_scalar"] = return_scalar
             return handle_torch_function(
-                Tensor.__array_wrap__, (self,), self, array=array
+                Tensor.__array_wrap__, (self,), self, **kwargs
             )
         if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor
