@@ -342,6 +342,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
         cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
     descriptor_.reset(raw_descriptor);
   }
+
   template <typename T>
   void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
     TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
@@ -1593,7 +1594,9 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
+  bool use_bias_epilogue = bias != nullptr;
+  bool use_bias_descriptor = bias != nullptr && !use_bias_epilogue;
+  opmath_t beta_val = use_bias_epilogue ? 0 : 1;
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1682,28 +1685,45 @@ bool gemm_and_bias(
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-  const auto epilogue = [&]() -> cublasLtEpilogue_t {
-    // The cuBLAS documentation indicates that
-    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
-    // but we keep it verbose here for clarity.
+
+  const auto get_epilogue_attribute = [&activation, &use_bias_epilogue]() -> cublasLtEpilogue_t {
     switch (activation) {
       case GEMMAndBiasActivationEpilogue::RELU:
-        return bias ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
       case GEMMAndBiasActivationEpilogue::GELU:
-        return bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
       default:
-        return bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
     }
-  }();
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  };
 
-  if (bias) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
-  }
+  const auto get_bias_pointer_attribute = [&use_bias_epilogue, &bias]() -> decltype(bias) {
+    return use_bias_epilogue ? bias : static_cast<decltype(bias)>(nullptr);
+  };
+
+  const auto set_epilogue_attributes = [&computeDesc, &get_epilogue_attribute, &get_bias_pointer_attribute]() -> void {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, get_epilogue_attribute());
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, get_bias_pointer_attribute());
+  };
+
+  const auto get_Cdesc_params = [&]() -> std::tuple<CuBlasLtMatrixLayout, const void*> {
+    if (use_bias_descriptor) {
+#ifdef USE_ROCM
+      uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
+#endif
+      return std::make_tuple(CuBlasLtMatrixLayout(abType, m, n, 0), bias);
+    } else {
+      if (use_bias_epilogue) {
+        set_epilogue_attributes();
+      }
+      return std::make_tuple(CuBlasLtMatrixLayout(cType, m, n, result_ld), result_ptr);
+    }
+  };
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1711,33 +1731,51 @@ bool gemm_and_bias(
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
-  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Cdesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+  {
+    const auto [Cdesc, c_ptr] = get_Cdesc_params();
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc.descriptor(),
+        Ddesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+  }
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
+#ifndef USE_ROCM
+    if constexpr (std::is_same_v<Dtype, C_Dtype> && (std::is_same_v<Dtype, at::Half> || std::is_same_v<Dtype, at::BFloat16>)) {
+      int nsplitk = 0;
+      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoConfigGetAttribute(
+        &heuristicResult.algo,
+        CUBLASLT_ALGO_CONFIG_SPLITK_NUM,
+        &nsplitk,
+        sizeof(nsplitk),
+        nullptr
+      ));
+      if (nsplitk > 1 && use_bias_epilogue) {
+        use_bias_epilogue = false;
+        use_bias_descriptor = true;
+      }
+    }
+#endif
+    const auto [Cdesc, c_ptr] = get_Cdesc_params();
     cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1747,10 +1785,10 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      result_ptr,
+      c_ptr,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
