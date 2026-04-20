@@ -3249,6 +3249,9 @@ class TritonKernelVariable(VariableTracker):
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 
+    def python_type(self) -> type:
+        return type(self.kernel)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
