@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
-# flake8: noqa: E731
 import contextlib
 import copy
 import functools
 import math
 import re
-import unittest  # noqa: F811
+import unittest
 from importlib import import_module
 
 import torch
@@ -15,6 +13,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint
 from functorch.compile import (
     default_partition,
@@ -2732,7 +2731,7 @@ def forward(self, arg0_1):
         wrapped = CheckpointedBlock(block_cp)
 
         for _, submod in wrapped.block.named_children():
-            submod.compile(backend="aot_eager", fullgraph=True)
+            submod.compile(backend="aot_eager")
 
         with torch._dynamo.config.patch(recompile_limit=2):
             x_test = x_ref.detach().clone().requires_grad_(True)
@@ -2817,6 +2816,103 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return (detach_6,)""",
         )
 
+    def test_chunked_loss_remat(self):
+        """Chunked loss pattern: multiple backward regions from chunk_loss.backward()
+        calls, but only the final x.backward() region needs remat. The pass should
+        skip the chunk backwards and only rematerialize for the final one."""
+        dim = 32
+        chunksz = 4
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class ChunkedLoss(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+                self.head = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x, y):
+                x = self.block(x)
+                x_detached = x.detach().requires_grad_()
+                total = 0
+                for start in range(0, x_detached.shape[0], chunksz):
+                    end = start + chunksz
+                    chunk_loss = (
+                        F.mse_loss(
+                            self.head(x_detached[start:end]),
+                            y[start:end],
+                            reduction="sum",
+                        )
+                        / x_detached.shape[0]
+                    )
+                    chunk_loss.backward()
+                    total = total + chunk_loss.detach()
+                x.backward(x_detached.grad)
+                return total
+
+        model = ChunkedLoss()
+        x = torch.randn(12, dim)
+        y = torch.randn(12, dim)
+
+        result_with, gm_with = self._compile_and_capture(model, True, (x, y))
+        result_without, gm_without = self._compile_and_capture(model, False, (x, y))
+
+        torch.testing.assert_close(result_with, result_without)
+
+        # Without remat, gelu appears once (forward only).
+        # With remat, gelu is duplicated into the backward region.
+        gelu_without = self.count_op(gm_without, torch.ops.aten.gelu.default)
+        gelu_with = self.count_op(gm_with, torch.ops.aten.gelu.default)
+        self.assertEqual(gelu_without, 1)
+        self.assertEqual(gelu_with, 2, "gelu should be recomputed in backward")
+
+    def test_two_backward_regions_needing_remat_errors(self):
+        """Two independent backward calls that both need recompute should error."""
+        dim = 32
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class TwoBackwards(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block1 = Block()
+                self.block2 = Block()
+
+            def forward(self, x):
+                y = self.block1(x)
+                z = self.block2(y)
+                z.sum().backward(retain_graph=True)
+                y.sum().backward()
+                return z.detach()
+
+        x = torch.randn(8, dim, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "require recomputation",
+        ):
+            self._compile_and_capture(TwoBackwards(), True, (x,))
+
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(
@@ -2826,6 +2922,17 @@ instantiate_device_type_tests(
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
+
+    @staticmethod
+    def _count_backward_regions(gm):
+        regions = 0
+        in_backward = False
+        for node in gm.graph.nodes:
+            is_backward = bool(node.meta.get("autograd_backward", False))
+            if is_backward and not in_backward:
+                regions += 1
+            in_backward = is_backward
+        return regions
 
     def test_backward_nodes_have_seq_nr_under_non_strict(self):
         class Model(nn.Module):
@@ -2843,14 +2950,14 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
             node.meta["seq_nr"]
             for node in gm.graph.nodes
             if node.op == "call_function"
-            and not node.meta.get("custom", {}).get("autograd_backward", False)
+            and not node.meta.get("autograd_backward", False)
             and "seq_nr" in node.meta
         }
         backward_seq_nrs = {
             node.meta["seq_nr"]
             for node in gm.graph.nodes
             if node.op == "call_function"
-            and node.meta.get("custom", {}).get("autograd_backward", False)
+            and node.meta.get("autograd_backward", False)
             and "seq_nr" in node.meta
         }
 
@@ -2869,6 +2976,60 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
                 "_non_strict_tracing_context\\(\\)",
             ):
                 torch.autograd.grad(loss, (x,))
+
+    def test_patch_autograd_grad_does_not_leak_backward_tag(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        x = torch.randn(2, 4, requires_grad=True)
+
+        def fn(x):
+            with torch.fx.traceback.annotate({"ac_region_id": 0}):
+                y = torch.sin(x)
+                torch.autograd.grad(y.sum(), (x,))
+                return torch.neg(y)
+
+        with (
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_autograd_grad(),
+            preserve_node_meta(),
+        ):
+            gm = make_fx(fn)(x)
+
+        backward_nodes = [
+            node for node in gm.graph.nodes if node.meta.get("autograd_backward", False)
+        ]
+        self.assertTrue(backward_nodes)
+
+        neg_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.neg.default
+        )
+        self.assertEqual(len(neg_nodes), 1)
+        self.assertNotIn("autograd_backward", neg_nodes[0].meta)
+        self.assertEqual(neg_nodes[0].meta.get("custom", {}), {"ac_region_id": 0})
+
+    def test_patch_autograd_grad_mlp_has_single_contiguous_backward_region(self):
+        class Block(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.fc1 = nn.Linear(dim, dim * 2)
+                self.fc2 = nn.Linear(dim * 2, dim)
+
+            def forward(self, x):
+                return x + self.fc2(torch.relu(self.fc1(x)))
+
+        class Model(nn.Module):
+            def __init__(self, dim=32, depth=6):
+                super().__init__()
+                self.blocks = nn.ModuleList([Block(dim) for _ in range(depth)])
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        gm = self._trace_train_step(Model(), torch.randn(4, 16, 32))
+        self.assertEqual(self._count_backward_regions(gm), 1)
 
     def _trace_train_step(self, mod, x):
         import torch.utils._pytree as pytree

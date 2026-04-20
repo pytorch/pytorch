@@ -77,7 +77,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     __slots__ = ["packed", "meta", "packed_t", "meta_t", "compressed_swizzled_bitmask"]
 
     @staticmethod
-    def __new__(  # noqa: PYI034
+    def __new__(
         cls,
         shape: torch.Size,
         packed: torch.Tensor | None,

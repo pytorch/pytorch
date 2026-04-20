@@ -338,11 +338,6 @@ dtensor_compiled_fails = {
     xfail("scatter"),
     xfail("scatter_add"),
     xfail("take_along_dim"),
-    # batch_norm variants decompose through squeeze.dims → as_strided under
-    # compilation, and DTensor has no as_strided strategy.
-    xfail("_native_batch_norm_legit"),
-    xfail("native_batch_norm"),
-    xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
@@ -388,7 +383,6 @@ dtensor_numeric_only_fails = {
 # Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
 # These will error during sharding propagation and affect unbacked tests too.
 dtensor_fails_no_strategy = {
-    xfail("_batch_norm_with_update"),
     xfail("_chunk_cat"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
@@ -401,7 +395,7 @@ dtensor_fails_no_strategy = {
     xfail("block_diag"),
     xfail("cdist"),
     xfail("complex"),
-    xfail("diagonal_scatter"),
+    xfail("exponential"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
     xfail("geometric"),
@@ -416,7 +410,6 @@ dtensor_fails_no_strategy = {
     xfail("multinomial"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
-    xfail("nn.functional.group_norm"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
@@ -435,7 +428,6 @@ dtensor_fails_no_strategy = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("select_scatter"),
     xfail("squeeze_copy"),
     xfail("stft"),
     xfail("take"),
@@ -776,6 +768,7 @@ class TestLocalDTensorOps(TestDTensorOps):
 ops_unbacked_dtensor_dde = {
     xfail("__getitem__"),
     xfail("__rmatmul__"),
+    xfail("_batch_norm_with_update"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
     xfail("_native_batch_norm_legit"),
@@ -871,6 +864,7 @@ ops_unbacked_dtensor_dde = {
     xfail("rot90"),
     xfail("scatter"),
     xfail("scatter_add"),
+    xfail("select_scatter"),
     xfail("sort"),
     xfail("squeeze_copy"),
     xfail("std_mean"),

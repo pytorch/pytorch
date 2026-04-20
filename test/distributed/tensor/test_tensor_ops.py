@@ -1339,6 +1339,43 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+    @with_comms
+    def test_select_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        # select_scatter(self, src, dim, index): insert src at self[:, :, index]
+        for dim, idx in [(0, 2), (1, 1), (2, 3)]:
+            src_shape = list(inp.shape)
+            src_shape.pop(dim)
+            src = torch.randn(src_shape, device=self.device_type)
+            expected = inp.select_scatter(src, dim, idx)
+
+            for shard_dim in range(inp.ndim):
+                if shard_dim == dim:
+                    continue
+                dt_inp = distribute_tensor(inp, device_mesh, [Shard(shard_dim)])
+                src_shard_dim = shard_dim if shard_dim < dim else shard_dim - 1
+                dt_src = distribute_tensor(src, device_mesh, [Shard(src_shard_dim)])
+                result = dt_inp.select_scatter(dt_src, dim, idx)
+                self.assertEqual(result.full_tensor(), expected)
+                self.assertTrue(result.placements[0].is_shard(shard_dim))
+
+    @with_comms
+    def test_diagonal_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+
+        # diagonal_scatter(self, src, offset, dim1, dim2)
+        src = torch.randn(8, 4, device=self.device_type)
+        expected = inp.diagonal_scatter(src, 0, 1, 2)
+
+        # shard on dim 0 (batch), which is not one of the diagonal dims
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_src = distribute_tensor(src, device_mesh, [Shard(0)])
+        result = dt_inp.diagonal_scatter(dt_src, 0, 1, 2)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
 
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms
@@ -1708,6 +1745,87 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
         self.assertEqual(
             dt.grad._local_tensor,
             torch.full_like(dt.grad._local_tensor, 2.0),
+        )
+
+    @with_comms
+    def test_new_empty_propagates_partial(self):
+        """new_empty/new_empty_strided on a Partial DTensor should inherit Partial.
+
+        Uninitialized memory will be overwritten immediately, so the placement
+        only needs to match the source of the subsequent write. Without this,
+        copy_ from a Partial source to a Replicate destination triggers an
+        unwanted all-reduce (issue #180486).
+        """
+        mesh = self.build_device_mesh()
+        partial_dt = DTensor.from_local(
+            torch.randn(4, 8, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Partial()],
+        )
+
+        empty_dt = partial_dt.new_empty(partial_dt.shape)
+        self.assertEqual(empty_dt.placements, (Partial(),))
+
+        empty_strided_dt = partial_dt.new_empty_strided(
+            partial_dt.shape, partial_dt.stride()
+        )
+        self.assertEqual(empty_strided_dt.placements, (Partial(),))
+
+        # Initialized factories must keep Replicate, otherwise their values
+        # would be incorrect after a Partial reduction (e.g. ones * world_size).
+        ones_dt = partial_dt.new_ones(partial_dt.shape)
+        self.assertEqual(ones_dt.placements, (Replicate(),))
+
+    @with_comms
+    def test_backward_partial_grad_with_transpose(self):
+        """Backward preserves Partial placement when grad is non-contiguous (issue #180486).
+
+        When a Replicate DTensor parameter is used with to_local(grad_placements=[Partial()]),
+        and the backward produces a non-contiguous gradient (e.g. via transpose), autograd's
+        layout invariant calls new_empty_strided + copy_ to fix strides. This must preserve
+        the Partial placement rather than defaulting to Replicate.
+        """
+        mesh = self.build_device_mesh()
+
+        class _Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 8, 8))
+                self._grad_placement = None
+
+            def forward(self, x):
+                w = self.weight
+                if isinstance(w, DTensor):
+                    w = w.to_local(grad_placements=[Partial()])
+
+                    def _capture(param, model=self):
+                        if param.grad is not None and isinstance(param.grad, DTensor):
+                            model._grad_placement = param.grad.placements
+
+                    self.weight.register_post_accumulate_grad_hook(_capture)
+
+                # transpose backward produces non-contiguous grad
+                w = w.transpose(1, 2).contiguous()
+                return torch.mm(x, w[0])
+
+        model = _Model().to(self.device_type)
+        with torch.no_grad():
+            model.weight = torch.nn.Parameter(
+                DTensor.from_local(
+                    model.weight.data,
+                    device_mesh=mesh,
+                    placements=[Replicate()],
+                )
+            )
+
+        x = torch.randn(2, 8, device=self.device_type, requires_grad=True)
+        out = model(x)
+        out.sum().backward()
+
+        self.assertIsNotNone(model._grad_placement)
+        self.assertTrue(
+            all(isinstance(p, Partial) for p in model._grad_placement),
+            f"Expected Partial grad placement, got {model._grad_placement}",
         )
 
     @with_comms

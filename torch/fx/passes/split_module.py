@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 import logging
 from collections import OrderedDict
@@ -19,7 +18,7 @@ log = _LOGGER = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=True)
 class Partition:
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name: str = name
         self.submod_name = f"submod_{name}"
         self.node_names: list[str] = []
@@ -64,7 +63,7 @@ def split_module(
     *,
     partition_affix: str | None = None,
     tuple_return: bool = False,
-):
+) -> GraphModule:
     """
     Creates subgraphs out of main graph
 
@@ -177,7 +176,7 @@ def split_module(
         node: Node,
         base_mod_env: dict[str, Node],
         base_mod_attrs: dict[str, torch.fx.graph_module.GraphModule],
-    ):
+    ) -> tuple[dict[str, Node], dict[str, torch.fx.graph_module.GraphModule]]:
         if node.op == "placeholder":
             default_value = (
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
@@ -214,7 +213,7 @@ def split_module(
     orig_nodes: dict[str, Node] = {}
     symbol_to_node: dict[sympy.Symbol, Node] = {}
 
-    def record_cross_partition_use(def_node: Node, use_node: Node | None):
+    def record_cross_partition_use(def_node: Node, use_node: Node | None) -> None:
         from torch.fx.experimental.symbolic_shapes import free_symbols
 
         defined = getattr(def_node, "_fx_partition", None)
@@ -263,7 +262,7 @@ def split_module(
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
-    def instantiate_node_partition_mapping(node):
+    def instantiate_node_partition_mapping(node: Node) -> None:
         partition_idx = split_callback(node)
         partition_name = str(partition_idx)
         if partition_affix is not None:
@@ -411,7 +410,7 @@ def split_module(
             )
             torch.fx.graph.map_arg(
                 node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
-            )  # noqa: B950
+            )
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
@@ -467,7 +466,7 @@ def split_module(
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
 
-            def add_placeholder():
+            def add_placeholder() -> Node:
                 if keep_original_input_name:
                     name = inp
                 else:
@@ -640,7 +639,7 @@ def split_module(
 
         base_mod_attrs[partition.submod_name] = _make_graph_module(
             partition.targets, partition.graph
-        )  # noqa: B950
+        )
 
         # Emit call in base graph to this submodule
         output_val = base_mod_graph.call_module(
@@ -672,7 +671,7 @@ def split_module(
         if node.op == "output":
             base_mod_graph.output(
                 torch.fx.graph.map_arg(node.args[0], lambda n: base_mod_env[n.name])
-            )  # noqa: B950
+            )
 
     ret = _make_graph_module(base_mod_attrs, base_mod_graph)
     log.debug(

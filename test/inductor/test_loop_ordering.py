@@ -416,6 +416,192 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    def test_reshape_reindexing_for_reduction(self):
+        """
+        RMS norm pattern where reshape(-1, head_dim) changes the loop
+        decomposition from [M, N] to [M*num_heads, head_dim]. Without
+        reindexing, the pointwise and reduction have different MemoryDep
+        indexing and can't fuse. With reindexing, the pointwise's
+        iteration is re-factored to match the reduction's, enabling fusion
+        into a single kernel.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        if DO_PERF_TEST:
+            M = 1024
+        else:
+            M = 16
+        # Non-contiguous input (simulating a slice from qkv projection)
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            optf = torch.compile(f)
+            print(f"ms={do_bench(lambda: optf(x))}")
+
+    def test_reshape_reindexing_transposed_input(self):
+        """
+        Same RMS norm pattern but with a transposed input. The reshape
+        sees transposed strides, so the reduction's memory access
+        pattern differs from the contiguous case. Reindexing should
+        still enable fusion.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        # Transposed input: shape [M, 8192] but stride (1, M)
+        x = torch.randn(8192, M, dtype=torch.bfloat16).T
+
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    @inductor_config.patch("loop_ordering_after_fusion", False)
+    def test_reshape_reindexing_without_loop_ordering(self):
+        """
+        Reindexing should enable fusion even when loop ordering is
+        disabled. Same RMS norm pattern as test_reshape_reindexing_for_reduction.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_reindex_unfusable_write_read_dep(self):
+        """
+        Grouped quantization where a custom op consumes both the
+        quantized tensor and the scale, forcing the reduction (amax)
+        and scale epilogue to fuse into a FusedSchedulerNode while
+        the quantize pointwise remains separate.
+
+        The FusedSchedulerNode's dep on the input has 3 vars (from the
+        reduction + scale bodies), while the pointwise has 2 vars.
+        This num_vars mismatch causes _try_reorder_loops_for_candidates
+        to return a score based on the shared read (input), short-
+        circuiting reindexing. The write-read dep prioritization
+        detects the unfusable dep and returns -1, letting reindexing
+        fire.
+        """
+        HIDDEN, GROUP_SIZE = 7168, 128
+
+        @torch.library.custom_op("test::opaque_gemm", mutates_args=())
+        def opaque_gemm(x_q: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        @opaque_gemm.register_fake
+        def _(x_q, scale):
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        def f(x):
+            grouped = x.reshape(-1, HIDDEN // GROUP_SIZE, GROUP_SIZE).float()
+            absmax = grouped.abs().amax(dim=-1, keepdim=True)
+            scale = (absmax / FP8_MAX).clamp(min=1e-6)
+            x_q = (
+                (grouped / scale)
+                .clamp(-FP8_MAX, FP8_MAX)
+                .to(torch.float16)
+                .reshape(x.shape)
+            )
+            scale = scale.squeeze(-1)
+            return torch.ops.test.opaque_gemm(x_q, scale)
+
+        FP8_MAX = 448.0  # arbitrary clamp range
+        x = torch.randn(8, HIDDEN, dtype=torch.bfloat16)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_reindex_rollback_on_no_improvement(self):
+        """
+        When reindexing is attempted but doesn't improve the fusion
+        score, the node state should be rolled back. Here a reduction
+        and pointwise both read from x but at different slices (offsets).
+        They share the buffer and have the same iteration numel, so
+        reindexing is attempted, but the offset means deps still don't
+        match after reindexing. The rollback restores the original
+        node state so the pointwise isn't left with a wrong iteration
+        domain.
+        """
+        M, N = 16, 128
+
+        def f(x):
+            r = x[:, :N].sum(dim=-1)
+            p = x[:, N:] * 2
+            return r, p
+
+        x = torch.randn(M, N * 2, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+
+    def test_reshape_reindexing_fused_pointwise(self):
+        """
+        Redecomposition where the pointwise side is a FusedSchedulerNode.
+        realize() forces ops to materialize as separate nodes, so
+        add and clamp become two SchedulerNodes that fuse into a
+        FusedSchedulerNode before the reindexing fuses them with
+        the reduction.
+        """
+
+        def f(x, bias):
+            head_dim = 128
+            M, N = x.shape
+            y = realize(x + bias)
+            z = realize(y.clamp(-1, 1))
+            x_reshaped = z.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+        bias = torch.randn(8192, dtype=torch.bfloat16)
+
+        ref = f(x, bias)
+        actual = torch.compile(f)(x, bias)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+        torch._dynamo.reset()
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     @unittest.skipIf(not SM90OrLater, "sm89 errors out on this test")
     def test_fp8_cast_and_t(self):
@@ -672,6 +858,69 @@ class LoopOrderingTest(TestCase):
         x = torch.randn(M, N, K, device=GPU_TYPE)
         self.do_acc_test(f, x)
         self.assertEqual(0, metrics.num_loop_reordering)
+
+    def test_qknorm_rope_fusion(self):
+        """
+        When qknorm (RMS norm) is followed by RoPE which uses cat, the cat
+        inputs read from the same buffers. Pointwise cat should be used so
+        everything fuses into a single kernel.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_rope(x, freqs_cos, freqs_sin):
+            half = x.shape[-1] // 2
+            x1 = x[..., :half]
+            x2 = x[..., half:]
+            out1 = x1 * freqs_cos - x2 * freqs_sin
+            out2 = x2 * freqs_cos + x1 * freqs_sin
+            return torch.cat([out1, out2], dim=-1)
+
+        def f(q, norm_weight, freqs_cos, freqs_sin):
+            q = rms_norm(q, norm_weight)
+            return apply_rope(q, freqs_cos, freqs_sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        freqs_cos = torch.randn(1, 1, S, D // 2)
+        freqs_sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, freqs_cos, freqs_sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_qknorm_interleaved_rope_fusion(self):
+        """
+        Interleaved RoPE (stack + flatten) should also fuse with qknorm.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_interleaved_rope(x, cos, sin):
+            pairs = x.reshape(*x.shape[:-1], -1, 2)
+            a, b = pairs[..., 0], pairs[..., 1]
+            out_real = a * cos - b * sin
+            out_imag = a * sin + b * cos
+            return torch.stack([out_real, out_imag], dim=-1).flatten(-2)
+
+        def f(q, norm_weight, cos, sin):
+            q = rms_norm(q, norm_weight)
+            return apply_interleaved_rope(q, cos, sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        cos = torch.randn(1, 1, S, D // 2)
+        sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, cos, sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
 
 
 @inductor_config.patch(

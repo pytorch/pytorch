@@ -2430,7 +2430,7 @@ def _cache_autograd_info(
         # NB: aot_config here is technically not needed as an argument: we could just
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
-        def try_save_cache_entry(  # noqa: F811
+        def try_save_cache_entry(
             compiled_bw_func: Callable[..., Any],
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,

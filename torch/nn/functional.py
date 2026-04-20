@@ -10,7 +10,6 @@ import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
-    _infer_size,
     _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
     _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
@@ -146,7 +145,7 @@ Examples::
     >>> inputs = torch.randn(1, 4, 5, 5)
     >>> F.conv2d(inputs, filters, padding=1)
 """,
-)  # noqa: E501
+)
 
 conv3d = _add_docstr(
     torch.conv3d,
@@ -196,7 +195,7 @@ Examples::
     >>> inputs = torch.randn(20, 16, 50, 10, 20)
     >>> F.conv3d(inputs, filters)
 """,
-)  # noqa: E501
+)
 
 conv_transpose1d = _add_docstr(
     torch.conv_transpose1d,
@@ -280,7 +279,7 @@ Examples::
     >>> weights = torch.randn(4, 8, 3, 3)
     >>> F.conv_transpose2d(inputs, weights, padding=1)
 """,
-)  # noqa: E501
+)
 
 conv_transpose3d = _add_docstr(
     torch.conv_transpose3d,
@@ -322,7 +321,7 @@ Examples::
     >>> weights = torch.randn(16, 33, 3, 3, 3)
     >>> F.conv_transpose3d(inputs, weights)
 """,
-)  # noqa: E501
+)
 
 conv_tbc = _add_docstr(
     torch.conv_tbc,
@@ -443,7 +442,7 @@ def fractional_max_pool2d_with_indices(
     output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -556,7 +555,7 @@ def fractional_max_pool3d_with_indices(
     output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -674,7 +673,7 @@ def max_pool1d_with_indices(
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -764,7 +763,7 @@ def max_pool2d_with_indices(
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -854,7 +853,7 @@ def max_pool3d_with_indices(
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -1201,7 +1200,7 @@ def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     adaptive_max_pool1d(input, output_size, return_indices=False)
 
@@ -1256,7 +1255,7 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
@@ -1313,7 +1312,7 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:
     r"""
     adaptive_max_pool3d(input, output_size, return_indices=False)
 
@@ -1709,7 +1708,7 @@ In-place version of :func:`~threshold`.
 )
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+def relu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
@@ -1734,7 +1733,7 @@ In-place version of :func:`~relu`.
 )
 
 
-def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+def glu(input: Tensor, dim: int = -1) -> Tensor:
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1766,7 +1765,7 @@ def hardtanh(
     min_val: float = -1.0,
     max_val: float = 1.0,
     inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -1796,7 +1795,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
-def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
@@ -1836,7 +1835,7 @@ In-place version of :func:`~elu`.
 )
 
 
-def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+def selu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1869,7 +1868,7 @@ def celu(
     input: Tensor,
     alpha: float = 1.0,
     inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1902,7 +1901,7 @@ def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
     inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -1959,7 +1958,7 @@ def rrelu(
     upper: float = 1.0 / 3,
     training: bool = False,
     inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -2034,7 +2033,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 )
 
 
-def tanhshrink(input):  # noqa: D400,D402
+def tanhshrink(input):
     r"""tanhshrink(input) -> Tensor
 
     Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
@@ -2046,7 +2045,7 @@ def tanhshrink(input):  # noqa: D400,D402
     return input - input.tanh()
 
 
-def softsign(input):  # noqa: D400,D402
+def softsign(input):
     r"""softsign(input) -> Tensor
 
     Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
@@ -2282,7 +2281,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 )
 
 
-def tanh(input):  # noqa: D400,D402
+def tanh(input):
     r"""tanh(input) -> Tensor
 
     Applies element-wise,
@@ -2293,7 +2292,7 @@ def tanh(input):  # noqa: D400,D402
     return input.tanh()
 
 
-def sigmoid(input):  # noqa: D400,D402
+def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
@@ -3570,7 +3569,7 @@ def binary_cross_entropy(
         )
 
     if weight is not None:
-        new_size = _infer_size(target.size(), weight.size())
+        new_size = torch.broadcast_shapes(target.size(), weight.size())
         weight = weight.expand(new_size)
 
     # pyrefly: ignore [bad-argument-type]
@@ -3813,7 +3812,7 @@ def l1_loss(
     reduce: bool | None = None,
     reduction: str = "mean",
     weight: Tensor | None = None,
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the L1 loss, with optional weighting.
 
     Function that takes the mean element-wise absolute value difference.
@@ -3968,7 +3967,7 @@ def margin_ranking_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the margin ranking loss.
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
@@ -4018,7 +4017,7 @@ def hinge_embedding_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the hinge embedding loss.
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
@@ -4061,7 +4060,7 @@ def multilabel_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the multilabel margin loss.
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
@@ -4103,7 +4102,7 @@ def soft_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the soft margin loss.
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
@@ -4146,7 +4145,7 @@ def multilabel_soft_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the multilabel soft margin loss.
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -4207,7 +4206,7 @@ def cosine_embedding_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the cosine embedding loss.
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
@@ -4255,7 +4254,7 @@ def multi_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:  # noqa: D400,D402
+) -> Tensor:
     r"""Compute the multi margin loss, with optional weighting.
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
@@ -4446,14 +4445,14 @@ Examples::
 
 
 @_overload
-def upsample(  # noqa: F811
+def upsample(
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,
     mode: str = "nearest",
     align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     pass
 
 
@@ -4465,7 +4464,7 @@ def upsample(  # noqa: F811
     mode: str = "nearest",
     align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     pass
 
 
@@ -4559,7 +4558,7 @@ def _is_integer(x) -> bool:
 
 
 @_overload
-def interpolate(  # noqa: F811
+def interpolate(
     input: Tensor,
     size: int | None = None,
     scale_factor: list[float] | None = None,
@@ -4568,7 +4567,7 @@ def interpolate(  # noqa: F811
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     pass
 
 
@@ -4582,7 +4581,7 @@ def interpolate(  # noqa: F811
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     pass
 
 
@@ -4596,7 +4595,7 @@ def interpolate(  # noqa: F811
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     pass
 
 
@@ -4622,7 +4621,7 @@ def interpolate(  # noqa: F811
     align_corners: bool | None = None,
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
-) -> Tensor:  # noqa: B950
+) -> Tensor:
     r"""Down/up samples the input.
 
     Tensor interpolated to either the given :attr:`size` or the given
@@ -4970,7 +4969,7 @@ if interpolate.__doc__:
 
 
 @_overload
-def upsample_nearest(  # noqa: F811
+def upsample_nearest(
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,
@@ -5022,7 +5021,7 @@ if upsample_nearest.__doc__:
 
 
 @_overload
-def upsample_bilinear(  # noqa: F811
+def upsample_bilinear(
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,

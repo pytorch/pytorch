@@ -30,6 +30,15 @@ def stash_graph_created_object(obj: Any) -> Any:
     return obj
 
 
+CURRENT_STREAM_INDEX = 0
+
+
+def set_external_object_by_index(index: int, value: Any) -> None:
+    """Update an entry in the external object registry at runtime."""
+    keep_alive.append(value)
+    index_to_external_object_weakref[index] = weakref.ref(value)
+
+
 def get_external_object_by_index(index: int) -> Any:
     assert index in index_to_external_object_weakref, (
         "Index not registered in index_to_user_object_weakref"

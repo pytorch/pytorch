@@ -4,10 +4,11 @@ import heapq
 from collections import Counter, defaultdict
 from typing import Any, TYPE_CHECKING
 
-import torch
-import torch.fx as fx
+import torch  # noqa: TC001
+import torch.fx as fx  # noqa: TC001
 from torch._dynamo.graph_deduplication import _stable_topological_sort
 from torch._inductor.fx_passes.bucketing import (
+    _get_collective_node_from_wait,
     _schedulable_wait_node,
     BucketMode,
     is_all_gather_into_tensor as is_all_gather,
@@ -54,6 +55,9 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     ):
         super().__init__(*args, **kwargs)
         self.node_to_wait_map: dict[fx.Node, fx.Node] = defaultdict()
+        # Maps bucketed nodes to their type string, scoped to this bucketer
+        # instance so metadata doesn't leak across separate invocations.
+        self.bucketed_node_types: dict[fx.Node, str] = {}
 
     def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
         assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
@@ -90,25 +94,33 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
-        # Identify the new wait and start
-        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
-        assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
-        new_wait = new_waits[0]
-        new_start = new_wait.args[0]
-        assert isinstance(new_start, fx.Node)
+        # Identify the new wait(s) and their collective start in a single pass
+        wait_to_start = {
+            n: start
+            for n in new_nodes
+            if (start := _get_collective_node_from_wait(n)) is not None
+        }
+        assert len(wait_to_start) >= 1, (
+            f"Expected at least one new wait, got none in {new_nodes}"
+        )
+        new_waits = list(wait_to_start)
+        new_start: fx.Node = wait_to_start[new_waits[0]]
+        # Use last wait as the canonical wait for scheduling (same node when len == 1)
+        new_wait = new_waits[-1]
 
-        # Set manual bucketing-specific metadata
-        # Note: Generic metadata (nn_module_stack, fwd_nn_module_stack, custom, stack_trace)
-        # is now preserved automatically by the bucketing functions in bucketing.py
+        # Track bucketed node types on this bucketer instance so it doesn't leak
+        # when the same graph is processed by multiple ManualOverlapScheduler
+        # invocations (e.g. separate forward and backward passes).
         node_type = (
             "bucketed_all_gather" if is_all_gather(first) else "bucketed_reduce_scatter"
         )
+        wait_set = OrderedSet(new_waits)
         for n in new_nodes:
-            if n == new_wait:
-                node_type = node_type + "_wait"
-            n.meta["manual_bucket_node_type"] = node_type
-            if "wait" in node_type:
+            if n in wait_set:
+                self.bucketed_node_types[n] = node_type + "_wait"
                 self.node_to_wait_map[n] = new_wait
+            elif n is new_start:
+                self.bucketed_node_types[n] = node_type
 
     def manual_bucket_collectives(self, nodes: list[fx.Node]) -> None:
         """
@@ -146,6 +158,8 @@ class ManualOverlapScheduler(OverlapScheduler):
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
         bucket_mode: BucketMode | None = None,
     ):
+        # Manual overlap historically used "custom_ops" mode for bucketing
+        bucket_mode = bucket_mode or "custom_ops"
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
@@ -250,7 +264,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         # schedule reduce scatter normally in self._schedule
         while self.on_path_ready:
             _, node = heapq.heappop(self.on_path_ready)
-            node_type = node.meta.get("manual_bucket_node_type", "")
+            node_type = self.bucketer.bucketed_node_types.get(node, "")
 
             if node in self.scheduled:
                 continue
@@ -277,7 +291,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         last_compute: fx.Node | None = None
 
         for node in self.scheduled:
-            node_type = node.meta.get("manual_bucket_node_type", "")
+            node_type = self.bucketer.bucketed_node_types.get(node, "")
             if node_type == "bucketed_all_gather":
                 picked_ag.append(node)
                 continue

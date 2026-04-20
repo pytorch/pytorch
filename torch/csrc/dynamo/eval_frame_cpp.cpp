@@ -337,18 +337,6 @@ struct CRecursionLimitRAII {
 
 #endif
 
-EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
-
-EvalFrameOverride get_eval_frame_override() {
-  return eval_frame_override;
-}
-
-EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
-  EvalFrameOverride prev = eval_frame_override;
-  eval_frame_override = override;
-  return prev;
-}
-
 // frame and callback are borrowed references.
 // Returns new reference.
 PyObject* dynamo__custom_eval_frame(
@@ -428,28 +416,28 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    // If we're attempting to run dynamo-generated code and eval frame override
-    // is set to SKIP, then we should set the callback to None to skip.
-    // If the override is set to ERROR, then we call
-    // torch._dynamo.convert_frame.get_fail_callback, which patches
-    // convert_frame.compile_frame with a function that errors unconditionally.
-    // This means Dynamo will error if it attempts to trace into the frame
-    // (Python-level skips pre-trace are permissible).
-    if (!recursive_callback.is_none() &&
-        !recursive_callback.is(py::bool_(false))) {
-      if (eval_frame_override == EvalFrameOverride::SKIP) {
-        recursive_callback = py::none();
-      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
-        if (!convert_frame_get_fail_callback) {
-          convert_frame_get_fail_callback =
-              py::module_::import("torch._dynamo.convert_frame")
-                  .attr("get_fail_callback");
-          auto atexit = py::module_::import("atexit");
-          atexit.attr("register")(py::cpp_function(
-              []() { convert_frame_get_fail_callback = std::nullopt; }));
+    if (fullgraph_compiled_frame_count >= 0) {
+      fullgraph_compiled_frame_count++;
+      // Under fullgraph, disable or error Dynamo for sub-frames of compiled
+      // code. If fullgraph_error_on_nested_compile is set, wrap the callback
+      // with get_fail_callback so compilation attempts error. Otherwise, set
+      // callback to None to skip sub-frames entirely.
+      if (!recursive_callback.is_none() &&
+          !recursive_callback.is(py::bool_(false))) {
+        if (fullgraph_error_on_nested_compile) {
+          if (!convert_frame_get_fail_callback) {
+            convert_frame_get_fail_callback =
+                py::module_::import("torch._dynamo.convert_frame")
+                    .attr("get_fail_callback");
+            auto atexit = py::module_::import("atexit");
+            atexit.attr("register")(py::cpp_function(
+                []() { convert_frame_get_fail_callback = std::nullopt; }));
+          }
+          recursive_callback =
+              convert_frame_get_fail_callback.value()(recursive_callback);
+        } else {
+          recursive_callback = py::none();
         }
-        recursive_callback =
-            convert_frame_get_fail_callback.value()(recursive_callback);
       }
     }
     eval_frame_callback_set(recursive_callback.ptr());
@@ -562,13 +550,13 @@ PyObject* dynamo__custom_eval_frame(
   if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(maybe_cached_code != Py_None);
+    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
     if (!py::cast<bool>(res)) {
       maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
-  if (maybe_cached_code != Py_None) {
+  if (!Py_IsNone(maybe_cached_code)) {
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
@@ -647,7 +635,7 @@ PyObject* dynamo__custom_eval_frame(
     extra_state_set_exec_strategy(extra, new_strategy);
   }
 
-  if (guarded_code != Py_None) {
+  if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
     // NB: We could use extract_cache_entry to get the cache_entry, but

@@ -37,8 +37,8 @@ log = logging.getLogger(__name__)
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
 if TYPE_CHECKING:
-    from ._symbolic_trace import Tracer  # noqa: F401
-    from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer
+    from .graph_module import GraphModule
 
 
 # Mapping of builtins to their `typing` equivalent.

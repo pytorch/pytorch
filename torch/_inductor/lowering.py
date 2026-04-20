@@ -80,6 +80,7 @@ from .ir import (
 )
 from .utils import (
     ceildiv,
+    convert_symint_to_expr,
     decode_device,
     is_dynamic,
     is_gpu,
@@ -1982,6 +1983,85 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     )
 
 
+def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | None:
+    """If all cat inputs share a common upstream reduction buffer whose
+    only consumers feed into this cat, return its name so it can be
+    excluded from the can_fuse_reduction check.
+
+    Checks common reads for an IR reduction whose numel matches the cat
+    output, then verifies via FX origins that all of the reduction's
+    consumers feed into the cat inputs."""
+    if len(inputs) < 2:
+        return None
+
+    common_reads = inputs[0].get_read_names()
+    for inp in inputs[1:]:
+        common_reads = common_reads & inp.get_read_names()
+    if not common_reads:
+        return None
+
+    # Find a common read that is an IR reduction buffer whose input
+    # numel matches the cat output numel.
+    cat_out_numel = convert_symint_to_expr(V.graph.current_node.meta["val"].numel())
+    reduction_name = None
+    reduction_buf = None
+    for name in common_reads:
+        buf = V.graph.try_get_buffer(name)
+        if (
+            buf is not None
+            and isinstance(buf, ir.ComputedBuffer)
+            and isinstance(buf.data, ir.Reduction)
+        ):
+            reduction_numel = sympy_product(buf.data.get_size()) * sympy_product(
+                buf.data.get_reduction_size()
+            )
+            if V.graph.sizevars.statically_known_equals(cat_out_numel, reduction_numel):
+                reduction_name = name
+                reduction_buf = buf
+                break
+
+    if reduction_name is None:
+        return None
+
+    # Verify the reduction doesn't have consumers outside this cat's
+    # computation. Each IR node tracks which FX nodes produced it
+    # (origins). Collect the FX origins of all cat inputs, then check
+    # that every FX user of the reduction's origins feeds into one of
+    # the cat inputs.
+    #
+    # We also tried checking IR-level users via V.graph.name_to_users,
+    # but at lowering time the cat inputs are unrealized TensorBox
+    # wrappers (not named buffers), so name_to_users entries can't be
+    # correlated back to the cat's input chain.
+    #
+    # TODO: origins is a set of FX nodes attached to IR nodes during
+    # lowering — using it for correctness is fragile. A proper
+    # buffer→FX node mapping would be better.
+    origins = getattr(reduction_buf, "origins", None)
+    if not origins:
+        return None
+
+    cat_input_origins: OrderedSet[torch.fx.Node] = OrderedSet()
+    for inp in inputs:
+        inp_origins = getattr(inp, "origins", None)
+        if inp_origins:
+            cat_input_origins.update(inp_origins)
+
+    # Check that the reduction FX node's users all feed into the cat.
+    # origins may include non-reduction nodes (e.g. pow that feeds into
+    # mean), so filter to only reduction ops via torch.Tag.reduction.
+    for origin in origins:
+        if (
+            origin.op == "call_function"
+            and isinstance(origin.target, torch._ops.OpOverload)
+            and torch.Tag.reduction in origin.target.tags
+            and not all(u in cat_input_origins for u in origin.users)
+        ):
+            return None
+
+    return reduction_name
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
@@ -2021,20 +2101,26 @@ def cat(inputs, dim=0):
     def is_reduction(t):
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
-    def can_fuse_reduction(t):
+    def can_fuse_reduction(t, exclude: OrderedSet[str] = OrderedSet()):
         if isinstance(t, (TensorBox, ir.StorageBox)):
-            return can_fuse_reduction(unwrap_tensor(t))
+            return can_fuse_reduction(unwrap_tensor(t), exclude)
         return (
             is_reduction(t)
             or isinstance(t, ir.Pointwise)
             and any(
-                can_fuse_reduction(V.graph.get_buffer(read))
+                read not in exclude
+                and can_fuse_reduction(V.graph.get_buffer(read), exclude)
                 for read in t.get_read_names()
             )
         )
 
-    # fusing reducutions into computed concat buffer can cause regressions.
-    fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
+    # Pointwise cat evaluates every input's computation for each
+    # output element (masked), so fusing reductions in is wasteful.
+    # Exception: when inputs just recombine a reduction's output
+    # (e.g. qknorm → RoPE → cat), we do not duplicate computation
+    recombined = _cat_inputs_recombine_reduction(inputs, dim)
+    exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
+    fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
     def should_lower_cat_input(x) -> bool:
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
@@ -2137,12 +2223,11 @@ def cat(inputs, dim=0):
 
         has_multi_consumers = any_input_has_multi_consumers()
 
-        horizontal_fuse_cat = all(
-            should_lower_cat_input(inp) for inp in inputs
-        ) and not any(can_fuse_reduction(t) for t in inputs)
-        if not has_multi_consumers and (
-            fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction)
-        ):
+        horizontal_fuse_cat = (
+            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+        )
+
+        if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -3885,7 +3970,7 @@ def tensor_constructor(fill_value):
     ):
         assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -3895,7 +3980,14 @@ def tensor_constructor(fill_value):
         for s in size:
             assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        full_pointwise = _full(fill_value, decode_device(device), dtype, size)
+
+        if pin_memory:
+            # Realize the buffer
+            full_pointwise.realize()
+            full_pointwise.data.data.get_layout().is_pinned = True
+
+        return full_pointwise
 
     return inner
 

@@ -49,7 +49,7 @@ base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[  # noqa: UP007, UP045
+Argument = Optional[  # noqa: UP045
     Union[
         tuple["Argument", ...],
         Sequence["Argument"],
@@ -292,6 +292,7 @@ class Node(_NodeBase):
     # generated function return type. (Note this is a special case. ``return``
     # does not produce a value, it's more of a notation. Thus, this value
     # describes the type of args[0] in the ``return`` node.
+    # TODO: narrow this to TensorType | _DynType | None
     type: Any | None
     _sort_key: Any
     # If set, use this fn to print this node

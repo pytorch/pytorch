@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This is where the local pytorch install in the docker image is located
-pt_checkout="/var/lib/jenkins/workspace"
+pt_checkout="${GITHUB_WORKSPACE:-/var/lib/jenkins/workspace}"
 
 source "$pt_checkout/.ci/pytorch/common_utils.sh"
 

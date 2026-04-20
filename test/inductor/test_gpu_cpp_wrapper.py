@@ -224,6 +224,55 @@ class TestGpuWrapper(InductorTestCase):
             res = comp(x, s)
             self.assertEqual(res, expected)
 
+    def test_many_args_fold_expression_nesting(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE == "xpu":
+            self.skipTest("ocloc backend compiler crashes with too many kernel args")
+
+        num_params = 130
+        params = [torch.randn(64, device=self.device) for _ in range(num_params)]
+        grads = [torch.randn_like(p) for p in params]
+        expected = [p.clone() + (-0.1) * g for p, g in zip(params, grads)]
+
+        @torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "combo_kernels": True,
+                "combo_kernel_max_num_args": 1000,
+            }
+        )
+        def fn(params, grads):
+            torch._foreach_add_(params, grads, alpha=-0.1)
+
+        fn(params, grads)
+
+        for p, e in zip(params, expected):
+            self.assertEqual(p, e)
+
+    def test_cpp_wrapper_backward_lazy_compile(self):
+        """Test that options={"cpp_wrapper": True} works with backward pass.
+
+        Backward graphs may be compiled lazily (after compile_fx returns).
+        The cpp_wrapper triton config (store_cubin, autotune_at_compile_time)
+        must still be applied. See https://github.com/pytorch/pytorch/issues/178845
+        """
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x, output_grad):
+            layer_norm = torch.nn.LayerNorm(normalized_shape=4).to(self.device)
+            output = layer_norm(x)
+            output.backward(output_grad)
+            return output
+
+        x = torch.randn(2, 3, 4, device=self.device)
+        output_grad = torch.randn(2, 3, 4, device=self.device)
+
+        opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
+        result = opt_fn(x, output_grad)
+        self.assertEqual(result.shape, x.shape)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -231,6 +280,8 @@ instantiate_parametrized_tests(TestGpuWrapper)
 # Run as a subprocess so dlopen truly re-runs .so static initializers.
 _LAZY_COMPILE_COLLISION_SCRIPT = """\
 import torch
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
 from torch._inductor import config
 
 config.cpp_wrapper = True
@@ -246,7 +297,7 @@ def fn(x, y, z, w):
     d = (c * w).cos()
     return d.sum()
 
-args = [torch.randn(32, device="cuda", requires_grad=True) for _ in range(4)]
+args = [torch.randn(32, device=GPU_TYPE, requires_grad=True) for _ in range(4)]
 ref_args = [a.detach().clone().requires_grad_(True) for a in args]
 ref = fn(*ref_args)
 ref.backward()

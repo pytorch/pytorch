@@ -1029,7 +1029,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
-) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
+) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
@@ -1278,7 +1278,7 @@ def repro_get_args(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args  # type: ignore[return-value]
+    return mod, args
 
 
 def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:

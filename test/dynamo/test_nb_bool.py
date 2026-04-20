@@ -197,7 +197,7 @@ class NbBoolTests(TestCase):
     def test_user_defined_bool_returns_non_bool_raises(self):
         class BadBool:
             def __bool__(self):
-                return 1  # noqa: PLE0305
+                return 1
 
         def fn(x, obj):
             return x + 1 if bool(obj) else x - 1

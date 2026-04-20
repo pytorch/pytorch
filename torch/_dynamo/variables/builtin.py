@@ -35,7 +35,6 @@ from collections.abc import Callable, Iterable, KeysView, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
-from torch import sym_float, sym_int
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -65,7 +64,6 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
-    cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
     frozenset_methods,
@@ -88,12 +86,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    ConstantVariable,
-    FakeIdVariable,
-)
+from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -389,17 +382,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             abs,
             all,
             any,
+            ascii,
+            bin,
             bool,
             callable,
             chr,
             complex,
             divmod,
             float,
+            format,
             getattr,
+            hex,
             int,
             len,
             max,
             min,
+            oct,
             ord,
             pow,
             repr,
@@ -956,7 +954,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     # Builtins that have been promoted to their own VT classes. Creating a
     # BuiltinVariable for these is a bug; use the specialized class instead.
-    MUST_USE_SPECIALIZED: frozenset[Any] = frozenset({dict, iter, list})
+    MUST_USE_SPECIALIZED: frozenset[Any] = frozenset({dict, getattr, iter, list})
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
         assert fn not in self.MUST_USE_SPECIALIZED, (
@@ -1148,7 +1146,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(  # noqa: G200
+                            log.warning(
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1567,7 +1565,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
         if self.fn is set:
             resolved_fn = getattr(self.fn, name)
@@ -1607,32 +1605,19 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def _call_int_float(
+    def call_int(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
-        # Handle cases like int(torch.seed())
-        # Also handle sym_float to sym_int cases
-        if arg.is_tensor() or isinstance(arg, SymNodeVariable):
-            if arg.is_tensor():
-                item = arg.call_method(tx, "item", [], {})
-            else:
-                item = arg
-            fn_ = sym_int if self.fn is int else sym_float
-            from torch._dynamo.variables.builder import wrap_fx_proxy
+        from .object_protocol import generic_int
 
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    (item.as_proxy(),),
-                    {},
-                ),
-            )
-        return None
+        return generic_int(tx, arg)
 
-    call_int = _call_int_float
-    call_float = _call_int_float
+    def call_float(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
+        from .object_protocol import generic_float
+
+        return generic_float(tx, arg)
 
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -1661,6 +1646,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
                 value = f"{arg.exc_type.__name__}{const_args!r}"
             return VariableTracker.build(tx, value)
+        if isinstance(arg, variables.UserDefinedDictVariable):
+            assert arg._base_vt is not None
+            try:
+                return VariableTracker.build(
+                    tx, repr(arg._base_vt.as_python_constant())
+                )
+            except Exception:
+                pass
         if isinstance(arg, variables.UserDefinedObjectVariable):
             repr_method = arg.value.__repr__
 
@@ -2076,7 +2069,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 NNModuleVariable,
             ),
         ):
-            return variables.CONSTANT_VARIABLE_TRUE
+            return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
             return VariableTracker.build(tx, callable(arg.value))
         elif isinstance(
@@ -2090,7 +2083,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ListIteratorVariable,
             ),
         ):
-            return variables.CONSTANT_VARIABLE_FALSE
+            return variables.ConstantVariable.create(False)
         else:
             return None
 
@@ -2202,7 +2195,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
+        strict = kwargs.pop("strict", ConstantVariable.create(False))
         iter_args = [
             SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
             for arg in args
@@ -2401,7 +2394,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        strict = CONSTANT_VARIABLE_FALSE
+        strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
                 if not (len(kwargs) == 1 and "strict" in kwargs):
@@ -2411,7 +2404,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         "1 kwargs (`strict`)",
                         f"{len(kwargs)} kwargs",
                     )
-                strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
             else:
                 raise_args_mismatch(
                     tx,
@@ -2459,173 +2452,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
-
-    def call_getattr(
-        self,
-        tx: "InstructionTranslator",
-        obj: VariableTracker,
-        name_var: VariableTracker,
-        default: VariableTracker | None = None,
-    ) -> VariableTracker | None:
-        if not name_var.is_python_constant():
-            unimplemented(
-                gb_type="getattr() with non-constant name argument",
-                context=f"getattr({obj}, {name_var}, {default})",
-                explanation="getattr() with non-constant name argument is not supported",
-                hints=["Ensure the name argument of getattr() is a string"],
-            )
-
-        name = name_var.as_python_constant()
-
-        # See NOTE [Tensor "grad" and "_grad" attr]
-        if obj.is_tensor() and name == "_grad":
-            name = "grad"
-
-        if tx.output.side_effects.is_attribute_mutation(obj):
-            if isinstance(obj, variables.UnspecializedNNModuleVariable):
-                if (
-                    name
-                    in (
-                        "named_parameters",
-                        "parameters",
-                        "named_buffers",
-                        "buffers",
-                        "named_modules",
-                        "modules",
-                    )
-                    and obj.is_state_mutated
-                    and tx.output.side_effects.has_pending_mutation(obj)
-                ):
-                    unimplemented(
-                        gb_type="getattr() on nn.Module with pending mutation",
-                        context=f"getattr({obj}, {name}, {default})",
-                        explanation="Intentionally graph breaking on getattr() on a nn.Module "
-                        "with a pending mutation",
-                        hints=[],
-                    )
-
-        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            return tx.output.side_effects.load_attr(obj, name)
-
-        if default is not None:
-            hasattr_var = self.call_hasattr(tx, obj, name_var)
-            if hasattr_var is not None:
-                assert hasattr_var.is_constant_match(True, False)
-                if not hasattr_var.as_python_constant():
-                    return default
-            else:
-                return default
-
-        source = obj.source and AttrSource(obj.source, name)
-        if name in {"__bases__", "__base__", "__flags__"}:
-            try:
-                value = obj.as_python_constant()
-                if isinstance(value, type):
-                    if name == "__bases__":
-                        tuple_args = [
-                            VariableTracker.build(
-                                tx, b, source and GetItemSource(source, i)
-                            )
-                            for i, b in enumerate(value.__bases__)
-                        ]
-                        return variables.TupleVariable(tuple_args, source=source)
-                    if name == "__base__":
-                        return VariableTracker.build(tx, value.__base__, source)
-                    if name == "__flags__":
-                        return VariableTracker.build(tx, value.__flags__)
-            except NotImplementedError:
-                pass
-
-        if isinstance(obj, variables.NNModuleVariable):
-            return obj.var_getattr(tx, name)
-        elif isinstance(
-            obj,
-            (
-                variables.TensorVariable,
-                variables.ConstantVariable,
-                variables.DefaultDictVariable,
-                variables.DistributedVariable,
-                variables.UserDefinedClassVariable,
-                variables.UserDefinedObjectVariable,
-            ),
-        ):
-            if (
-                isinstance(obj, variables.UserDefinedObjectVariable)
-                and issubclass(obj.value.__class__, unittest.TestCase)
-                and config.enable_trace_unittest
-                and name
-                in (
-                    "assertRaisesRegex",
-                    "assertNotWarns",
-                    "assertWarnsRegex",
-                    "assertWarns",
-                )
-            ):
-                unimplemented(
-                    gb_type="Failed to trace unittest method",
-                    context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
-                    hints=[
-                        f"Avoid calling `TestCase.{name}`. "
-                        "Please report an issue to PyTorch.",
-                    ],
-                )
-            if obj.is_tensor():
-                # pyrefly: ignore[missing-attribute]
-                fake_val = obj.as_proxy().node.meta["example_value"]
-                if (
-                    isinstance(fake_val, torch.Tensor)
-                    and is_sparse_any(fake_val)
-                    and (not tx.export or not config.capture_sparse_compute)
-                ):
-                    unimplemented(
-                        gb_type="Attempted to wrap sparse Tensor",
-                        context="",
-                        explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SPARSE_TENSOR],
-                    )
-
-            try:
-                return obj.var_getattr(tx, name)
-            except AsPythonConstantNotImplementedError:
-                # dont fallback on as_python_constant error because this leads
-                # to a failure later on, and leads to a wrong stacktrace
-                raise
-            except NotImplementedError:
-                return variables.GetAttrVariable(obj, name, source=source)
-        elif isinstance(obj, variables.TorchInGraphFunctionVariable):
-            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
-            try:
-                member = getattr(obj.value, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-
-            if isinstance(
-                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
-            ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
-                return variables.TorchInGraphFunctionVariable(member, source=source)
-            elif name in cmp_name_to_op_mapping:
-                return variables.GetAttrVariable(
-                    obj, name, py_type=type(member), source=source
-                )
-            else:
-                return None
-        elif isinstance(obj, DummyModule):
-            # TODO(mlazos) - Do we need this?
-            if obj.is_torch or name not in obj.value.__dict__:
-                member = getattr(obj.value, name)
-            else:
-                member = obj.value.__dict__[name]
-
-            if config.replay_record_enabled:
-                tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
-            return VariableTracker.build(tx, member, source)
-        else:
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return variables.GetAttrVariable(obj, name, source=source)
 
     def call_setattr(
         self,
@@ -3240,12 +3066,16 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args:
+                # dict.__new__ (tp_new) ignores extra args — only the first
+                # arg (the type) matters.  Pass init_args=[] so reconstruction
+                # emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
                 dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
                 if isinstance(args[0], DictBuiltinVariable):
                     return dict_vt
                 return tx.output.side_effects.track_new_user_defined_object(
-                    self, args[0], args[1:]
+                    self, args[0], []
                 )
 
         if name == "fromkeys":
@@ -3319,7 +3149,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 f"{len(args)} args",
             )
         if len(args) == 1:
-            args = (*args, CONSTANT_VARIABLE_NONE)
+            args = (*args, ConstantVariable.create(None))
         if len(args) != 2:
             raise_args_mismatch(
                 tx,
@@ -3329,25 +3159,40 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             )
 
         arg, value = args
-        DictVariableType = (
-            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
-        )
+
+        def _make_result(
+            items: dict[VariableTracker, VariableTracker],
+        ) -> VariableTracker:
+            if user_cls is OrderedDict:
+                from .builder import SourcelessBuilder
+                from .user_defined import OrderedDictVariable
+
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    SourcelessBuilder.create(tx, dict),
+                    SourcelessBuilder.create(tx, OrderedDict),
+                    [],
+                )
+                assert isinstance(result, OrderedDictVariable)
+                result._base_vt = ConstDictVariable(
+                    items,
+                    user_cls=OrderedDict,
+                    mutation_type=ValueMutationNew(),
+                )
+                return result
+            elif user_cls is defaultdict:
+                return DefaultDictVariable(
+                    items, user_cls, mutation_type=ValueMutationNew()
+                )
+            else:
+                return ConstDictVariable(items, mutation_type=ValueMutationNew())
 
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
-            return DictVariableType(
-                dict.fromkeys(arg_list, value),
-                user_cls,
-                mutation_type=ValueMutationNew(),
-            )
+            return _make_result(dict.fromkeys(arg_list, value))
         elif arg.has_force_unpack_var_sequence(tx):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
-                return DictVariableType(
-                    dict.fromkeys(keys, value),
-                    user_cls,
-                    mutation_type=ValueMutationNew(),
-                )
+                return _make_result(dict.fromkeys(keys, value))
 
         unimplemented(
             gb_type="failed to call dict.fromkeys()",
@@ -3421,6 +3266,218 @@ class IterBuiltinVariable(BaseBuiltinVariable):
             # Dynamo knows to forward __next__ calls to the returned object.
             ret = variables.ObjectIteratorVariable(ret)
         return ret
+
+
+class GetAttrBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `getattr` builtin."""
+
+    _fn = getattr
+
+    def __init__(self, value: Any = getattr, **kwargs: Any) -> None:
+        assert value is getattr
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "GetAttrBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+            ]
+        try:
+            return self._call_getattr(tx, args, kwargs)
+        except Unsupported:
+            # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
+            # if all args are python constants, evaluate getattr() directly rather
+            # than propagating a graph break from var_getattr.
+            if not check_unspec_or_constant_args(args, kwargs):
+                raise
+            try:
+                result = getattr(*[a.as_python_constant() for a in args])
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+                raise
+            except AsPythonConstantNotImplementedError:
+                raise
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+                raise
+            return VariableTracker.build(tx, result)
+
+    def _call_getattr(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        obj = args[0]
+        name_var = args[1]
+        default = args[2] if len(args) > 2 else None
+
+        if not name_var.is_python_constant():
+            unimplemented(
+                gb_type="getattr() with non-constant name argument",
+                context=f"getattr({obj}, {name_var}, {default})",
+                explanation="getattr() with non-constant name argument is not supported",
+                hints=["Ensure the name argument of getattr() is a string"],
+            )
+
+        name = name_var.as_python_constant()
+
+        # See NOTE [Tensor "grad" and "_grad" attr]
+        if obj.is_tensor() and name == "_grad":
+            name = "grad"
+
+        if tx.output.side_effects.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UnspecializedNNModuleVariable):
+                if (
+                    name
+                    in (
+                        "named_parameters",
+                        "parameters",
+                        "named_buffers",
+                        "buffers",
+                        "named_modules",
+                        "modules",
+                    )
+                    and obj.is_state_mutated
+                    and tx.output.side_effects.has_pending_mutation(obj)
+                ):
+                    unimplemented(
+                        gb_type="getattr() on nn.Module with pending mutation",
+                        context=f"getattr({obj}, {name}, {default})",
+                        explanation="Intentionally graph breaking on getattr() on a nn.Module "
+                        "with a pending mutation",
+                        hints=[],
+                    )
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            return tx.output.side_effects.load_attr(obj, name)
+
+        if default is not None:
+            hasattr_var = obj.call_obj_hasattr(tx, name)
+            if hasattr_var is not None:
+                assert hasattr_var.is_constant_match(True, False)
+                if not hasattr_var.as_python_constant():
+                    return default
+            else:
+                return default
+
+        source = obj.source and AttrSource(obj.source, name)
+        if name in {"__bases__", "__base__", "__flags__"}:
+            try:
+                value = obj.as_python_constant()
+                if isinstance(value, type):
+                    if name == "__bases__":
+                        tuple_args = [
+                            VariableTracker.build(
+                                tx, b, source and GetItemSource(source, i)
+                            )
+                            for i, b in enumerate(value.__bases__)
+                        ]
+                        return variables.TupleVariable(tuple_args, source=source)
+                    if name == "__base__":
+                        return VariableTracker.build(tx, value.__base__, source)
+                    if name == "__flags__":
+                        return VariableTracker.build(tx, value.__flags__)
+            except NotImplementedError:
+                pass
+
+        if isinstance(obj, variables.NNModuleVariable):
+            return obj.var_getattr(tx, name)
+        elif isinstance(
+            obj,
+            (
+                variables.TensorVariable,
+                variables.NamedTupleVariable,
+                variables.ConstantVariable,
+                variables.DefaultDictVariable,
+                variables.DistributedVariable,
+                variables.UserDefinedClassVariable,
+                variables.UserDefinedObjectVariable,
+            ),
+        ):
+            if (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and issubclass(obj.value.__class__, unittest.TestCase)
+                and config.enable_trace_unittest
+                and name
+                in (
+                    "assertRaisesRegex",
+                    "assertNotWarns",
+                    "assertWarnsRegex",
+                    "assertWarns",
+                )
+            ):
+                unimplemented(
+                    gb_type="Failed to trace unittest method",
+                    context=f"function: unittest.TestCase.{name}",
+                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
+                    hints=[
+                        f"Avoid calling `TestCase.{name}`. "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+            if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
+                fake_val = obj.as_proxy().node.meta["example_value"]
+                if (
+                    isinstance(fake_val, torch.Tensor)
+                    and is_sparse_any(fake_val)
+                    and (not tx.export or not config.capture_sparse_compute)
+                ):
+                    unimplemented(
+                        gb_type="Attempted to wrap sparse Tensor",
+                        context="",
+                        explanation="torch.compile does not support sparse Tensors",
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
+                    )
+
+            try:
+                return obj.var_getattr(tx, name)
+            except AsPythonConstantNotImplementedError:
+                # dont fallback on as_python_constant error because this leads
+                # to a failure later on, and leads to a wrong stacktrace
+                raise
+            except NotImplementedError:
+                return variables.GetAttrVariable(obj, name, source=source)
+        elif isinstance(obj, variables.TorchInGraphFunctionVariable):
+            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
+            try:
+                member = getattr(obj.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+                raise
+
+            if isinstance(
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+                return variables.TorchInGraphFunctionVariable(member, source=source)
+            else:
+                return variables.GetAttrVariable(obj, name, source=source)
+        elif isinstance(obj, DummyModule):
+            # TODO(mlazos) - Do we need this?
+            if obj.is_torch or name not in obj.value.__dict__:
+                member = getattr(obj.value, name)
+            else:
+                member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
+            return VariableTracker.build(tx, member, source)
+        else:
+            try:
+                return obj.var_getattr(tx, name)
+            except NotImplementedError:
+                return variables.GetAttrVariable(obj, name, source=source)
 
 
 class ListBuiltinVariable(BaseBuiltinVariable):

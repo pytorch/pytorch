@@ -23,9 +23,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _iterate_exprs,
     DimConstraints,
     DimDynamic,
     expect_true,
+    free_symbols,
     guard_bool,
     guard_float,
     guard_int,
@@ -1391,7 +1393,7 @@ class f(torch.nn.Module):
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: "f32[s57 + s75, 2*s96]" = native_dropout[0]
         getitem_1: "b8[s57 + s75, 2*s96]" = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""",  # noqa: B950
+        return (getitem, getitem_1)""",
         )
 
     def test_statically_known_true(self):
@@ -2045,6 +2047,13 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(z > -2)
         with self.assertRaises(ZeroDivisionError):
             y % x
+
+        # test pow operations preserve DynamicInt type
+        check(w**2, 1)  # DynamicInt ** int
+        check(2**z, 4)  # int ** DynamicInt
+        check(y**x, 1)  # DynamicInt ** DynamicInt
+        check(pow(z, 2), 4)  # pow(DynamicInt, int)
+        self.assertTrue(isinstance(pow(y, 3, 5), DynamicInt))  # pow with modulo
 
         # math, numpy
         self.assertEqual(math.cos(x), y)
@@ -3564,6 +3573,28 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    def test_iterate_exprs_dict(self):
+        """Test that _iterate_exprs handles dict values (e.g. from triton_kernel_wrapper_functional)."""
+        a, b = sympy.symbols("a b")
+
+        # dict with tensor values and string keys — should not crash
+        t = torch.randn(3, 4)
+        result = list(_iterate_exprs({"Out": t}))
+        # concrete tensor has no symbolic exprs
+        self.assertEqual(len(result), 0)
+
+        # dict with sympy keys — should iterate over both keys and values
+        result = list(_iterate_exprs({a: 1, b: 2}))
+        self.assertEqual(len(result), 2)
+        self.assertIn(a, result)
+        self.assertIn(b, result)
+
+        # free_symbols works on dicts with sympy keys
+        self.assertEqual(free_symbols({a + b: 1}), {a, b})
+
+        # empty dict
+        self.assertEqual(list(_iterate_exprs({})), [])
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])
@@ -3859,7 +3890,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
         mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_11, mul_14, clone)""",  # noqa: B950
+        return (mul_11, mul_14, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3900,7 +3931,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
         mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_6, mul_9, clone)""",  # noqa: B950
+        return (mul_6, mul_9, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3970,7 +4001,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
         mul_21: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_21,)""",  # noqa: B950
+        return (mul_21,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4001,7 +4032,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """""",  # noqa: B950
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4104,7 +4135,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
         ge_2: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_2 = None
-        return (slice_1,)""",  # noqa: B950
+        return (slice_1,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4394,7 +4425,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg2_1, memory_format = torch.contiguous_format);  arg2_1 = None
         add_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
         mul_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_3, 100);  add_3 = None
-        return (mul_6,)""",  # noqa: B950
+        return (mul_6,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4422,7 +4453,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
         mul_5: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
-        return (mul_5,)""",  # noqa: B950
+        return (mul_5,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4460,7 +4491,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
         select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
         select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
-        return (select, select_1, select_2)""",  # noqa: B950
+        return (select, select_1, select_2)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4611,7 +4642,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4647,7 +4678,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )

@@ -160,6 +160,7 @@ def set_flags(
     _fp32_precision="none",
     _conv_fp32_precision=None,
     _rnn_fp32_precision=None,
+    _depthwise_kernel=None,
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -170,6 +171,7 @@ def set_flags(
         torch._C._get_fp32_precision_getter("cuda", "all"),
         torch._C._get_fp32_precision_getter("cuda", "conv"),
         torch._C._get_fp32_precision_getter("cuda", "rnn"),
+        torch._C._get_cudnn_depthwise_kernel(),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -187,6 +189,8 @@ def set_flags(
         torch._C._set_fp32_precision_setter("cuda", "conv", _conv_fp32_precision)
     if _rnn_fp32_precision is not None:
         torch._C._set_fp32_precision_setter("cuda", "rnn", _rnn_fp32_precision)
+    if _depthwise_kernel is not None:
+        torch._C._set_cudnn_depthwise_kernel(_depthwise_kernel)
     return orig_flags
 
 
@@ -198,6 +202,7 @@ def flags(
     deterministic=False,
     allow_tf32=True,
     fp32_precision="none",
+    depthwise_kernel="auto",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
@@ -207,6 +212,7 @@ def flags(
             deterministic,
             allow_tf32,
             fp32_precision,
+            depthwise_kernel,
         )
     try:
         yield
@@ -243,6 +249,10 @@ class CudnnModule(PropModule):
         _get_fp32_precision_getter("cuda", "all"),
         _set_fp32_precision_setter("cuda", "all"),
     )
+    depthwise_kernel = ContextProp(
+        torch._C._get_cudnn_depthwise_kernel,
+        torch._C._set_cudnn_depthwise_kernel,
+    )
 
 
 # This is the sys.modules replacement trick, see
@@ -256,3 +266,4 @@ benchmark: bool
 allow_tf32: bool
 fp32_precision: str
 benchmark_limit: int
+depthwise_kernel: str
