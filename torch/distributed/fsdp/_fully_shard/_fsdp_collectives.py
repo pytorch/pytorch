@@ -679,6 +679,14 @@ def foreach_reduce(
                         group=all_reduce_group,
                         op=all_reduce_op,
                     )
+                # Keep refs to the reduce-dtype AR buffer + completion
+                # event so FSDPParamGroup._all_reduce_state can hold them
+                # across layers. This keeps the buffer off the caching
+                # allocator's free list; otherwise the next layer's
+                # reduce-scatter can reuse the same physical block while
+                # this layer's AR is still in flight, causing cross-layer
+                # gradient aliasing under slow AR. See PR #140044,
+                # regression test PR #180900.
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -695,6 +703,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
+        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
+        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
+        # the old reduce-dtype buffer's lifetime: the rebind orders the
+        # cast before the free-event on AR stream, but the freed block
+        # lands on the caching allocator's free list and the next layer's
+        # RS on RS stream can reuse it without waiting for this layer's
+        # AR to finish. The reduce-dtype buffer is held across layers by
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent
+        # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
