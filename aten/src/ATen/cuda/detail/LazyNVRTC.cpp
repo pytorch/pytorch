@@ -2,6 +2,9 @@
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/DynamicLibrary.h>
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
+#include <locale.h>
+#endif
 #include <stdexcept>
 
 
@@ -143,12 +146,40 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
   return fn(prog, src, name, numHeaders, headers, includeNames);
 }
 
+// Workaround nvrtcCompileProgram changing the locale until 12.6.2
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
+nvrtcResult nvrtcCompileProgram_wrapped(nvrtcProgram prog,
+                                        int numOptions,
+                                        const char * const *options) {
+  // Save & restore current thread locale which can get modified by nvrtcCompileProgram
+  locale_t oldLocale = uselocale((locale_t) 0);
+  auto result = lazyNVRTC.nvrtcCompileProgram_real(prog, numOptions, options);
+  if (oldLocale != (locale_t) 0)
+    uselocale(oldLocale);
+  return result;
+}
+
+nvrtcResult nvrtcCompileProgram(nvrtcProgram prog,
+                                int numOptions,
+                                const char * const *options) {
+  auto fn = reinterpret_cast<decltype(&nvrtcCompileProgram)>(getNVRTCLibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get nvrtcCompileProgram");
+  lazyNVRTC.nvrtcCompileProgram_real = fn;
+  fn = &nvrtcCompileProgram_wrapped;
+  lazyNVRTC.nvrtcCompileProgram = fn;
+  return fn(prog, numOptions, options);
+}
+#endif
+
 NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *)
 NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *)
 NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *)
 NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *)
 NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12062
 NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *)
+#endif
 _STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult)
 NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*)
 NVRTC_STUB2(nvrtcGetProgramLog, nvrtcProgram, char *)
