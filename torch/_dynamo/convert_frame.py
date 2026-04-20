@@ -2147,7 +2147,7 @@ def _compile(
                 )
 
             # Cleanup guards unless if in export, which will return guards
-            # Make sure to to do this after collecting metrics
+            # Make sure to do this after collecting metrics
             if (
                 tracer_output is not None
                 and tracer_output.output_graph is not None
