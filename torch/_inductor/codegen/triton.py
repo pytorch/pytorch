@@ -2894,7 +2894,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def should_use_cooperative_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
-            self.features
+            V.graph.get_current_device_or_throw(),
+            self.features.numel,
+            self.features.reduction_numel,
         )
 
     def init_cooperative_reduction(self):

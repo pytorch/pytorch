@@ -58,6 +58,14 @@ class SkipPatternTest(TestBase):
         self.assertEqual(2, metrics.generated_kernel_count)
 
 
+# Cooperative reductions disable split reductions, which are necessary for mix order
+# reductions.
+@inductor_config.patch(
+    {
+        "triton.cooperative_reductions": False,
+        "triton.force_cooperative_reductions": False,
+    }
+)
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
     @parametrize(

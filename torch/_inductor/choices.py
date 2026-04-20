@@ -363,17 +363,16 @@ class InductorChoices:
         return fused_name
 
     @staticmethod
-    def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
+    def should_use_cooperative_reduction(
+        device: torch.device, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
         if config.triton.force_cooperative_reductions:
             return True
-        if (
-            not config.triton.cooperative_reductions
-            or V.graph.get_current_device_or_throw().type == "cpu"
-        ):
+        if not config.triton.cooperative_reductions or device.type == "cpu":
             return False
 
-        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -381,11 +380,9 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
-        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # TODO(laith) What if hint(reduction_numel) >= threshold ?
         # shall we compare hints instead
-        return V.graph.sizevars.statically_known_geq(
-            features.reduction_numel, threshold
-        )
+        return V.graph.sizevars.statically_known_geq(reduction_numel, threshold)
 
     @staticmethod
     def should_use_persistent_reduction(
