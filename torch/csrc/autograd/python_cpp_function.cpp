@@ -44,7 +44,7 @@ PyObject* THPCppFunction_call(
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
-    if (arg == Py_None) {
+    if (Py_IsNone(arg)) {
       continue;
     }
     if (!THPVariable_Check(arg)) {
@@ -359,7 +359,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   if (!res) {
     return nullptr;
   }
-  if (dict == Py_None) {
+  if (Py_IsNone(dict)) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     fn.add_post_hook(std::make_unique<PyFunctionPostHook>(dict));
   }
@@ -382,7 +382,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   if (!res) {
     return nullptr;
   }
-  if (dict == Py_None) {
+  if (Py_IsNone(dict)) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     fn.add_pre_hook(std::make_unique<PyFunctionPreHook>(dict));
   }

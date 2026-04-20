@@ -546,8 +546,12 @@ class ScheduleTest(MultiProcContinuousTest):
         # Handle shape inference
         if not shape_inference:
             input_args = (x.chunk(chunks)[0],)
-            with torch.no_grad():
-                output_args = stage_module(*input_args)
+            if self.rank > 0:
+                # Non-first stages receive activations from previous stages,
+                # which have requires_grad=True in training mode.
+                input_args = tuple(a.detach().requires_grad_(True) for a in input_args)
+            output_args = stage_module(*input_args)
+            output_args = output_args.detach().requires_grad_(output_args.requires_grad)
             stage = PipelineStage(
                 stage_module,
                 self.rank,

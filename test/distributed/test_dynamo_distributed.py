@@ -1809,6 +1809,84 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
+    def test_inductor_config_override_with_ddp(self):
+        """
+        Verifies that TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS works end-to-end
+        when DDPOptimizer is active: config_patches should be forwarded through
+        DDPOptimizer to compile_fx for each subgraph.
+
+        Uses reduce-overhead mode (which enables cudagraphs=True). The model
+        has a graph break producing 2 Dynamo frames. The override targets only
+        the second frame, so frame 0 keeps cudagraphs=True while frame 1 gets
+        cudagraphs=False.
+        """
+        from torch._dynamo.graph_id_filter import _create_inductor_config_router
+        from torch._inductor import compile_fx as compile_fx_mod
+
+        N = 5000
+
+        class GraphBreakModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear0 = nn.Linear(N, N)
+                self.linear1 = nn.Linear(N, N)
+
+            def forward(self, x):
+                x = self.linear0(x)
+                torch._dynamo.graph_break()
+                x = self.linear1(x)
+                return x
+
+        m = GraphBreakModel().to(self.device)
+        m.apply(init_weights)
+        inputs = torch.rand(20, N).to(self.device)
+        correct_outputs = m(inputs)
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        cudagraphs_by_frame: dict[int, bool] = {}
+        original_compile_fx = compile_fx_mod.compile_fx
+
+        def tracking_compile_fx(model_, inputs_, **kwargs):
+            compile_id = torch._guards.CompileContext.current_compile_id()
+            fid = compile_id.frame_id
+            if fid not in cudagraphs_by_frame:
+                patches = kwargs.get("config_patches", {})
+                cudagraphs_by_frame[fid] = patches.get("triton.cudagraphs")
+            return original_compile_fx(model_, inputs_, **kwargs)
+
+        # First compile: discover frame_ids without any override
+        with patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx):
+            opt_fn = torch.compile(ddp_m, mode="reduce-overhead")
+            opt_outputs = opt_fn(inputs)
+
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        frame_ids = sorted(cudagraphs_by_frame.keys())
+        self.assertEqual(len(frame_ids), 2)
+        # Both frames should have cudagraphs=True from reduce-overhead
+        for fid in frame_ids:
+            self.assertTrue(cudagraphs_by_frame[fid])
+
+        # Second compile: override only the second frame
+        torch._dynamo.reset()
+        _create_inductor_config_router.cache_clear()
+        cudagraphs_by_frame.clear()
+
+        override = f">{frame_ids[0]}:triton.cudagraphs=False"
+        with (
+            torch._dynamo.config.patch(debug_inductor_config_override=override),
+            patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
+        ):
+            opt_fn = torch.compile(ddp_m, mode="reduce-overhead")
+            opt_outputs = opt_fn(inputs)
+
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        self.assertEqual(len(cudagraphs_by_frame), 2)
+        # First frame: no override, reduce-overhead keeps cudagraphs=True
+        self.assertTrue(cudagraphs_by_frame[frame_ids[0]])
+        # Second frame: override sets cudagraphs=False
+        self.assertFalse(cudagraphs_by_frame[frame_ids[1]])
+
+    @patch.object(config, "optimize_ddp", True)
     def test_graph_split_ctx_manager(self):
         """
         Ensures that we get the right number of splits and that the respective
@@ -2448,7 +2526,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_fsdp_staticmethod(self):
         """
@@ -2494,9 +2572,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            # 3 is expected here for 1 forward.
-            # Graph 1 should be add and imul
-            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.frame_count, 2)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 

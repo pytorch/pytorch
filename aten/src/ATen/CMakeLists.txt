@@ -892,12 +892,23 @@ if(USE_MPS)
             metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
+        set(METALLIB_DEPS kernels_basic.metallib)
+        if(CAN_COMPILE_METAL_40)
+            foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
+                cmake_path(GET SHADER STEM TGT_STEM)
+                string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
+                list(APPEND AIR_40 ${TGT_40})
+                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0")
+            endforeach()
+            air_to_metallib(kernels_40.metallib ${AIR_40})
+            list(APPEND METALLIB_DEPS kernels_40.metallib)
+        endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
-                          DEPENDS kernels_basic.metallib
+                          DEPENDS ${METALLIB_DEPS}
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib metallib_dummy.cpp)
+        add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})

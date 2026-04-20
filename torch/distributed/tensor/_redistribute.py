@@ -15,6 +15,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     _StridedShardNotDecodableError,
@@ -275,9 +276,7 @@ def _get_flattened_mesh_by_layout_impl(
     # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
     # _get_slice_mesh_layout does pure layout math, no tensor operations
     sliced_layout = mesh._get_slice_mesh_layout(dim_names)
-    expected_layout = sliced_layout.coalesce()
-    if len(expected_layout) > 1:
-        expected_layout = expected_layout.nest()
+    expected_layout = _MeshLayout([sliced_layout.collapse()])
 
     # Search existing flattened meshes by comparing layouts
     for flattened_mesh in root_mesh._flatten_mapping.values():
@@ -1448,7 +1447,7 @@ def _gen_transform_infos_non_cached(
     )
 
     # Determine which transform strategy to use:
-    # 1. Non-standard device order or _StridedShard → graph-based
+    # 1. Non-standard device order or contains _StridedShard → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
     # 3. Otherwise → use greedy
     if has_non_default_order or has_strided_shard:
@@ -1464,12 +1463,16 @@ def _gen_transform_infos_non_cached(
         src_spec.tensor_meta,
     )
     if use_graph_based_transform:
-        # The graph-based planner requires decoding _StridedShard split_factor into a
-        # shard order via _maybe_convert_StridedShard_to_shard_order. This fails when
-        # split_factor doesn't correspond to any valid product of mesh dimension sizes
-        # (e.g. sf=2 on a 1D mesh, or sf=3 on a (4,2) mesh). In those cases, fall back
-        # to greedy which treats _StridedShard as an opaque placement and delegates
-        # directly to _StridedShard._to_replicate_tensor().
+        # TODO(zpcore): Temporary workaround for the case where _StridedShard
+        # cannot be decoded into shard order. This happens when
+        # use_strided_shard_as_shard_order defaults to True (e.g. in
+        # Redistribute.forward where the target DTensorSpec is constructed from
+        # raw placements without the flag), but the split_factor doesn't
+        # correspond to any valid product of mesh dimension sizes (e.g. sf=2
+        # on a 1D mesh). A proper fix is to either pass
+        # use_strided_shard_as_shard_order through the Redistribute API, or
+        # migrate to explicit shard_order so _StridedShard is no longer
+        # overloaded for two purposes.
         try:
             transform_infos = drp.generate_graph_based_transform_infos(
                 src_spec, dst_spec, src_spec.shape
@@ -1768,11 +1771,13 @@ def _redistribute_backward(
                 # pyrefly: ignore [bad-argument-type]
                 dtype=backward_dtype,
             ),
+            use_strided_shard_as_shard_order=grad_output._spec.use_strided_shard_as_shard_order,
         )
         previous_spec = DTensorSpec(
             mesh=previous_spec.device_mesh,
             placements=previous_spec.placements,
             tensor_meta=current_spec.tensor_meta,
+            use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
         )
     else:
         local_tensor = grad_output._local_tensor
@@ -1799,6 +1804,7 @@ def _redistribute_backward(
         previous_spec.device_mesh,
         placements=tuple(normalized_placements),
         tensor_meta=previous_spec.tensor_meta,
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
 
     output = redistribute_local_tensor(
@@ -1819,6 +1825,7 @@ def _redistribute_backward(
             stride=grad_output.stride(),
             dtype=output.dtype,
         ),
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
     return output, spec
 
@@ -1849,6 +1856,7 @@ class Redistribute(torch.autograd.Function):
                     stride=input.stride(),
                     dtype=forward_dtype,
                 ),
+                use_strided_shard_as_shard_order=input._spec.use_strided_shard_as_shard_order,
             )
         else:
             local_tensor = input._local_tensor

@@ -45,6 +45,7 @@ import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
     get_external_object_by_index,
     register_user_object,
 )
@@ -117,6 +118,7 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
+    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -149,8 +151,8 @@ from ..utils import (
     clone_input,
     common_constant_types,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_fake_value,
-    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -198,11 +200,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictKeySetVariable,
-    FrozensetVariable,
     MappingProxyVariable,
-    OrderedSetClassVariable,
-    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -269,6 +267,12 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
+from .sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
+)
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
@@ -295,8 +299,10 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    OrderedDictVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
@@ -763,17 +769,17 @@ class VariableBuilder:
             pass
 
         if has_triton_experimental_host_tma():
-            from triton.tools.experimental_descriptor import (  # noqa: F811
+            from triton.tools.experimental_descriptor import (
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
         if has_triton_tensor_descriptor_host_tma():
-            from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
+            from triton.tools.tensor_descriptor import TensorDescriptor
         if has_triton():
             import triton as triton_mod
 
             if hasattr(triton_mod, "set_allocator"):
-                set_allocator = triton_mod.set_allocator  # noqa: F811
+                set_allocator = triton_mod.set_allocator
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -855,7 +861,7 @@ class VariableBuilder:
                 self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -871,13 +877,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
             if istype(value, collections.defaultdict):
@@ -890,10 +892,18 @@ class VariableBuilder:
                     ),
                     source=self.source,
                 )
+            elif istype(value, collections.OrderedDict):
+                dict_vt = ConstDictVariable(
+                    result,  # type: ignore[arg-type]
+                    user_cls=collections.OrderedDict,
+                    mutation_type=ValueMutationExisting(),
+                    source=self.source,
+                )
+                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
+                return self.tx.output.side_effects.track_object_existing(value, result)
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
-                    user_cls=type(value),
                     source=self.source,
                 )
 
@@ -1134,6 +1144,7 @@ class VariableBuilder:
                     source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
+                py_type=type(value),
             )
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1185,7 +1196,11 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            index = register_user_object(value, self.source)
+            if isinstance(self.source, CurrentStreamSource):
+                # Reuse the index pre-allocated in SymbolicStreamState.__init__
+                index = CURRENT_STREAM_INDEX
+            else:
+                index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function", get_external_object_by_index, (index,), {}
             )
@@ -1267,6 +1282,8 @@ class VariableBuilder:
                     hint=value.real,  # type: ignore[attr-defined]
                     source=source,
                 )
+                if not isinstance(node, SymInt):
+                    raise AssertionError(f"Expected SymInt, got {type(node)}")
 
             # Bind to graph input
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1329,6 +1346,8 @@ class VariableBuilder:
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             assert new_symint is not None
+            if not isinstance(new_symint, SymInt):
+                raise AssertionError(f"Expected SymInt, got {type(new_symint)}")
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
@@ -1435,6 +1454,7 @@ class VariableBuilder:
             return GetAttrVariable(
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
+                py_type=type(value),
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
@@ -1661,7 +1681,7 @@ class VariableBuilder:
             self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -1674,22 +1694,15 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
+            is_ordered_dict = isinstance(value, collections.OrderedDict)
             dict_vt = ConstDictVariable(
                 result,
-                user_cls=(
-                    collections.OrderedDict
-                    if isinstance(value, collections.OrderedDict)
-                    else dict
-                ),
+                user_cls=(collections.OrderedDict if is_ordered_dict else dict),
                 mutation_type=ValueMutationExisting(),
                 source=self.source,
             )
@@ -1697,7 +1710,12 @@ class VariableBuilder:
             # bytecode simple
             dict_vt.should_reconstruct_all = True
 
-            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            if is_ordered_dict:
+                result = OrderedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            else:
+                result = UserDefinedDictVariable(
+                    value, dict_vt=dict_vt, source=self.source
+                )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1829,6 +1847,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
+        from .user_defined import _CONSTANT_BASE_TYPES
+
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
             # Skip guards on inspect related variable trackers because they are
@@ -1836,6 +1856,12 @@ class VariableBuilder:
             # cause recompiles) and can cause a large number of OBJECT_ALIASING
             # guards.
             result = InspectVariable(value, source=SkipGuardSource(self.source))
+        elif (
+            isinstance(value, _CONSTANT_BASE_TYPES)
+            and type(value) not in common_constant_types
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
+            result = UserDefinedConstantVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1972,7 +1998,9 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
         # Get all the values from the range iterator; no need to install guards
         # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
-        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        items: list[VariableTracker] = [
+            ConstantVariable.create(v) for v in copy.deepcopy(value)
+        ]
         result = ListIteratorVariable(items, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
@@ -2759,6 +2787,8 @@ class VariableBuilder:
                 dynamic_dim=dynamic_dim,
                 excluded_value=excluded_scalar,
             )
+            if not isinstance(wrapped_value, SymInt):
+                raise AssertionError(f"Expected SymInt, got {type(wrapped_value)}")
 
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, context)
@@ -2829,7 +2859,7 @@ class VariableBuilder:
             # break because they expect all cuda inputs but our tensorified
             # float will be a f64[] cpu tensor. Fixes the following test
             # when specialize_float=False
-            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
@@ -4270,7 +4300,7 @@ class SourcelessBuilder:
             # NamedTuple._make uses an alias of tuple.__new__
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
-            return GetAttrVariable(obj, "__new__")
+            return GetAttrVariable(obj, "__new__", py_type=type(value))
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
@@ -4285,20 +4315,23 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
-        elif (
-            isinstance(value, types.MethodType)
-            # We only want to support sourceless class objects here
-            # An instance variable is not allowed and it should have source
-            and isinstance(value.__self__, (type, abc.ABCMeta))
-        ):
-            # value is a classmethod
-            assert getattr(value.__self__, value.__func__.__name__) == value
-            cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
-            try:
-                # pyrefly: ignore[bad-argument-type]
-                return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
-            except NotImplementedError:
-                pass  # failthrough to unimplemented branch
+        elif isinstance(value, types.MethodType):
+            if isinstance(value.__self__, (type, abc.ABCMeta)):
+                # value is a classmethod
+                assert getattr(value.__self__, value.__func__.__name__) == value
+                cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
+                try:
+                    # pyrefly: ignore[bad-argument-type]
+                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                except NotImplementedError:
+                    pass  # failthrough to unimplemented branch
+            else:
+                # Instance method — look up the VT for __self__ via side effects
+                obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
+                if obj_vt is not None:
+                    return torch._dynamo.variables.UserMethodVariable(
+                        value.__func__, obj_vt
+                    )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):

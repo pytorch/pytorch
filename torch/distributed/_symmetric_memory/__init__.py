@@ -2008,7 +2008,9 @@ def is_nvshmem_available() -> bool:
     r"""
     is_nvshmem_available() -> bool
 
-    Check if NVSHMEM is available in current build and on current system.
+    Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
+    build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
+    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available

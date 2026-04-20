@@ -237,6 +237,7 @@ inductor_skips["xpu"] = {}
 # torch-xpu-ops: #2956
 inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -1271,7 +1272,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1283,7 +1284,7 @@ class TestInductorOpInfo(TestCase):
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 

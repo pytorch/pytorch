@@ -160,10 +160,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def setUp(self):
+        super().setUp()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
@@ -927,7 +929,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, arg1_1);  mul = arg1_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -981,7 +983,7 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
     @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
@@ -1101,7 +1103,7 @@ class GraphModule(torch.nn.Module):
             # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(cos, 2);  cos = None
             return (div, arg0_1)
-        """,  # noqa: B950
+        """,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1124,7 +1126,7 @@ class GraphModule(torch.nn.Module):
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
-            return (mul,)""",  # noqa: B950
+            return (mul,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1184,7 +1186,7 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1231,7 +1233,7 @@ class outer_fn(torch.nn.Module):
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1);  arg2_1 = arg3_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1281,7 +1283,7 @@ class outer_fn(torch.nn.Module):
             sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (add, sub, mul)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1332,7 +1334,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
             return (add_1, mul_1)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)

@@ -740,7 +740,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
-    @skipIfTorchDynamo("matplotlib uses .flat unsupported by FakeTensor, see #179582")
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure(self):
         writer = self.createSummaryWriter()
 
@@ -766,7 +766,7 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
     @skipIfNoMatplotlib
-    @skipIfTorchDynamo("matplotlib uses .flat unsupported by FakeTensor, see #179582")
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure_list(self):
         writer = self.createSummaryWriter()
 
@@ -783,13 +783,13 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
         self.assertTrue(
             all(plt.fignum_exists(figure.number) is True for figure in figures)
-        )  # noqa: F812
+        )
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != "3.3.0":
             self.assertTrue(
                 all(plt.fignum_exists(figure.number) is False for figure in figures)
-            )  # noqa: F812
+            )
         else:
             print(
                 "Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163"

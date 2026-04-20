@@ -136,7 +136,9 @@ def guarding_hint_or_throw(
     """
     if isinstance(a, SymNode):
         if a._hint is not None:
-            return a._hint
+            return a._hint  # pyrefly: ignore[bad-return]
+        if a.shape_env is None:
+            raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
         a._hint = hint
         return hint
@@ -943,7 +945,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     return expr
 
 
-def is_nested_int(s: IntLikeType) -> TypeGuard[SymInt]:
+def is_nested_int(s: IntLikeType | FloatLikeType) -> TypeGuard[SymInt]:
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
 
@@ -984,10 +986,13 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         yield val.expr
     elif isinstance(val, sympy.Basic):
         yield val
-    elif isinstance(val, (int, float, bool)):
+    elif isinstance(val, (int, float, bool, str)):
         pass
     elif isinstance(val, (tuple, list)):
         for s in val:
+            yield from _iterate_exprs(s)
+    elif isinstance(val, dict):
+        for s in itertools.chain(val.keys(), val.values()):
             yield from _iterate_exprs(s)
     elif is_sparse_any(val):
         yield from _iterate_exprs(val.size())
@@ -1142,7 +1147,7 @@ def find_symbol_binding_fx_nodes(
     Returns:
         A dictionary mapping from sympy Symbols to their binding FX nodes
     """
-    r = {}
+    r: dict[sympy.Symbol, torch.fx.Node] = {}
     # NB: Prefer first occurrence of symbol
     for node in graph.nodes:
         if (s := is_symbol_binding_fx_node(node)) is not None and s not in r:
@@ -1161,7 +1166,7 @@ class Specialization:
     """
 
     source: TensorPropertySource
-    check_fn: Callable
+    check_fn: Callable[[int], bool]
 
 
 # Analogous to ConvertIntSource
@@ -1256,7 +1261,7 @@ def _free_unbacked_symbols_with_path(
         pending = set()
     r = {}
 
-    def match_tensor(a: torch.Tensor, real_tensor: torch.Tensor | None = None):
+    def match_tensor(a: torch.Tensor, real_tensor: torch.Tensor | None = None) -> None:
         r.update(
             go(
                 a.size(),
@@ -1733,6 +1738,7 @@ def _advise_is_size(a: SymInt) -> None:
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
         and isinstance(a.node.expr, sympy.Symbol)
+        and a.node.shape_env is not None
         and a.node.shape_env.is_unbacked_symint(a.node.expr)
     ):
         _constrain_range_for_size(a)
@@ -1743,6 +1749,7 @@ def _advise_is_bounded(a: SymInt, upper_bound: IntLikeType) -> None:
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
         and isinstance(a.node.expr, sympy.Symbol)
+        and a.node.shape_env is not None
         and a.node.shape_env.is_unbacked_symint(a.node.expr)
         and isinstance(upper_bound, int)  # TODO: relax
     ):
@@ -2008,7 +2015,7 @@ class StrictMinMaxConstraint(Constraint):
     for N=0/1 too.
     """
 
-    vr: ValueRanges
+    vr: ValueRanges[sympy.Expr]
 
     def render(self, source: Source) -> str:
         """Format the constrain equation"""
@@ -2291,7 +2298,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
 # is used.
 # TODO(voz): Shape env validation
 @dataclass(frozen=True, slots=True, kw_only=True)
-class StatefulSymbolicContext(StatelessSymbolicContext):
+class StatefulSymbolicContext(StatelessSymbolicContext[..., Any]):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by a cache of Source:Symbol. A cache hit
@@ -2380,7 +2387,8 @@ def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
         - A boolean indicating whether expansion occurred (True if multiple additive
           expressions were present or if there was at least one additive and one other expression)
     """
-    adds, other = [], []
+    adds: list[sympy.Expr] = []
+    other: list[sympy.Expr] = []
     for arg in args:
         if arg.is_Add:
             adds.append(arg)
@@ -2474,7 +2482,7 @@ def safe_expand(r: _SympyT) -> _SympyT:
 
 class _SymbolInfo(NamedTuple):
     k: sympy.Symbol
-    vr: ValueRanges | None
+    vr: ValueRanges[sympy.Expr] | None
     val: sympy.Integer | None
     is_size_like: bool
 
@@ -2952,7 +2960,7 @@ class _CppShapeGuardsHelper(_ShapeGuardsHelper):
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
-    def __init__(self, var_to_sources: Mapping[sympy.Symbol, list[Source]]):
+    def __init__(self, var_to_sources: Mapping[sympy.Symbol, list[Source]]) -> None:
         super().__init__(var_to_sources, lambda n: n.name, var_to_sources)
 
 
@@ -2969,7 +2977,7 @@ class DynamicDimConstraintPrinter(PythonPrinter):
         self,
         symbol_to_source: dict[sympy.Symbol, list[Source]],
         source_name_to_debug_name: Mapping[str, str],
-    ):
+    ) -> None:
         super().__init__()
         self.symbol_to_source = symbol_to_source
         self.source_name_to_debug_name = source_name_to_debug_name
@@ -3210,7 +3218,7 @@ class DimConstraints:
     def _reduce_congruences(self) -> dict[sympy.Symbol, set[sympy.Expr]]:
         reduced_congruences: dict[sympy.Symbol, set[sympy.Expr]] = {}
         for s, congruences in self._congruences.items():
-            remainder_modulus_pairs = []
+            remainder_modulus_pairs: list[tuple[sympy.Integer, sympy.Integer]] = []
             congruences_to_check = set()
             for congruence in congruences:
                 base, divisor = congruence.args
@@ -3687,8 +3695,8 @@ class DimConstraints:
 
         self._process_derived_dim_roots(results, name_to_dim)
 
-        dims = []
-        others = []
+        dims: list[str] = []
+        others: list[str] = []
 
         # order results by source name
         results2 = {
@@ -3759,7 +3767,7 @@ class ValueRangesSLoc:
 
 
 @contextmanager
-def _suppress_guards(shape_env: ShapeEnv) -> Iterator[None]:
+def _suppress_guards(shape_env: ShapeEnv) -> Generator[None, None, None]:
     shape_env._suppress_guards_enter()
     try:
         yield
@@ -3922,7 +3930,7 @@ class ShapeEnv:
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
         # practice
-        self.var_to_range: dict[sympy.Symbol, ValueRanges] = {}
+        self.var_to_range: dict[sympy.Symbol, ValueRanges[sympy.Expr]] = {}
         self.var_to_range_sloc: dict[sympy.Symbol, ValueRangesSLoc] = {}
         self.source_name_to_debug_name: dict[str, str] = {}
         self.var_to_sources: dict[sympy.Symbol, list[Source]] = {}
@@ -3955,7 +3963,7 @@ class ShapeEnv:
         self.size_like: set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: dict[int, sympy.Symbol] = {}
+        self.val_to_var: dict[IntLikeType | FloatLikeType, sympy.Symbol] = {}
         self.unbacked_symfloat_counter = 0
         self.unbacked_symint_counter = 0
         # Similar to guards, but these MUST evaluate to true and can
@@ -4046,7 +4054,9 @@ class ShapeEnv:
         #   2. list of arguments
         # This drastically reduces the size of the FX graph, avoiding
         # duplicated nodes.
-        self.fx_node_cache: dict[tuple[Callable, tuple[Any, ...]], torch.fx.Node] = {}
+        self.fx_node_cache: dict[
+            tuple[Callable[..., Any], tuple[Any, ...]], torch.fx.Node
+        ] = {}
         self.source_to_symbol: dict[str, sympy.Symbol] = {}
 
         # Suppose you want to replace an unbacked symbol with another
@@ -4143,7 +4153,7 @@ class ShapeEnv:
     @contextmanager
     def patch_source_specialization(
         self, source: Source, check_fn: Callable[[sympy.Symbol], sympy.Expr]
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         """
         Temporarily add symbol-level axioms to the ShapeEnv. This is useful when you want to "fork"
         and have parallel universes of ShapeEnvs. For example, we use this when doing multi-graph
@@ -4273,7 +4283,7 @@ class ShapeEnv:
         return len(self.events) - 1
 
     @contextmanager
-    def _recording(self) -> Iterator[None]:
+    def _recording(self) -> Generator[None, None, None]:
         self.is_recording = True
         try:
             yield
@@ -4285,7 +4295,9 @@ class ShapeEnv:
         self._set_replacement(orig_s, new_s, "eliminate_unbacked")
 
     @record_shapeenv_event()
-    def set_real_tensor_prop_unbacked_vals(self, k: sympy.Symbol, v: int) -> None:
+    def set_real_tensor_prop_unbacked_vals(
+        self, k: sympy.Symbol, v: int | float | torch.Tensor
+    ) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
         log.info("set_real_tensor_prop_unbacked_vals %s = %s", k, v)
@@ -4411,7 +4423,7 @@ class ShapeEnv:
         return prev
 
     @contextmanager
-    def ignore_fresh_unbacked_symbols(self) -> Iterator[None]:
+    def ignore_fresh_unbacked_symbols(self) -> Generator[None, None, None]:
         """
         Indicates that the newly allocated unbacked SymInts are being
         discarded
@@ -4470,8 +4482,8 @@ class ShapeEnv:
     @record_shapeenv_event()
     def _create_fx_call_function(
         self,
-        op: Callable,
-        args: tuple,
+        op: Callable[..., object],
+        args: tuple[Any, ...],
     ) -> tuple[torch.fx.Node | None, bool]:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
@@ -4566,7 +4578,7 @@ class ShapeEnv:
         return _suppress_guards(self)
 
     @contextmanager
-    def error_on_new_guards(self) -> Iterator[None]:
+    def error_on_new_guards(self) -> Generator[None, None, None]:
         """Context manager that raises _ShapeEnvGuardError if a guard is attempted.
 
         Temporarily freezes the ShapeEnv and makes _check_frozen raise
@@ -4981,7 +4993,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: int | None,
+        hint: int | float | bool | torch.SymInt | None,
         source: Source | None = None,
     ) -> IntLikeType:
         """Create a SymInt value from a symbolic expression
@@ -5027,7 +5039,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: int | float | bool | None,
+        hint: int | float | bool | torch.SymInt | None,
         source: Source | None = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
@@ -5100,7 +5112,7 @@ class ShapeEnv:
         self,
         prefix: str,
         symbol: sympy.Symbol,
-        vr: ValueRanges,
+        vr: ValueRanges[sympy.Expr],
         source: Source | None = None,
         sym_node: SymNode | None = None,
     ) -> None:
@@ -5224,7 +5236,7 @@ class ShapeEnv:
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
-        symbolic_context: StatelessSymbolicContext | None = None,
+        symbolic_context: SymbolicContext | None = None,
     ) -> sympy.Expr:
         """
         Create a symbol with an unspecified value
@@ -5250,13 +5262,13 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_symbol(
         self,
-        val: int,
+        val: IntLikeType | FloatLikeType,
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: bool | None = True,
         do_not_specialize_zero_one: bool = False,
-        symbolic_context: StatelessSymbolicContext | None = None,
+        symbolic_context: SymbolicContext | None = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
         # check if constraint_dim is actually static integer
@@ -5270,7 +5282,7 @@ class ShapeEnv:
                     f"Static shape constraint of {constraint_dim.vr.lower} does not match input size of {val}, "
                     f"for {source.name}"
                 )
-            if symbolic_context:
+            if isinstance(symbolic_context, StatelessSymbolicContext):
                 from torch._dynamo.source import TensorPropertySource
 
                 if not isinstance(source, TensorPropertySource):
@@ -5677,7 +5689,9 @@ class ShapeEnv:
             raise AssertionError(f"len({placeholders}) != len({sources})")
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
-        def _create_no_constraints_context(t: Tensor) -> StatelessSymbolicContext:
+        def _create_no_constraints_context(
+            t: Tensor,
+        ) -> StatelessSymbolicContext[..., Any]:
             return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
@@ -6297,7 +6311,7 @@ class ShapeEnv:
 
             if not sources:
                 raise AssertionError(f"sources must not be empty for symbol {symbol}")
-            bounds = []
+            bounds: list[sympy.Basic] = []
             rf = source_ref(sources[0])
             verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
@@ -6688,7 +6702,7 @@ class ShapeEnv:
 
     def bound_sympy(
         self, expr: sympy.Expr, size_oblivious: bool = False
-    ) -> ValueRanges:
+    ) -> ValueRanges[sympy.Expr]:
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
         # TODO: maybe it's guaranteed x in is var_to_range?
         var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
@@ -6851,7 +6865,7 @@ class ShapeEnv:
         compute_hint: bool = False,
         size_oblivious: bool = False,
         axioms: tuple[SympyBoolean] | None = None,
-        var_to_range: tuple[tuple[sympy.Symbol, ValueRanges]] | None = None,
+        var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]] | None = None,
     ) -> sympy.Basic | None:
         """
         Tries to evaluate expr without introducing guards
@@ -6944,7 +6958,7 @@ class ShapeEnv:
         tracks only replacement changes) to cache calls to this method, so
         depending on other state would cause stale cache results.
         """
-        replacements = {}
+        replacements: dict[sympy.Basic, sympy.Basic] = {}
         # pyrefly: ignore [missing-attribute]
         for s in expr.free_symbols:
             r = self._find(s)
@@ -6980,7 +6994,7 @@ class ShapeEnv:
         # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
         # expression when creating contiguous strides.
         if not size_oblivious:
-            min_max_replacements = {}
+            min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
             for atom in expr.atoms(Max):  # type: ignore[has-type]
                 if len(atom.args) > 2:
                     continue
@@ -6996,7 +7010,7 @@ class ShapeEnv:
                 expr = expr.xreplace(min_max_replacements)
 
         if expr.has(TruncToInt):
-            trunc_replacements = {}
+            trunc_replacements: dict[sympy.Basic, sympy.Basic] = {}
             for atom in expr.atoms(TruncToInt):
                 if isinstance(atom.args[0], IntTrueDiv):
                     base, divisor = atom.args[0].args
@@ -7016,7 +7030,7 @@ class ShapeEnv:
         # for now just do a separate pass to catch common nested case
         if expr.has(FloorDiv):
             self._update_divisible()
-            div_replacements = {}
+            div_replacements: dict[sympy.Basic, sympy.Basic] = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
                 if isinstance(divisor, FloorDiv):
@@ -7031,7 +7045,7 @@ class ShapeEnv:
                 expr = expr.xreplace(div_replacements)
                 expr = safe_expand(expr)
         if expr.has(FloorDiv):
-            div_replacements = {}
+            div_replacements: dict[sympy.Basic, sympy.Basic] = {}
             pows = expr.atoms(sympy.Pow)
             rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
             for fd in expr.atoms(FloorDiv):
@@ -7205,7 +7219,7 @@ class ShapeEnv:
     def _update_var_to_range(
         self,
         symbol: sympy.Symbol,
-        vr: ValueRanges,
+        vr: ValueRanges[sympy.Expr],
         vr_sloc: ValueRangesSLoc | None = None,
         *,
         is_constraint: bool = False,
@@ -7593,11 +7607,11 @@ class ShapeEnv:
     # See: Note - On 0/1 specialization
     def _default_value_range(
         self, do_not_specialize_zero_one: bool = False
-    ) -> ValueRanges:
+    ) -> ValueRanges[sympy.Expr]:
         lower = 0 if (do_not_specialize_zero_one or not self.specialize_zero_one) else 2
         return ValueRanges(lower, int_oo)
 
-    def _default_unspecified_value_range(self) -> ValueRanges:
+    def _default_unspecified_value_range(self) -> ValueRanges[sympy.Expr]:
         return ValueRanges.unknown_int()
 
     @_lru_cache
@@ -7848,8 +7862,8 @@ class ShapeEnv:
         self._expr_sym_node_id = id(sym_node)
         return self.evaluate_expr(
             sym_node.expr,
-            sym_node.hint,
-            sym_node.fx_node,
+            sym_node.hint,  # pyrefly: ignore[bad-argument-type]
+            sym_node.fx_node,  # pyrefly: ignore[bad-argument-type]
             size_oblivious,
             fallback_value=fallback_value,
         )
@@ -8696,6 +8710,8 @@ def _remove_effect_token_unbacked_bindings(
 # that we apply is unbacked renaming.
 def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
+    if shape_env is None:
+        raise AssertionError("shape_env is required for _get_placeholder_expr")
     result = sym_node._expr
     if result in shape_env.unbacked_renamings:
         return shape_env.unbacked_renamings[result]

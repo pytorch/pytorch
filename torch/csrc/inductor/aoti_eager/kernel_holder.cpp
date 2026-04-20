@@ -255,7 +255,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
       nullptr));
   TORCH_INTERNAL_ASSERT(
-      result.ptr() != nullptr && result.ptr() != Py_None,
+      result.ptr() != nullptr && !Py_IsNone(result.ptr()),
       "Failed to load AOTI kernel. Operator Name is ",
       op_name_with_overload_);
 
@@ -378,7 +378,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         auto device_type_value =
             metadata["device_type_value"].cast<std::string>();
         auto device = c10::Device(device_type_value);
-        if (metadata["device_index_value"].ptr() != Py_None) {
+        if (!Py_IsNone(metadata["device_index_value"].ptr())) {
           auto device_index_value =
               metadata["device_index_value"].cast<c10::DeviceIndex>();
           device.set_index(device_index_value);
@@ -501,7 +501,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       qualified_name.end());
 
   py::gil_scoped_acquire gil;
-  py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {
+  py::handle op_py_func = op.getPythonOp([&]() -> PyObject* {
     py::handle torch_api_function = py::module::import("torch")
                                         .attr("ops")
                                         .attr(ns_str.c_str())
@@ -514,7 +514,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
   });
 
   TORCH_INTERNAL_ASSERT(
-      op_py_func.ptr() != nullptr && op_py_func.ptr() != Py_None,
+      op_py_func.ptr() != nullptr && !Py_IsNone(op_py_func.ptr()),
       "Failed to get python operation. Operator Name is ",
       op.operator_name().name,
       ", Overload Name is ",
@@ -525,7 +525,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
           .attr("aoti_compile_with_persistent_cache");
   TORCH_INTERNAL_ASSERT(
       aot_compile_function.ptr() != nullptr &&
-          aot_compile_function.ptr() != Py_None,
+          !Py_IsNone(aot_compile_function.ptr()),
       "Failed to import - torch._inductor.aoti_eager.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
@@ -541,7 +541,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
       nullptr));
-  TORCH_INTERNAL_ASSERT(result.ptr() != nullptr && result.ptr() != Py_None);
+  TORCH_INTERNAL_ASSERT(result.ptr() != nullptr && !Py_IsNone(result.ptr()));
 
   auto kernel_lib_path = py::cast<std::string>(result);
   TORCH_CHECK(

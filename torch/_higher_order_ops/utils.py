@@ -96,10 +96,29 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def _hop_compile_and_call(fn, args, kwargs=None):
+    """Compile and call fn with fullgraph=True for HOP eager execution.
+
+    Pre-activates the fullgraph counter so that compile_wrapper treats this as
+    a nested compile.  This avoids erroring when a non-infra dispatch mode
+    causes the frame to be skipped — the function still executes eagerly within
+    compile_wrapper and returns normally.
+    """
+    from torch._dynamo.eval_frame import set_fullgraph_compiled_frame_count
+
+    with setup_compilation_env() as backend:
+        old_count = set_fullgraph_compiled_frame_count(0)
+        try:
+            return torch.compile(fn, backend=backend, fullgraph=True)(
+                *args, **(kwargs or {})
+            )
+        finally:
+            set_fullgraph_compiled_frame_count(old_count)
+
+
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        return _hop_compile_and_call(fn, args)
     else:
         return fn(*args)
 
@@ -466,9 +485,9 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
     if aliases:
-        raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")
     if inp_mutation:
-        raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
+        raise RuntimeError(f"{name} might be modifying the input!")
 
 
 def unique_graph_id(proxy_mode, prefix):

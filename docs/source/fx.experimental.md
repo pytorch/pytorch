@@ -362,6 +362,7 @@ These APIs are experimental and subject to change without notice.
     view_inference_rule
     register_inference_rule
     transpose_inference_rule
+    range_check
 ```
 
 ## torch.fx.experimental.migrate_gradual_types.constraint_transformation

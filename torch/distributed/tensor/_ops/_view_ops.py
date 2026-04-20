@@ -1117,6 +1117,13 @@ class _ViewShardingPropagator:
                     f"{tgt_shard_dims} for Shard(dim={p.dim}) on mesh dim {mesh_dim}."
                 )
         cmd = self.rule[tgt_shard_dim]
+        if isinstance(cmd, Split) and isinstance(cmd.input_dim, Flatten):
+            first_dim = cmd.input_dim.input_dims[0]
+            if isinstance(first_dim, InputDim) and p.dim != first_dim.input_dim:
+                raise RuntimeError(
+                    f"Shard(dim={p.dim}) through Split(Flatten(...), {cmd.group_shape}) "
+                    f"is not supported yet for non-first flatten dims."
+                )
         if isinstance(cmd, (Split, InputDim)):
             # Split/InputDim: 1:1 dim mapping, sharding transfers directly.
             # Flatten needs stride computation below (multiple dims merge).
@@ -1284,12 +1291,17 @@ def register_op_strategy_map(
                 placements=tuple(input_tgt_placements),
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
+                use_strided_shard_as_shard_order=False,
             )
             redistribute_costs: list[list[float]] = [
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
-            output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
+            output_spec = DTensorSpec(
+                mesh=mesh,
+                placements=tuple(output_placements),
+                use_strided_shard_as_shard_order=False,
+            )
             output_strategy.strategies.append(
                 OpSpec(
                     output_specs=output_spec,

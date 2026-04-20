@@ -152,6 +152,10 @@ output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
+FXGRAPH_CACHE_PREFIX = "c"
+AOTAUTOGRAD_CACHE_PREFIX = "a"
+COMPILED_FX_GRAPH_CACHE_PREFIX = "f"
+
 
 def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
@@ -343,7 +347,7 @@ def code_hash(code: str | bytes, extra: str | bytes = "") -> str:
     if extra:
         extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
         hashing_str = hashing_str + b"||" + extra_b
-    return "c" + sha256_hash(hashing_str)
+    return FXGRAPH_CACHE_PREFIX + sha256_hash(hashing_str)
 
 
 def get_path(
@@ -523,6 +527,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
+                torch.SymBool: functools.partial(self._reduce_symbool),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
@@ -597,6 +602,14 @@ class FxGraphCachePickler(pickle.Pickler):
         # For hashing purposes, we only care about the name of the symbol and not the
         # backed value. We evaluate guards stored with a cached graph to ensure a cached
         # entity with SymInt args is safe to reuse.
+        return (_ident, (str(s),))
+
+    def _reduce_symbool(self, s: torch.SymBool) -> tuple[Callable[[T], T], tuple[str]]:
+        """
+        Custom reducer to pickle SymBools.
+        """
+        # Same approach as _reduce_symint: use the string representation for
+        # hashing.  Guards ensure correctness on cache reload.
         return (_ident, (str(s),))
 
     def _reduce_unsupported(self, s: Any) -> NoReturn:
@@ -970,6 +983,12 @@ class FxGraphHashDetails:
             torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
 
+        # Provenance tracking level affects whether provenance data is stored
+        # in the CompiledFxGraph, so it must be part of the cache key.
+        # Note: the "trace" prefix is excluded from _cache_config_ignore_prefix,
+        # so we add this explicitly.
+        self.provenance_tracking_level = config.trace.provenance_tracking_level
+
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
             torch.backends.cuda.matmul.fp32_precision,
@@ -1109,7 +1128,7 @@ def compiled_fx_graph_hash(
 
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = "f" + pickler.get_hash(details)
+    key = COMPILED_FX_GRAPH_CACHE_PREFIX + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
@@ -1757,7 +1776,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-            log.info("Bypassing FX Graph Cache because '%s'", e)  # noqa: G200
+            log.info("Bypassing FX Graph Cache because '%s'", e)
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
             cache_info = {
@@ -4307,7 +4326,7 @@ class CUTLASSCodeCache:
                         f.write(f"// {cls._BACKEND} {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("%s %s: %s", cls._BACKEND, operation_name, cmd)
-                    cmd_parts = cmd.split(" ")
+                    cmd_parts = shlex.split(cmd)
                     try:
                         if cls._use_re_build():
                             from triton.fb.re_build_helper import run_build_command

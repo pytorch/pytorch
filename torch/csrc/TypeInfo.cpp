@@ -399,20 +399,10 @@ PyTypeObject THPIInfoType = {
 };
 
 void THPDTypeInfo_init(PyObject* module) {
-  if (PyType_Ready(&THPFInfoType) < 0) {
+  if (PyModule_AddType(module, &THPFInfoType) < 0) {
     throw python_error();
   }
-  Py_INCREF(&THPFInfoType);
-  if (PyModule_AddObject(
-          module, "finfo", reinterpret_cast<PyObject*>(&THPFInfoType)) != 0) {
-    throw python_error();
-  }
-  if (PyType_Ready(&THPIInfoType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPIInfoType);
-  if (PyModule_AddObject(
-          module, "iinfo", reinterpret_cast<PyObject*>(&THPIInfoType)) != 0) {
+  if (PyModule_AddType(module, &THPIInfoType) < 0) {
     throw python_error();
   }
 }

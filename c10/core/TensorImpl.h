@@ -2185,9 +2185,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void incref_pyobject() const noexcept final;
-
   void decref_pyobject() const noexcept final;
-
   bool try_incref_pyobject() const noexcept final;
 
  private:
