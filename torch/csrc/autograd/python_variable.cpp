@@ -2469,9 +2469,11 @@ create_native_op_schema(
     // way; the C++ fast path must match. Without this filter, step-varying
     // scalar kwargs (e.g. the `value` arg of addcdiv_ used by AdamW bias
     // corrections) cause unbounded cache growth.
+    py::list static_kwargkey =
+        py::reinterpret_borrow<py::list>(native_info.static_kwargkey);
     c10::SmallVector<std::string, 2> static_kwarg_names;
-    for (const auto& key :
-         py::reinterpret_borrow<py::list>(native_info.static_kwargkey)) {
+    static_kwarg_names.reserve(static_kwargkey.size());
+    for (const auto& key : static_kwargkey) {
       static_kwarg_names.push_back(py::cast<std::string>(key));
     }
 
