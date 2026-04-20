@@ -1520,7 +1520,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 return _node
             else:
                 assert len(_node.args) >= 1, (
-                    "In in dequant pattern, each node should have more than 1 arg."
+                    "In dequant pattern, each node should have more than 1 arg."
                 )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
