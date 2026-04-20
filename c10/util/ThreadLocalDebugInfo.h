@@ -3,8 +3,8 @@
 #include <c10/macros/Export.h>
 
 #include <cstdint>
-#include <memory>
 #include <iosfwd>
+#include <memory>
 #include <string_view>
 
 namespace c10 {
