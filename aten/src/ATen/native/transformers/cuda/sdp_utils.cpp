@@ -496,7 +496,7 @@ bool check_cudnn_dropout(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
-  constexpr int64_t max_cudnn_dim_size = (1LL << 16) - 1;
+  constexpr int64_t max_cudnn_dim_size = 65535;
   const auto b = params.query.sym_size(0);
   const auto h = params.query.sym_size(1);
   if (b > max_cudnn_dim_size || h > max_cudnn_dim_size) {
