@@ -6906,6 +6906,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
