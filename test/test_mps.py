@@ -8053,15 +8053,31 @@ class TestMPS(TestCaseMPS):
     def test_writable_shared_buffer_ptr(self):
         import ctypes
         n = 1024
+        nbytes = n * torch.tensor([], dtype=torch.float32).element_size()
         x = torch.empty(n, dtype=torch.float32, device="mps")
         torch.mps.synchronize()
-        ptr = torch.mps._writable_shared_buffer_ptr(x)
-        # Discrete-memory MPS devices legitimately return 0: no shared storage.
-        if ptr == 0:
+        handle = torch.mps._writable_shared_buffer_ptr(x)
+        # Discrete-memory MPS devices legitimately return None: no shared storage.
+        if handle is None:
             self.skipTest("MPS device does not support shared storage")
+        self.assertEqual(handle.nbytes, nbytes)
+        self.assertNotEqual(handle.data_ptr, 0)
+
+        # CPU writes through the handle are visible to GPU-side reads
         ref = torch.arange(n, dtype=torch.float32)
-        ctypes.memmove(ptr, ref.data_ptr(), n * ref.element_size())
+        ctypes.memmove(handle.data_ptr, ref.data_ptr(), nbytes)
         self.assertEqual(x.cpu(), ref)
+
+        # Lifetime: handle retains the MTLBuffer so the pointer stays valid
+        # after the originating tensor is freed and the allocator cache is
+        # emptied
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
+        ref2 = torch.arange(n, dtype=torch.float32) + n
+        ctypes.memmove(handle.data_ptr, ref2.data_ptr(), nbytes)
+        readback = (ctypes.c_float * n).from_address(handle.data_ptr)
+        self.assertEqual(torch.tensor(list(readback)), ref2)
 
         # Non-MPS tensors must be rejected.
         with self.assertRaises(ValueError):

@@ -535,16 +535,26 @@ void initModule(PyObject* module) {
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
+  py::class_<
+      at::mps::MPSSharedBufferHandle,
+      std::shared_ptr<at::mps::MPSSharedBufferHandle>>(
+      m, "_MPSSharedBufferHandle")
+      .def_property_readonly(
+          "data_ptr",
+          [](const at::mps::MPSSharedBufferHandle& self) {
+            return reinterpret_cast<uintptr_t>(self.data());
+          })
+      .def_property_readonly("nbytes", &at::mps::MPSSharedBufferHandle::nbytes);
   m.def(
       "_mps_get_writable_shared_buffer_ptr",
-      [](uintptr_t data_ptr) -> uintptr_t {
+      [](uintptr_t data_ptr)
+          -> std::shared_ptr<at::mps::MPSSharedBufferHandle> {
         auto* allocator = at::mps::getIMPSAllocator();
         if (!allocator) {
-          return 0;
+          return nullptr;
         }
-        void* writable = allocator->getWritableSharedBufferPtr(
+        return allocator->getWritableSharedBufferPtr(
             reinterpret_cast<const void*>(data_ptr));
-        return reinterpret_cast<uintptr_t>(writable);
       });
 }
 #endif /* USE_MPS */

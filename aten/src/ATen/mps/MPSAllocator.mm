@@ -544,7 +544,32 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
 }
 
-void* MPSHeapAllocatorImpl::getWritableSharedBufferPtr(const void* ptr) {
+namespace {
+
+class SharedBufferHandleImpl : public MPSSharedBufferHandle {
+ public:
+  SharedBufferHandleImpl(id<MTLBuffer> buf, void* contents, size_t nbytes)
+      : buffer_(buf), contents_(contents), nbytes_(nbytes) {
+    [buffer_ retain];
+  }
+  ~SharedBufferHandleImpl() override {
+    [buffer_ release];
+  }
+  void* data() const override {
+    return contents_;
+  }
+  size_t nbytes() const override {
+    return nbytes_;
+  }
+
+ private:
+  id<MTLBuffer> buffer_;
+  void* contents_;
+  size_t nbytes_;
+};
+} // namespace
+
+std::shared_ptr<MPSSharedBufferHandle> MPSHeapAllocatorImpl::getWritableSharedBufferPtr(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
@@ -554,7 +579,8 @@ void* MPSHeapAllocatorImpl::getWritableSharedBufferPtr(const void* ptr) {
   if (!buffer_block->cpu_ptr) {
     buffer_block->cpu_ptr = [buffer_block->buffer contents];
   }
-  return buffer_block->cpu_ptr;
+  return std::make_shared<SharedBufferHandleImpl>(
+      buffer_block->buffer, buffer_block->cpu_ptr, buffer_block->requested_size);
 }
 
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
@@ -753,7 +779,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getSharedBufferPtr(ptr);
   }
-  void* getWritableSharedBufferPtr(const void* ptr) const override {
+  std::shared_ptr<MPSSharedBufferHandle> getWritableSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getWritableSharedBufferPtr(ptr);
   }
   bool isSharedBuffer(const void* ptr) const override {

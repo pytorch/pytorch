@@ -5,10 +5,18 @@
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/Allocator.h>
 #include <c10/util/Registry.h>
+#include <memory>
 
 #define MB(x) (x * 1048576UL)
 
 namespace at::mps {
+
+class MPSSharedBufferHandle {
+ public:
+  virtual ~MPSSharedBufferHandle() = default;
+  virtual void* data() const = 0;
+  virtual size_t nbytes() const = 0;
+};
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
@@ -38,11 +46,8 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
-  // returns a writable host pointer to a shared-storage MTLBuffer allocated
-  // by MPSAllocator, or nullptr for non-shared-storage / unknown buffers.
-  // Intended for advanced interop (e.g. bulk tensor loaders) that need to
-  // write directly into MPS memory, bypassing the CPU→MPS staging copy.
-  virtual void* getWritableSharedBufferPtr(const void* ptr) const = 0;
+  virtual std::shared_ptr<MPSSharedBufferHandle> getWritableSharedBufferPtr(
+      const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 };
