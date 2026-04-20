@@ -514,6 +514,18 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     if (seqNum >= 0) {
       map.emplace(kSeqNum, std::to_string(seqNum));
     }
+
+    auto seqNumber = debugInfo->getSeqNumber();
+    auto isP2P = debugInfo->isP2P();
+    const auto& group_name_for_hash = debugInfo->getProcessGroupName();
+    size_t comms_id = c10::get_hash(
+        group_name_for_hash,
+        seqNumber,
+        isP2P,
+        globalRankStart,
+        globalRankStride,
+        debugInfo->getWorldSize());
+    map.emplace(kCommsId, std::to_string(comms_id));
   }
 
   map.emplace(
