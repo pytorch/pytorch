@@ -4722,11 +4722,22 @@ class TestQuantizedLinear(TestCase):
 
     def _test_qlinear_pt2e_fast_path_helper(self, qlinear_op):
         import os
+        import subprocess
+        import sys
+        import textwrap
 
-        env_key = "ONEDNN_CACHE_CONTEXT_UNSAFE"
-        original_value = os.environ.get(env_key)
-        os.environ[env_key] = "1"
-        try:
+        _ = qlinear_op
+        env = os.environ.copy()
+        env["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        code = textwrap.dedent(
+            """
+            import numpy as np
+            import torch
+            import torch.nn.functional as F
+            from torch.testing._internal.common_quantized import override_quantized_engine
+
+            qlinear_op = torch.ops.onednn.qlinear_pointwise
             qlinear_prepack = torch.ops.onednn.qlinear_prepack
             x_scale, x_zp = 1.2, 1
             w_scale, w_zp = 0.8, 0
@@ -4744,7 +4755,7 @@ class TestQuantizedLinear(TestCase):
             qx_cpu = qx.int_repr()
             w_ref = qw.dequantize()
 
-            with override_quantized_engine('onednn'):
+            with override_quantized_engine("onednn"):
                 # Warm up once to initialize the fast-path cache.
                 qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu.shape)
                 qlinear_op(
@@ -4784,17 +4795,32 @@ class TestQuantizedLinear(TestCase):
                     y_ref = F.linear(x_ref, w_ref, b)
                     qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
 
-                    self.assertEqual(qy_ref.dim(), qy_cpu.dim())
+                    assert qy_ref.dim() == qy_cpu.dim()
                     np.testing.assert_array_almost_equal(
                         qy_ref.int_repr().cpu().numpy(),
                         qy_cpu.cpu().numpy(),
                         decimal=0,
                     )
-        finally:
-            if original_value is None:
-                os.environ.pop(env_key, None)
-            else:
-                os.environ[env_key] = original_value
+            """
+        )
+
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "Subprocess fast-path validation failed.\n"
+                f"stdout:\n{proc.stdout}\n"
+                f"stderr:\n{proc.stderr}"
+            ),
+        )
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -4963,11 +4989,29 @@ class TestQuantizedLinear(TestCase):
 
     def _test_qlinear_fp8_fast_path_helper(self, qlinear_op):
         import os
+        import subprocess
+        import sys
+        import textwrap
 
-        env_key = "ONEDNN_CACHE_CONTEXT_UNSAFE"
-        original_value = os.environ.get(env_key)
-        os.environ[env_key] = "1"
-        try:
+        _ = qlinear_op
+        env = os.environ.copy()
+        env["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        code = textwrap.dedent(
+            """
+            import torch
+            import torch.nn.functional as F
+            from torch.testing._internal.common_quantized import override_quantized_engine
+
+            def _quantize_fp8e4m3(t, scale):
+                # Align with oneDNN conversion path: fp32 -> fp16 -> fp8.
+                qt = (t / scale).clamp(-448, 448).half().to(torch.float8_e4m3fn)
+                return qt
+
+            def _dequantize_fp8e4m3(qt, scale):
+                return qt.float() * scale
+
+            qlinear_op = torch.ops.onednn.qlinear_pointwise
             qlinear_prepack = torch.ops.onednn.qlinear_prepack
             y_scale = 0.3
             x_zp = 0
@@ -4976,11 +5020,18 @@ class TestQuantizedLinear(TestCase):
             w = torch.rand(16, 4) * 10
             b = torch.rand(16) * 10
 
-            qx, x_scale = _quantize_fp8e4m3(x, channelwise=False)
-            qw, w_scales = _quantize_fp8e4m3(w, channelwise=False)
+            x_scale = x.abs().max().reshape([1]) / torch.finfo(torch.float8_e4m3fn).max
+            x_scale = torch.max(x_scale, torch.tensor([torch.finfo(torch.float32).eps]))
+            qx = _quantize_fp8e4m3(x, x_scale)
+
+            w_scale = w.abs().max().reshape([1]) / torch.finfo(torch.float8_e4m3fn).max
+            w_scale = torch.max(w_scale, torch.tensor([torch.finfo(torch.float32).eps]))
+            qw = _quantize_fp8e4m3(w, w_scale)
+
+            w_scales = w_scale
             w_zps = torch.zeros_like(w_scales, dtype=torch.int)
 
-            with override_quantized_engine('onednn'):
+            with override_quantized_engine("onednn"):
                 # Warm up once to initialize the fast-path cache.
                 qw_packed = qlinear_prepack(qw, qx.shape)
                 qlinear_op(
@@ -5019,17 +5070,32 @@ class TestQuantizedLinear(TestCase):
                     x_ref = _dequantize_fp8e4m3(qx_iter, x_scale)
                     w_ref = _dequantize_fp8e4m3(qw, w_scales)
                     y_ref = F.linear(x_ref, w_ref, b)
-                    y_ref = _quantize_fp8e4m3(y_ref, False, y_scale)[0]
+                    y_ref = _quantize_fp8e4m3(y_ref, y_scale)
 
-                    self.assertEqual(y_ref.dim(), qy.dim())
-                    self.assertEqual(y_ref.float(), qy.float())
+                    assert y_ref.dim() == qy.dim()
+                    assert torch.equal(y_ref.float(), qy.float())
                     if torch.isnan(qy).any():
                         raise AssertionError("Output qy contains NaN values")
-        finally:
-            if original_value is None:
-                os.environ.pop(env_key, None)
-            else:
-                os.environ[env_key] = original_value
+            """
+        )
+
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "Subprocess fp8 fast-path validation failed.\n"
+                f"stdout:\n{proc.stdout}\n"
+                f"stderr:\n{proc.stderr}"
+            ),
+        )
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
