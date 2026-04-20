@@ -1114,7 +1114,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
       auto& params = it->second;
-        if (params.K == K && params.N == N) {
+      if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()
             : at::empty({M, N}, at::device(c10::kCPU).dtype(params.out_dtype));

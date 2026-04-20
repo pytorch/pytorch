@@ -4764,7 +4764,6 @@ class TestQuantizedLinear(TestCase):
                 )
 
                 for qx_cpu_iter in (qx_cpu, qx_cpu.repeat(2, 1)):
-                    qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu_iter.shape)
                     qy_cpu = qlinear_op(
                         qx_cpu_iter,
                         x_scale,
@@ -5001,7 +5000,6 @@ class TestQuantizedLinear(TestCase):
                 )
 
                 for qx_iter in (qx, qx.repeat(2, 1)):
-                    qw_packed = qlinear_prepack(qw, qx_iter.shape)
                     qy = qlinear_op(
                         qx_iter,
                         x_scale,
