@@ -659,6 +659,20 @@ class CachingAutotuner(KernelInterface):
 
             self._make_launchers()
 
+    def compile_by_disabling_pipelining(self, config):
+        # self.fn.fn is dropped by prepare_for_pickle() after the initial
+        # compile; reload it so triton.compile can access the source.
+        if self.fn.fn is None:
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
+        cfg = copy.deepcopy(config)
+        cfg.num_stages = 1
+        if "NUM_STAGES" in cfg.kwargs:
+            cfg.kwargs["NUM_STAGES"] = 1
+        result = self._precompile_config(cfg)
+        self.compile_results = [result]
+        return result.make_launcher()
+
     def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
             return
@@ -682,8 +696,17 @@ class CachingAutotuner(KernelInterface):
                     IntelGPUError,
                 ) as e:
                     exc = e
-        if len(launchers) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            if len(launchers) == 0:
+                result = self.compile_results[-1]
+                config = result.config
+                if isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError)) and (
+                    config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
+                ):
+                    self.launchers = [self.compile_by_disabling_pipelining(config)]
+                    return
+                raise RuntimeError(
+                    f"No valid triton configs. {type(exc).__name__}: {exc}"
+                )
         self.launchers = launchers
 
     def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any, Any]:
