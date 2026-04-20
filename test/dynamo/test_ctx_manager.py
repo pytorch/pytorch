@@ -586,6 +586,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """17""")
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3395")
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_device(self):
         def fn(x):
