@@ -1109,11 +1109,10 @@ static at::Tensor linear_int8_with_onednn_weight(
           context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
 #endif
   if (allow_cache) {
-    auto it = qlinear_forward_params_map.find(cache_key);
-    if (it != qlinear_forward_params_map.end()) {
+    if (qlinear_forward_params_map.contains(cache_key)) {
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      auto& params = it->second;
+      auto& params = qlinear_forward_params_map.at(cache_key);
       if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()
@@ -1148,42 +1147,44 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
 
   TORCH_CHECK(
-      weight_scales.scalar_type() == c10::ScalarType::Float,
-      "weight scales should be dtype c10::ScalarType::Float.");
+      weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(
-      binary_alpha == 1.0f,
-      "onednn qlinear: alpha != 1 for binary post op is not yet supported.");
+      binary_alpha == 1.0f, "onednn qlinear: alpha != 1 for binary post op is not yet supported.");
   bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
   bool bf16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
   if (fp32_output || bf16_output) {
     TORCH_CHECK(
-        output_scale == 1.0f && output_zero_point == 0,
-        "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
+        output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
   if (binary_post_op != "none") {
-    TORCH_CHECK(
-        other.has_value(),
-        "onednn qlinear: the extra input is missing for post op ",
-        binary_post_op);
+    /* Supported cases for binary post op:
+      +-------------------+--------------+---------------+
+      | Extra input dtype | Output dtype | Post op       |
+      +-------------------+--------------+---------------+
+      | Fp32/bf16         | fp32/bf16    | sum           |
+      +-------------------+--------------+---------------+
+      | Fp32/bf16         | int8         | add           |
+      +-------------------+--------------+---------------+
+      | int8              | fp32/bf16    | not supported |
+      +-------------------+--------------+---------------+
+      | int8              | int8         | sum           |
+      +-------------------+--------------+---------------+
+    */
+    TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op ", binary_post_op);
     if (fp32_output || bf16_output) {
       TORCH_CHECK(
           other_scale == 1.0f && other_zero_point == 0,
-          "onednn qlinear: expect extra input scale = 1.0 and zero point = 0 when output dtype is ",
-          output_dtype.value(),
-          ", but got ",
-          other_scale,
-          " and ",
-          other_zero_point,
-          ", respectively");
+          "onednn qlinear: expect extra input scale = 1.0 and zero point = 0 when output dtype is ", output_dtype.value(),
+          ", but got ", other_scale, " and ", other_zero_point, ", respectively"
+      );
     }
     if (binary_post_op == "sum") {
       auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
       TORCH_CHECK(
           other.value().scalar_type() == expected_dtype,
-          "onednn qlinear: the dtype of extra input for binary post op should be ",
-          expected_dtype,
-          " (same as output dtype), but got ",
-          other.value().scalar_type());
+          "onednn qlinear: the dtype of extra input for binary post op should be ", expected_dtype,
+          " (same as output dtype), but got ", other.value().scalar_type()
+      );
     }
   }
 #if defined(__powerpc__)
