@@ -474,6 +474,9 @@ lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor"
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
+lib.define(
+    "_low_contention_all_gather_v2(Tensor tensor, str group_name) -> Tensor"
+)
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
 """
@@ -1725,6 +1728,101 @@ def _low_contention_all_gather(
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
         symm_mem.barrier()
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v2", "Meta")
+def _low_contention_all_gather_v2_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    group_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * group_size, *tensor.shape[1:])
+
+
+# Monotonic counter for v2 signal pad synchronization (no reset needed).
+_v2_counter: dict[str, int] = {}
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v2", "CUDA")
+def _low_contention_all_gather_v2(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """
+    All-gather using stream_write/wait_value32 instead of barrier kernels.
+
+    Uses monotonically increasing counters with GEQ wait mode to avoid
+    the reset-vs-write race that occurs with 0/1 signaling.
+    """
+    symm_mem = rendezvous(tensor, group_name)
+    if symm_mem is not None:
+        input_is_symm_mem = True
+    else:
+        symm_mem = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        input_is_symm_mem = False
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    # Increment counter for this call
+    counter = _v2_counter.get(group_name, 0) + 1
+    _v2_counter[group_name] = counter
+
+    output = tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+    chunks = output.chunk(world_size)
+
+    # Signal pad layout (channel 1, 2 * world_size slots):
+    #   [ws..2ws-1]  = barrier 1 slots (data ready)
+    #   [2ws..3ws-1] = barrier 2 slots (reads complete)
+    channel = 1
+    b1_base = world_size * channel
+    b2_base = world_size * channel + world_size
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with _get_backend_stream():
+        if not input_is_symm_mem:
+            local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
+            local_buf.copy_(tensor)
+
+        # Barrier 1: signal data ready, wait for all peers
+        for peer in range(world_size):
+            if peer != rank:
+                remote_signal_pad = symm_mem.get_signal_pad(peer)
+                _SymmetricMemory.stream_write_value32(
+                    remote_signal_pad, b1_base + rank, counter
+                )
+
+        local_signal_pad = symm_mem.get_signal_pad(rank)
+        for peer in range(world_size):
+            if peer != rank:
+                torch.ops.symm_mem.stream_wait_value32(
+                    local_signal_pad, b1_base + peer, counter
+                )
+
+        # CE copies: pull from all ranks
+        for step in range(world_size):
+            remote_rank = (rank - step) % world_size
+            src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
+            chunks[remote_rank].copy_(src_buf)
+
+        # Barrier 2: signal reads complete, wait for all peers
+        for peer in range(world_size):
+            if peer != rank:
+                remote_signal_pad = symm_mem.get_signal_pad(peer)
+                _SymmetricMemory.stream_write_value32(
+                    remote_signal_pad, b2_base + rank, counter
+                )
+
+        for peer in range(world_size):
+            if peer != rank:
+                torch.ops.symm_mem.stream_wait_value32(
+                    local_signal_pad, b2_base + peer, counter
+                )
+
         torch._C._distributed_c10d._register_work(output, Work())
         return output
 

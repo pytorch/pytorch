@@ -1234,6 +1234,9 @@ class aten_distributed_optimizations:
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
 
+    # Use v2 all-gather (stream_write/wait_value32 instead of barrier kernels).
+    low_contention_all_gather_v2: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

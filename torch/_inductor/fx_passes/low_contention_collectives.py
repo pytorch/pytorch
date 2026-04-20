@@ -60,6 +60,7 @@ def replace_collectives_with_low_contention(
     from torch._inductor import config
 
     min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
+    use_ag_v2 = config.aten_distributed_optimizations.low_contention_all_gather_v2
 
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
@@ -100,7 +101,7 @@ def replace_collectives_with_low_contention(
             )
             continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name)
+        _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2)
         replacements += 1
 
     log.info(
@@ -135,11 +136,15 @@ def _enable_symm_mem(group_name):
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name):
+def _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2=False):
     input_node = node.args[0]
     if is_ag:
-        target = symm_mem._low_contention_all_gather.default
-        args = (input_node, group_name)
+        if use_ag_v2:
+            target = symm_mem._low_contention_all_gather_v2.default
+            args = (input_node, group_name)
+        else:
+            target = symm_mem._low_contention_all_gather.default
+            args = (input_node, group_name)
     else:
         reduce_op = node.args[1]
         target = symm_mem._low_contention_reduce_scatter.default

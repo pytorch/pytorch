@@ -1305,6 +1305,59 @@ at::Tensor stream_write_value32_(
   return input;
 }
 
+void stream_wait_value32(
+    const at::Tensor& input,
+    int64_t offset,
+    int64_t val,
+    int64_t flags) {
+  TORCH_CHECK(
+      input.dim() == 1 && input.is_contiguous() &&
+          input.scalar_type() == c10::ScalarType::UInt32,
+      "symm_mem::stream_wait_value32: input must be a flat, contiguous "
+      "uint32 tensor.");
+
+  TORCH_CHECK(
+      offset >= 0 && offset < input.numel(),
+      "symm_mem::stream_wait_value32: offset (",
+      offset,
+      ") out of range [0, ",
+      input.numel(),
+      ")");
+
+  TORCH_CHECK(
+      val >= 0 &&
+          static_cast<size_t>(val) <= std::numeric_limits<uint32_t>::max(),
+      "symm_mem::stream_wait_value32: "
+      "val must be in the range of [0, 4294967295] (uint32_t).")
+
+  // flags: 0 = CU_STREAM_WAIT_VALUE_GEQ, 1 = CU_STREAM_WAIT_VALUE_EQ
+  TORCH_CHECK(
+      flags >= 0 && flags <= 3,
+      "symm_mem::stream_wait_value32: flags must be 0 (GEQ), 1 (EQ), "
+      "2 (AND), or 3 (NOR).");
+
+  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+  c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto driver_api = c10::cuda::DriverAPI::get();
+  C10_CUDA_DRIVER_CHECK(driver_api->cuStreamWaitValue32_(
+      at::cuda::getCurrentCUDAStream(),
+      reinterpret_cast<CUdeviceptr>(addr),
+      val,
+      static_cast<unsigned int>(flags)));
+#elif defined(USE_ROCM)
+  C10_CUDA_CHECK(hipStreamWaitValue32(
+                                      at::cuda::getCurrentCUDAStream(),
+                                      reinterpret_cast<void*>(addr),
+                                      val,
+                                      static_cast<unsigned int>(flags)));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+}
+
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -1337,5 +1390,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
+  m.impl("stream_wait_value32", ::stream_wait_value32);
   m.impl("memset32_", ::memset32_);
 }

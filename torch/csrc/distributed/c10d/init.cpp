@@ -1285,6 +1285,23 @@ Example:
           py::arg("offset"),
           py::arg("val"))
       .def_static(
+          "stream_wait_value32",
+          [](const at::Tensor& input,
+             int64_t offset,
+             int64_t val,
+             int64_t flags) {
+            auto op =
+                c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("symm_mem::stream_wait_value32", "")
+                    .typed<
+                        void(const at::Tensor&, int64_t, int64_t, int64_t)>();
+            op.call(input, offset, val, flags);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"),
+          py::arg("flags") = 0)
+      .def_static(
           "memset32",
           [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
             // The range of `val` is checked inside the op
