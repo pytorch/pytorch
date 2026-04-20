@@ -109,6 +109,15 @@ class FSDPCommContext:
         # one. Storing on comm_ctx (vs per-group) limits liveness to one
         # buffer at a time, avoiding O(n_layers) accumulation in case (1).
         self.all_reduce_state: AllReduceState | None = None
+        # HSDP + CPUOffloadPolicy: the GPU reduce_output buffer is allocated
+        # on the reduce-scatter stream but its final consumer (the D2H copy
+        # for offload) runs on the all-reduce stream. Since sharded_param.grad
+        # is a separate CPU tensor, the GPU storage has no surviving ref once
+        # foreach_reduce returns. Kept here so that the predecessor layer's
+        # reduce_output is dropped on the all-reduce stream context, routing
+        # its block to the AR-stream free pool and avoiding reuse by an
+        # RS-stream alloc before the D2H memcpy drains.
+        self.grad_offload_state: GradOffloadState | None = None
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -135,6 +144,21 @@ class FSDPCommContext:
             self.device_handle.current_stream().wait_event(self.all_reduce_state.event)
         self.all_reduce_state = None
 
+    def flush_grad_offload_state(self):
+        """Drain the last layer's offload keep-alive at end of backward.
+        The GPU reduce_output ref is released only after its D2H memcpy
+        completes (via post_reduce_event) so the CUDA caching allocator
+        cannot hand the block to a racing RS-stream allocation.
+        """
+        if (
+            self.grad_offload_state is not None
+            and self.grad_offload_state.event is not None
+        ):
+            self.device_handle.current_stream().wait_event(
+                self.grad_offload_state.event
+            )
+        self.grad_offload_state = None
+
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
@@ -150,6 +174,11 @@ class ReduceScatterState(NamedTuple):
 class AllReduceState(NamedTuple):
     all_reduce_input: torch.Tensor
     event: torch.Event | None  # all-reduce event
+
+
+class GradOffloadState(NamedTuple):
+    reduce_output: torch.Tensor
+    event: torch.Event | None  # post-reduce event (after D2H memcpy)
 
 
 class FSDPParamGroup:
@@ -607,6 +636,11 @@ class FSDPParamGroup:
             prev_all_reduce_event = (
                 prev_all_reduce_state.event if prev_all_reduce_state else None
             )
+            # HSDP + offload: drain predecessor's grad_offload keep-alive so
+            # its GPU reduce_output block can go to the all-reduce-stream
+            # free pool once we drop the ref below.
+            prev_grad_offload_state = self.comm_ctx.grad_offload_state
+            self.comm_ctx.grad_offload_state = None
             (
                 reduce_scatter_input,
                 reduce_scatter_event,
@@ -614,6 +648,7 @@ class FSDPParamGroup:
                 all_reduce_input,
                 all_reduce_event,
                 self._partial_reduce_output,
+                grad_offload_keepalive,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
@@ -650,6 +685,18 @@ class FSDPParamGroup:
                 # it has completed.
                 with self.device_handle.stream(all_reduce_stream):
                     del prev_all_reduce_state
+            if grad_offload_keepalive is not None:
+                self.comm_ctx.grad_offload_state = GradOffloadState(
+                    grad_offload_keepalive, self._post_reduce_event
+                )
+            if prev_grad_offload_state is not None:
+                # Same reasoning as prev_all_reduce_state above: route the
+                # block into all_reduce_stream's free pool by dropping the
+                # ref inside its stream context. The all_reduce_stream is
+                # FIFO-ordered behind the prev layer's D2H memcpy, so its
+                # events correctly gate reuse.
+                with self.device_handle.stream(all_reduce_stream):
+                    del prev_grad_offload_state
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
@@ -675,6 +722,7 @@ class FSDPParamGroup:
     def finalize_backward(self):
         self._wait_for_post_backward()
         self.comm_ctx.flush_all_reduce_state()
+        self.comm_ctx.flush_grad_offload_state()
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()

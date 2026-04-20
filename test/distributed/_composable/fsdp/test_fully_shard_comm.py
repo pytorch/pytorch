@@ -294,6 +294,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             _,
             _,
+            _,
         ) = foreach_reduce(
             fsdp_params,
             unsharded_grads,
