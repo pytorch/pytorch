@@ -116,6 +116,12 @@ def is_opaque_node(node: Any) -> bool:
 _thread_local = threading.local()
 
 
+def _should_save_cache(*compiled_fns: Callable[..., Any]) -> bool:
+    if should_bundle_autograd_cache():
+        return True
+    return all(hasattr(fn, "_fx_graph_cache_key") for fn in compiled_fns)
+
+
 @contextmanager
 def maybe_skip_decompose(aot_config: AOTConfig) -> Generator[None, None, None]:
     old_decomp = aot_config.decompositions
@@ -493,14 +499,8 @@ def _cache_inference_info(
 
     cache_info = aot_config.cache_info
 
-    def should_save_cache() -> bool:
-        if should_bundle_autograd_cache():
-            return True
-        else:
-            return hasattr(compiled_fw, "_fx_graph_cache_key")
-
     entry: GenericAOTAutogradResult[Any, Any] | None = None
-    if cache_info is not None and should_save_cache():
+    if cache_info is not None and _should_save_cache(compiled_fw):
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
         entry = AOTAutogradCache.make_entry(
@@ -2438,15 +2438,9 @@ def _cache_autograd_info(
         ) -> GenericAOTAutogradResult[Any, Any] | None:
             cache_info = aot_config.cache_info
 
-            def should_save_cache() -> bool:
-                if should_bundle_autograd_cache():
-                    return True
-                else:
-                    return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(
-                        compiled_bw_func, "_fx_graph_cache_key"
-                    )
-
-            if cache_info is not None and should_save_cache():
+            if cache_info is not None and _should_save_cache(
+                compiled_fw_func, compiled_bw_func
+            ):
                 if forward_time_taken_ns is None:
                     raise AssertionError("forward_time_taken_ns must not be None")
                 # TODO: technically, AOTAutograd does a *little* bit of post processing work
