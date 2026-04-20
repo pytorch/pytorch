@@ -1249,6 +1249,212 @@ function test_envelope_default_pool_unaffected() {
 }
 
 // ============================================================
+// Per-pool summarization tests
+// ============================================================
+
+function test_per_pool_summarization() {
+  console.log('test_per_pool_summarization');
+  // 10 allocs in default pool (sizes 100..1000), 10 allocs in private pool
+  // (sizes 200..2000). Limit to 5 entries per pool.
+  // Expect: 5 drawn + 5 summarized per pool.
+  const poolId = [1, 50];
+  const traces = [];
+  // Default pool: 10 allocs at 0x1000..0x1900, sizes 100,200,...,1000
+  for (let i = 0; i < 10; i++) {
+    traces.push({ action: 'alloc', addr: 0x1000 + i * 0x100, size: (i + 1) * 100,
+                  frames: [], stream: 0 });
+  }
+  // Private pool: 10 allocs at 0x5000..0x5900, sizes 200,400,...,2000
+  for (let i = 0; i < 10; i++) {
+    traces.push({ action: 'alloc', addr: 0x5000 + i * 0x100, size: (i + 1) * 200,
+                  frames: [], stream: 0 });
+  }
+
+  const snapshot = makeSnapshot({
+    traces,
+    segments: [
+      { device: 0, address: 0x1000, total_size: 0x1000, segment_pool_id: [0, 0],
+        stream: 0, blocks: [] },
+      { device: 0, address: 0x5000, total_size: 0x1000, segment_pool_id: poolId,
+        stream: 0, blocks: [] },
+    ],
+  });
+
+  // Global top 5: the 5 largest across all pools.
+  // Private pool sizes: 200,400,...,2000. Default pool sizes: 100,200,...,1000.
+  // Top 5 globally = 2000,1800,1600,1400,1200 (all from private pool).
+  // Default pool: all 10 go to global summarized band.
+  // Private pool: top 5 drawn, bottom 5 (200+400+600+800+1000=3000) in per-pool summary.
+  const result = process_alloc_data(snapshot, 0, false, 5, true);
+
+  const non_pool = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === undefined);
+  assertEqual(non_pool.length, 0, 'default pool: 0 drawn (all smaller than top 5)');
+
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 5, 'private pool: 5 drawn stripes');
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, '1 pool envelope');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+  const ps_max = Math.max(...pool_summaries[0].size);
+  assertEqual(ps_max, 3000, 'per-pool summarized max = 3000');
+
+  // Global summarized band has ALL default pool allocs (100+200+...+1000=5500)
+  const global_summary = result.allocations_over_time.find(
+    d => d.elem === 'summarized' && d.opacity === undefined);
+  assert(global_summary !== undefined, 'global summarized band exists');
+  const gs_max = Math.max(...global_summary.size);
+  assertEqual(gs_max, 5500, 'global summarized max = 5500 (all default pool allocs)');
+
+  assertEqual(result.elements_length, 20, 'elements_length = 20 (total elements)');
+}
+
+function test_per_pool_summarization_with_frees() {
+  console.log('test_per_pool_summarization_with_frees');
+  // 6 allocs in private pool, limit to 3. Then free 2 drawn and 2 non-drawn.
+  // Verify summarized stripe shrinks on non-drawn frees.
+  const poolId = [1, 60];
+  const snapshot = makeSnapshot({
+    traces: [
+      // 6 allocs: sizes 100,200,300,400,500,600
+      // Top 3 drawn: 400,500,600. Summarized: 100,200,300.
+      { action: 'alloc', addr: 0x8100, size: 100, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8200, size: 200, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8300, size: 300, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8400, size: 400, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8500, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8600, size: 600, frames: [], stream: 0 },
+      // Free a drawn element (600)
+      { action: 'free_completed', addr: 0x8600, size: 600, frames: [], stream: 0 },
+      // Free a non-drawn element (100) — summarized should shrink
+      { action: 'free_completed', addr: 0x8100, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x8000, total_size: 0x1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 3, true);
+
+  // After all events: drawn active = 400+500 = 900, summarized active = 200+300 = 500
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  // 3 drawn stripes created (400, 500, 600), 600 was freed (closed out)
+  assertEqual(stripes.length, 3, '3 pool stripes created (one freed)');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+
+  // Summarized stripe should show the shrink: peak was 600 (100+200+300),
+  // then 100 was freed → final = 500 (200+300)
+  const ps = pool_summaries[0];
+  const ps_max = Math.max(...ps.size);
+  assertEqual(ps_max, 600, 'per-pool summarized peak = 600 (before non-drawn free)');
+  const ps_final = ps.size.at(-1);
+  assertEqual(ps_final, 500, 'per-pool summarized final = 500 (after non-drawn free)');
+}
+
+function test_per_pool_summarization_initially_allocated() {
+  console.log('test_per_pool_summarization_initially_allocated');
+  // 4 free_completed events in a private pool (no matching allocs).
+  // Limit to 2. The 2 largest should be drawn stripes, the 2 smallest
+  // should be in the per-pool summarized stripe.
+  const poolId = [1, 70];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 0xa100, size: 100, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa200, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa300, size: 300, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa400, size: 400, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0xa000, total_size: 0x1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 2, true);
+
+  // Top 2 by size: 300, 400 → drawn stripes (pre-loaded then freed)
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, '2 drawn stripes (largest initially_allocated)');
+  const stripe_sizes = stripes.map(s => s.size).sort((a, b) => a - b);
+  assertEqual(stripe_sizes[0], 300, 'drawn stripe 300');
+  assertEqual(stripe_sizes[1], 400, 'drawn stripe 400');
+
+  // Summarized: 100 + 200 = 300 initially, then freed to 0
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+  const ps_max = Math.max(...pool_summaries[0].size);
+  assertEqual(ps_max, 300, 'per-pool summarized peak = 300 (100+200)');
+  assertEqual(pool_summaries[0].size.at(-1), 0,
+    'per-pool summarized final = 0 (all freed)');
+}
+
+function test_per_pool_summarization_interleaved() {
+  console.log('test_per_pool_summarization_interleaved');
+  // Drawn and non-drawn allocs interleaved: drawn stripes must not overlap
+  // with the summarized region. Alloc order: 1800 (drawn), 200 (non-drawn),
+  // 1600 (drawn), 100 (non-drawn).
+  const poolId = [1, 80];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xc000, size: 1800, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xc800, size: 200, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xd000, size: 1600, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xd800, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0xc000, total_size: 0x2000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  // max_entries=2: drawn = 1800, 1600. Non-drawn = 200, 100.
+  const result = process_alloc_data(snapshot, 0, false, 2, true);
+
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, '2 drawn stripes');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+
+  // Summarized sits on top of drawn stripes (like global summarized band).
+  // Drawn stripes start at envelope base, summarized is above them.
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  const env_base = envelopes[0].offsets.at(-1);
+  const sum_final = pool_summaries[0].size.at(-1);
+  assertEqual(sum_final, 300, 'summarized final = 300 (200+100)');
+
+  // Drawn stripes should start at envelope base
+  for (const stripe of stripes) {
+    const final_offset = stripe.offsets.at(-1);
+    assert(final_offset >= env_base,
+      `stripe offset ${final_offset} must be >= env_base(${env_base})`);
+  }
+
+  // Summarized stripe offset should be at envelope_base + drawn_active
+  const sum_offset = pool_summaries[0].offsets.at(-1);
+  const drawn_tops = stripes.map(s => s.offsets.at(-1) + s.size);
+  const max_drawn_top = Math.max(...drawn_tops);
+  assert(sum_offset >= max_drawn_top - 1,
+    `summarized offset ${sum_offset} should be at or above top of drawn stripes ${max_drawn_top}`);
+}
+
+// ============================================================
 // Run all tests
 // ============================================================
 
@@ -1295,6 +1501,10 @@ test_envelope_from_initial_reserved();
 test_envelope_segment_map_no_double_count();
 test_envelope_active_exceeds_reserved();
 test_envelope_default_pool_unaffected();
+test_per_pool_summarization();
+test_per_pool_summarization_with_frees();
+test_per_pool_summarization_initially_allocated();
+test_per_pool_summarization_interleaved();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
