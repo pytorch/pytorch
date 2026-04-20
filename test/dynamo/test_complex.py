@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -70,7 +69,6 @@ class ComplexTests(ComplexDynamoTestCase):
         ):
             fn_c(a)
 
-    @unittest.expectedFailure
     def test_aliasing_semantics_2(self):
         def f(a):
             return a
@@ -83,7 +81,11 @@ class ComplexTests(ComplexDynamoTestCase):
 
         fn_c = torch.compile(f, fullgraph=True)
 
-        self.assertEqual(mutate(fn_c), mutate(f))
+        with self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed,
+            msg=r"For wrapped complex output \d+, aliasing input data is not supported.",
+        ):
+            mutate(fn_c)
 
 
 instantiate_parametrized_tests(ComplexTests)
