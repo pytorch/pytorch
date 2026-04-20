@@ -22,7 +22,7 @@ Note that the import should happen before the call to install_config_module(), o
 """
 
 if not TYPE_CHECKING:  # noqa: PYI002
-    raise AssertionError("Do not use at runtime")  # noqa: W291
+    raise AssertionError("Do not use at runtime")
 
 def save_config() -> bytes: ...
 def save_config_portable(*, ignore_private_configs: bool = True) -> dict[str, Any]: ...

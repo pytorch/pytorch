@@ -1015,7 +1015,7 @@ Data-dependent branching
 
 from user code:
    File "test_error_messages.py", line N, in cast_overflow_tensors
-    if tensors.isinf().any() or tensors.isnan().any():""",  # noqa: B950
+    if tensors.isinf().any() or tensors.isnan().any():""",
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker

@@ -1067,7 +1067,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
         raise
-    except:  # noqa: B001,E722, copied from python core library
+    except:
         p.kill()
         raise
     finally:
@@ -2242,7 +2242,7 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if IS_WINDOWS:  # noqa: F821
+            if IS_WINDOWS:
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -2257,7 +2257,7 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
+            if IS_WINDOWS and torch.xpu.is_available():
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -3549,7 +3549,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:  # noqa: B036
+                        except BaseException as e:
                             self.skipTest(e)
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
@@ -3571,7 +3571,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:  # noqa: B036
+                        except BaseException as e:
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
                         if getattr(method, "__unittest_expecting_failure__", False):
