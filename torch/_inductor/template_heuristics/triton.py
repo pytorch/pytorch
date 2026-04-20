@@ -1561,8 +1561,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
         }
 
@@ -1753,7 +1753,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack)
+                default_config = ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
