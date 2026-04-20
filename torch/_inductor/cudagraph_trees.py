@@ -1598,7 +1598,7 @@ class CUDAGraphNode:
         return True
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
-        "Adds node as a a child of self"
+        "Adds node as a child of self"
         self.children[function_id].append(node)
 
     @staticmethod

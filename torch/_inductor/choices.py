@@ -417,7 +417,7 @@ class InductorChoices:
             lower = next_power_of_2(int(lower))
             upper = next_power_of_2(int(upper))
 
-            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # If we are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
             # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
