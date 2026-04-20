@@ -2,10 +2,9 @@
 
 #include <c10/macros/Export.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <ostream>
+#include <iosfwd>
 #include <string_view>
 
 namespace c10 {
