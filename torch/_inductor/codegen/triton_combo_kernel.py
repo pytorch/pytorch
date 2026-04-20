@@ -767,7 +767,7 @@ class ComboKernel(Kernel):
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **self.triton_kernel_cls.inductor_meta_common(),
+            **selected_kernel.inductor_meta_common(),
         }
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock

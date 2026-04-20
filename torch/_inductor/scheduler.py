@@ -2669,8 +2669,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
             for node in nodes:
                 device = node.get_device()
-                if device and (device.type == "mps" or device.type == "cpu"):
-                    continue
+                # MTIA could lower with fake tensors on cpu, but the kernel is executed on device.
+                # Give it a chance to use combo kernel.
+                if not torch.mtia.is_available():
+                    if device and (device.type == "mps" or device.type == "cpu"):
+                        continue
 
                 # exclude nodes that read from FusedMixOrderReductions output buffers'
                 if node.used_buffer_names() & excluded_buffer_names:
