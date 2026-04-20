@@ -3055,6 +3055,8 @@
       self: grad.mul(grad)
     AutogradCUDA:
       self: grad.expand_symint(self.sym_sizes()) * 2
+    AutogradXPU:
+      self: grad.expand_symint(self.sym_sizes()) * 2
 
 - name: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
   dispatch:
@@ -3066,6 +3068,8 @@
     Default:
       self: grad.reshape_as(self)
     AutogradCUDA:
+      self: grad.reshape_as(self) + 1
+    AutogradXPU:
       self: grad.reshape_as(self) + 1
 
 - name: _efficientzerotensor(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
