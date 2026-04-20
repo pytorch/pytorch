@@ -142,7 +142,7 @@ class InstanceNorm1d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -271,7 +271,7 @@ class InstanceNorm2d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -401,7 +401,7 @@ class InstanceNorm3d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 

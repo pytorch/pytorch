@@ -110,7 +110,7 @@ class LayerNorm(Module):
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -255,7 +255,7 @@ class GroupNorm(Module):
     the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 

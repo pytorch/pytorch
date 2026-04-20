@@ -311,7 +311,7 @@ class BatchNorm1d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -436,7 +436,7 @@ class BatchNorm2d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -561,7 +561,7 @@ class BatchNorm3d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
@@ -687,7 +687,7 @@ class SyncBatchNorm(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
     with
 
