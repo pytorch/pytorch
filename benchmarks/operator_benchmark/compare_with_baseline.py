@@ -51,8 +51,11 @@ def extract_latency_map(records):
 def gmean(values):
     if not values:
         return 0.0
-    log_sum = sum(math.log(v) for v in values if v > 0)
-    return math.exp(log_sum / len(values))
+    positive = [v for v in values if v > 0]
+    if not positive:
+        return 0.0
+    log_sum = sum(math.log(v) for v in positive)
+    return math.exp(log_sum / len(positive))
 
 
 def format_comparison(branch_map, baseline_map):
