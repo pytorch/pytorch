@@ -8050,6 +8050,23 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def test_writable_shared_buffer_ptr(self):
+        import ctypes
+        n = 1024
+        x = torch.empty(n, dtype=torch.float32, device="mps")
+        torch.mps.synchronize()
+        ptr = torch.mps._writable_shared_buffer_ptr(x)
+        # Discrete-memory MPS devices legitimately return 0: no shared storage.
+        if ptr == 0:
+            self.skipTest("MPS device does not support shared storage")
+        ref = torch.arange(n, dtype=torch.float32)
+        ctypes.memmove(ptr, ref.data_ptr(), n * ref.element_size())
+        self.assertEqual(x.cpu(), ref)
+
+        # Non-MPS tensors must be rejected.
+        with self.assertRaises(ValueError):
+            torch.mps._writable_shared_buffer_ptr(torch.empty(4))
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged

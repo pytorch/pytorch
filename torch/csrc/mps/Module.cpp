@@ -13,6 +13,7 @@
 #include <memory>
 
 #ifdef USE_MPS
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
@@ -534,6 +535,17 @@ void initModule(PyObject* module) {
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
+  m.def(
+      "_mps_get_writable_shared_buffer_ptr",
+      [](uintptr_t data_ptr) -> uintptr_t {
+        auto* allocator = at::mps::getIMPSAllocator();
+        if (!allocator) {
+          return 0;
+        }
+        void* writable = allocator->getWritableSharedBufferPtr(
+            reinterpret_cast<const void*>(data_ptr));
+        return reinterpret_cast<uintptr_t>(writable);
+      });
 }
 #endif /* USE_MPS */
 

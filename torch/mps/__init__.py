@@ -199,6 +199,27 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def _writable_shared_buffer_ptr(tensor: Tensor) -> int:
+    r"""Returns a writable host pointer to the shared-storage MTLBuffer
+    backing ``tensor``, or 0 if the tensor is not backed by a shared-storage
+    MPS allocation (e.g. on discrete-memory devices, or for tensors not
+    allocated by the MPS allocator).
+
+    This is an advanced, non-stable interop primitive intended for external
+    libraries that write tensor data directly into MPS memory (e.g. bulk
+    safetensors loaders), avoiding a CPU→MPS staging copy.
+
+    The caller is responsible for synchronization: CPU writes must not race
+    in-flight GPU work on the same buffer. Call :func:`torch.mps.synchronize`
+    before writing and again before subsequent GPU ops read the written data.
+    Writing past the storage size or after the tensor is freed is undefined
+    behavior.
+    """
+    if tensor.device.type != "mps":
+        raise ValueError(f"expected an MPS tensor, got device={tensor.device}")
+    return torch._C._mps_get_writable_shared_buffer_ptr(tensor.data_ptr())
+
+
 from . import profiler
 from .event import Event
 

@@ -38,6 +38,11 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
+  // returns a writable host pointer to a shared-storage MTLBuffer allocated
+  // by MPSAllocator, or nullptr for non-shared-storage / unknown buffers.
+  // Intended for advanced interop (e.g. bulk tensor loaders) that need to
+  // write directly into MPS memory, bypassing the CPU→MPS staging copy.
+  virtual void* getWritableSharedBufferPtr(const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 };

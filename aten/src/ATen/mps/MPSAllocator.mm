@@ -544,6 +544,19 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
 }
 
+void* MPSHeapAllocatorImpl::getWritableSharedBufferPtr(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    return nullptr;
+  }
+  if (!buffer_block->cpu_ptr) {
+    buffer_block->cpu_ptr = [buffer_block->buffer contents];
+  }
+  return buffer_block->cpu_ptr;
+}
+
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   bool recordedEvent = false;
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -739,6 +752,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getSharedBufferPtr(ptr);
+  }
+  void* getWritableSharedBufferPtr(const void* ptr) const override {
+    return _getAllocImpl().getWritableSharedBufferPtr(ptr);
   }
   bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
