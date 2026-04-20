@@ -9,7 +9,6 @@ from typing import Any
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._higher_order_ops.partitioner import (
     _find_hop_subgraph_outputs,
     HopGraphMinCutPartitioner,
@@ -19,24 +18,20 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_hop_call_proxy,
     fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,
     get_tensor_mask,
     mask_list,
     materialize_as_graph,
-    reenter_make_fx,
+    register_hop_dispatches,
     split_into_chunks,
-    unique_graph_id,
+    trace_and_register_subgraphs,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
@@ -387,9 +382,15 @@ def trace_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        combine_graph = reenter_make_fx(combine_fn)(
-            *sample_inits, *sample_inputs, *sample_additional_inputs
+        (combine_subgraph,) = trace_and_register_subgraphs(
+            proxy_mode,
+            (
+                "scan_combine_graph",
+                combine_fn,
+                (*sample_inits, *sample_inputs, *sample_additional_inputs),
+            ),
         )
+        combine_graph = combine_subgraph.graph
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -416,14 +417,12 @@ def trace_scan(
         init_fake_tensors, carry_fake_tensors, "init", "carry", include_contiguity=False
     )
 
-    _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
-
-    proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
-
     args = (combine_graph, init, xs, additional_inputs)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="scan"
+    out_proxy = create_hop_call_proxy(
+        proxy_mode,
+        func_overload,
+        args,
+        name="scan",
     )
 
     with disable_proxy_modes_tracing():
@@ -439,7 +438,6 @@ def trace_scan(
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def scan_op_dense(combine_fn, init, xs, additional_inputs):
     mode = _get_current_dispatch_mode()
     if mode is not None:
@@ -814,7 +812,6 @@ class ScanAutogradImpl:
         )
 
 
-@scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
     with disable_proxy_modes_tracing():
         hop_partitioned_graph: HopPartitionedGraph = (
@@ -836,12 +833,10 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
     )
 
 
-@scan_op.py_impl(ProxyTorchDispatchMode)
 def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
     return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
 
 
-@scan_op.py_impl(FakeTensorMode)
 def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
     with mode:
         scan_length = xs[0].shape[0]
@@ -860,7 +855,6 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
         return out
 
 
-@scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
@@ -892,6 +886,16 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)
+
+
+register_hop_dispatches(
+    scan_op,
+    autograd_impl=scan_autograd,
+    functionalize_impl=scan_functionalize,
+    proxy_mode_impl=scan_proxy_mode,
+    fake_tensor_impl=scan_fake_tensor_mode,
+    composite_impl=scan_op_dense,
+)
 
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)

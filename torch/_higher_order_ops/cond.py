@@ -9,7 +9,6 @@ from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,
     get_unwrapped,
@@ -20,19 +19,20 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
+    create_hop_call_proxy,
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
-    reenter_make_fx,
+    register_hop_dispatches,
     save_values_for_backward,
     saved_values,
-    unique_graph_id,
+    trace_and_register_subgraphs,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
@@ -252,8 +252,13 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
         )
 
-    true_graph = reenter_make_fx(true_fn)(*operands)
-    false_graph = reenter_make_fx(false_fn)(*operands)
+    true_subgraph, false_subgraph = trace_and_register_subgraphs(
+        proxy_mode,
+        ("true_graph", true_fn, operands),
+        ("false_graph", false_fn, operands),
+    )
+    true_graph = true_subgraph.graph
+    false_graph = false_subgraph.graph
 
     true_outs = []
     false_outs = []
@@ -274,31 +279,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
-    i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
-
-    false_name = f"false_graph_{i}"
-    if hasattr(proxy_mode.tracer.root, false_name):
-        raise AssertionError(
-            f"proxy_mode.tracer.root already has attribute {false_name}"
-        )
-
-    proxy_mode.tracer.root.register_module(true_name, true_graph)
-    proxy_mode.tracer.root.register_module(false_name, false_graph)
-
     args = (pred, true_graph, false_graph, operands)
-
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}
-    )
+    out_proxy = create_hop_call_proxy(proxy_mode, func_overload, args)
 
     out = func_overload(pred, true_graph, false_graph, operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
     if not all(isinstance(o, (torch.Tensor, int)) for o in operands):
         raise AssertionError(
@@ -390,7 +378,6 @@ class CondAutogradOp(torch.autograd.Function):
 # As long as one of the tensors in pred or operands requires grad,
 # all the output would require grad with backward fn set to be the CondAutogradOp.
 # This is consistent with autograd.Function's semantic.
-@cond_op.py_autograd_impl
 def cond_autograd(pred, true_fn, false_fn, operands):
     return CondAutogradOp.apply(
         pred,
@@ -400,12 +387,10 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     )
 
 
-@cond_op.py_impl(ProxyTorchDispatchMode)
-def inner(mode, pred, true_fn, false_fn, operands):
+def cond_proxy_torch_dispatch_mode(mode, pred, true_fn, false_fn, operands):
     return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
-@cond_op.py_impl(FakeTensorMode)
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     # Ignore here, because if you've gotten here but you're not manually
     # tracing the inner graphs, that means that you intend to reuse the graph
@@ -707,7 +692,6 @@ def _merge_output(
         )
 
 
-@cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     from torch._higher_order_ops.auto_functionalize import (
         can_auto_functionalize,
@@ -741,6 +725,16 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return ctx.wrap_tensors(cond_return)
+
+
+register_hop_dispatches(
+    cond_op,
+    autograd_impl=cond_autograd,
+    functionalize_impl=cond_func,
+    proxy_mode_impl=cond_proxy_torch_dispatch_mode,
+    fake_tensor_impl=cond_fake_tensor_mode,
+    composite_impl=cond_op_dense,
+)
 
 
 @cond_op.py_impl(torch._C._functorch.TransformType.Vmap)

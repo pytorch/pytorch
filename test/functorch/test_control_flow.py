@@ -15,6 +15,7 @@ from torch._dynamo.testing import (
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
+    associative_scan_op,
 )
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
@@ -7002,6 +7003,32 @@ def forward(self, arg0_1):
         res = gm(x, y, z)
         self.assertEqual(res, g(x, y, z))
         self.check_map_count(gm, 1)
+
+    def test_tracing_associative_scan_op_symbolic(self):
+        def combine_fn(lhs, rhs):
+            return [lhs + rhs.sin()]
+
+        def f(x):
+            return associative_scan_op(combine_fn, [x], ())
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.ones(3, 4))
+        x = torch.randn(5, 4)
+        res = gm(x)
+        self.assertEqual(res, f(x))
+        self.assertTrue(hasattr(gm, "associative_scan_combine_graph_0"))
+
+    def test_tracing_associative_scan_op_real(self):
+        def combine_fn(lhs, rhs):
+            return [lhs + rhs.sin()]
+
+        def f(x):
+            return associative_scan_op(combine_fn, [x], ())
+
+        gm = make_fx(f, tracing_mode="real")(torch.ones(3, 4))
+        x = torch.randn(5, 4)
+        res = gm(x)
+        self.assertEqual(res, f(x))
+        self.assertTrue(hasattr(gm, "associative_scan_combine_graph_0"))
 
     def test_tracing_map_autograd_symbolic_simple(self):
         def f(x, y):

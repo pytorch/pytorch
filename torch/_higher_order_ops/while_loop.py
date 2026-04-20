@@ -5,25 +5,23 @@ from collections.abc import Callable
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_hop_call_proxy,
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
+    register_hop_dispatches,
     reenter_make_fx,
+    trace_and_register_subgraphs,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -256,7 +254,6 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     )
 
 
-@while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(
     cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
@@ -322,7 +319,6 @@ def while_loop_dense(
     return carried_vals
 
 
-@while_loop_op.py_autograd_impl
 def while_loop_autograd(cond_fn, body_fn, operands, additional_inputs):
     return WhileLoopAutogradOp.apply(
         cond_fn,
@@ -358,7 +354,6 @@ def _create_unbacked_symint(
         return fake_mode.shape_env.create_unbacked_symint()
 
 
-@while_loop_op.py_impl(ProxyTorchDispatchMode)
 def while_loop_tracing(
     mode,
     cond_fn,
@@ -450,31 +445,20 @@ def while_loop_tracing(
             cond_graph = produce_graph(cond_fn)
             body_graph = produce_graph(body_fn)
 
-        next_name = None
-        i = 0
-        # pyrefly: ignore [bad-assignment]
-        while not next_name:
-            candidate = f"while_loop_cond_graph_{i}"
-            if hasattr(proxy_mode.tracer.root, candidate):
-                i += 1
-            else:
-                next_name = candidate
-        cond_graph_name = next_name
-        body_graph_name = f"while_loop_body_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, body_graph_name):
-            raise AssertionError(
-                f"proxy_mode.tracer.root already has attribute {body_graph_name}"
-            )
-
-        proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
-        proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
+        cond_subgraph, body_subgraph = trace_and_register_subgraphs(
+            proxy_mode,
+            ("while_loop_cond_graph", cond_graph),
+            ("while_loop_body_graph", body_graph),
+        )
+        cond_graph = cond_subgraph.graph
+        body_graph = body_subgraph.graph
 
         args = (cond_graph, body_graph, carried_inputs, additional_inputs)
-
-        proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-
-        out_proxy = proxy_mode.tracer.create_proxy(
-            "call_function", op, proxy_args, {}, name=op._name
+        out_proxy = create_hop_call_proxy(
+            proxy_mode,
+            op,
+            args,
+            name=op._name,
         )
 
         out = op(
@@ -494,7 +478,6 @@ def while_loop_tracing(
     )
 
 
-@while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
@@ -576,7 +559,6 @@ def while_loop_fake_tensor_mode(
         )
 
 
-@while_loop_op.py_functionalize_impl
 def while_loop_func(
     ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
@@ -603,6 +585,16 @@ def while_loop_func(
             unwrapped_additional_inputs,
         )
         return ctx.wrap_tensors(ret)
+
+
+register_hop_dispatches(
+    while_loop_op,
+    autograd_impl=while_loop_autograd,
+    functionalize_impl=while_loop_func,
+    proxy_mode_impl=while_loop_tracing,
+    fake_tensor_impl=while_loop_fake_tensor_mode,
+    composite_impl=while_loop_dense,
+)
 
 
 class WhileLoopStackOutputOp(HigherOrderOperator):
@@ -932,22 +924,15 @@ class WhileLoopAutogradOp(torch.autograd.Function):
 
 while_loop_stack_output_op = WhileLoopStackOutputOp()
 
-while_loop_stack_output_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
-    functools.partial(while_loop_dense, stack_output=True)
-)
-
-while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
-    functools.partial(while_loop_tracing, stack_output=True)
-)
-
-while_loop_stack_output_op.py_impl(FakeTensorMode)(
-    functools.partial(while_loop_fake_tensor_mode, stack_output=True)
-)
-
-while_loop_stack_output_op.py_functionalize_impl(
-    functools.partial(while_loop_func, stack_output=True)
-)
-
-while_loop_stack_output_op.py_autograd_impl(
-    autograd_not_implemented(while_loop_stack_output_op, deferred_error=True)
+register_hop_dispatches(
+    while_loop_stack_output_op,
+    autograd_impl=autograd_not_implemented(
+        while_loop_stack_output_op, deferred_error=True
+    ),
+    functionalize_impl=functools.partial(while_loop_func, stack_output=True),
+    proxy_mode_impl=functools.partial(while_loop_tracing, stack_output=True),
+    fake_tensor_impl=functools.partial(
+        while_loop_fake_tensor_mode, stack_output=True
+    ),
+    composite_impl=functools.partial(while_loop_dense, stack_output=True),
 )

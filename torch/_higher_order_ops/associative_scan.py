@@ -7,30 +7,25 @@ from typing import Any
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    create_hop_call_proxy,
     create_bw_fn,
     first_slice_copy,
     first_slice_copy_with_grad,
     materialize_as_graph,
-    reenter_make_fx,
+    register_hop_dispatches,
     save_values_for_backward,
     saved_values,
     split_into_chunks,
-    unique_graph_id,
+    trace_and_register_subgraphs,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
 
 
 aten = torch._ops.ops.aten
@@ -419,9 +414,15 @@ def trace_associative_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        combine_graph = reenter_make_fx(combine_fn)(
-            *sample_xs, *sample_additional_inputs
+        (combine_subgraph,) = trace_and_register_subgraphs(
+            proxy_mode,
+            (
+                "associative_scan_combine_graph",
+                combine_fn,
+                (*sample_xs, *sample_additional_inputs),
+            ),
         )
+        combine_graph = combine_subgraph.graph
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -452,16 +453,12 @@ def trace_associative_scan(
         xs_fake_tensors, output_fake_tensors, "init", "carry", include_contiguity=False
     )
 
-    _, combine_graph_name = unique_graph_id(
-        proxy_mode, prefix="associative_scan_combine_graph"
-    )
-
-    proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
-
     args = (combine_graph, xs, additional_inputs)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="associative_scan"
+    out_proxy = create_hop_call_proxy(
+        proxy_mode,
+        func_overload,
+        args,
+        name="associative_scan",
     )
 
     with disable_proxy_modes_tracing():
@@ -470,7 +467,6 @@ def trace_associative_scan(
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def associative_scan_op_dense(combine_fn, xs, additional_inputs):
     return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
@@ -832,7 +828,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
 
 
-@associative_scan_op.py_autograd_impl
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
     num_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
@@ -851,20 +846,17 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
     return (*flat_out,)
 
 
-@associative_scan_op.py_impl(ProxyTorchDispatchMode)
 def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
     return trace_associative_scan(
         mode, associative_scan_op, combine_fn, xs, additional_inputs
     )
 
 
-@associative_scan_op.py_impl(FakeTensorMode)
 def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
     with mode:
         return tuple(x.clone() for x in xs)
 
 
-@associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
 
@@ -893,6 +885,16 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)
+
+
+register_hop_dispatches(
+    associative_scan_op,
+    autograd_impl=associative_scan_autograd,
+    functionalize_impl=associative_scan_functionalize,
+    proxy_mode_impl=associative_scan_proxy_mode,
+    fake_tensor_impl=assoiciative_scan_fake_tensor_mode,
+    composite_impl=associative_scan_op_dense,
+)
 
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):

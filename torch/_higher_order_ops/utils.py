@@ -9,13 +9,14 @@ from typing import Any, overload, TypeVar
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -24,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
     make_fx,
+    ProxyTorchDispatchMode,
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
@@ -33,6 +35,17 @@ from torch.multiprocessing.reductions import StorageWeakRef
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
+
+@dataclass(frozen=True)
+class RegisteredSubgraph:
+    name: str
+    graph: torch.fx.GraphModule
+
+
+TracedSubgraphSpec = tuple[str, torch.fx.GraphModule]
+UntracedSubgraphSpec = tuple[str, Callable[..., Any], tuple[Any, ...]]
+SubgraphSpec = TracedSubgraphSpec | UntracedSubgraphSpec
 
 
 def autograd_not_implemented_inner(
@@ -492,25 +505,82 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
 
 def unique_graph_id(proxy_mode, prefix):
     """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
-    # There are probably better ways - I know that create_arg has some self incrementing name
-    # magic to it, but since we explicitly have to get the name for register_module,
-    # I was not sure how to do that. This kinda simulates it.
-    return unique_graph_name_with_root(proxy_mode.tracer.root, prefix)
+    i, names = unique_graph_names_with_root(proxy_mode.tracer.root, prefix)
+    return i, names[0]
 
 
 def unique_graph_name_with_root(
     root: torch.fx.GraphModule, prefix: str
 ) -> tuple[int, str]:
+    i, names = unique_graph_names_with_root(root, prefix)
+    return i, names[0]
+
+
+def unique_graph_names_with_root(
+    root: torch.fx.GraphModule, *prefixes: str
+) -> tuple[int, tuple[str, ...]]:
+    # There are probably better ways - I know that create_arg has some self incrementing name
+    # magic to it, but since we explicitly have to get the name for register_module,
+    # I was not sure how to do that. This kinda simulates it.
+    if len(prefixes) == 0:
+        raise AssertionError("Expected at least one prefix")
+
     next_name = None
     i = 0
     # pyrefly: ignore [bad-assignment]
     while not next_name:
-        candidate = f"{prefix}_{i}"
-        if hasattr(root, candidate):
+        candidates = tuple(f"{prefix}_{i}" for prefix in prefixes)
+        if any(hasattr(root, candidate) for candidate in candidates):
             i += 1
         else:
-            next_name = candidate
+            next_name = candidates
     return i, next_name
+
+
+def trace_and_register_subgraphs(
+    proxy_mode: ProxyTorchDispatchMode, *subgraph_specs: SubgraphSpec
+) -> tuple[RegisteredSubgraph, ...]:
+    traced_graphs: list[torch.fx.GraphModule] = []
+    prefixes: list[str] = []
+    for spec in subgraph_specs:
+        if len(spec) == 2:
+            prefix, graph = spec
+            if not isinstance(graph, torch.fx.GraphModule):
+                raise AssertionError(
+                    "Expected a GraphModule when registering a traced subgraph"
+                )
+        elif len(spec) == 3:
+            prefix, fn, args = spec
+            graph = reenter_make_fx(fn)(*args)
+        else:
+            raise AssertionError(
+                "Expected subgraph spec of the form (prefix, graph) or (prefix, fn, args)"
+            )
+        prefixes.append(prefix)
+        traced_graphs.append(graph)
+
+    _, names = unique_graph_names_with_root(proxy_mode.tracer.root, *prefixes)
+    registered_subgraphs: list[RegisteredSubgraph] = []
+    for name, graph in zip(names, traced_graphs):
+        proxy_mode.tracer.root.register_module(name, graph)
+        registered_subgraphs.append(RegisteredSubgraph(name, graph))
+
+    return tuple(registered_subgraphs)
+
+
+def create_hop_call_proxy(
+    proxy_mode: ProxyTorchDispatchMode,
+    hop: OperatorBase,
+    args: Any,
+    kwargs: Mapping[str, Any] | None = None,
+    *,
+    name: str | None = None,
+) -> torch.fx.Proxy:
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
+    proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs or {})
+    return proxy_mode.tracer.create_proxy(
+        "call_function", hop, proxy_args, proxy_kwargs, name=name
+    )
 
 
 def _from_fun(t):
@@ -655,6 +725,22 @@ def redirect_to_mode(hop: OperatorBase, mode):
         return mode.__torch_dispatch__(hop, [], args, kwargs)
 
     return impl
+
+
+def register_hop_dispatches(
+    hop: HigherOrderOperator,
+    *,
+    autograd_impl: Callable,
+    functionalize_impl: Callable,
+    proxy_mode_impl: Callable,
+    fake_tensor_impl: Callable,
+    composite_impl: Callable,
+) -> None:
+    hop.py_autograd_impl(autograd_impl)
+    hop.py_functionalize_impl(functionalize_impl)
+    hop.py_impl(ProxyTorchDispatchMode)(proxy_mode_impl)
+    hop.py_impl(FakeTensorMode)(fake_tensor_impl)
+    hop.py_impl(DispatchKey.CompositeExplicitAutograd)(composite_impl)
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations

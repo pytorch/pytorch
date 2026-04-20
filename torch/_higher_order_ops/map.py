@@ -5,30 +5,27 @@ from typing_extensions import TypeVarTuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, track_tensor_tree
 
 from .utils import (
     _from_fun,
+    _maybe_run_with_interpreter,
     _stack_pytree,
     _unstack_pytree,
+    create_hop_call_proxy,
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,
     materialize_as_graph,
+    register_hop_dispatches,
     save_values_for_backward,
     saved_values,
     split_into_chunks,
+    trace_and_register_subgraphs,
 )
 
 
@@ -248,46 +245,41 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
         # Use first_slice_copy instead of _unstack_pytree to avoid
         # iterating over batch dim, which would guard on symbolic sizes.
         example_input = pytree.tree_map(first_slice_copy, xs)
-
-        body_graph = f
-
-        body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
-
-    next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
-
-    proxy_mode.tracer.root.register_module(next_name, body_graph)
+        (body_subgraph,) = trace_and_register_subgraphs(
+            proxy_mode,
+            ("body_graph", f, (*example_input, *pos_args)),
+        )
+        body_graph = body_subgraph.graph
 
     fake_outs = map_impl(body_graph, xs, pos_args)
 
     node_args = (body_graph, list(xs), list(pos_args))
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="map_impl"
+    out_proxy = create_hop_call_proxy(
+        proxy_mode,
+        func_overload,
+        node_args,
+        name="map_impl",
     )
     return track_tensor_tree(
         fake_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
 
 
-@map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, xs, pos_args):
     pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
     return _stack_pytree(pytrees)
 
 
-@map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
     flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
     return flat_out
 
 
-@map_impl.py_impl(ProxyTorchDispatchMode)
 def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@map_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(mode, f, xs, args):
     from torch._higher_order_ops.utils import first_slice_copy
 
@@ -303,7 +295,6 @@ def map_fake_tensor_mode(mode, f, xs, args):
         return _broadcast_to_batch(example_output, batch_size)
 
 
-@map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
@@ -325,6 +316,16 @@ def map_functionalize(ctx, f, xs, pos_args):
         _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)
+
+
+register_hop_dispatches(
+    map_impl,
+    autograd_impl=map_autograd,
+    functionalize_impl=map_functionalize,
+    proxy_mode_impl=map_proxy_torch_dispatch_mode,
+    fake_tensor_impl=map_fake_tensor_mode,
+    composite_impl=map_dense,
+)
 
 
 def _fake_map(f, x, *args):
