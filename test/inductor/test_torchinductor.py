@@ -2331,6 +2331,15 @@ class CommonTemplate:
             self.common(fn, (inp.view(-1),), rtol=1e-4, atol=1e-5, check_lowp=False)
             self.common(fn, (inp.view(10, -1),), rtol=1e-4, atol=1e-5, check_lowp=False)
 
+    def test_split_cumsum_broadcast(self):
+        # https://github.com/pytorch/pytorch/issues/180221
+        def fn(x, b):
+            return torch.cumsum(x + b, dim=1)
+
+        x = make_tensor(1, 129, 64, low=0, dtype=torch.float32, device=self.device)
+        b = make_tensor(64, low=0, dtype=torch.float32, device=self.device)
+        self.common(fn, (x, b))
+
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumsum_low_prec(self):
