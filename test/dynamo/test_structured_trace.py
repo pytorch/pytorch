@@ -371,10 +371,9 @@ class StructuredTraceTest(TestCase):
 {{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "output": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{"artifact": {"name": "aotautograd_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{"artifact": {"name": "aotautograd_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
@@ -706,66 +705,13 @@ class StructuredTraceTest(TestCase):
                 f"""\
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['x']"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_x_": [1024, 1024], "l__self___layers_0": [1024, 1024], "l__self___layers_1": [1024, 1024]}}}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_child": {{"name": "submod_0"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"optimize_ddp_split_child": {{"name": "submod_1"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['x']"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_joint_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_forward_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_backward_graph": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_bypass", "encoding": "json"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-""",  # noqa: B950
-            )
-        else:
-            self.assertExpectedInline(
-                self.buffer.getvalue(),
-                f"""\
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1024, 1024], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1024, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['args'][0]"}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
 {{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1}}
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}}
@@ -774,9 +720,6 @@ class StructuredTraceTest(TestCase):
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}}
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}}
 {{"artifact": {{"name": "dynamo_graph_break_reason", "encoding": "string"}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1}}
-{{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}

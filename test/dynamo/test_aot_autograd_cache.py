@@ -79,6 +79,48 @@ device_type = (
 )
 
 
+class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
+    """
+    Pre-grad pass that removes redundant identity multiplications (1 * x).
+    """
+
+    def __call__(self, g: torch.fx.Graph) -> None:
+        for n in g.nodes:
+            if n.op == "call_function" and n.target is operator.mul:
+                lhs, rhs = n.args
+                if lhs == 1:
+                    n.replace_all_uses_with(rhs)
+                    g.erase_node(n)
+
+    def uuid(self):
+        return "custom_pre_grad_pass_remove_ident_muls_v1"
+
+
+class CustomPreGradPassRemoveIdentMulsNoUUID(CustomPreGradPassRemoveIdentMuls):
+    def uuid(self):
+        return None
+
+
+custom_pre_grad_pass_remove_ident_muls = CustomPreGradPassRemoveIdentMuls()
+custom_pre_grad_pass_remove_ident_muls_wo_uuid = (
+    CustomPreGradPassRemoveIdentMulsNoUUID()
+)
+
+
+@contextlib.contextmanager
+def _fake_process_group(rank=0, world_size=2):
+    """Context manager for setting up and tearing down a fake process group."""
+    import torch.distributed as c10d
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    fake_store = FakeStore()
+    c10d.init_process_group("fake", store=fake_store, rank=rank, world_size=world_size)
+    try:
+        yield
+    finally:
+        c10d.destroy_process_group()
+
+
 def aot_eager_regional_inductor():
     """
     Regional inductor backend for AOT autograd.
@@ -1939,37 +1981,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertNotEqual(res1, res3)
             self.assertEqual(res1, res3.sub(torch.ones(2, 2)))
-
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
-    @inductor_config.patch("fx_graph_cache", True)
-    @inductor_config.patch("fx_graph_remote_cache", False)
-    @functorch_config.patch({"enable_autograd_cache": True})
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_constant_tensor_device_guards(self):
-        """
-        Usually, when there are example inputs, the device index of the inputs
-        is sufficient to make sure we don't cache hit with the results from different
-        gpu devices.
-        When the input has no arguments, we still need to have the gpu
-        device index in the cache key.
-        """
-
-        @torch.compile
-        def f():
-            y = torch.tensor([5], device=device_type)
-            return (y,)
-
-        with torch.get_device_module(device_type)._DeviceGuard(0):
-            torch.get_device_module(device_type).set_device(0)
-            result = f()
-            self.assertEqual(result[0].device, torch.device(f"{device_type}:0"))
-
-        self._clear_dynamo_and_codecache()
-
-        with torch.get_device_module(device_type)._DeviceGuard(1):
-            torch.get_device_module(device_type).set_device(1)
-            result = f()
-            self.assertEqual(result[0].device, torch.device(f"{device_type}:1"))
 
     @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_cache", True)

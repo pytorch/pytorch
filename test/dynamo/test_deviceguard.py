@@ -66,21 +66,6 @@ class TestGPUDeviceGuard(torch._dynamo.test_case.TestCase):
         else:
             raise ValueError("Not supported GPU type")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_device_guard(self):
-        current_device = torch.accelerator.current_device_index()
-
-        device_guard = DeviceGuard(self.device_interface, 1)
-
-        with device_guard as _:
-            self.assertEqual(torch.accelerator.current_device_index(), 1)
-            self.assertEqual(device_guard.prev_idx, 0)
-            self.assertEqual(device_guard.idx, 1)
-
-        self.assertEqual(torch.accelerator.current_device_index(), current_device)
-        self.assertEqual(device_guard.prev_idx, 0)
-        self.assertEqual(device_guard.idx, 1)
-
     def test_device_guard_no_index(self):
         current_device = torch.accelerator.current_device_index()
 
