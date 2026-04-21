@@ -120,6 +120,12 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._ordered_set import OrderedSet
 
+from .cache_key import (
+    CODE_CACHE_KEY_STRATEGY,
+    COMPACT_CACHE_KEY_STRATEGY,
+    FX_GRAPH_CACHE_KEY_STRATEGY,
+    SYSTEM_CACHE_KEY_STRATEGY,
+)
 from .output_code import CompiledFxGraph
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -152,9 +158,7 @@ output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
-FXGRAPH_CACHE_PREFIX = "c"
 AOTAUTOGRAD_CACHE_PREFIX = "a"
-COMPILED_FX_GRAPH_CACHE_PREFIX = "f"
 
 
 def get_cpp_wrapper_cubin_path_name() -> str:
@@ -218,9 +222,7 @@ class CacheBase:
             # If cuda is not installed, none of the above config is relevant.
             system = {}
 
-        system["hash"] = hashlib.sha256(
-            json.dumps(system, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system)
 
         return system
 
@@ -338,16 +340,13 @@ def get_lock_dir() -> str:
 
 
 def sha256_hash(data: bytes) -> str:
-    # [:51] to strip off the "Q====" suffix common to every hash value.
-    return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
+    return COMPACT_CACHE_KEY_STRATEGY.key(data)
 
 
 def code_hash(code: str | bytes, extra: str | bytes = "") -> str:
-    hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra:
-        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
-        hashing_str = hashing_str + b"||" + extra_b
-    return FXGRAPH_CACHE_PREFIX + sha256_hash(hashing_str)
+        return CODE_CACHE_KEY_STRATEGY.key(code, extra)
+    return CODE_CACHE_KEY_STRATEGY.key(code)
 
 
 def get_path(
@@ -682,7 +681,14 @@ class FxGraphCachePickler(pickle.Pickler):
         Serialize an object and return a hash of the bytes.
         """
         serialized_data = self.dumps(obj)
-        return sha256_hash(serialized_data)
+        return COMPACT_CACHE_KEY_STRATEGY.key(serialized_data)
+
+    def get_key(self, obj: Any) -> str:
+        """
+        Serialize an object and return an FX graph cache key.
+        """
+        serialized_data = self.dumps(obj)
+        return FX_GRAPH_CACHE_KEY_STRATEGY.key(serialized_data)
 
     def debug_lines(self, inp: FxGraphHashDetails) -> list[str]:
         """
@@ -1128,7 +1134,7 @@ def compiled_fx_graph_hash(
 
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = COMPILED_FX_GRAPH_CACHE_PREFIX + pickler.get_hash(details)
+    key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
