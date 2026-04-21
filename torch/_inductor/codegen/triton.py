@@ -6644,7 +6644,7 @@ class TritonScheduling(SIMDScheduling):
     def benchmark_codegened_module(
         self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:
-        """Benchmark an already compiled module"""
+        """Benchmark a compiled module to measure epilogue fusion speedup."""
         device_interface = get_interface_for_device(V.graph.device_type)
         with (
             preserve_rng_state(),
@@ -6654,6 +6654,16 @@ class TritonScheduling(SIMDScheduling):
 
             def cache_file_path():
                 assert mod.__file__ is not None
+                override_dir = config.persistent_autotune_dir
+                if override_dir:
+                    from torch._inductor.runtime.autotune_cache import (
+                        _name_agnostic_source_hash_from_file,
+                    )
+
+                    basename = _name_agnostic_source_hash_from_file(mod.__file__)
+                    perf_dir = os.path.join(override_dir, "kernel_perf")
+                    os.makedirs(perf_dir, exist_ok=True)
+                    return os.path.join(perf_dir, basename + ".kernel_perf")
                 return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
             def store_cache():

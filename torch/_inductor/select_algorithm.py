@@ -4146,6 +4146,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 layout.device.type if layout else "unknown",
             )
 
+        # If the cache already has timings for all choices, skip precompilation,
+        # prescreening, and benchmarking entirely — just return cached timings.
+        # The cache check is cheap (dict lookup, no benchmarking on miss).
+        cached_timings = self.lookup(
+            choices, name, inputs_key, benchmark=None, hint_override=hint_override
+        )
+        if cached_timings and len(cached_timings) == len(choices):
+            return cached_timings
+
         precompile_start_ts = time.time()
 
         if not use_pipelined_autotuning():

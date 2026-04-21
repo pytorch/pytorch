@@ -112,8 +112,34 @@ class AutotuneCacheArtifact(CacheArtifact):
         return content_bytes
 
 
+_TRITON_NAME_RE = re.compile(r"^def [^(]+\(", re.MULTILINE)
+
+
+def _name_agnostic_source_hash(source: str) -> str:
+    """Hash kernel source with function name stripped, so that kernel
+    renumbering (from model changes or fusion decision changes) doesn't
+    change the cache key.  Same regex as generate_lookup_hash_from_source_code
+    used by the LUT."""
+    source_stripped = _TRITON_NAME_RE.sub("(", source.strip(), count=1)
+    return hashlib.sha256(source_stripped.encode("utf-8")).hexdigest()
+
+
+def _name_agnostic_source_hash_from_file(filename: str) -> str:
+    """Fallback: read entire file and hash with function name stripped.
+    Less stable than fn.src (includes decorator metadata) but better than
+    the raw filename hash."""
+    try:
+        with open(filename) as f:
+            source = f.read()
+        return _name_agnostic_source_hash(source)
+    except OSError:
+        return os.path.basename(filename)
+
+
 @dataclasses.dataclass
 class AutotuneCache:
+    """Cache for storing and retrieving the best triton kernel autotuning configs."""
+
     configs_hash: str
     local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
     remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
@@ -121,24 +147,47 @@ class AutotuneCache:
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
-        inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
+        inductor_meta: _InductorMetaTy,
+        filename: str,
+        configs_hash: str,
+        fn_src: str | None = None,
+        local_enabled: bool = True,
+        remote_enabled: bool = True,
     ) -> AutotuneCache | None:
         cache = AutotuneCache(configs_hash)
-        key = AutotuneCache._prepare_key(filename)
+        key = AutotuneCache._prepare_key(filename, fn_src, configs_hash)
 
-        cache._setup_local_cache(inductor_meta, os.path.dirname(filename), key)
-        cache._setup_remote_autotune_cache(inductor_meta, key)
+        if local_enabled:
+            cache._setup_local_cache(inductor_meta, os.path.dirname(filename), key)
+        if remote_enabled:
+            cache._setup_remote_autotune_cache(inductor_meta, key)
         if cache.local_cache or cache.remote_cache:
             return cache
         else:
             return None
 
     @staticmethod
-    def _prepare_key(filename: str) -> str:
+    def _prepare_key(
+        filename: str, fn_src: str | None = None, configs_hash: str | None = None
+    ) -> str:
+        from torch._inductor.config import persistent_autotune_dir
         from torch.compiler import config as cconfig
 
-        # base of filename is already sha256 hash the source contents
-        key = f"{os.path.basename(filename)}:{cconfig.cache_key_tag}"
+        if persistent_autotune_dir:
+            # Use fn.src (kernel body only) with function name stripped.
+            # Stable across kernel renumbering, model changes, and decorator
+            # metadata changes — only the actual computation matters.
+            assert fn_src is not None, (
+                "fn_src is required for persistent_autotune_dir cache keys"
+            )
+            key = _name_agnostic_source_hash(fn_src)
+            # Include configs_hash so different config sets get separate files
+            if configs_hash:
+                key = f"{key}:{configs_hash}"
+        else:
+            # Default: base of filename is already sha256 hash of source contents
+            key = os.path.basename(filename)
+        key = f"{key}:{cconfig.cache_key_tag}"
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
@@ -186,8 +235,18 @@ class AutotuneCache:
         """
         hasher = hashlib.sha256()
         hasher.update(cache_key.encode("utf-8"))
-        hasher.update(torch_key())
+        from torch._inductor.config import persistent_autotune_dir
+
+        # Skip torch_key() when using persistent dir so code changes don't invalidate cache
+        if not persistent_autotune_dir:
+            hasher.update(torch_key())
         updated_cache_key = hasher.hexdigest()
+
+        # Use stable directory if persistent_autotune_dir is set,
+        # instead of the per-process temp dir where kernel files live
+        if persistent_autotune_dir:
+            os.makedirs(persistent_autotune_dir, exist_ok=True)
+            dirname = persistent_autotune_dir
 
         cache_filename = f"{dirname}/{updated_cache_key}.best_config"
         local_cache = LocalAutotuneCache()

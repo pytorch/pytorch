@@ -325,7 +325,11 @@ class TuningProcessPool:
         """
         assert choice.bmreq is not None
 
-        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        env_vars = [
+            "TORCHINDUCTOR_CACHE_DIR",
+            "TRITON_CACHE_DIR",
+            "TORCHINDUCTOR_PERSISTENT_AUTOTUNE_DIR",
+        ]
         extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)

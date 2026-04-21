@@ -165,6 +165,17 @@ bundled_autotune_remote_cache: bool | None = bundled_autotune_remote_cache_defau
 # See torch.compiler.config.force_disable_caches
 force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
+# Directory for persistent autotune cache that survives across code changes
+# and process restarts. When set, autotune results are stored in this directory
+# using name-agnostic keys (based on kernel body, not filename), making the cache
+# stable across kernel renumbering and code changes. Works even when
+# force_disable_caches=True (local autotune cache is enabled, remote stays disabled).
+# Also redirects template selection (PersistentCache) and fusion benchmark
+# (kernel_perf) caches to this directory.
+persistent_autotune_dir: str = os.environ.get(
+    "TORCHINDUCTOR_PERSISTENT_AUTOTUNE_DIR", ""
+)
+
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
