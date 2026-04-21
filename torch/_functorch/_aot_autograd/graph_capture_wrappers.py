@@ -25,7 +25,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._opaque_base import OpaqueBase
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import AcceleratorRngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
@@ -512,6 +512,19 @@ def create_functionalized_rng_ops_wrapper(
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
     # At runtime, we pass on the current seed and offset. This is hidden from
     # the user.
+
+    # Detect device type from tensor arguments.
+    # When trace_joint=True, args is (primals_list, tangents_list) — a nested tuple.
+    # Flatten to get individual tensors before device inspection.
+    _devices = {
+        t.device.type
+        for t in pytree.arg_tree_leaves(*args)
+        if isinstance(t, torch.Tensor)
+    }
+    device_type = (
+        "cuda" if "cuda" in _devices else ("xpu" if "xpu" in _devices else "cuda")
+    )
+
     fake_mode_det = detect_fake_mode()
     fake_mode: AbstractContextManager[Any] = nullcontext()
     if fake_mode_det is not None:
@@ -562,26 +575,26 @@ def create_functionalized_rng_ops_wrapper(
         tuple[tuple[AOTOutput, ...], tuple[AOTOutput, ...]],
     ]:
         with (
-            patch("torch.cuda.get_rng_state", override_get_rng_state),
-            patch("torch.cuda.set_rng_state", override_set_rng_state),
+            patch(f"torch.{device_type}.get_rng_state", override_get_rng_state),
+            patch(f"torch.{device_type}.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(*func(primals, tangents))
 
     def traced_forward(*primals_fwd_seed_fwd_base_offset: Any) -> Any:
         # The signature is (*primals, seed, offset)
         with (
-            patch("torch.cuda.get_rng_state", override_get_rng_state),
-            patch("torch.cuda.set_rng_state", override_set_rng_state),
+            patch(f"torch.{device_type}.get_rng_state", override_get_rng_state),
+            patch(f"torch.{device_type}.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(*func(*primals_fwd_seed_fwd_base_offset[:-2]))
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
-            fake_mode
+        fwd_seed, fwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+            fake_mode, device_type=device_type
         )
-        bwd_seed, bwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
-            fake_mode
+        bwd_seed, bwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+            fake_mode, device_type=device_type
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         PhiloxStateTracker.record_state(bwd_seed, bwd_base_offset, "backward")
@@ -604,8 +617,8 @@ def create_functionalized_rng_ops_wrapper(
         )
     else:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
-            fake_mode
+        fwd_seed, fwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+            fake_mode, device_type=device_type
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         return (

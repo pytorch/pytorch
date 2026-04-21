@@ -1,13 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import cast
-
 import torch
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
-from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
+from torch._prims_common import AcceleratorRngStateHelper, make_contiguous_strides_for
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -17,11 +15,11 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.types import _device, _dtype
 
 
-def throw_on_non_cuda(device):
+def throw_on_unsupported_rng_device(device):
     raise RuntimeError(
-        f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
-        f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
-        "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
+        f"You are trying to functionalize a {device.type} RNG operator, but only cuda and xpu "
+        f"Philox/counter-based RNG functionalization is currently supported. We are discussing the "
+        f"possibility of a Philox-based RNG implementation for CPU."
     )
 
 
@@ -56,6 +54,7 @@ def philox_rand_offset_meta(
 
 def philox_rand_offset(
     shape: torch.Size,
+    device: _device,
 ):
     # For impl, look at the function calc_execution_policy in the file
     # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
@@ -63,17 +62,29 @@ def philox_rand_offset(
     numel_scalar = 1
     for dim_size in shape:
         numel_scalar *= dim_size
-    numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
 
     block_size = 256
     unroll = 4
     curand4_engine_calls = 4
-    device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
-    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-    num = cast(int, numel)
+    if device.type == "cuda":
+        device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
+        max_threads_per_processor = device_property.max_threads_per_multi_processor
+        processor_count = device_property.multi_processor_count
+    elif device.type == "xpu":
+        device_property = torch.xpu.get_device_properties(torch.xpu.current_device())
+        # TODO: XPU property mapping (max_work_group_size ≈ max_threads_per_multi_processor,
+        # max_compute_units ≈ multi_processor_count) is an approximation. XPU execution
+        # model differs from CUDA. Validate with XPU team.
+        max_threads_per_processor = device_property.max_work_group_size
+        processor_count = device_property.max_compute_units
+    else:
+        raise throw_on_unsupported_rng_device(device)
+    blocks_per_sm = max_threads_per_processor // block_size
+    num = numel_scalar
     grid_size = (num + block_size - 1) // block_size
-    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
-    return ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+    grid_size = min(grid_size, processor_count * blocks_per_sm)
+    result = ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+    return torch.scalar_tensor(result, dtype=torch.int64)
 
 
 def register_philox_rand():
@@ -114,14 +125,16 @@ def register_philox_rand():
         else:
             devices = [device]
 
-        if device.type != "cuda":
-            raise throw_on_non_cuda(device)
+        if device.type not in ("cuda", "xpu"):
+            raise throw_on_unsupported_rng_device(device)
 
-        with torch.random.fork_rng(devices):
-            CUDARngStateHelper.set_torch_state_tensor(seed, offset)
+        with torch.random.fork_rng(devices, device_type=device.type):
+            AcceleratorRngStateHelper.set_torch_state_tensor(
+                seed, offset, device_type=device.type
+            )
             random_values = torch.rand(shape, device=device, dtype=dtype)
 
-        return random_values, philox_rand_offset(shape)
+        return random_values, philox_rand_offset(shape, device)
 
     register_rng_prim(
         name=name,

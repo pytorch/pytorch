@@ -40,7 +40,7 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import AcceleratorRngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
@@ -1145,6 +1145,12 @@ def _create_runtime_wrapper(
     return _runtime_wrapper
 
 
+def _detect_rng_device_type(tensors: Sequence[Any]) -> str:
+    """Detect accelerator device type from an iterable of tensors."""
+    _devices = {t.device.type for t in tensors if isinstance(t, torch.Tensor)}
+    return "cuda" if "cuda" in _devices else ("xpu" if "xpu" in _devices else "cuda")
+
+
 # WARNING: this does NOT operate on TraceFn
 @dataclass
 class FunctionalizedRngRuntimeWrapper(InductorWrapper):
@@ -1172,7 +1178,11 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 raise AssertionError(
                     "fake_mode must not be None when functionalize_rng_ops is True"
                 )
-            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            # Detect device type once and store on metadata
+            device_type = _detect_rng_device_type(flat_args)
+            seed, offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+                fake_mode, device_type=device_type
+            )
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
@@ -1197,10 +1207,11 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
 
         offset_index = runtime_metadata.num_forward_returns
         lines = ["def _functionalized_rng_wrapper(runtime_args):"]
-        lines.append("    seed, offset = _get_rng_state_()")
+        lines.append("    device_type = _detect_rng_device_type_(runtime_args)")
+        lines.append("    seed, offset = _get_rng_state_(device_type=device_type)")
         lines.append("    runtime_args.extend([seed, offset])")
         lines.append("    outs = _compiled_fn_(runtime_args)")
-        lines.append(f"    _set_offset_(outs[{offset_index}])")
+        lines.append(f"    _set_offset_(outs[{offset_index}], device_type=device_type)")
         if self.return_new_outs:
             lines.append(
                 f"    return outs[:{offset_index}] + outs[{offset_index + 1}:]"
@@ -1213,8 +1224,9 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
             source,
             {
                 "_compiled_fn_": compiled_fn,
-                "_get_rng_state_": CUDARngStateHelper.get_torch_state_as_tuple,
-                "_set_offset_": CUDARngStateHelper.set_new_offset,
+                "_detect_rng_device_type_": _detect_rng_device_type,
+                "_get_rng_state_": AcceleratorRngStateHelper.get_torch_state_as_tuple,
+                "_set_offset_": AcceleratorRngStateHelper.set_new_offset,
             },
             "_functionalized_rng_wrapper",
             "functionalized_rng_wrapper",
@@ -1230,6 +1242,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         metadata: ViewAndMutationMeta,
         outs: Any,
         offset_index: int,
+        device_type: str = "cuda",
     ) -> Any:
         if metadata.is_rng_op_functionalized:
             if metadata.num_outputs_rng_offset != 1:
@@ -1237,7 +1250,9 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                     f"expected num_outputs_rng_offset == 1, got {metadata.num_outputs_rng_offset}"
                 )
             new_rng_offset = outs[offset_index]
-            CUDARngStateHelper.set_new_offset(new_rng_offset)
+            AcceleratorRngStateHelper.set_new_offset(
+                new_rng_offset, device_type=device_type
+            )
             if self.return_new_outs:
                 user_outs = outs[:offset_index] + outs[offset_index + 1 :]
                 return user_outs
@@ -2973,8 +2988,10 @@ def _codegen_backward_prologue(
     if num_backward_tokens > 0:
         parts.append(f"*([None] * {num_backward_tokens})")
     if is_rng_op_functionalized:
-        G["_get_rng_state_"] = CUDARngStateHelper.get_torch_state_as_tuple
-        parts.append("*_get_rng_state_()")
+        G["_detect_rng_device_type_"] = _detect_rng_device_type
+        G["_get_rng_state_"] = AcceleratorRngStateHelper.get_torch_state_as_tuple
+        L.append("    _device_type = _detect_rng_device_type_(ctx_saved_tensors)")
+        parts.append("*_get_rng_state_(device_type=_device_type)")
     L.append(f"    all_args = [{', '.join(parts)}]")
     L.append("    del ctx_saved_tensors")
 
@@ -3057,9 +3074,11 @@ def _codegen_backward_epilogue(
             raise AssertionError(
                 f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
             )
-        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        code_globals["_detect_rng_device_type_"] = _detect_rng_device_type
+        code_globals["_set_offset_"] = AcceleratorRngStateHelper.set_new_offset
         lines.append("    _oi = len(out) - 1")
-        lines.append("    _set_offset_(out[_oi])")
+        lines.append("    _device_type = _detect_rng_device_type_(out[:_oi])")
+        lines.append("    _set_offset_(out[_oi], device_type=_device_type)")
         lines.append("    out = out[:_oi] + out[_oi + 1:]")
 
     lines.append("    out = tuple(out)")
