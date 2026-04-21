@@ -334,7 +334,8 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
           auto metadata = item_tensor.cast<py::dict>();
           test_list_metadata.push_back(build_tensor_metadata(metadata));
         }
-        parameter_metadata_list.emplace_back(std::move(test_list_metadata), arg_idx);
+        parameter_metadata_list.emplace_back(
+            std::move(test_list_metadata), arg_idx);
       } else if (is_scalar) {
         // Scalar
         auto metadata = item_metadata.cast<py::dict>();
