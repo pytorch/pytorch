@@ -402,6 +402,8 @@ def _load_global_deps() -> None:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
+_glog_v_before_c_import = os.environ.get("GLOG_v")
+
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
     platform.system() != "Windows"
 ):
@@ -442,6 +444,37 @@ else:
     if USE_GLOBAL_DEPS:
         _load_global_deps()
     from torch._C import *  # noqa: F403
+
+# Work around a bug in ROCm's librocprofiler-sdk.so which unconditionally calls
+# setenv("GLOG_v", "2", 1) in its ELF constructor during the HIP fat binary
+# registration chain. Only revert the env var if it was NOT set by the user
+# before the _C import (i.e., it was injected by a third-party library during
+# static init).
+_glog_v_after_c_import = os.environ.get("GLOG_v")
+if _glog_v_before_c_import is None and _glog_v_after_c_import is not None:
+    # GLOG_v appeared during _C import — injected by a library constructor.
+    del os.environ["GLOG_v"]
+elif (
+    _glog_v_before_c_import is not None
+    and _glog_v_after_c_import != _glog_v_before_c_import
+):
+    # GLOG_v was overwritten during _C import — restore user's original value.
+    os.environ["GLOG_v"] = _glog_v_before_c_import
+elif (
+    _glog_v_before_c_import is not None
+    and _glog_v_before_c_import == _glog_v_after_c_import
+):
+    # GLOG_v was already set before the _C import and unchanged — could be
+    # user-set, or set during pre-Python static init in a statically-linked
+    # binary. Only clear it if we can confirm rocprofiler-sdk is loaded (the
+    # known source of this pollution).
+    try:
+        with open("/proc/self/maps") as _maps:
+            if "librocprofiler-sdk" in _maps.read():
+                del os.environ["GLOG_v"]
+    except OSError:
+        pass
+del _glog_v_before_c_import, _glog_v_after_c_import
 
 
 class SymInt:
