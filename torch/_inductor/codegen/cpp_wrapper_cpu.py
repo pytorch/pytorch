@@ -123,15 +123,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        # MSVC does not support implicitly converting a const iterator to a const pointer.
-        ptr_call = (
-            "data()"
-            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
-            else "cbegin()"
-        )
-        return (
-            f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
-        )
+        array_expr = f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}"
+        if force_mutable or c_type.endswith("*"):
+            return f"{array_expr}.data()"
+
+        # MSVC does not support implicitly converting a const iterator to a const
+        # pointer, so use data() and cast to keep const qualification.
+        if cpp_builder.is_msvc_cl():
+            return f"static_cast<const {c_type}*>({array_expr}.data())"
+
+        return f"{array_expr}.cbegin()"
 
     def _generate_kernel_call_helper(
         self,
