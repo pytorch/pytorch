@@ -3527,7 +3527,7 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             def block(self, x):
                 return compiled_f(x)
 
-        m = getattr(M(), device_type)
+        m = getattr(M(), device_type)()
         x = torch.randn(8, device=device_type, requires_grad=True)
 
         def fn(x):
