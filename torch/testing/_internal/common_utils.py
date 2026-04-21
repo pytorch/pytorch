@@ -1069,6 +1069,51 @@ def parse_cmd_line_args():
     set_rng_seed()
 
 
+def _descendant_pids(pid):
+    # Return all descendant pids of `pid` on Linux by walking
+    # /proc/<pid>/task/<tid>/children. No psutil dependency.
+    pids: list[int] = []
+    stack = [pid]
+    while stack:
+        cur = stack.pop()
+        task_dir = f"/proc/{cur}/task"
+        try:
+            tids = os.listdir(task_dir)
+        except OSError:
+            continue
+        for tid in tids:
+            try:
+                with open(f"{task_dir}/{tid}/children") as f:
+                    children = f.read().split()
+            except OSError:
+                continue
+            for c in children:
+                try:
+                    cpid = int(c)
+                except ValueError:
+                    continue
+                pids.append(cpid)
+                stack.append(cpid)
+    return pids
+
+
+def _dump_subprocess_stacks(pid):
+    # Request Python stack dumps from `pid` and all its descendants via SIGUSR1
+    # (handler installed in test/conftest.py and inductor compile workers).
+    # Used on CI timeout to capture diagnostics before the SIGINT/SIGKILL
+    # sequence destroys in-process state.
+    if not hasattr(signal, "SIGUSR1"):
+        return
+    pids = [pid, *_descendant_pids(pid)]
+    for target in pids:
+        try:
+            os.kill(target, signal.SIGUSR1)
+        except OSError:
+            pass
+    # Give handlers a few seconds to run and flush stderr to the CI log.
+    time.sleep(3)
+
+
 def wait_for_process(p, timeout=None):
     try:
         return p.wait(timeout=timeout)
@@ -1082,6 +1127,13 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
+        # Capture Python stacks from the child (and any inductor compile
+        # workers it spawned) before SIGINT/SIGKILL wipes them. SIGUSR1 is not
+        # masked by CUDA/Triton runtimes, unlike SIGINT.
+        try:
+            _dump_subprocess_stacks(p.pid)
+        except Exception:
+            pass
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None

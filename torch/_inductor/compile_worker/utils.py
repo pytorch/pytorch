@@ -40,6 +40,19 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     # Install a crash handler to print out the stacktrace for SEGV
     torch._C._initCrashHandler()
 
+    # Opt-in SIGUSR1 stack dumper for CI hang diagnosis; parent process (the
+    # pytest test subprocess) enables this via test/conftest.py and propagates
+    # the env var. On SIGUSR1 we dump all Python threads to stderr.
+    if os.environ.get("PYTORCH_FAULT_HANDLER") == "1":
+        import faulthandler
+        import sys
+
+        faulthandler.enable(file=sys.stderr, all_threads=True)
+        if hasattr(faulthandler, "register"):
+            faulthandler.register(
+                signal.SIGUSR1, file=sys.stderr, all_threads=True, chain=False
+            )
+
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
     global _IN_TOPLEVEL_PROCESS
     _IN_TOPLEVEL_PROCESS = False

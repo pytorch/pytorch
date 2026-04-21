@@ -92,7 +92,27 @@ def pytest_addoption(parser: Parser) -> None:
     shard_addoptions(parser)
 
 
+def _install_fault_handler() -> None:
+    # Dump Python stacks from every thread when this process receives SIGUSR1
+    # or when faulthandler detects a fatal signal (SEGV, etc.). Used to
+    # diagnose flaky CI hangs: test/run_test.py's outer timeout sends SIGUSR1
+    # to the whole process tree before SIGKILL so we capture stacks in the log.
+    import faulthandler
+    import signal as _signal
+    import sys as _sys
+
+    faulthandler.enable(file=_sys.stderr, all_threads=True)
+    if hasattr(faulthandler, "register"):  # not on Windows
+        faulthandler.register(
+            _signal.SIGUSR1, file=_sys.stderr, all_threads=True, chain=False
+        )
+    # Inductor compile-worker subprocesses inherit this env var and self-arm
+    # the same SIGUSR1 handler in _async_compile_initializer.
+    os.environ["PYTORCH_FAULT_HANDLER"] = "1"
+
+
 def pytest_configure(config: Config) -> None:
+    _install_fault_handler()
     parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
