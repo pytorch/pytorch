@@ -1210,18 +1210,15 @@ def _is_compiling(func, args, kwargs):
 
 
 class _VersionWrapper:
-    # Check that cached tensors are not mutated.
     def __init__(self, val) -> None:
         self.val: torch.Tensor | Any = val
         self.version: int | None = val._version if isinstance(val, torch.Tensor) else None
 
-    def get_val(self, allow_cache_entry_mutation):
-        if self.version is not None and not allow_cache_entry_mutation:
-            if self.val._version != self.version:
-                # Can we give user a stack trace of where the mutation happened?
-                raise RuntimeError(
-                    "Tensor cached during selective activation checkpoint has been mutated"
-                )
+    def get_val(self):
+        if self.version is not None and self.val._version != self.version:
+            raise RuntimeError(
+                "Tensor cached during selective activation checkpoint has been mutated"
+            )
         return self.val
 
 
@@ -1377,10 +1374,9 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return True
 
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage, allow_cache_entry_mutation) -> None:
+    def __init__(self, policy_fn, storage) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
-        self.allow_cache_entry_mutation = allow_cache_entry_mutation
         self.func_counter: Dict[Any, int] = defaultdict(int)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1400,7 +1396,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
 
         cached = self.storage.get(func, {}).pop(idx, None)
         if cached is not None:
-            out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), cached)
+            out = tree_map(lambda x: x.get_val(), cached)
         elif policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             if func not in self.storage:
                 raise RuntimeError(f"{func} encountered during backward, but not found in storage")
@@ -1413,7 +1409,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return out
 
 
-def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False):
+def create_selective_checkpoint_contexts(policy_fn_or_list, *, allow_cache_entry_mutation=False):
     """
     Helper to avoid recomputing certain ops during activation checkpointing.
 
@@ -1430,10 +1426,6 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
             returning `CheckpointPolicy.MUST_SAVE` for the specified
             operations and `CheckpointPolicy.PREFER_RECOMPUTE` for all other
             operations.
-        allow_cache_entry_mutation (bool, optional): By default, an error is
-            raised if any tensors cached by selective activation checkpoint are
-            mutated in order to ensure correctness. If set to `True`, this check
-            is disabled.
     Returns:
         A tuple of two context managers.
 
@@ -1468,6 +1460,12 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
         >>>     context_fn=context_fn,
         >>> )
     """
+    if allow_cache_entry_mutation:
+        raise ValueError(
+            "allow_cache_entry_mutation is no longer supported. Cached tensors are "
+            "always checked for mutation to ensure correctness. If your use case "
+            "requires caching a tensor that is mutated afterwards, please file an issue."
+        )
     # NB: If grad_mode is disabled, checkpoint would not run forward under
     #     context_fn anyway, so proceed as usual.
     if isinstance(policy_fn_or_list, list):
@@ -1495,7 +1493,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     storage: Dict[Any, Dict[int, Any]] = defaultdict(dict)
     return (
         _CachingTorchDispatchMode(policy_fn, storage),
-        _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
+        _CachedTorchDispatchMode(policy_fn, storage),
     )
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
