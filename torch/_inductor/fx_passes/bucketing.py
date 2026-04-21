@@ -16,6 +16,7 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
+from torch._inductor.comm_lowering import _should_pg_alloc
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.distributed.distributed_c10d import _resolve_process_group
@@ -262,9 +263,9 @@ def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-
 
 
 def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target is torch.ops._c10d_functional.reduce_scatter_tensor.default
+    return node.op == "call_function" and (
+        node.target is torch.ops._c10d_functional.reduce_scatter_tensor.default
+        or node.target is torch.ops._c10d_functional.reduce_scatter_tensor_out.default
     )
 
 
@@ -590,7 +591,7 @@ def _pre_bucket_reduce_scatter(
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
     x = rs_ins[0]
     size = sum(t.numel() for t in rs_ins)
-    if torch._inductor.config.comms_use_pg_alloc:
+    if _should_pg_alloc("reduce_scatter", "input"):
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(x.device)
         out = backend.allocate_tensor(size, dtype=x.dtype, device=x.device)
@@ -627,7 +628,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
         rs_ins, group_size, group_name
     )
 
-    if torch._inductor.config.comms_use_pg_alloc:
+    if _should_pg_alloc("reduce_scatter", "output"):
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(new_rs_in.device)
         size = list(new_rs_in.shape)
@@ -768,7 +769,7 @@ def _pre_bucket_all_gather(
     ]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
-    if torch._inductor.config.comms_use_pg_alloc:
+    if _should_pg_alloc("all_gather", "output"):
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(device)
         size = ag_input_numel * group_size
@@ -1157,11 +1158,16 @@ def _annotate_pg_alloc(
     group_name: str,
 ) -> None:
     """Tag collective nodes with pg_alloc_group_name for PG-based allocation."""
-    if torch._inductor.config.comms_use_pg_alloc:
-        for node in new_nodes:
-            if is_wait_tensor(node):
-                coll_node = node.args[0]
-                assert isinstance(coll_node, torch.fx.Node)
+    if not torch._inductor.config.comms_use_pg_alloc:
+        return
+    for node in new_nodes:
+        if is_wait_tensor(node):
+            coll_node = node.args[0]
+            assert isinstance(coll_node, torch.fx.Node)
+            coll_type = get_collective_type(coll_node)
+            if _should_pg_alloc(coll_type, "input") or _should_pg_alloc(
+                coll_type, "output"
+            ):
                 coll_node.meta["pg_alloc_group_name"] = group_name
 
 
