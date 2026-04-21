@@ -137,7 +137,10 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   endif()
   if(USE_TSAN)
     if(TARGET Sanitizer::thread)
-      list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::thread)
+      # Use global flags so that all targets (including executables like
+      # torch_shm_manager that don't link torch_cpu) get TSan instrumentation.
+      add_compile_options(-fsanitize=thread)
+      add_link_options(-fsanitize=thread)
     else()
       message(WARNING "TSAN not found. Suppress this warning with -DUSE_TSAN=OFF.")
       caffe2_update_option(USE_TSAN OFF)
