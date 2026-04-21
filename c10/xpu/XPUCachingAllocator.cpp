@@ -1687,8 +1687,8 @@ class DeviceCachingAllocator {
   }
 
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
-      std::unique_lock<std::recursive_mutex> lock(mutex);
-      trace_trackers_.emplace_back(std::move(tracker));
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    trace_trackers_.emplace_back(std::move(tracker));
   }
 
   std::pair<size_t, size_t> getMemoryInfo() {
