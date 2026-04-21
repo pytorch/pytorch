@@ -596,7 +596,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             old_node_name,
             node_name,
             old_tensors_to_clone,
-            [tensor_idx for tensor_idx in old_tensors_to_clone if tensor_idx not in tensors_to_clone],
+            [
+                tensor_idx
+                for tensor_idx in old_tensors_to_clone
+                if tensor_idx not in tensors_to_clone
+            ],
             tensors_to_clone,
             missed_args,
             missed_bytes,
