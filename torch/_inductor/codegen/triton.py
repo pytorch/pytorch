@@ -2132,6 +2132,12 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
+        """
+        index expr behaviour.
+        If the index is used for values, we keep the original dtype.
+        Otherwise we downgrade the dtype to int32.
+        For non-integer dtypes, respect the requested dtype.
+        """
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
@@ -2144,45 +2150,78 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # Our sympy expr printing casts to the current kernel index dtype.
-        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
 
-        # after we emit this var we cast it to the correct dtype
+        # FIX for Issue #175966: Check if this index_expr is used for values vs indexing
+        # Algorithm: Trace VALUE chains backward from store operations
+        # - If index_expr is in VALUE chain → compute in int64 (preserve semantics)
+        # - If index_expr is NOT in VALUE chain → use int32 (safe for indexing)
+        is_for_values_only = False
+        index_str_to_use = indexing.index_str
+
+        # Check if current FX node is marked as "for values only"
+        # During codegen, V.interpreter.current_node is the FX node being executed
+        # V.kernel.current_node._body is the LoopBody containing the analysis
+  
+        current_fx_node = V.interpreter.current_node
+        if current_fx_node:
+            is_for_values_only = V.kernel.current_node._body.index_expr_usage.get(current_fx_node, False)
+
+        # Determine dtype to use based on usage chain
+        if is_for_values_only:
+            # In VALUE chain → force int64 to preserve original dtype semantics
+            # This ensures operations like idx*1e9 don't overflow, regardless of
+            # what dtype fusion/lowering requested (e.g., float32 due to later cast)
+            dtype_to_use = torch.int64
+            index_str_to_use = cls._cast_index_vars_to_int64(indexing.index_str)
+        elif dtype not in (torch.int32, torch.int64):
+            # Non-integer dtypes: respect requested dtype
+            dtype_to_use = dtype
+        else:
+            # In INDEXING chain or uncertain → use kernel index dtype (int32)
+            # This is conservative and safe for indexing operations
+            dtype_to_use = index_dtype
+
+        # Casting violates this assert, set to false if we can cast.
         orig = config.test_configs.runtime_triton_dtype_assert
         try:
             config.test_configs.runtime_triton_dtype_assert = False
             var = V.kernel.cse.generate(
                 V.kernel.compute,
-                indexing.index_str,
+                index_str_to_use,
                 bounds=get_bounds_index_expr(expr),
-                dtype=dtype,
+                dtype=dtype_to_use,
                 shape=shape,
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
 
-        if dtype not in (torch.int32, torch.int64):
+        if dtype_to_use not in (torch.int32, torch.int64):
+            # Non-integer dtype: cast to requested dtype
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 cls.to_dtype(var, dtype),
                 dtype=upcast_compute_type(dtype),
                 shape=var.shape,
             )
+        elif is_for_values_only:
+            # For values only with int64: already generated with casts, no further action needed
+            # The var was generated with dtype_to_use (int64) and index vars cast to int64
+            pass
         else:
+            # Original behavior: handle type promotion for indexing case
             # TODO: we are not always consistent in enforcing that the output of the index expr printing
             # results in the indexing dtype. So if we detect that we have an input which might type promote
             # to a dtype other than indexing dtype, add a cast.
             # Trying to avoid
-            dtype = index_dtype
+            dtype_check = index_dtype
             for index_var in expr.free_symbols:
                 if symbol_is_type(index_var, SymT.TMP):
-                    dtype = torch.promote_types(
-                        dtype, V.kernel.cse.varname_map[index_var.name].dtype
+                    dtype_check = torch.promote_types(
+                        dtype_check, V.kernel.cse.varname_map[index_var.name].dtype
                     )
 
-            if dtype != index_dtype:
+            if dtype_check != index_dtype:
                 var = V.kernel.cse.generate(
                     V.kernel.compute,
                     cls.to_dtype(var, index_dtype),
@@ -2192,6 +2231,47 @@ class TritonKernelOverrides(TritonOverrides):
 
         var.mask_vars = indexing.mask_vars
         return var
+
+    @classmethod
+    def _cast_index_vars_to_int64(cls, index_str: str) -> str:
+        """
+        Cast index variables to int64 for value computation.
+
+        This is used when an index_expr is determined to be used ONLY for computing
+        tensor values (not for indexing), and the requested dtype is int64 while
+        the kernel index dtype is int32.
+
+        Without this cast, int64 arithmetic would overflow when performed in int32.
+        By casting index variables (x0, x1, etc.) to int64, all arithmetic involving
+        them is promoted to int64, including multiplications with constants.
+
+        Example:
+            Input:  "1000000000*x0"
+            Output: "1000000000*x0.to(tl.int64)"
+
+            Input:  "10000000*r0_0"  (reduction variable)
+            Output: "10000000*r0_0.to(tl.int64)"
+
+            When Triton evaluates: 1000000000 (int32) * x0.to(tl.int64) (int64)
+            Result: int64 (type promotion)
+
+        Args:
+            index_str: String containing index expression with index variables
+
+        Returns:
+            Modified string with .to(tl.int64) casts on index variables
+        """
+        import re
+        # Cast index variables to tl.int64:
+        # - x0, x1, x2, ..., xindex (regular iteration variables)
+        # - r0_0, r1_2, etc. (reduction variables)
+        # Use word boundaries to avoid matching variables like "max0"
+        # This promotes all arithmetic involving these variables to int64
+        return re.sub(
+            r'\b(x\d+|xindex|r\d+_\d+)\b',
+            lambda m: f"{m.group(0)}.to(tl.int64)",
+            index_str
+        )
 
     @staticmethod
     def masked(mask, body, other):
