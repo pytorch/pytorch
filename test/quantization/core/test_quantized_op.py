@@ -4,8 +4,11 @@
 
 import copy
 import itertools
+import multiprocessing
+import os
 import operator
 import random
+import traceback
 import unittest
 from typing import NamedTuple, TYPE_CHECKING
 
@@ -193,6 +196,168 @@ def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
         scale_reshape = scale.reshape((-1,) + (1,) * (qt.dim() - 1))
         dqt = dqt * scale_reshape
     return dqt
+
+
+def _test_qlinear_pt2e_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        x_scale, x_zp = 1.2, 1
+        w_scale, w_zp = 0.8, 0
+        y_scale, y_zp = 4.7, 2
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
+        qw = torch.quantize_per_tensor(w, w_scale, w_zp, torch.qint8)
+        w_scales = torch.tensor([w_scale])
+        w_zps = torch.tensor([w_zp], dtype=torch.int)
+
+        qx_cpu = qx.int_repr()
+        w_ref = qw.dequantize()
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu.shape)
+            qlinear_op(
+                qx_cpu,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                y_zp,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_cpu_iter in (qx_cpu, qx_cpu.repeat(2, 1)):
+                qy_cpu = qlinear_op(
+                    qx_cpu_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    y_zp,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = x_scale * (qx_cpu_iter.float() - x_zp)
+                y_ref = F.linear(x_ref, w_ref, b)
+                qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
+
+                assert qy_ref.dim() == qy_cpu.dim()
+                np.testing.assert_array_almost_equal(
+                    qy_ref.int_repr().cpu().numpy(),
+                    qy_cpu.cpu().numpy(),
+                    decimal=0,
+                )
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
+
+
+def _test_qlinear_fp8_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        def _quantize_fp8_for_process(tensor, scale):
+            return (tensor / scale).clamp(-448, 448).half().to(torch.float8_e4m3fn)
+
+        def _dequantize_fp8_for_process(qtensor, scale):
+            return qtensor.float() * scale
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        y_scale = 0.3
+        x_zp = 0
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        eps = torch.tensor([torch.finfo(torch.float32).eps])
+        quant_max = torch.finfo(torch.float8_e4m3fn).max
+        x_scale = torch.max(x.abs().max().reshape([1]) / quant_max, eps)
+        w_scales = torch.max(w.abs().max().reshape([1]) / quant_max, eps)
+        qx = _quantize_fp8_for_process(x, x_scale)
+        qw = _quantize_fp8_for_process(w, w_scales)
+        w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw, qx.shape)
+            qlinear_op(
+                qx,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                0,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_iter in (qx, qx.repeat(2, 1)):
+                qy = qlinear_op(
+                    qx_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    0,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = _dequantize_fp8_for_process(qx_iter, x_scale)
+                w_ref = _dequantize_fp8_for_process(qw, w_scales)
+                y_ref = F.linear(x_ref, w_ref, b)
+                y_ref = _quantize_fp8_for_process(y_ref, torch.tensor([y_scale]))
+
+                assert y_ref.dim() == qy.dim()
+                assert torch.equal(y_ref.float(), qy.float())
+                if torch.isnan(qy).any():
+                    raise AssertionError("Output qy contains NaN values")
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
 
 class TestQuantizedOps(TestCase):
 
@@ -4720,108 +4885,6 @@ class TestQuantizedLinear(TestCase):
                     y_s: {y_scale}, y_zp: {y_zp}""",
                 )
 
-    def _test_qlinear_pt2e_fast_path_helper(self, qlinear_op):
-        import os
-        import subprocess
-        import sys
-        import textwrap
-
-        _ = qlinear_op
-        env = os.environ.copy()
-        env["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
-
-        code = textwrap.dedent(
-            """
-            import numpy as np
-            import torch
-            import torch.nn.functional as F
-            from torch.testing._internal.common_quantized import override_quantized_engine
-
-            qlinear_op = torch.ops.onednn.qlinear_pointwise
-            qlinear_prepack = torch.ops.onednn.qlinear_prepack
-            x_scale, x_zp = 1.2, 1
-            w_scale, w_zp = 0.8, 0
-            y_scale, y_zp = 4.7, 2
-
-            x = torch.rand(1, 4) * 10
-            w = torch.rand(16, 4) * 10
-            b = torch.rand(16) * 10
-
-            qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
-            qw = torch.quantize_per_tensor(w, w_scale, w_zp, torch.qint8)
-            w_scales = torch.Tensor([w_scale])
-            w_zps = torch.Tensor([w_zp]).to(dtype=torch.int)
-
-            qx_cpu = qx.int_repr()
-            w_ref = qw.dequantize()
-
-            with override_quantized_engine("onednn"):
-                # Warm up once to initialize the fast-path cache.
-                qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu.shape)
-                qlinear_op(
-                    qx_cpu,
-                    x_scale,
-                    x_zp,
-                    qw_packed,
-                    w_scales,
-                    w_zps,
-                    b,
-                    y_scale,
-                    y_zp,
-                    None,
-                    "none",
-                    (),
-                    "none",
-                )
-
-                for qx_cpu_iter in (qx_cpu, qx_cpu.repeat(2, 1)):
-                    qy_cpu = qlinear_op(
-                        qx_cpu_iter,
-                        x_scale,
-                        x_zp,
-                        qw_packed,
-                        w_scales,
-                        w_zps,
-                        b,
-                        y_scale,
-                        y_zp,
-                        None,
-                        "none",
-                        (),
-                        "none",
-                    )
-
-                    x_ref = x_scale * (qx_cpu_iter.float() - x_zp)
-                    y_ref = F.linear(x_ref, w_ref, b)
-                    qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
-
-                    assert qy_ref.dim() == qy_cpu.dim()
-                    np.testing.assert_array_almost_equal(
-                        qy_ref.int_repr().cpu().numpy(),
-                        qy_cpu.cpu().numpy(),
-                        decimal=0,
-                    )
-            """
-        )
-
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            env=env,
-            cwd=os.getcwd(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(
-            proc.returncode,
-            0,
-            msg=(
-                "Subprocess fast-path validation failed.\n"
-                f"stdout:\n{proc.stdout}\n"
-                f"stderr:\n{proc.stderr}"
-            ),
-        )
-
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_pt2e(self):
@@ -4868,8 +4931,25 @@ class TestQuantizedLinear(TestCase):
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_fast_path_pt2e(self):
-        qlinear = torch.ops.onednn.qlinear_pointwise
-        self._test_qlinear_pt2e_fast_path_helper(qlinear)
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_pt2e_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                "Spawned fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
 
     def _test_qlinear_fp8_helper(
         self,
@@ -4987,116 +5067,6 @@ class TestQuantizedLinear(TestCase):
                 if torch.isnan(qy).any():
                     raise AssertionError("Output qy contains NaN values")
 
-    def _test_qlinear_fp8_fast_path_helper(self, qlinear_op):
-        import os
-        import subprocess
-        import sys
-        import textwrap
-
-        _ = qlinear_op
-        env = os.environ.copy()
-        env["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
-
-        code = textwrap.dedent(
-            """
-            import torch
-            import torch.nn.functional as F
-            from torch.testing._internal.common_quantized import override_quantized_engine
-
-            def _quantize_fp8e4m3(t, scale):
-                # Align with oneDNN conversion path: fp32 -> fp16 -> fp8.
-                qt = (t / scale).clamp(-448, 448).half().to(torch.float8_e4m3fn)
-                return qt
-
-            def _dequantize_fp8e4m3(qt, scale):
-                return qt.float() * scale
-
-            qlinear_op = torch.ops.onednn.qlinear_pointwise
-            qlinear_prepack = torch.ops.onednn.qlinear_prepack
-            y_scale = 0.3
-            x_zp = 0
-
-            x = torch.rand(1, 4) * 10
-            w = torch.rand(16, 4) * 10
-            b = torch.rand(16) * 10
-
-            x_scale = x.abs().max().reshape([1]) / torch.finfo(torch.float8_e4m3fn).max
-            x_scale = torch.max(x_scale, torch.tensor([torch.finfo(torch.float32).eps]))
-            qx = _quantize_fp8e4m3(x, x_scale)
-
-            w_scale = w.abs().max().reshape([1]) / torch.finfo(torch.float8_e4m3fn).max
-            w_scale = torch.max(w_scale, torch.tensor([torch.finfo(torch.float32).eps]))
-            qw = _quantize_fp8e4m3(w, w_scale)
-
-            w_scales = w_scale
-            w_zps = torch.zeros_like(w_scales, dtype=torch.int)
-
-            with override_quantized_engine("onednn"):
-                # Warm up once to initialize the fast-path cache.
-                qw_packed = qlinear_prepack(qw, qx.shape)
-                qlinear_op(
-                    qx,
-                    x_scale,
-                    x_zp,
-                    qw_packed,
-                    w_scales,
-                    w_zps,
-                    b,
-                    y_scale,
-                    0,
-                    None,
-                    "none",
-                    (),
-                    "none",
-                )
-
-                for qx_iter in (qx, qx.repeat(2, 1)):
-                    qy = qlinear_op(
-                        qx_iter,
-                        x_scale,
-                        x_zp,
-                        qw_packed,
-                        w_scales,
-                        w_zps,
-                        b,
-                        y_scale,
-                        0,
-                        None,
-                        "none",
-                        (),
-                        "none",
-                    )
-
-                    x_ref = _dequantize_fp8e4m3(qx_iter, x_scale)
-                    w_ref = _dequantize_fp8e4m3(qw, w_scales)
-                    y_ref = F.linear(x_ref, w_ref, b)
-                    y_ref = _quantize_fp8e4m3(y_ref, y_scale)
-
-                    assert y_ref.dim() == qy.dim()
-                    assert torch.equal(y_ref.float(), qy.float())
-                    if torch.isnan(qy).any():
-                        raise AssertionError("Output qy contains NaN values")
-            """
-        )
-
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            env=env,
-            cwd=os.getcwd(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(
-            proc.returncode,
-            0,
-            msg=(
-                "Subprocess fp8 fast-path validation failed.\n"
-                f"stdout:\n{proc.stdout}\n"
-                f"stderr:\n{proc.stderr}"
-            ),
-        )
-
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_fp8(self):
@@ -5143,8 +5113,25 @@ class TestQuantizedLinear(TestCase):
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_fast_path_fp8(self):
-        qlinear = torch.ops.onednn.qlinear_pointwise
-        self._test_qlinear_fp8_fast_path_helper(qlinear)
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_fp8_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                "Spawned fp8 fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
 
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
