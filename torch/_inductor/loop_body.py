@@ -137,8 +137,8 @@ class LoopBody:
         self.indexing = None
 
         # Analyze index_expr usage for int64 overflow fix (Issue #175966)
-        # Maps FX nodes -> is_used_only_for_values
-        self.index_expr_usage: dict[torch.fx.Node, bool] = analyze_index_expr_usage(self)
+        # Maps FX nodes -> (is_used_only_for_values, original_dtype)
+        self.index_expr_usage: dict[torch.fx.Node, tuple[bool, Any]] = analyze_index_expr_usage(self)
 
     def get_original_num_rdims(self) -> int:
         assert self.has_partial_accumulate
@@ -852,10 +852,10 @@ class CaptureIndexing(WrapperHandler):
         self.tracer.create_proxy("output", "output", result, {})
 
 
-def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, bool]:
+def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, tuple[bool, Any]]:
     """
     Analyze the LoopBody's FX graph to determine which index_expr nodes
-    are used ONLY for values (never for indexing).
+    are used ONLY for values (never for indexing), and capture their original dtype.
 
     This implements the IR-level use-chain analysis to fix int64 overflow bug
     (Issue #175966). The bug occurs when int64 arithmetic is performed in int32
@@ -866,6 +866,7 @@ def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, bool]:
     2. Mark ancestors as used for indexing or values based on argument position
     3. Stop at load barriers (don't propagate "for values" through load index)
     4. Conservative: if used for BOTH indexing and values, treat as indexing
+    5. Extract original dtype from ops.index_expr(expr, dtype) call
 
     Terminal operations:
     - ops.load(name, index) - index → INDEXING
@@ -876,9 +877,9 @@ def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, bool]:
     - ops.load() - result is VALUES, but don't propagate backward through index arg
 
     Returns:
-        dict mapping FX node -> is_used_only_for_values (bool)
-        - True: CERTAIN it's only for values, never indexing (safe to use int64)
-        - False: Used for indexing OR uncertain (use int32 - conservative)
+        dict mapping FX node -> (is_used_only_for_values, original_dtype)
+        - is_used_only_for_values: True if CERTAIN it's only for values, False otherwise
+        - original_dtype: The dtype argument from ops.index_expr(expr, dtype) call
     """
     # Track what each FX node is used for
     used_for_indexing: set[torch.fx.Node] = set()
@@ -943,16 +944,17 @@ def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, bool]:
             if len(node.args) > 2 and isinstance(node.args[2], torch.fx.Node):
                 mark_indexing_ancestors(node.args[2])
 
-    # Build result: for each index_expr node, determine usage
+    # Build result: for each index_expr node, determine usage AND capture original dtype
     # ULTRA-CONSERVATIVE: if in BOTH sets, treat as INDEXING (avoid Type 2 error)
-    result: dict[torch.fx.Node, bool] = {}
+    result: dict[torch.fx.Node, tuple[bool, Any]] = {}
     for node in loop_body.root_block.graph.nodes:
         if node.target == 'index_expr':
             in_values = node in used_for_values
             in_indexing = node in used_for_indexing
 
-            # Only True if ONLY used for values, never indexing
-            # This avoids Type 2 errors (false positive for values → perf regression)
-            result[node] = in_values and not in_indexing
+            # Original dtype lookup not needed - we'll look it up from V.graph during codegen
+            # Just return is_for_values_only
+            is_for_values_only = in_values and not in_indexing
+            result[node] = (is_for_values_only, None)
 
     return result

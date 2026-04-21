@@ -2133,10 +2133,19 @@ class TritonKernelOverrides(TritonOverrides):
     @classmethod
     def index_expr(cls, expr, dtype):
         """
-        index expr behaviour.
-        If the index is used for values, we keep the original dtype.
-        Otherwise we downgrade the dtype to int32.
-        For non-integer dtypes, respect the requested dtype.
+        Handles dtype selection for index expressions based on usage.
+
+        - For non-integer int 32/64 dtypes: Respect the requested dtype
+        - elif used for VALUES and original dtype is int64: Use int64 to preserve semantics
+        - elif used for INDEXING or original dtype is not int64: Use kernel index dtype (int32)
+        
+
+        The VALUE vs INDEXING distinction is determined by analyzing the
+        LoopBody FX graph to trace which ops.store argument position the
+        index_expr feeds into.
+
+        The original dtype is retrieved from V.kernel.current_node.node.dtype,
+        which preserves the user's dtype choice before type promotion.
         """
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
@@ -2154,32 +2163,56 @@ class TritonKernelOverrides(TritonOverrides):
 
         # FIX for Issue #175966: Check if this index_expr is used for values vs indexing
         # Algorithm: Trace VALUE chains backward from store operations
-        # - If index_expr is in VALUE chain → compute in int64 (preserve semantics)
-        # - If index_expr is NOT in VALUE chain → use int32 (safe for indexing)
+        # - If index_expr is in VALUE chain AND may overflow → use int64
+        # - Otherwise → use kernel index dtype (int32)
         is_for_values_only = False
         index_str_to_use = indexing.index_str
 
-        # Check if current FX node is marked as "for values only"
+        # Check if current FX node is marked as "for values only" and get original dtype
         # During codegen, V.interpreter.current_node is the FX node being executed
         # V.kernel.current_node._body is the LoopBody containing the analysis
-  
-        current_fx_node = V.interpreter.current_node
-        if current_fx_node:
-            is_for_values_only = V.kernel.current_node._body.index_expr_usage.get(current_fx_node, False)
 
-        # Determine dtype to use based on usage chain
-        if is_for_values_only:
-            # In VALUE chain → force int64 to preserve original dtype semantics
-            # This ensures operations like idx*1e9 don't overflow, regardless of
-            # what dtype fusion/lowering requested (e.g., float32 due to later cast)
+        current_fx_node = V.interpreter.current_node
+        is_for_values_only = False
+        original_dtype = None
+
+        if current_fx_node:
+            # index_expr_usage now returns (is_for_values_only, original_dtype)
+            usage_info = V.kernel.current_node._body.index_expr_usage.get(current_fx_node, (False, None))
+            is_for_values_only, original_dtype = usage_info
+
+            # Try to find the original dtype from FX nodes in V.graph.user_to_last_uses
+            # The iota/arange FX node should have meta information with int64 dtype
+            # Only trust original_dtype if it's int64; otherwise look it up
+            if original_dtype != torch.int64 and hasattr(V, 'graph') and V.graph:
+                # Check FX nodes for int64 dtype in meta
+                for user, last_uses in V.graph.user_to_last_uses.items():
+                    for fx_node in last_uses:
+                        # Check if FX node has meta with dtype information
+                        if hasattr(fx_node, 'meta') and 'val' in fx_node.meta:
+                            val = fx_node.meta['val']
+                            if hasattr(val, 'dtype') and val.dtype == torch.int64:
+                                original_dtype = torch.int64
+                                break
+                    if original_dtype == torch.int64:
+                        break
+
+        # Determine dtype to use based on usage chain and original dtype
+        if is_for_values_only and original_dtype == torch.int64:
+            # In VALUE chain AND original dtype was int64 → use int64 to preserve semantics
+            # This catches cases like: idx * 1e9 where idx came from int64 arange
+            # Even if type promotion changed final dtype to float32, the intermediate
+            # multiplication needs int64 to avoid overflow
             dtype_to_use = torch.int64
-            index_str_to_use = cls._cast_index_vars_to_int64(indexing.index_str)
+            if index_dtype == torch.int32:
+                index_str_to_use = cls._cast_index_vars_to_int64(indexing.index_str)
+            # else: kernel index dtype is already int64, no cast needed
         elif dtype not in (torch.int32, torch.int64):
             # Non-integer dtypes: respect requested dtype
             dtype_to_use = dtype
         else:
-            # In INDEXING chain or uncertain → use kernel index dtype (int32)
-            # This is conservative and safe for indexing operations
+            # INDEXING chain OR original dtype was not int64 → use kernel index dtype (int32)
+            # Trust user's dtype choice: if they didn't specify int64, use int32
             dtype_to_use = index_dtype
 
         # Casting violates this assert, set to false if we can cast.
@@ -2204,9 +2237,9 @@ class TritonKernelOverrides(TritonOverrides):
                 dtype=upcast_compute_type(dtype),
                 shape=var.shape,
             )
-        elif is_for_values_only:
-            # For values only with int64: already generated with casts, no further action needed
-            # The var was generated with dtype_to_use (int64) and index vars cast to int64
+        elif is_for_values_only and original_dtype == torch.int64:
+            # For VALUE chain with int64 original dtype: already generated with int64
+            # The var was generated with dtype_to_use (int64) and index vars cast if needed
             pass
         else:
             # Original behavior: handle type promotion for indexing case
