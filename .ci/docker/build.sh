@@ -81,6 +81,13 @@ elif [[ "$image" == *riscv* ]]; then
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
+# For benchmark images built via merge, both BASE_IMAGE and TORCHBENCH_IMAGE
+# must be set. This uses torchbench/Dockerfile.benchmark which `COPY`
+# pre-built benchmark deps from the torchbench image into the base image.
+if [[ -n "${TORCHBENCH_IMAGE:-}" ]]; then
+  DOCKERFILE="torchbench/Dockerfile.benchmark"
+fi
+
 tag=$(echo $image | awk -F':' '{print $2}')
 # If no tag (no colon in image name), use the image name itself
 if [[ -z "$tag" ]]; then
@@ -197,12 +204,14 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-py3-gcc11 | pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
-    INDUCTOR_BENCHMARKS=yes
+    if [[ $tag =~ "inductor-benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
@@ -317,44 +326,58 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker buildx build \
-       ${no_cache_flag} \
-       ${progress_flag} \
-       --build-arg "BUILD_ENVIRONMENT=${image}" \
-       --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
-       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
-       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
-       --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
-       --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
-       --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
-       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
-       --build-arg "GCC_VERSION=${GCC_VERSION}" \
-       --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
-       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "TRITON=${TRITON}" \
-       --build-arg "TRITON_CPU=${TRITON_CPU}" \
-       --build-arg "ONNX=${ONNX}" \
-       --build-arg "DOCS=${DOCS}" \
-       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "HALIDE=${HALIDE}" \
-       --build-arg "PALLAS=${PALLAS}" \
-       --build-arg "TPU=${TPU}" \
-       --build-arg "XPU_VERSION=${XPU_VERSION}" \
-       --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "ACL=${ACL:-}" \
-       --build-arg "OPENBLAS=${OPENBLAS:-}" \
-       --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
-       -f $(dirname ${DOCKERFILE})/Dockerfile \
-       --load \
-       -t "$tmp_tag" \
-       "$@" \
-       .
+if [[ -n "${TORCHBENCH_IMAGE:-}" ]]; then
+  # Merge build: COPY pre-built benchmark deps from torchbench image into base
+  docker buildx build \
+         ${no_cache_flag} \
+         ${progress_flag} \
+         --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+         --build-arg "TORCHBENCH_IMAGE=${TORCHBENCH_IMAGE}" \
+         -f "${DOCKERFILE}" \
+         --load \
+         -t "$tmp_tag" \
+         "$@" \
+         .
+else
+  docker buildx build \
+         ${no_cache_flag} \
+         ${progress_flag} \
+         --build-arg "BUILD_ENVIRONMENT=${image}" \
+         --build-arg "LLVMDEV=${LLVMDEV:-}" \
+         --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
+         --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+         --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
+         --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
+         --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+         --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
+         --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
+         --build-arg "GCC_VERSION=${GCC_VERSION}" \
+         --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
+         --build-arg "KATEX=${KATEX:-}" \
+         --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+         --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
+         --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
+         --build-arg "TRITON=${TRITON}" \
+         --build-arg "TRITON_CPU=${TRITON_CPU}" \
+         --build-arg "ONNX=${ONNX}" \
+         --build-arg "DOCS=${DOCS}" \
+         --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+         --build-arg "EXECUTORCH=${EXECUTORCH}" \
+         --build-arg "HALIDE=${HALIDE}" \
+         --build-arg "PALLAS=${PALLAS}" \
+         --build-arg "TPU=${TPU}" \
+         --build-arg "XPU_VERSION=${XPU_VERSION}" \
+         --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
+         --build-arg "ACL=${ACL:-}" \
+         --build-arg "OPENBLAS=${OPENBLAS:-}" \
+         --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
+         --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+         -f $(dirname ${DOCKERFILE})/Dockerfile \
+         --load \
+         -t "$tmp_tag" \
+         "$@" \
+         .
+fi
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could

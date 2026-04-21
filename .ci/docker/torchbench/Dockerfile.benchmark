@@ -1,0 +1,23 @@
+# Merges a base CI image with the standalone torchbench deps image.
+#
+# This is a fast multi-stage build: no installs, just COPY.
+# The torchbench image has all benchmark deps pre-installed in its conda env.
+# The base image has the CI toolchain (compilers, CUDA, etc.).
+#
+# Usage:
+#   docker build -f torchbench/Dockerfile.benchmark \
+#     --build-arg BASE_IMAGE=<base-image> \
+#     --build-arg TORCHBENCH_IMAGE=<torchbench-image> \
+#     -t <output-tag> .
+
+ARG BASE_IMAGE
+ARG TORCHBENCH_IMAGE
+
+FROM ${TORCHBENCH_IMAGE} AS torchbench
+FROM ${BASE_IMAGE}
+
+COPY --from=torchbench /torchbench /torchbench
+COPY --from=torchbench /opt/conda/envs/py_3.10/ /opt/conda/envs/py_3.10/
+
+ENV BUILD_AOT_INDUCTOR_TEST=yes
+CMD ["bash"]
