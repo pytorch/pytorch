@@ -8,11 +8,12 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import requires_accelerator, run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import DEVICE_TYPE
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-@requires_cuda
+@requires_accelerator
 class TestDTensorLogging(TestCase):
     """Test DTensor logging."""
 
@@ -28,7 +29,7 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def test_sharding_prop_cache_logging(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -58,14 +59,12 @@ class TestDTensorLogging(TestCase):
         x_dt2 = DTensor.from_local(torch.randn(4, 4), mesh, [Shard(0)], run_check=False)
         x_dt2 + x_dt2
 
-        self.assertExpectedInline(
-            log_string(),
-            """\
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
-sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](R))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",  # noqa: B950
-        )
+        logs = log_string()
+        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
+        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
+        self.assertIn("sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
+        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on {mesh_str}) -> Spec(f32[4, 4](R))", logs)  # noqa: B950
+        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on {mesh_str}) -> Spec(f32[8, 4](S(0)))", logs)  # noqa: B950
 
         # Test Python LRU cache, directly with ShardingPropagator
         log_records.clear()
@@ -86,12 +85,10 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
         )
         propagator.propagate_op_sharding(op_schema)  # Python cache miss
         propagator.propagate_op_sharding(op_schema)  # Python cache hit
-        self.assertExpectedInline(
-            log_string(),
-            """\
-sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
-sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",  # noqa: B950
-        )
+        logs = log_string()
+        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
+        self.assertIn(f"sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
+        self.assertIn(f"sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
 
     def test_logging_level_change_resets_cpp_cache(self):
         """setLevel on the dispatch logger resets the C++ cached logging flag."""

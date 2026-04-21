@@ -105,10 +105,15 @@ T = TypeVar("T")
 # when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    assert len(avail_gpus) <= 1
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+    device_types = list(GPU_TYPES)
+    privateuse1_name = torch._C._get_privateuse1_backend_name()
+    if privateuse1_name and privateuse1_name != "privateuseone":
+        if hasattr(torch, privateuse1_name):
+            device_types.append(privateuse1_name)
+    avail_devices = [x for x in device_types if getattr(torch, x).is_available()]
+    assert len(avail_devices) <= 1
+    device_type = "cuda" if len(avail_devices) == 0 else avail_devices.pop()
+    return device_type
 
 
 from torch._dynamo.device_interface import get_interface_for_device
