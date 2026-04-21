@@ -127,9 +127,9 @@ class — it calls `torch._dynamo.reset()` in setUp/tearDown and patches config
 for strict error checking.
 
 ```bash
-python test/dynamo/test_misc.py                       # whole file
-python test/dynamo/test_misc.py MiscTests.test_foo    # single test
-python test/dynamo/test_misc.py -k test_foo           # pattern match
+python test/dynamo/test_compile_semantics.py                                   # whole file
+python test/dynamo/test_compile_semantics.py CompileSemanticsTests.test_boolarg # single test
+python test/dynamo/test_compile_semantics.py -k test_boolarg                   # pattern match
 ```
 
 ### Common patterns

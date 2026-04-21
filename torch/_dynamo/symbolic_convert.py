@@ -4770,7 +4770,7 @@ class InstructionTranslatorBase(
         else:
             # This log line MUST not contain the string "Graph break in user code",
             # exercised by
-            #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+            #   python test/dynamo/test_compile_semantics.py -k test_duplicate_graph_break_log
             graph_break_log.debug(
                 "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
                 frame_loc[0],

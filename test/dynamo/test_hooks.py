@@ -39,6 +39,17 @@ class ClassWithVal:
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
+    def test_retain_grad(self):
+        def fn(x, y):
+            y.retain_grad()
+            return torch.sin(y) + x
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(4, requires_grad=True)
+        y = torch.cos(x)
+        opt_fn(x, y).sum().backward()
+        self.assertTrue(y.grad is not None)
+
     def test_tensor_only_register_hook_in_graph_lambda(self):
         def fn(x):
             x.register_hook(lambda grad: grad * 2)

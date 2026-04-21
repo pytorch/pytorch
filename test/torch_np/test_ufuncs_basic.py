@@ -97,7 +97,7 @@ class TestUnaryUfuncs(TestCase):
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
         # TODO: switching the order causes a graph break, failing the test.
-        # See test/dynamo/test_misc.py -k test_numpy_graph_break
+        # See test/dynamo/test_numpy_interop.py -k test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function
         if res_out is not out:
             raise AssertionError("Expected res_out to be out")
         assert_equal(res_out, res_bcast)
@@ -220,7 +220,7 @@ class TestBinaryUfuncs(TestCase):
         res_bcast = ufunc(x_b, y_b)
 
         # TODO: switching the order causes a graph break, failing the test.
-        # See test/dynamo/test_misc.py -k test_numpy_graph_break
+        # See test/dynamo/test_numpy_interop.py -k test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function
         if res_out is not out:
             raise AssertionError("Expected res_out to be out")
         assert_equal(res_out, res_bcast)

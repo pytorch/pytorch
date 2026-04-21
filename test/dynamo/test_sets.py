@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-# TODO: move set tests from test_functions.py/test_misc.py to this file
+# TODO: move set tests from test_functions.py/test_python_builtins.py to this file
 
 import math
 import unittest

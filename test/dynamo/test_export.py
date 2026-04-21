@@ -4583,6 +4583,37 @@ def forward(self, x, b, y):
 
         self.assertEqual(ref, res)
 
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                self._call_impl = functools.partial(wrapped_fn, fn)
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
+
+    test_partial_export._expected_failure_inline_and_install = True
+
 
 class ExportTestsSubprocess(torch._dynamo.test_case.TestCase):
     def test_strict_export_under_pythonoptimize(self):

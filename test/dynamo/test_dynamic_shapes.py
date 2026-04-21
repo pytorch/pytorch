@@ -10,28 +10,40 @@ from torch.testing._internal.common_utils import slowTest, TEST_Z3
 try:
     from . import (
         test_aot_autograd,
+        test_closures,
+        test_compile_semantics,
         test_ctx_manager,
         test_export,
         test_functions,
+        test_guards,
         test_higher_order_ops,
-        test_misc,
         test_modules,
+        test_numpy_interop,
+        test_python_builtins,
         test_repros,
         test_sdpa,
         test_subgraphs,
+        test_tensor_semantics,
+        test_user_defined_objects,
     )
 except ImportError:
     import test_aot_autograd
+    import test_closures
+    import test_compile_semantics
     import test_ctx_manager
     import test_export
     import test_functions
+    import test_guards
     import test_higher_order_ops
-    import test_misc
 
     import test_modules
+    import test_numpy_interop
+    import test_python_builtins
     import test_repros
     import test_sdpa
     import test_subgraphs
+    import test_tensor_semantics
+    import test_user_defined_objects
 
 
 test_classes = {}
@@ -70,10 +82,16 @@ def make_dynamic_cls(cls):
 tests = [
     test_ctx_manager.CtxManagerTests,
     test_functions.FunctionTests,
-    test_misc.MiscTests,
+    test_closures.ClosureTests,
+    test_compile_semantics.CompileSemanticsTests,
+    test_guards.GuardTests,
     test_repros.ReproTests,
     test_modules.NNModuleTests,
+    test_numpy_interop.NumpyInteropTests,
+    test_tensor_semantics.TensorSemanticsTests,
+    test_user_defined_objects.UserDefinedObjectTests,
     test_export.ExportTests,
+    test_python_builtins.PythonBuiltinTests,
     test_subgraphs.SubGraphTests,
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,

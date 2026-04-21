@@ -1171,7 +1171,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer.generator_exhausted = True
             raise e
         except InfiniteGeneratorError:
-            # test/dynamo/test_misc.py::test_iterator_limit
+            # test/dynamo/test_python_builtins.py::PythonBuiltinTests::test_iterator_limit
             unimplemented(
                 gb_type="infinite generator detected",
                 context="",

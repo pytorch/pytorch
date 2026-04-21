@@ -56,14 +56,9 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
-from torch.nn.attention.flex_attention import (
-    AuxRequest,
-    create_block_mask,
-    flex_attention,
-)
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     SM70OrLater,
     TEST_CUDA,
@@ -79,7 +74,6 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfHpu,
     skipIfWindows,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -3964,14 +3958,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
-
-    def test_jit_trace_errors(self):
-        @torch.compile(backend="eager", dynamic=True)
-        def f(x):
-            return x + 1
-
-        with self.assertRaises(RuntimeError):
-            torch.jit.trace(f, torch.randn(3))
 
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
@@ -8121,80 +8107,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             self.assertTrue(same(res, ref))
 
-    def test_guard_default_device(self, device):
-        try:
-            torch.set_default_device(device)
-
-            counter = torch._dynamo.testing.CompileCounter()
-
-            @torch._dynamo.optimize(counter)
-            def f():
-                x = torch.randn(3)
-                return x * 2
-
-            self.assertEqual(f().device.type + ":0", device)
-            self.assertEqual(counter.frame_count, 1)
-
-            torch.set_default_device("cpu")
-
-            self.assertEqual(f().device.type, "cpu")
-            self.assertEqual(counter.frame_count, 2)
-
-        finally:
-            torch.set_default_device(None)
-
-    @skipIfHpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
-    def test_flash_attn_backward_mixed_strides(self, device):
-        # in this repro, "grad_out" and "value" are transposed tensors,
-        # but "key" and "value" are contiguous
-        def gen_inputs(device):
-            return (
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, device=device),
-                None,
-                None,
-                513,
-                513,
-                0.0,
-                False,
-                torch.tensor(1, dtype=torch.int64),
-                torch.tensor(1, dtype=torch.int64),
-            )
-
-        inps_device = gen_inputs(device)
-        inps_meta = gen_inputs("meta")
-        (
-            out1_ref,
-            out2_ref,
-            out3_ref,
-        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
-            *inps_device, scale=0.125
-        )
-        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
-
-        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
-            *inps_meta, scale=0.125
-        )
-
-        self.assertEqual(out1_ref.shape, out1_test.shape)
-        self.assertEqual(out1_ref.stride(), out1_test.stride())
-        self.assertEqual(out2_ref.shape, out2_test.shape)
-        self.assertEqual(out2_ref.stride(), out2_test.stride())
-        self.assertEqual(out3_ref.shape, out3_test.shape)
-        self.assertEqual(out3_ref.stride(), out3_test.stride())
-
     def test_megablocks_moe(self, device):
         try:
             from megablocks.layers import moe
@@ -8308,27 +8220,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         _ = f_compiled(x2)
 
         self.assertEqual(cnt.frame_count, 1)
-
-    @requires_cuda
-    def test_sdpa_dynamic_shapes(self, device):
-        def f(x, s0, s1, s2):
-            q = x.view(2, s0, s2, s0)
-            return torch._C._nn.scaled_dot_product_attention(
-                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
-            )
-
-        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device=device)
-        x_ref = x.clone().detach().requires_grad_()
-        s0 = 32
-        s1 = 64
-        s2 = 128
-
-        f_compiled = torch.compile(f, dynamic=True, backend="eager")
-
-        with torch._dynamo.config.patch(assume_static_by_default=False):
-            out_ref = f(x_ref, s0, s1, s2)
-            out = f_compiled(x, s0, s1, s2)
-            self.assertEqual(out_ref, out)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
     @requires_cuda
@@ -8566,19 +8457,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
 
-    def test_torch_cuda_is_initialized(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x):
-            if torch.cuda.is_initialized():
-                return x + 1
-            return x + 2
-
-        inp = torch.randn(3)
-        self.assertEqual(f(inp), inp + 1)
-
-        with mock.patch("torch.cuda.is_initialized", lambda: False):
-            self.assertEqual(f(inp), inp + 2)
-
     def test_named_tuple_vt_clone(self):
         # https://github.com/pytorch/pytorch/issues/157945
         class SVDCompressor(nn.Module):
@@ -8597,44 +8475,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out1 = model(input.clone())
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
-
-    @requires_cuda
-    def test_zero_dim_param_mixed_device_grad(self):
-        # cpu 0-dim params with cuda grads
-        # https://github.com/pytorch/pytorch/issues/160084
-        class RegressionModel(torch.nn.Module):
-            def __init__(self, a=0, b=0):
-                super().__init__()
-                self.a = torch.nn.Parameter(torch.tensor(a).float())
-                self.b = torch.nn.Parameter(torch.tensor(b).float())
-
-            def forward(self, x):
-                return x * self.a + self.b
-
-        model = RegressionModel()
-        model.forward = torch.compile(
-            model.forward, backend="aot_eager", fullgraph=True
-        )
-        inputs = torch.randn(4, 10).to("cuda")
-        out = model(inputs)
-        out.sum().backward()
-        self.assertIsNotNone(model.a.grad)
-        self.assertIsNotNone(model.b.grad)
-        self.assertEqual(model.a.grad.device, torch.device("cpu"))
-        self.assertEqual(model.b.grad.device, torch.device("cpu"))
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_cuda_sync(self):
-        def fn(x):
-            y = x + 1
-            torch.cuda.synchronize()
-            return y * 2
-
-        x = torch.ones(2, device="cuda")
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(cnt.frame_count, 1)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -8691,136 +8531,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
-
-    def test_partial_export(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def parallelize(self):
-                fn = self._call_impl
-
-                def wrapped_fn(fn, *args, **kwargs):
-                    new_args_0 = args[0].to(torch.bfloat16)
-                    new_args_1 = args[1].to(torch.bfloat16)
-                    return fn(new_args_0, new_args_1)
-
-                fn = functools.partial(wrapped_fn, fn)
-                self._call_impl = fn
-
-            def forward(self, a, b):
-                return a + b
-
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
-        foo = Foo()
-        foo.parallelize()
-        x = torch.randn(4, 4, dtype=torch.float32)
-        y = torch.randn(4, 4, dtype=torch.float32)
-        ref = foo(x, y)
-        gm = dynamo_graph_capture_for_export(foo)(x, y)
-        res = gm(x, y)
-        self.assertEqual(res, ref)
-
-    def test_current_accelerator(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.accelerator.current_accelerator()
-            return x + 1
-
-        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
-
-    def test_pytree_get_node_type_not_traced(self):
-        # Test that torch.utils._pytree._get_node_type is not traced into
-        # and doesn't cause excessive trace time overhead
-        from torch.utils._pytree import _get_node_type
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(x, y):
-            # Call _get_node_type which is used internally by pytree operations
-            node_type = _get_node_type([x, y])
-            assert node_type is list  # noqa: S101
-            # Do some work with pytree structures
-            data = {"a": x, "b": y}
-            flat, spec = pytree.tree_flatten(data)
-            result = flat[0] + flat[1]
-            return result
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_pytree_get_node_type_with_namedtuple(self):
-        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
-        # without being traced into, even when is_namedtuple_class is True
-        from collections import namedtuple
-
-        from torch.utils._pytree import _get_node_type
-
-        Point = namedtuple("Point", ["x", "y"])
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(a, b):
-            # Create a namedtuple
-            point = Point(a, b)
-            # Call _get_node_type with a namedtuple instance
-            node_type = _get_node_type(point)
-            assert node_type is namedtuple  # noqa: S101
-            # Use pytree operations with namedtuples
-            flat, spec = pytree.tree_flatten(point)
-            result = flat[0] + flat[1]
-            return result
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_pytree_tree_is_leaf_not_traced(self):
-        # Test that torch.utils._pytree.tree_is_leaf is not traced into
-        # when is_leaf parameter is None (the common case)
-        from torch.utils._pytree import tree_is_leaf
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(x, y):
-            # Test with various types
-            # Tensors are leaves
-            is_leaf_tensor = tree_is_leaf(x)
-            assert is_leaf_tensor is True  # noqa: S101
-
-            # Lists are not leaves (they're in SUPPORTED_NODES)
-            is_leaf_list = tree_is_leaf([x, y])
-            assert is_leaf_list is False  # noqa: S101
-
-            # Dicts are not leaves
-            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
-            assert is_leaf_dict is False  # noqa: S101
-
-            return x + y
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
 
     def test_ordered_set_doesnt_recompile_with_ac(self):
         import torch
@@ -8896,38 +8606,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         result = fn(obj, t)
         self.assertEqual(result, torch.tensor([43.0]))
         self.assertEqual(cnt.frame_count, 2)
-
-    def test_pytree_tree_is_leaf_with_namedtuple(self):
-        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
-        from collections import namedtuple
-
-        from torch.utils._pytree import tree_is_leaf
-
-        Point = namedtuple("Point", ["x", "y"])
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(a, b):
-            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
-            point = Point(a, b)
-            is_leaf_namedtuple = tree_is_leaf(point)
-            assert is_leaf_namedtuple is False  # noqa: S101
-
-            # But individual tensors are leaves
-            is_leaf_tensor = tree_is_leaf(a)
-            assert is_leaf_tensor is True  # noqa: S101
-
-            return a + b
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
 
     def test_data_attr_mutation_with_noop_add(self):
         # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
@@ -9077,90 +8755,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             grad = torch.autograd.grad(res.sum(), x)
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
-
-    @requires_cuda
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
-    def test_flex_attention_guard_on_constant_func_defaults(self):
-        """
-        Dynamo must guard on mask_mod.__defaults__ so that when a
-        compiled function is re-invoked with a new BlockMask whose
-        mask_mod has the same __code__ but different __defaults__,
-        Dynamo recompiles instead of reusing the stale first graph.
-        """
-        from torch.utils._triton import has_triton
-
-        if not has_triton():
-            self.skipTest("requires triton")
-
-        @torch.compile(fullgraph=True)
-        def flex_chunk(q, k, v, block_mask, scale):
-            out, aux = flex_attention(
-                q,
-                k,
-                v,
-                block_mask=block_mask,
-                scale=scale,
-                return_aux=AuxRequest(lse=True),
-            )
-            return out, aux.lse
-
-        def merge(out, lse, new_out, new_lse):
-            lse, new_lse = lse.unsqueeze(-1), new_lse.unsqueeze(-1)
-            mx = torch.maximum(lse, new_lse)
-            e0, e1 = torch.exp(lse - mx), torch.exp(new_lse - mx)
-            d = e0 + e1
-            return (out * e0 + new_out * e1) / d, (mx + torch.log(d)).squeeze(-1)
-
-        @torch.compile(fullgraph=True)
-        def ref_attn(q, k, v, block_mask, scale):
-            return flex_attention(q, k, v, block_mask=block_mask, scale=scale)
-
-        torch.manual_seed(42)
-        B, H, S, D = 1, 1, 512, 16
-        device = "cuda"
-        NUM_CHUNKS = 4
-        chunk_size = S // NUM_CHUNKS
-
-        q = torch.randn(B, H, S, D, device=device)
-        k = torch.randn(B, H, S, D, device=device)
-        v = torch.randn(B, H, S, D, device=device)
-        scale = D**-0.5
-
-        merged_out = merged_lse = None
-        for step in range(NUM_CHUNKS):
-            kv_offset = step * chunk_size
-
-            def mask_mod(b, h, q_idx, kv_idx, _offset=kv_offset):
-                return q_idx >= kv_idx + _offset
-
-            bm = create_block_mask(
-                mask_mod, B=B, H=H, Q_LEN=S, KV_LEN=chunk_size, device=device
-            )
-            out, lse = flex_chunk(
-                q,
-                k[:, :, kv_offset : kv_offset + chunk_size],
-                v[:, :, kv_offset : kv_offset + chunk_size],
-                bm,
-                scale,
-            )
-            if merged_out is None:
-                merged_out, merged_lse = out, lse
-            else:
-                merged_out, merged_lse = merge(merged_out, merged_lse, out, lse)
-
-        def causal(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        ref_bm = create_block_mask(causal, B=B, H=H, Q_LEN=S, KV_LEN=S, device=device)
-        ref_out = ref_attn(q, k, v, ref_bm, scale)
-
-        self.assertTrue(
-            (merged_out - ref_out).abs().max().item() < 1e-3,
-            "flex_attention mask_mod __defaults__ not properly guarded",
-        )
 
 
 instantiate_parametrized_tests(ReproTests)

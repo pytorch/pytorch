@@ -9,16 +9,16 @@ from torch._dynamo.testing import make_test_cls_with_patches
 
 
 try:
-    # from . import test_ctx_manager
+    # from . import test_compile_semantics, test_ctx_manager
     pass
 except ImportError:
     # import test_aot_autograd
+    # import test_compile_semantics
     # import test_ctx_manager
 
     # import test_export
     # import test_functions
     # import test_higher_order_ops
-    # import test_misc
     # import test_modules
     # import test_repros
     # import test_sdpa
@@ -53,8 +53,8 @@ def make_nested_cls(cls):
 
 tests = [
     # test_ctx_manager.CtxManagerTests,
+    # test_compile_semantics.CompileSemanticsTests,
     # test_functions.FunctionTests,
-    # test_misc.MiscTests,
     # test_repros.ReproTests,
     # test_modules.NNModuleTests,
     # test_subgraphs.SubGraphTests,
