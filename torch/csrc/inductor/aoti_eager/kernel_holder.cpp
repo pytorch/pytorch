@@ -327,12 +327,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
             py::isinstance<py::list>(metadata["tensor_list"]));
         auto tensor_list = metadata["tensor_list"].cast<py::list>();
         std::vector<TensorMetadata> test_list_metadata;
-        for (auto item_tensor : tensor_list) {
+        test_list_metadata.reserve(tensor_list.size());
+        for (const auto& item_tensor : tensor_list) {
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
               py::isinstance<py::dict>(item_tensor));
           auto metadata = item_tensor.cast<py::dict>();
-          auto tensor_metadata = build_tensor_metadata(metadata);
-          test_list_metadata.push_back(tensor_metadata);
+          test_list_metadata.push_back(build_tensor_metadata(metadata));
         }
         parameter_metadata_list.emplace_back(test_list_metadata, arg_idx);
       } else if (is_scalar) {

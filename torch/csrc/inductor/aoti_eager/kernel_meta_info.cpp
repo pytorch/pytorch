@@ -151,7 +151,7 @@ ParameterMetadata::ParameterMetadata(
   for (const auto& tensor : tensor_list) {
     tensor_metadata_list.emplace_back(tensor);
   }
-  value_ = tensor_metadata_list;
+  value_ = std::move(tensor_metadata_list);
 }
 
 ParameterMetadata::ParameterMetadata(
