@@ -42,15 +42,19 @@ def _async_compile_initializer(orig_ppid: int) -> None:
 
     # Opt-in SIGUSR1 stack dumper for CI hang diagnosis; parent process (the
     # pytest test subprocess) enables this via test/conftest.py and propagates
-    # the env var. On SIGUSR1 we dump all Python threads to stderr.
+    # the env var. On SIGUSR1 we dump all Python threads to stderr. Use
+    # sys.__stderr__ instead of sys.stderr so the dump goes to the real fd 2
+    # and is unaffected by pytest's stderr capture — important because this
+    # initializer runs in a forked worker that inherits the parent's sys.stderr.
     if os.environ.get("PYTORCH_FAULT_HANDLER") == "1":
         import faulthandler
         import sys
 
-        faulthandler.enable(file=sys.stderr, all_threads=True)
+        stderr = sys.__stderr__ or sys.stderr
+        faulthandler.enable(file=stderr, all_threads=True)
         if hasattr(faulthandler, "register"):
             faulthandler.register(
-                signal.SIGUSR1, file=sys.stderr, all_threads=True, chain=False
+                signal.SIGUSR1, file=stderr, all_threads=True, chain=False
             )
 
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
