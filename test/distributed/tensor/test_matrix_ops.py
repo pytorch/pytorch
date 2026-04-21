@@ -909,13 +909,14 @@ class DistMatrixOpsTest(DTensorTestBase):
         #       Gaps include missing op support for aten.masked_fill_.Scalar.
         is_causal = True
         enable_gqa = False
-        params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal, enable_gqa
-        )
-        if torch.backends.cuda.can_use_flash_attention(params, debug=False):
-            available_backends.append(SDPBackend.FLASH_ATTENTION)
-        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
-            available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
+        if self.device_type == "cuda":
+            params = torch.backends.cuda.SDPAParams(
+                query, key, value, None, dropout_p, is_causal, enable_gqa
+            )
+            if torch.backends.cuda.can_use_flash_attention(params, debug=False):
+                available_backends.append(SDPBackend.FLASH_ATTENTION)
+            if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
+                available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
         placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
         for backend, input_placements in itertools.product(

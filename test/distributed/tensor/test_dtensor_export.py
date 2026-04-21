@@ -26,11 +26,14 @@ from torch.nn.attention.flex_attention import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
+    requires_accelerator,
     run_tests,
     TestCase,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DEVICE_TYPE,
+    MLPModule,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import register_pytree_node
 
@@ -175,7 +178,7 @@ register_pytree_node(
 )
 
 
-@requires_cuda
+@requires_accelerator
 class DTensorExportTest(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -188,7 +191,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
