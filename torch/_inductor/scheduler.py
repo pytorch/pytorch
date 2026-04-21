@@ -2198,6 +2198,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 
 class FusedMixOrderReductions(FusedSchedulerNode):
+    """Fused node for two reductions with different iteration orders (inner + outer)."""
+
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         if not MixOrderReduction.is_contiguous_node(node1):
             assert MixOrderReduction.is_contiguous_node(node2)
@@ -2261,6 +2263,19 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
+        # Limit tl.load() count in the fused RSPLIT loop to avoid register
+        # spills. See https://github.com/pytorch/pytorch/issues/179423
+        max_reads = config.triton.mix_order_reduction_max_reads
+        if max_reads > 0:
+            all_reads: OrderedSet[str] = OrderedSet()
+            for sn in itertools.chain(self.get_nodes(), other.get_nodes()):
+                for dep in sn.read_writes.reads:
+                    if isinstance(dep, MemoryDep):
+                        all_reads.add(dep.name)
+            if len(all_reads) > max_reads:
+                # pyrefly: ignore [bad-assignment]
+                metrics.rejected_mix_order_reduction_fusion += 1
+                return False
         if not isinstance(other, FusedMixOrderReductions):
             return self.sub_node_can_fuse(
                 self.node1, other, (self.node2,)

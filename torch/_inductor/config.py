@@ -1988,6 +1988,10 @@ class triton:
     # this could be helpful to avoid recompilations in some cases
     mix_order_reduction_non_strict_mode = False
 
+    # Maximum external read buffers (loads) in a mix-order reduction
+    # kernel. Set to 0 to disable the check.
+    mix_order_reduction_max_reads = 10
+
     # Don't allow multi-stages by default to avoid out of shared memory
     mix_order_reduction_allow_multi_stages = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
