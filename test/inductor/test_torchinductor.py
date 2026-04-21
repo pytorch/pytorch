@@ -6284,6 +6284,12 @@ for dtype in (torch.int32, torch.int64):
         if self.device != "cuda":
             self.skipTest("CUDA-only behavior")
 
+    def test_conv2d_backward_mixed_memory_format_1x1(self):
+        # Regression test: when inductor converts conv weights to channels-last
+        # in the forward graph, the saved input retains contiguous strides.
+        # With 1x1 spatial dims the contiguous strides (C,1,1,1) differ from
+        # channels-last strides (C,1,C,C), causing incorrect gradients on
+        # backends that are sensitive to the actual stride values (e.g. XPU).
         def fn(grad_output, inp, weight):
             return torch.ops.aten.convolution_backward.default(
                 grad_output,
@@ -6293,6 +6299,10 @@ for dtype in (torch.int32, torch.int64):
                 [1, 1],
                 [1, 1],
                 [2, 2],
+                [0],  # no bias
+                [1, 1],
+                [0, 0],
+                [1, 1],
                 False,
                 [0, 0],
                 1,
@@ -6435,6 +6445,52 @@ for dtype in (torch.int32, torch.int64):
         m = torch.nn.ConvTranspose1d(4, 8, 3, stride=2, padding=1)
         x = torch.randn(2, 4, 16)
         self.common(m, (x,), check_lowp=False)
+        N, C_in, C_out = 2, 64, 128
+        # Weight is channels-last, input and grad_output are contiguous —
+        # this is the mixed-format scenario from the forward/backward split.
+        self.common(
+            fn,
+            (
+                torch.randn([N, C_out, 1, 1]),
+                torch.randn([N, C_in, 1, 1]),
+                torch.randn([C_out, C_in, 1, 1]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
+        )
+
+    def test_conv2d_backward_mixed_memory_format(self):
+        # Same mixed-format scenario but with larger spatial dims where
+        # channels-last and contiguous strides are unambiguously different.
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [256],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+
+        # On XPU the layout constraint normalises all inputs to channels-last
+        # for correctness, which changes the computation order vs eager and
+        # introduces small numerical differences.
+        atol, rtol = (1e-4, 1e-4) if self.device == "xpu" else (None, None)
+        self.common(
+            fn,
+            (
+                torch.randn([4, 256, 14, 14]),
+                torch.randn([4, 128, 14, 14]),
+                torch.randn([256, 128, 3, 3]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
+            atol=atol,
+            rtol=rtol,
+        )
 
     @parametrize(
         "use_block_ptr",
