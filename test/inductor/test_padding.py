@@ -908,6 +908,25 @@ class PaddingTest(TestCaseBase):
         )
         self.assertEqual(result.stride(), expected_stride)
 
+    def test_reduction_comprehensive_padding_stride(self):
+        """Comprehensive padding should not cause stride mismatches for
+        user-visible reductions.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/179931
+        """
+
+        def program(x):
+            y = torch.nn.functional.adaptive_avg_pool2d(x, 7)
+            return y.flatten(1).sum(dim=-1)
+
+        x = torch.randn(4, 2049, 8, 8, dtype=torch.float32, device=GPU_TYPE)
+        eager = program(x.clone())
+
+        with config.patch({"comprehensive_padding": True}):
+            compiled = torch.compile(program, backend="inductor")(x.clone())
+
+        self.assertEqual(eager, compiled)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
