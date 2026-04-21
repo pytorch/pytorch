@@ -5587,7 +5587,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
-            "deterministic": config.deterministic,
+            "deterministic": config.deterministic or config.batch_invariant,
+            "batch_invariant": config.batch_invariant,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
         }
