@@ -2977,6 +2977,18 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
             ):
                 torch.autograd.grad(loss, (x,))
 
+    def test_patch_engine_backward_requires_non_strict_tracing(self):
+        x = torch.randn(2, 4, requires_grad=True)
+        loss = torch.sin(x).sum()
+
+        with torch.compiler._patch_engine_backward():
+            with self.assertRaisesRegex(
+                AssertionError,
+                "_patch_engine_backward\\(\\) must be used under "
+                "_non_strict_tracing_context\\(\\)",
+            ):
+                loss.backward()
+
     def test_patch_autograd_grad_does_not_leak_backward_tag(self):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
@@ -2992,6 +3004,37 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
         with (
             torch.compiler._non_strict_tracing_context(),
             torch.compiler._patch_autograd_grad(),
+            preserve_node_meta(),
+        ):
+            gm = make_fx(fn)(x)
+
+        backward_nodes = [
+            node for node in gm.graph.nodes if node.meta.get("autograd_backward", False)
+        ]
+        self.assertTrue(backward_nodes)
+
+        neg_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.neg.default
+        )
+        self.assertEqual(len(neg_nodes), 1)
+        self.assertNotIn("autograd_backward", neg_nodes[0].meta)
+        self.assertEqual(neg_nodes[0].meta.get("custom", {}), {"ac_region_id": 0})
+
+    def test_patch_engine_backward_does_not_leak_backward_tag(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        x = torch.randn(2, 4, requires_grad=True)
+
+        def fn(x):
+            with torch.fx.traceback.annotate({"ac_region_id": 0}):
+                y = torch.sin(x)
+                y.sum().backward()
+                return torch.neg(y)
+
+        with (
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_engine_backward(),
             preserve_node_meta(),
         ):
             gm = make_fx(fn)(x)

@@ -524,9 +524,16 @@ def _patch_autograd_grad():
     import functools
 
     import torch.autograd
+    from torch._dynamo.utils import warn_once
     from torch._functorch._aot_autograd.logging_utils import (
         setup_stacktrace_preservation_hooks_from_tensors,
     )
+
+    warn_once(
+        "torch.compiler._patch_autograd_grad() is deprecated; "
+        "use torch.compiler._patch_engine_backward() instead."
+    )
+    # TODO: Remove this helper once Titan no longer depends on it.
 
     _orig_grad = torch.autograd.grad
 
@@ -546,6 +553,44 @@ def _patch_autograd_grad():
         yield
     finally:
         torch.autograd.grad = _orig_grad
+
+
+@contextlib.contextmanager
+def _patch_engine_backward():
+    """Patch _engine_run_backward for non-strict make_fx tracing.
+
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real autograd engine entrypoint used by backward().
+    """
+    import functools
+
+    import torch.autograd
+    import torch.autograd.graph
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
+
+    _orig_engine_run_backward = torch.autograd.graph._engine_run_backward
+
+    @functools.wraps(_orig_engine_run_backward)
+    def _patched_engine_backward(outputs, *args, **kwargs):
+        if not _is_non_strict_tracing():
+            raise AssertionError(
+                "_patch_engine_backward() must be used under "
+                "_non_strict_tracing_context()"
+            )
+
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_engine_run_backward(outputs, *args, **kwargs)
+
+    torch.autograd.graph._engine_run_backward = _patched_engine_backward
+    torch.autograd._engine_run_backward = _patched_engine_backward
+    try:
+        yield
+    finally:
+        torch.autograd.graph._engine_run_backward = _orig_engine_run_backward
+        torch.autograd._engine_run_backward = _orig_engine_run_backward
 
 
 def is_dynamo_compiling() -> bool:
