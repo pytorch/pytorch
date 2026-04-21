@@ -250,8 +250,8 @@ dtensor_fails = {
 }
 
 dtensor_multi_threaded_fails = {
-    xfail("full_like"),
     xfail("index_fill"),
+    xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     xfail("nn.functional.huber_loss"),
@@ -308,6 +308,9 @@ dtensor_compiled_fails = {
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.interpolate", "trilinear"),
+    xfail("nn.functional.max_unpool1d"),
+    xfail("nn.functional.max_unpool2d"),
+    xfail("nn.functional.max_unpool3d"),
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
@@ -318,10 +321,22 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
+    xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.logsigmoid"),
+    # Miscellaneous runtime crashes (e.g. index out of bounds).
+    xfail("gather"),
+    xfail("index_add"),
+    xfail("index_copy"),
+    xfail("index_reduce", "amax"),
+    xfail("index_reduce", "amin"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "prod"),
+    xfail("index_select"),
+    xfail("lu_unpack"),
     xfail("scatter"),
+    xfail("scatter_add"),
     xfail("take_along_dim"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
