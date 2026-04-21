@@ -475,7 +475,12 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            if reduction_numel_hint <= 8192:
+            # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
+            # TODO: test more hardwares
+            no_split_threshold = (
+                524288 if props.major is not None and props.major >= 10 else 8192
+            )
+            if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
                 split_size = min_elements_per_thread
