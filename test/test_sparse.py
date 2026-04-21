@@ -4285,6 +4285,39 @@ class TestSparse(TestSparseBase):
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float16)
+    def test_sparse_spdiags_out_of_range_offsets(self, device, dtype):
+        # Regression test for gh-178089: offsets far outside the valid range
+        # (|k| > max matrix dim) used to produce a negative internal nnz count
+        # and a negative buffer offset, causing an out-of-bounds write and a
+        # bad-free at tensor destruction. They should now be accepted as
+        # empty diagonals, matching the existing boundary semantics.
+        make_diags = functools.partial(make_tensor, dtype=dtype, device=device)
+        make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
+
+        # Original reproducer from the issue.
+        out = torch.sparse.spdiags(
+            make_diags((2, 54)),
+            make_offsets([-65, 10]),
+            (54, 63),
+        )
+        self.assertEqual(out.shape, (54, 63))
+        # Only the in-range diagonal at offset 10 contributes nnz: the data
+        # matrix has 54 columns and the first 10 are skipped for a positive
+        # offset, giving 44 values.
+        self.assertEqual(out._nnz(), 44)
+
+        # Far out-of-range in both directions collapses to an empty matrix.
+        out = torch.sparse.spdiags(
+            make_diags((2, 4)),
+            make_offsets([-100, 100]),
+            (5, 5),
+        )
+        self.assertEqual(out.shape, (5, 5))
+        self.assertEqual(out._nnz(), 0)
+        self.assertEqual(out.to_dense(), torch.zeros((5, 5), dtype=dtype, device=device))
+
     def test_small_nnz_coalesced(self):
         # creating a coo tensor with nnz == 0 is always coalesced
         self.assertTrue(torch.sparse_coo_tensor([[], []], [], (2, 2)).is_coalesced())

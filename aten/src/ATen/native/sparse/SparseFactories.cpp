@@ -58,10 +58,15 @@ Tensor spdiags(
     return at::zeros(shape, diagonals_2d.options().layout(layout.value_or(Layout::Sparse)));
   }
 
+  // Offsets far outside the matrix bounds produce a negative diagonal length
+  // here, which would flow into `nnz` and `result_mem_offsets` below and cause
+  // the kernel to write before the buffer start (gh-178089). Clamp to zero so
+  // those diagonals are treated as empty.
   auto nnz_per_diag = at::where(
       offsets_1d.le(0),
       offsets_1d.add(shape[0]).clamp_max_(diagonals_2d.size(1)),
-      offsets_1d.add(-std::min<int64_t>(shape[1], diagonals_2d.size(1))).neg());
+      offsets_1d.add(-std::min<int64_t>(shape[1], diagonals_2d.size(1))).neg())
+      .clamp_min_(0);
 
   auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
   const auto nnz = diagonals_2d.size(0) > 0
