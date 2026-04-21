@@ -20398,6 +20398,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
+           ),
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_operator', device_type="xpu",
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
