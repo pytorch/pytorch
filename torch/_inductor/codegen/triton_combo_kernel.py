@@ -767,6 +767,10 @@ class ComboKernel(Kernel):
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
+            # Matches triton.py:codegen_kernel(): inference/backward graphs skip
+            # CPU-copy of mutated args during autotune retries; training-forward
+            # graphs must keep it to preserve benchmark inputs across retries.
+            "optimize_mem": V.graph.is_inference or V.graph.is_backward,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
         if max_persistent_rblock > 0:
