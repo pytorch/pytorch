@@ -590,8 +590,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const float softcap,
                const bool return_softmax,
-               std::optional<at::Generator> gen_,
-               int num_splits) {
+               std::optional<at::Generator> gen_) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm80_or_newer = (dprops->major * 10) >= 80;
@@ -764,10 +763,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    if (paged_KV || seqlenq_ngroups_swapped) {
+    if (seqlenq_ngroups_swapped) {
+        // Only apply split-k for decoding
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, num_splits, dprops, opts);
+                           head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset
