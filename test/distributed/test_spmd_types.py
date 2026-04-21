@@ -234,5 +234,118 @@ class TestSpmdTypes(TestCase):
             self.assertIs(get_axis_local_type(result, tp), P)
 
 
+class TestFSDPAnnotation(TestCase):
+    """Test that fully_shard preserves spmd_types annotations."""
+
+    @classmethod
+    def setUpClass(cls):
+        _setup_fake_dist(world_size=8)
+        from torch.distributed.device_mesh import init_device_mesh
+
+        cls.dp_tp_mesh = init_device_mesh("cpu", (4, 2), mesh_dim_names=("dp", "tp"))
+        cls.hsdp_tp_mesh = init_device_mesh(
+            "cpu", (2, 2, 2), mesh_dim_names=("rep", "shard", "tp")
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        _teardown_fake_dist()
+
+    def _make_stub(self, mesh_info):
+        from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
+
+        fsdp_param = object.__new__(FSDPParam)
+        fsdp_param._spmd_local_type = None
+        fsdp_param._spmd_partition_spec = None
+        return fsdp_param
+
+    def test_fsdp_tp(self):
+        """FSDP + TP: DP axis I -> R, TP S(0) annotation preserved through
+        save/restore round-trip."""
+        from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
+
+        dp_pg = self.dp_tp_mesh.get_group("dp")
+        tp_pg = self.dp_tp_mesh.get_group("tp")
+        dp = normalize_axis(dp_pg)
+        tp = normalize_axis(tp_pg)
+        mesh_info = FSDPMeshInfo(mesh=self.dp_tp_mesh["dp"], shard_mesh_dim=0)
+
+        param = torch.nn.Parameter(torch.randn(4, 3))
+        assert_type(param, {dp_pg: I, tp_pg: S(0)})
+
+        fsdp_param = self._make_stub(mesh_info)
+        fsdp_param._save_spmd_type_annotation(param, mesh_info)
+        self.assertIs(fsdp_param._spmd_local_type[dp], R)
+        self.assertIs(fsdp_param._spmd_local_type[tp], V)
+        self.assertEqual(fsdp_param._spmd_partition_spec, PartitionSpec(tp, None))
+
+        unsharded = torch.nn.Parameter(torch.randn(4, 3))
+        fsdp_param._restore_spmd_type_annotation(unsharded)
+        self.assertIs(get_axis_local_type(unsharded, dp), R)
+        self.assertIs(get_axis_local_type(unsharded, tp), V)
+        self.assertEqual(get_partition_spec(unsharded), PartitionSpec(tp, None))
+
+    def test_hsdp_tp(self):
+        """HSDP + TP: both DP axes I -> R, TP annotation preserved."""
+        from torch.distributed.fsdp._fully_shard._fsdp_common import HSDPMeshInfo
+
+        rep_pg = self.hsdp_tp_mesh.get_group("rep")
+        shard_pg = self.hsdp_tp_mesh.get_group("shard")
+        tp_pg = self.hsdp_tp_mesh.get_group("tp")
+        rep = normalize_axis(rep_pg)
+        shard = normalize_axis(shard_pg)
+        tp = normalize_axis(tp_pg)
+        mesh_info = HSDPMeshInfo(
+            mesh=self.hsdp_tp_mesh["rep", "shard"],
+            shard_mesh_dim=1,
+            replicate_mesh_dim=0,
+        )
+
+        param = torch.nn.Parameter(torch.randn(4, 3))
+        assert_type(param, {rep_pg: I, shard_pg: I, tp_pg: S(0)})
+
+        fsdp_param = self._make_stub(mesh_info)
+        fsdp_param._save_spmd_type_annotation(param, mesh_info)
+        self.assertIs(fsdp_param._spmd_local_type[shard], R)
+        self.assertIs(fsdp_param._spmd_local_type[rep], R)
+        self.assertIs(fsdp_param._spmd_local_type[tp], V)
+
+        unsharded = torch.nn.Parameter(torch.randn(4, 3))
+        fsdp_param._restore_spmd_type_annotation(unsharded)
+        self.assertIs(get_axis_local_type(unsharded, rep), R)
+        self.assertIs(get_axis_local_type(unsharded, shard), R)
+        self.assertEqual(get_partition_spec(unsharded), PartitionSpec(tp, None))
+
+    def test_shard_placement_fn_override(self):
+        """save uses self.mesh_info (the overridden mesh), not the default."""
+        from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
+
+        dp = normalize_axis(self.dp_tp_mesh.get_group("dp"))
+        tp = normalize_axis(self.dp_tp_mesh.get_group("tp"))
+        mesh_info_tp = FSDPMeshInfo(mesh=self.dp_tp_mesh["tp"], shard_mesh_dim=0)
+
+        param = torch.nn.Parameter(torch.randn(4, 3))
+        assert_type(param, {self.dp_tp_mesh.get_group("tp"): I})
+
+        fsdp_param = self._make_stub(mesh_info_tp)
+        fsdp_param._save_spmd_type_annotation(param, mesh_info_tp)
+        self.assertIs(fsdp_param._spmd_local_type[tp], R)
+        self.assertNotIn(dp, fsdp_param._spmd_local_type)
+
+    def test_no_annotation_is_noop(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
+        from torch.spmd_types import has_local_type
+
+        mesh_info = FSDPMeshInfo(mesh=self.dp_tp_mesh["dp"], shard_mesh_dim=0)
+        param = torch.nn.Parameter(torch.randn(4, 3))
+        fsdp_param = self._make_stub(mesh_info)
+        fsdp_param._save_spmd_type_annotation(param, mesh_info)
+        self.assertIsNone(fsdp_param._spmd_local_type)
+
+        unsharded = torch.nn.Parameter(torch.randn(4, 3))
+        fsdp_param._restore_spmd_type_annotation(unsharded)
+        self.assertFalse(has_local_type(unsharded))
+
+
 if __name__ == "__main__":
     run_tests()

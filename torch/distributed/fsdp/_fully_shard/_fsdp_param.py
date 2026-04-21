@@ -262,6 +262,10 @@ class FSDPParam:
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_dtensor = isinstance(param, DTensor)
+        self._spmd_local_type = None
+        self._spmd_partition_spec = None
+        if not self.is_dtensor:
+            self._save_spmd_type_annotation(param, self.mesh_info)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
         if not param_data.is_contiguous():
@@ -348,6 +352,8 @@ class FSDPParam:
             return self._init_sharding_spec_spmd(param, fsdp_placement, shard_dim)
         if self.is_dtensor:
             return self._init_sharding_spec_tp(param, fsdp_placement, shard_dim)
+        if self._has_non_dp_spmd_axes(param):
+            return self._init_sharding_spec_spmd_types(param, fsdp_placement, shard_dim)
         return self._init_sharding_spec_plain(param, fsdp_placement)
 
     def _init_sharding_spec_spmd(
@@ -501,6 +507,189 @@ class FSDPParam:
         )
         return param
 
+    def _has_non_dp_spmd_axes(self, param: nn.Parameter) -> bool:
+        from torch.spmd_types import (
+            get_local_type,  # pyrefly: ignore[missing-module-attribute]
+            has_local_type,  # pyrefly: ignore[missing-module-attribute]
+            normalize_axis,  # pyrefly: ignore[missing-module-attribute]
+        )
+
+        if not has_local_type(param):
+            return False
+        local_type = get_local_type(param)
+        if not local_type:
+            return False
+        root_mesh = self.mesh_info.mesh._root_mesh
+        if root_mesh is None:
+            return False
+        dp_axes: set = set()
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            dp_axes.add(normalize_axis(self.mesh_info.shard_process_group))
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            dp_axes.add(normalize_axis(self.mesh_info.replicate_process_group))
+        return any(axis not in dp_axes for axis in local_type)
+
+    def _init_sharding_spec_spmd_types(
+        self,
+        param: nn.Parameter,
+        fsdp_placement: Shard,
+        shard_dim: int,
+    ) -> torch.Tensor:
+        """Plain tensor with spmd_types annotations: build a multi-dim DTensor
+        that encodes both DP and non-DP (e.g. TP) placements."""
+        from torch.spmd_types import (
+            get_local_type,  # pyrefly: ignore[missing-module-attribute]
+            get_partition_spec,  # pyrefly: ignore[missing-module-attribute]
+            normalize_axis,  # pyrefly: ignore[missing-module-attribute]
+            spmd_type_to_dtensor_placement,  # pyrefly: ignore[missing-module-attribute]
+        )
+
+        local_type = get_local_type(param)
+        partition_spec = get_partition_spec(param)
+        dp_mesh = self.mesh_info.mesh
+        root_mesh = dp_mesh._root_mesh
+        assert root_mesh is not None
+        assert root_mesh.mesh_dim_names is not None
+
+        dp_axes: set = set()
+        dp_dim_names: set = set()
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            dp_axes.add(normalize_axis(self.mesh_info.shard_process_group))
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            dp_axes.add(normalize_axis(self.mesh_info.replicate_process_group))
+        for i in range(root_mesh.ndim):
+            if normalize_axis(root_mesh.get_group(i)) in dp_axes:
+                dp_dim_names.add(root_mesh.mesh_dim_names[i])
+
+        # Collect non-DP axes in root mesh dimension order
+        non_dp_submeshes: list[DeviceMesh] = []
+        non_dp_placements: list[Placement] = []
+        non_dp_world_sizes: list[tuple[int, int]] = []  # (shard_dim, world_size)
+        for i in range(root_mesh.ndim):
+            dim_name = root_mesh.mesh_dim_names[i]
+            if dim_name in dp_dim_names:
+                continue
+            axis = normalize_axis(root_mesh.get_group(i))
+            if axis not in local_type:
+                continue
+            non_dp_submeshes.append(root_mesh[dim_name])
+            # Determine DTensor placement for this axis
+            if partition_spec is not None:
+                shard_dim_for_axis = None
+                for d, entry in enumerate(partition_spec):
+                    if entry is axis:
+                        shard_dim_for_axis = d
+                        break
+                if shard_dim_for_axis is not None:
+                    non_dp_placements.append(Shard(shard_dim_for_axis))
+                    non_dp_world_sizes.append((shard_dim_for_axis, root_mesh.size(i)))
+                    continue
+            placement = spmd_type_to_dtensor_placement(local_type[axis])
+            non_dp_placements.append(placement)
+
+        # Compute global shape from local shape + non-DP shard world sizes
+        global_size = list(param.size())
+        for d, ws in non_dp_world_sizes:
+            global_size[d] *= ws
+        global_size = torch.Size(global_size)
+        global_stride = make_contiguous_strides_for(global_size)
+
+        # Build _unsharded_dtensor_spec (non-DP only, for unshard reconstruction)
+        if len(non_dp_submeshes) == 1:
+            non_dp_mesh = non_dp_submeshes[0]
+        else:
+            non_dp_mesh = DeviceMesh._concatenate(non_dp_submeshes)
+        self._unsharded_dtensor_spec = DTensorSpec(
+            non_dp_mesh,
+            tuple(non_dp_placements),
+            tensor_meta=TensorMeta(global_size, global_stride, param.dtype),
+        )
+
+        # Build combined mesh and placements
+        self._spmd_mesh = DeviceMesh._concatenate([dp_mesh] + non_dp_submeshes)
+
+        # Compute split_factor for _StridedShard
+        split_factor = 1
+        for p in non_dp_placements:
+            if isinstance(p, Shard) and p.dim == shard_dim:
+                idx = non_dp_placements.index(p)
+                split_factor *= non_dp_submeshes[idx].size(0)
+
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            dp_shard = (
+                _StridedShard(shard_dim, split_factor=split_factor)
+                if split_factor > 1
+                else fsdp_placement
+            )
+            dp_shard_and_non_dp = (dp_shard, *non_dp_placements)
+        else:  # DDP
+            dp_shard_and_non_dp = (Replicate(), *non_dp_placements)
+
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            self._spmd_placements = (Replicate(),) + dp_shard_and_non_dp
+        else:
+            self._spmd_placements = dp_shard_and_non_dp
+
+        self._sharding_spec = DTensorSpec(
+            self._spmd_mesh,
+            self._spmd_placements,
+            tensor_meta=TensorMeta(global_size, global_stride, param.dtype),
+        )
+        return param
+
+    def _save_spmd_type_annotation(
+        self,
+        param: nn.Parameter,
+        mesh_info: DataParallelMeshInfo,
+    ) -> None:
+        """Save spmd_types annotations from the original parameter.
+
+        DP axes are transformed from I to R in the saved annotation:
+        FSDP's all-gather makes the parameter replicated (not invariant),
+        and R.backward_type() == P matches the reduce-scatter semantics.
+        For HSDP, the replicate axis is also transformed since each
+        replica processes different data (gradient all-reduce implies P
+        gradients, i.e. R forward type).
+        """
+        from torch.spmd_types import (
+            get_local_type,  # pyrefly: ignore[missing-module-attribute]
+            get_partition_spec,
+            has_local_type,
+            I,  # pyrefly: ignore[missing-module-attribute]
+            normalize_axis,
+            R,  # pyrefly: ignore[missing-module-attribute]
+        )
+
+        if not has_local_type(param):
+            return
+        local_type = get_local_type(param)
+        if not local_type:
+            return
+        local_type = dict(local_type)
+        if isinstance(mesh_info, FSDPMeshInfo):
+            dp_axis = normalize_axis(mesh_info.shard_process_group)
+            if dp_axis in local_type and local_type[dp_axis] is I:
+                local_type[dp_axis] = R
+        if isinstance(mesh_info, HSDPMeshInfo):
+            rep_axis = normalize_axis(mesh_info.replicate_process_group)
+            if rep_axis in local_type and local_type[rep_axis] is I:
+                local_type[rep_axis] = R
+        self._spmd_local_type = local_type
+        self._spmd_partition_spec = get_partition_spec(param)
+
+    def _restore_spmd_type_annotation(self, param: nn.Parameter) -> None:
+        """Re-stamp saved spmd_types annotations onto the unsharded parameter."""
+        if self._spmd_local_type is None:
+            return
+        from torch.spmd_types import (  # pyrefly: ignore
+            _set_partition_spec,
+            set_local_type,
+        )
+
+        set_local_type(param, self._spmd_local_type)
+        if self._spmd_partition_spec is not None:
+            _set_partition_spec(param, self._spmd_partition_spec)
+
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info
         if mesh_info is None:
@@ -618,6 +807,7 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        self._restore_spmd_type_annotation(self._unsharded_param)
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
