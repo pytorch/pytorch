@@ -1498,6 +1498,7 @@ if torch._C._has_mkldnn:
                         compute_with_lp
                         or mkldnn._is_mkldnn_acl_supported()
                         or V.aot_compilation
+                        or has_free_symbols(batch_size)
                     )
                     else graph.create_node(
                         "call_function", aten.permute.default, (weight, (1, 0))
