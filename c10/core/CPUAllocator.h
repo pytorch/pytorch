@@ -9,8 +9,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Flags.h>
 
-// TODO: rename to c10
-C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(c10_report_cpu_memory_usage);
 
 namespace c10 {
 
