@@ -854,7 +854,6 @@ class TestExecutionTrace(TestCase):
                 raise AssertionError("Expected t2 contents to match [0, 0, 1, 0]")
 
 
-
 devices = ["cpu", "cuda"]
 if TEST_XPU:
     devices.append("xpu")
