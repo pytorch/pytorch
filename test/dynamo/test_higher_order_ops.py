@@ -7008,6 +7008,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
