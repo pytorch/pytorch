@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM89OrLater, xfailCUDAIfSM89OrLaterOnWindows
+from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,

@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 @dataclass
 class AsmTestCase:
     name: str

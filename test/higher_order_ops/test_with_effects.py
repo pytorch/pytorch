@@ -29,10 +29,7 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    SM70OrLater,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,

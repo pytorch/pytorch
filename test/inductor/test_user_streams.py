@@ -1941,6 +1941,7 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotEqual(matches[0], matches[1])
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
+
 @xfailIfNoAcceleratorTriton
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 class TestPDLWithMultiStream(InductorTestCase):
