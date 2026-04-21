@@ -389,11 +389,8 @@ class Benchmarker:
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
-        try:
-            # grad clearing is captured in the graph, don't pass it through.
-            return self.benchmark_gpu(cuda_graph.replay, **kwargs)
-        finally:
-            del cuda_graph
+        # grad clearing is captured in the graph, don't pass it through.
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
 
 
 # Make built-in defaults explicit via the registry
