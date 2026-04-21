@@ -724,6 +724,9 @@ class TestVarlenAttention(NNTestCase):
     ):
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+
+        split_kwargs = {"num_splits": num_splits} if backend != "fa2" else {}
+
         torch.manual_seed(42)
 
         num_heads, head_dim = 2, 128
@@ -774,7 +777,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             batched_output = varlen_attn(
@@ -786,7 +789,7 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             solo_out_buf = torch.empty_like(target_q)
@@ -800,7 +803,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             batched_out_buf = torch.empty_like(all_q)
@@ -814,7 +817,7 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
             if num_splits == 1:
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
@@ -1107,33 +1110,6 @@ class TestVarlenAttention(NNTestCase):
                     block_table=block_table,
                 )
             self.assertEqual(out_buf, output_reference)
-
-        # With num_splits=1, paged and contiguous must be bit-identical
-        if backend == "fa2":
-            with _use_backend(backend), torch.no_grad():
-                ref_num_splits = varlen_attn(
-                    q_packed,
-                    k_real_packed,
-                    v_real_packed,
-                    cu_seq_q,
-                    cu_seq_k_real,
-                    max_q,
-                    max_k_real,
-                    num_splits=1,
-                )
-                paged_num_splits = varlen_attn(
-                    q_packed,
-                    k_pages,
-                    v_pages,
-                    cu_seq_q,
-                    cu_seq_k_paged,
-                    max_q,
-                    cache_size,
-                    seqused_k=seqused_k,
-                    block_table=block_table,
-                    num_splits=1,
-                )
-            self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
