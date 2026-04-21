@@ -9337,6 +9337,8 @@ class TestFP32PrecisionFlags(TestCase):
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
         # Regression test: setting torch.backends.fp32_precision = "ieee"
         # must propagate to cudnn.conv and cudnn.rnn.
+        self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+        self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
         with torch.backends.flags(fp32_precision="ieee"):
             self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
