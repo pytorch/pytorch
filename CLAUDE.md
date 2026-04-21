@@ -55,6 +55,41 @@ If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
 will update the source id automatically when needed.
 
+# ghstack Workflow
+
+ghstack commits follow a different workflow than the conventional GitHub branch
+and PR workflow. First identify whether you're on a ghstack commit:
+
+- If HEAD is a detached commit, you are almost certainly in a ghstack flow.
+- If the commit message contains a `ghstack-source-id` trailer, it is an
+  existing ghstack commit.
+- If the commit is associated with a remote branch like `origin/gh/USERNAME/N`,
+  it is likely a ghstack commit (imperfect signal: local amends without a push
+  can desync this).
+
+Rules for working with ghstack:
+
+- **Don't amend unless asked.** If the user asks you to work on a ghstack
+  commit, leave changes uncommitted so the user can review with `git diff`.
+  Only amend into the commit if the user explicitly asks you to amend or to
+  submit it directly.
+- **Submitting.** Run `ghstack` to submit. When only working on a single
+  commit, use `ghstack --no-stack` to avoid updating the rest of the stack and
+  burning unnecessary CI. Use a full `ghstack` when you're intentionally
+  updating CI for the whole stack.
+- **Preserve metadata trailers.** When editing a commit message, never delete
+  `Pull-Request:` or `ghstack-source-id:` trailers. If you modified the commit
+  message, run `ghstack -u` afterwards to push the updated PR description.
+- **Never push directly.** Do not `git push` to branches, and never directly
+  modify the `gh/USERNAME/N` branches — ghstack manages those.
+- **Finding the PR.** If the user asks to pull CI results or code review for a
+  ghstack commit, get the PR URL from the `Pull-Request` trailer in the commit
+  message. Use `gh` CLI to fetch status/comments from there.
+- **Editing earlier commits / splitting.** Treat it like a normal stack of
+  commits (use `git rebase`, etc.). Commits that keep their metadata trailers
+  stay associated with their existing PRs; commits without trailers will get a
+  fresh PR on submit. A full `ghstack` run is usually appropriate here.
+
 # Coding Style Guidelines
 
 Follow these rules for all code changes in this repository:
