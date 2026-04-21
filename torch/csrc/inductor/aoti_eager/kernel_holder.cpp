@@ -404,7 +404,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     aoti_kernel_metadata.parameter_metadata_list_ =
         std::move(parameter_metadata_list);
     aoti_kernel_metadata.kernel_runner_ = load_aoti_model_runner(kernel_path);
-    aoti_kernel_cache_.push_back(aoti_kernel_metadata);
+    aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
   }
 }
 
