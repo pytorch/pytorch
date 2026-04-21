@@ -930,6 +930,10 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   int64_t* sorted_col_index_keys = nullptr;
   int64_t* sorted_col_index_values = nullptr;
 
+// We maintain the FBGEMM path for x86 platforms to leverage potential
+// architecture-specific assembly/intrinsic optimizations in that library.
+// For ARM and other non-x86 platforms, we use the in-tree radix_sort_parallel
+// implementation to ensure parity in performance.
 #if defined(USE_FBGEMM)
   std::tie(sorted_col_index_keys, sorted_col_index_values) = fbgemm::radix_sort_parallel(
       keys.get(),
