@@ -13,13 +13,13 @@ from torch.testing._internal.common_utils import TestCase
 try:
     from transformers import modeling_outputs
     from transformers.configuration_utils import PretrainedConfig
-    from transformers.file_utils import ModelOutput
     from transformers.modeling_outputs import (
         BaseModelOutput,
         BaseModelOutputWithPastAndCrossAttentions,
         BaseModelOutputWithPoolingAndCrossAttentions,
         CausalLMOutputWithPast,
     )
+    from transformers.utils import ModelOutput
 except ImportError:
     modeling_outputs = None
 
@@ -37,11 +37,11 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
             if hasattr(tmp, "somekey"):
                 a = a + 1
             if tmp.return_dict:
-                return a + torch.ones(2) * tmp.max_length
+                return a + torch.ones(2) * tmp.chunk_size_feed_forward
             return a
 
         x = torch.randn(2)
-        tmp = PretrainedConfig(return_dict=True, max_length=20)
+        tmp = PretrainedConfig(return_dict=True, chunk_size_feed_forward=20)
         ref = fn(x, tmp)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, tmp)
@@ -50,7 +50,7 @@ class TestHFPretrained(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_pretrained_non_const_attr(self):
         def fn(a, tmp):
-            if tmp.pruned_heads:
+            if tmp.attribute_map:
                 return a + 1
             else:
                 return a - 1
@@ -359,11 +359,7 @@ class TestModelOutputBert(TestCase):
         )
 
 
-devices = ["cpu", "cuda", "xpu", "hpu"]
-
-instantiate_device_type_tests(
-    TestModelOutputBert, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(TestModelOutputBert, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
