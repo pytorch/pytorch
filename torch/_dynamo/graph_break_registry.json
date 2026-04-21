@@ -3904,7 +3904,7 @@
   "GB0277": [
     {
       "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
-      "Context": "str(example_value)",
+      "Context": "context",
       "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
       "Hints": [
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."

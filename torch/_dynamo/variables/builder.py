@@ -3474,9 +3474,12 @@ def handle_traced_output(
         if is_sparse_any(example_value) and (
             not tx.export or not config.capture_sparse_compute
         ):
+            # Avoid calling str() on FakeTensors with unbacked symints as it triggers
+            # _tensor_str machinery which can cause GuardOnDataDependentSymNode errors
+            context = f"sparse tensor with layout={example_value.layout}, shape={example_value.shape}"
             unimplemented(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
-                context=str(example_value),
+                context=context,
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
