@@ -1,5 +1,6 @@
-#include <c10/xpu/XPUCachingAllocator.h>
 #include <gtest/gtest.h>
+
+#include <c10/xpu/XPUCachingAllocator.h>
 
 static int segmentAllocCalled = 0;
 static int segmentFreeCalled = 0;

@@ -121,7 +121,6 @@ if(APPLE AND USE_MPS)
 endif()
 
 list(APPEND ATen_XPU_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_caching_host_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_event_test.cpp
