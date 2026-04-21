@@ -468,6 +468,12 @@ bucket_all_reduces_fx_bucket_size_determinator: Callable[[int], int] | None = No
 # performance. Set via config or USE_PG_ALLOC env var.
 comms_use_pg_alloc: bool = os.environ.get("USE_PG_ALLOC", "0") == "1"
 
+# Max pg_alloc memory (GB). Allocations exceeding this fall back to torch.empty().
+# None means no limit.
+comms_pg_alloc_max_gb: float | None = (
+    float(v) if (v := os.environ.get("USE_PG_ALLOC_MAX_GB")) else None
+)
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
