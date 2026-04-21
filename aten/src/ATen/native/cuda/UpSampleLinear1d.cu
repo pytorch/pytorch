@@ -316,7 +316,7 @@ static void upsample_linear1d_backward_out_cuda_template(
   const int num_kernels = output_width;
   const int num_threads = 512;
   const int num_blocks = ceil_div(num_kernels, num_threads);
-  const int num_blocks_threshold = 128;
+  constexpr int num_blocks_threshold = 128;
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
