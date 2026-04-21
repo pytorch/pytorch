@@ -12,7 +12,7 @@ import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -236,14 +236,15 @@ def _prepare_graph_capture_tracing(
             )
         )
 
-    subclass_tracing_info = aot_dispatch_subclass(
-        fn_to_trace,
-        updated_flat_args,
-        updated_flat_args_descs,
-        is_joint_structure=trace_joint,
-        meta=fw_metadata,
-        fw_only=flat_fn,
-    )
+    with dynamo_timed("aot_dispatch_subclass", log_pt2_compile_event=True):
+        subclass_tracing_info = aot_dispatch_subclass(
+            fn_to_trace,
+            updated_flat_args,
+            updated_flat_args_descs,
+            is_joint_structure=trace_joint,
+            meta=fw_metadata,
+            fw_only=flat_fn,
+        )
     fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_flat_args = subclass_tracing_info.plain_tensor_args
     updated_flat_args_descs = subclass_tracing_info.plain_tensor_args_descs
@@ -275,10 +276,11 @@ def _create_graph_and_save_traced_inputs(
     aot_config: AOTConfig,
 ) -> tuple[torch.fx.GraphModule, Any]:
     saved_flat_args = _detach_traced_inputs(flat_args)
-    return (
-        _create_graph(fn_to_trace, flat_args, flat_args_descs, aot_config=aot_config),
-        saved_flat_args,
-    )
+    with dynamo_timed("aot_create_graph", log_pt2_compile_event=True):
+        fx_g = _create_graph(
+            fn_to_trace, flat_args, flat_args_descs, aot_config=aot_config
+        )
+    return (fx_g, saved_flat_args)
 
 
 def aot_dispatch_base_graph(
@@ -405,48 +407,49 @@ def aot_dispatch_base_graph(
         )
 
     if aot_config.enable_log:
-        aot_graphs_log.info(
-            "%s",
-            lazy_format_graph_code(
-                "Forward graph",
-                fw_module,
-                aot_config.aot_id,
-                include_stride=True,
-                include_device=True,
-                colored=True,
-                # For more expanded output set this to True (but can't default
-                # to this because it affects tests):
-                expanded_def=False,
-            ),
-        )
+        with dynamo_timed("aot_graph_logging", log_pt2_compile_event=True):
+            aot_graphs_log.info(
+                "%s",
+                lazy_format_graph_code(
+                    "Forward graph",
+                    fw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                    # For more expanded output set this to True (but can't default
+                    # to this because it affects tests):
+                    expanded_def=False,
+                ),
+            )
 
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "aot_forward_graph_fw_metadata",
-                "encoding": "string",
-            },
-            payload_fn=lambda: dataclass_repr(fw_metadata),
-        )
-        if maybe_subclass_meta is not None:
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": "aot_forward_graph_fw_subclass_metadata",
+                    "name": "aot_forward_graph_fw_metadata",
                     "encoding": "string",
                 },
-                payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+                payload_fn=lambda: dataclass_repr(fw_metadata),
             )
+            if maybe_subclass_meta is not None:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "aot_forward_graph_fw_subclass_metadata",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+                )
 
-        trace_structured(
-            "aot_inference_graph",
-            payload_fn=lambda: fw_module.print_readable(
-                print_output=False,
-                include_stride=True,
-                include_device=True,
-                expanded_def=True,
-            ),
-        )
+            trace_structured(
+                "aot_inference_graph",
+                payload_fn=lambda: fw_module.print_readable(
+                    print_output=False,
+                    include_stride=True,
+                    include_device=True,
+                    expanded_def=True,
+                ),
+            )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export and maybe_subclass_meta is not None:

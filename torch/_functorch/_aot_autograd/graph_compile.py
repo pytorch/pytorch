@@ -192,6 +192,14 @@ def aot_stage1_graph_capture(
     aot_state: AOTState,
     orig_flat_fn: FlatFn,
 ) -> AOTGraphCapture:
+    with dynamo_timed("aot_stage1_graph_capture", log_pt2_compile_event=True):
+        return _aot_stage1_graph_capture_impl(aot_state, orig_flat_fn)
+
+
+def _aot_stage1_graph_capture_impl(
+    aot_state: AOTState,
+    orig_flat_fn: FlatFn,
+) -> AOTGraphCapture:
     # NB: flat_fn at this point coincides with the initial info from forward
     # metadata collection returning a list[Tensor].  We are now going to
     # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
@@ -246,15 +254,19 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
         else:
-            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-                aot_dispatch_base_graph(
+            with dynamo_timed("aot_dispatch_base_graph", log_pt2_compile_event=True):
+                (
+                    graph,
+                    updated_flat_args,
+                    updated_flat_args_descs,
+                    maybe_subclass_meta,
+                ) = aot_dispatch_base_graph(
                     flat_fn,
                     aot_state.flat_args,
                     aot_state.flat_args_descs,
                     aot_config,
                     fw_metadata=aot_state.fw_metadata,
                 )
-            )
             # Apply AC rematerialization to forward+loss+bwd graph
             if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
                 from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
