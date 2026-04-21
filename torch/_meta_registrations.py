@@ -44,7 +44,6 @@ from torch.fx.experimental import _config as exp_config
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
-
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
@@ -5726,7 +5725,7 @@ def meta_select_scatter(self, src, dim, index):
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    # Must use contiguous strides to prevent inductor from collapsing 
+    # Must use contiguous strides to prevent inductor from collapsing
     # the iteration space on broadcast inputs. See gh-180164.
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
@@ -6823,14 +6822,11 @@ def _check_scaled_mm_sizes(
         n = mat2.size(1)
 
         is_blockwise_scaling = (
-            (
-                scale_a.dtype == torch.float8_e8m0fnu
-                and scale_b.dtype == torch.float8_e8m0fnu
-            )
-            or (
-                scale_a.dtype == torch.float8_e4m3fn
-                and scale_b.dtype == torch.float8_e4m3fn
-            )
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        ) or (
+            scale_a.dtype == torch.float8_e4m3fn
+            and scale_b.dtype == torch.float8_e4m3fn
         )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
@@ -9007,18 +9003,15 @@ def activate_meta():
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
             pass
-        elif (
-            op_overload.name()
-            in {
-                "aten::empty_strided",  # causing infinite recursion, test_meta.py
-                "aten::clone",  # causing infinite recursion
-                "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-                "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
-                "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
-                "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
-                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
-            }
-        ):
+        elif op_overload.name() in {
+            "aten::empty_strided",  # causing infinite recursion, test_meta.py
+            "aten::clone",  # causing infinite recursion
+            "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
+            "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
+            "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
+            "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
+        }:
             pass
         else:
             if "mkldnn::" in op_overload.name():
