@@ -82,12 +82,19 @@ def autograd_registration_check(op, args, kwargs):
             "that do require grad."
         )
 
-    # Determine which AutogradBACKEND key to check
+    # Determine which AutogradBACKEND key to check.
+    # In addition to the built-in accelerators we also accept the device type
+    # string reported by a PrivateUse1 backend. Any such backend dispatches
+    # through the AutogradPrivateUse1 key, so the mapping is uniform across them.
     all_device_types = {arg.device.type for arg in all_tensors}
-    if not all_device_types.issubset(["cpu", "cuda", "xpu"]):
-        # Don't want to support other keys yet
+    _priv = torch._C._get_privateuse1_backend_name()
+    _allowed = {"cpu", "cuda", "xpu"}
+    if _priv != "privateuseone":
+        _allowed.add(_priv)
+    if not all_device_types.issubset(_allowed):
         raise NotImplementedError(
-            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {all_device_types}"
+            "autograd_registration_check: NYI devices other than "
+            f"CPU/CUDA/XPU/PrivateUse1, got {all_device_types}"
         )
     if "cuda" in all_device_types:
         key = "AutogradCUDA"
@@ -95,6 +102,8 @@ def autograd_registration_check(op, args, kwargs):
         key = "AutogradCPU"
     elif "xpu" in all_device_types:
         key = "AutogradXPU"
+    elif _priv != "privateuseone" and _priv in all_device_types:
+        key = "AutogradPrivateUse1"
 
     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), key):
         return
