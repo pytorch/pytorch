@@ -189,6 +189,25 @@ def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     return ir.TensorBox.create(node)
 
 
+def _maybe_realize_as_pg_alloc(
+    x: ir.TensorBox,
+    group_name: "torch.distributed.distributed_c10d.GroupName",
+) -> None:
+    """
+    If the current FX node was annotated by the bucketing pass for pg_alloc,
+    realize the buffer as a PG_ALLOC comm buffer. This makes inductor's memory
+    planning allocate the buffer via backend.allocate_tensor() instead of
+    torch.empty().
+    """
+    current_node = getattr(V.graph, "current_node", None)
+    if current_node is None:
+        return
+    if not current_node.meta.get("pg_alloc_group_name"):
+        return
+    if can_realize_as_comm_buffer(x, ir.CommBufferType.PG_ALLOC):
+        realize_as_comm_buffer(x, ir.CommBufferType.PG_ALLOC, group_name)
+
+
 def register_comm_lowerings():
     """
     Register lowerings for the comm subsystem.
@@ -227,6 +246,7 @@ def register_comm_lowerings():
 
         # Lower as c10d.all_reduce_
         inp = clone(inp)
+        _maybe_realize_as_pg_alloc(inp, group_name)
         if config.reorder_for_compute_comm_overlap:
             # The horizontal fusion of this clone often severely delays the
             # scheduling of the all_reduce_ node. Horizontally fusing this
@@ -316,6 +336,7 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.all_gather_into_tensor_out)
     def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+        _maybe_realize_as_pg_alloc(out, group_name)
         ir._CollectiveKernel.create_inplace(
             c10d.all_gather_into_tensor_out.default,
             inp,
@@ -327,6 +348,7 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
+        _maybe_realize_as_pg_alloc(inp, group_name)
         return _create_out_of_place(
             c10d.reduce_scatter_tensor.default,
             inp,
@@ -337,6 +359,8 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_out)
     def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
+        _maybe_realize_as_pg_alloc(inp, group_name)
+        _maybe_realize_as_pg_alloc(out, group_name)
         ir._CollectiveKernel.create_inplace(
             c10d.reduce_scatter_tensor_out.default,
             inp,

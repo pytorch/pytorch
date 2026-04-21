@@ -462,6 +462,12 @@ bucket_all_reduces_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_reduces_fx_bucket_size_determinator: Callable[[int], int] | None = None
 
+# Use process group allocator for bucketed collective operations.
+# When enabled, allocates memory from the process group's registered allocator
+# (e.g., NCCL's multicast-compatible allocator) which can improve communication
+# performance. Set via config or USE_PG_ALLOC env var.
+comms_use_pg_alloc: bool = os.environ.get("USE_PG_ALLOC", "0") == "1"
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"

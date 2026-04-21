@@ -973,6 +973,20 @@ class AllocateLine(MemoryPlanningLine):
                 f'group_name="{group_name}", '
                 f"alloc_id={random.randint(0, 2**64 - 1)})"
             )
+        elif comm_buffer_type == ir.CommBufferType.PG_ALLOC:
+            storage_size = V.graph.sizevars.optimization_hint(
+                V.graph.get_allocation_storage_size(self.node)
+            )
+            line = (
+                f"{name} = _pg_alloc_tensor("
+                f"{storage_size}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'"{group_name}")'
+            )
+            # _pg_alloc_tensor returns a 1D flat tensor; reshape if needed
+            if len(shape) > 1:
+                line += f".view({self.wrapper.codegen_shape_tuple(shape)})"
         else:
             raise NotImplementedError(
                 f"Unsupported comm buffer type: {comm_buffer_type}"
@@ -1006,8 +1020,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
-            if self.comm_buffer:
-                # Comm buffers use separate pool (comm-comm reuse only)
+            layout = self.node.get_output_spec()
+            if isinstance(layout, ir.CommBufferLayout):
                 key = comm_buffer_reuse_key(self.node)
                 state.comm_buffer_push(key, self)
             else:
@@ -1019,15 +1033,14 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
             line = self.wrapper.make_buffer_free(self.node)
-            if self.comm_buffer:
-                layout = self.node.get_output_spec()
-                assert isinstance(layout, ir.CommBufferLayout)
+            layout = self.node.get_output_spec()
+            if isinstance(layout, ir.CommBufferLayout):
                 code.writeline(f"{line} # {layout.comm_buffer_type.value} buffer free")
             else:
                 code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        if self.comm_buffer:
+        if isinstance(self.node.get_output_spec(), ir.CommBufferLayout):
             return converter._generate_comm_buffer_free
         return converter._generate_free_if_not_reused
 
@@ -1407,6 +1420,26 @@ class PythonWrapperCodegen(CodeGen):
             self.header.splice(
                 """
                 empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+                """,
+                strip=True,
+            )
+        except (AttributeError, ImportError):
+            pass
+        try:
+            # Add _pg_alloc_tensor() for process group-based buffer allocation
+            from torch.distributed.distributed_c10d import (  # noqa: F401
+                _resolve_process_group,
+            )
+
+            self.header.splice(
+                """
+                def _pg_alloc_tensor(numel, dtype, device, group_name):
+                    from torch.distributed.distributed_c10d import _resolve_process_group
+                    _pg = _resolve_process_group(group_name)
+                    _backend = _pg._get_backend(device)
+                    if _backend.supports_tensor_alloc(device) and _backend.is_initialized():
+                        return _backend.allocate_tensor(numel, dtype=dtype, device=device)
+                    return torch.empty(numel, dtype=dtype, device=device)
                 """,
                 strip=True,
             )
@@ -2236,7 +2269,6 @@ class PythonWrapperCodegen(CodeGen):
         _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
-
     def run_wrapper_ir_passes(self, is_inference: bool):
         # We disable planning during training because it presently increases peak memory consumption.
         if is_inference and config.memory_planning:
