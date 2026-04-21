@@ -693,6 +693,7 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
             "name": "cpu",
             "desired_cuda": "cpu",
             "gpu_arch_type": "cpu",
+            "gpu_arch_version": "",
             "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-x86_64"],
             "runs_on": MANYWHEEL_RUNNERS["test_cpu"]["x86_64"],
         }
@@ -705,6 +706,7 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
                 "name": f"cuda{cuda_ver}",
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda",
+                "gpu_arch_version": cuda_ver,
                 "container_image": MANYWHEEL_CONTAINER_IMAGES["cuda-x86_64"],
                 "runs_on": MANYWHEEL_RUNNERS["test_cuda"]["x86_64"],
             }
@@ -717,6 +719,7 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
             "name": "cpu-aarch64",
             "desired_cuda": "cpu",
             "gpu_arch_type": "cpu-aarch64",
+            "gpu_arch_version": "",
             "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-aarch64"],
             "runs_on": MANYWHEEL_RUNNERS["test_cpu"]["aarch64"],
         }
@@ -730,6 +733,7 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
                 "name": f"cuda{base_ver}-aarch64",
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda-aarch64",
+                "gpu_arch_version": base_ver,
                 "container_image": MANYWHEEL_CONTAINER_IMAGES[
                     f"cuda{base_ver}-aarch64"
                 ],

@@ -56,6 +56,7 @@ jobs:
           DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
           DESIRED_PYTHON: ${{ matrix.python_version.version }}
           GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+          GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
           PACKAGE_TYPE: manywheel
           PYTORCH_BUILD_NUMBER: 1
         run: |
