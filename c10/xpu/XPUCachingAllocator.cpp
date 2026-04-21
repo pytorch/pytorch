@@ -1872,7 +1872,7 @@ class NativeCachingAllocator : public XPUAllocator {
           xpu::get_raw_device(device_));
 
       const auto result = ze_ipc_api.open_ipc_handle(
-          ze_context_, ze_device, ipc_handle_, static_cast<ze_ipc_memory_flags_t>(0), &xpu_ipc_ptr_);
+          ze_context_, ze_device, ipc_handle_, ZE_IPC_MEMORY_FLAG_BIAS_CACHED, &xpu_ipc_ptr_);
       TORCH_CHECK(
           result == ZE_RESULT_SUCCESS,
           "zeMemOpenIpcHandle failed with code ",
