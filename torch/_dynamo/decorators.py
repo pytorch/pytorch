@@ -1687,6 +1687,80 @@ def override_cudagraphs(
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
+def override_optimization_hint(x: Any, val: int) -> None:
+    """Override the optimization hint for a scalar unbacked symbol.
+
+    When the compiler or runtime needs a non-guarding integer hint for an
+    unbacked ``SymInt`` — for example during FX passes, graph partitioning,
+    or inductor autotuning — it calls
+    ``_optimization_hint_base``
+    (see ``torch/fx/experimental/_size_hinting.py``).  By default
+    that function uses internal heuristics to choose a hint and a global fixed
+    fallback;
+    this function lets user code override that choice.  This is similar to
+    the ``hint_override`` parameter in ``mark_unbacked``, but applies to
+    symbols that already exist (e.g. from ``.item()`` calls).
+
+    Typical usage::
+
+        u = x.item()  # unbacked SymInt
+        torch._dynamo.override_optimization_hint(u, 42)
+        # From now on, any call to shape_env.optimization_hint(u, ...)
+        # returns 42 instead of the default heuristic value.
+
+    This updates ``shape_env.var_to_hint_override`` so that any consumer
+    of ``_optimization_hint_base`` sees *val* as the hint for the
+    unbacked symbol behind *x*.
+
+    Works both eagerly (during FX passes or outside dynamo) and inside
+    ``torch.compile`` regions.
+
+    Behavior during compilation:
+        The dynamo handler applies the hint as a **side effect** on
+        ``shape_env.var_to_hint_override`` during tracing.  No FX graph
+        node is emitted — the call is fully consumed at trace time and
+        does not appear in the pre-grad, joint, or post-autograd graphs.
+        ``FXGraphCache`` includes ``var_to_hint_override`` in its cache
+        key, so cache hits/misses correctly reflect hint changes.
+
+    .. note::
+
+        To maximize performance, it is recommended to pass hints for
+        **all** unbacked symbols in the program to guide optimizations.
+
+    Args:
+        x: A ``torch.SymInt`` wrapping an unbacked symbol (e.g. from
+            ``.item()``), or a plain ``int``.  If *x* is a plain ``int``
+            the call is a no-op.
+        val: The integer hint value to record.
+    """
+    if not isinstance(val, int):
+        raise TypeError(
+            f"override_optimization_hint expects val to be an int, got {type(val)}"
+        )
+    if isinstance(x, int):
+        return
+    if not isinstance(x, torch.SymInt):
+        raise TypeError(
+            f"override_optimization_hint expects a torch.SymInt or int, got {type(x)}"
+        )
+    shape_env = x.node.shape_env
+    expr = x.node.expr
+    import sympy
+
+    if not isinstance(expr, sympy.Symbol):
+        raise ValueError(
+            f"override_optimization_hint expects a single unbacked symbol, "
+            f"got derived expression: {expr}"
+        )
+    if not shape_env.is_unbacked_symint(expr):
+        raise ValueError(
+            f"override_optimization_hint expects an unbacked symbol, "
+            f"but {expr} is backed"
+        )
+    shape_env.var_to_hint_override[expr] = val
+
+
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     """
     Check if a method is marked as `dynamo_disable` recursively. It returns:
