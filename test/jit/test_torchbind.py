@@ -438,8 +438,16 @@ class TestTorchbind(JitTestCase):
 
     def test_staticmethod_default_args(self):
         def fn(inp: int) -> int:
-            res = torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(inp)
-            return torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(res, 4)
+            res = (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    inp
+                )
+            )
+            return (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    res, 4
+                )
+            )
 
         self.checkScript(fn, (1,))
 

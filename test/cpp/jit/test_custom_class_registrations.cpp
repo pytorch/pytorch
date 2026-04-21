@@ -71,11 +71,13 @@ struct _StaticMethod : torch::CustomClassHolder {
   static int64_t staticMethod(int64_t input) {
     return 2 * input;
   }
-  static int64_t staticMethodWithDefault(int64_t input, std::optional<int64_t> scale) {
-      if (scale)
-          return (*scale) * input;
-      else
-          return 2 * input;
+  static int64_t staticMethodWithDefault(
+      int64_t input,
+      std::optional<int64_t> scale) {
+    if (scale)
+      return (*scale) * input;
+    else
+      return 2 * input;
   }
 };
 
