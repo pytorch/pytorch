@@ -135,7 +135,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_dump_generator(self):
-        torch.cuda.init()
         gen = torch.cuda.default_generators[0].clone_state()
         writer = InputWriter(None)
         writer.generator("fwd_rng_state_0", gen)
@@ -152,7 +151,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_graphsafe_rng_repro(self):
         """save_graph_repro should emit reader.generator() for Generator args."""
-        torch.cuda.init()
         gen = torch.cuda.default_generators[0].clone_state()
 
         def f(x):

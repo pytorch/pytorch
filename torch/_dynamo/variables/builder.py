@@ -1562,6 +1562,18 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif type(value) is torch._C.Generator:
+            # Generator is registered as an opaque reference type for make_fx
+            # tracing, but in dynamo we handle it as a regular object so that
+            # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
+            # work gracefully — allowing dynamo to compile code before and
+            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # and call_method are decorated with @_raise_hard_error_if_graph_break,
+            # which turns any graph break into a hard error that falls back to
+            # eager for the entire function. Generator methods intentionally
+            # graph-break (they mutate/read RNG state), so they need the
+            # UserDefinedObjectVariable path which supports graceful graph breaks.
+            return self.wrap_user_defined(value)
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
