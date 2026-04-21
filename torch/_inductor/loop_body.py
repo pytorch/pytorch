@@ -13,6 +13,7 @@ import sympy
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import SymT
 
@@ -867,13 +868,13 @@ def analyze_index_expr_usage(
         dict mapping FX node -> is_used_only_for_values
     """
     # Track what each FX node is used for
-    used_for_indexing: set[torch.fx.Node] = set()
-    used_for_values: set[torch.fx.Node] = set()
+    used_for_indexing: OrderedSet[torch.fx.Node] = OrderedSet()
+    used_for_values: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def mark_ancestors(
         node: torch.fx.Node,
-        target_set: set[torch.fx.Node],
-        visited: set[torch.fx.Node] | None = None,
+        target_set: OrderedSet[torch.fx.Node],
+        visited: OrderedSet[torch.fx.Node] | None = None,
     ) -> None:
         """
         Mark all ancestors by adding them to target_set, STOP at load barriers.
@@ -882,7 +883,7 @@ def analyze_index_expr_usage(
         because the loaded value is independent from the index used to load it.
         """
         if visited is None:
-            visited = set()
+            visited = OrderedSet()
         if node in visited or node.op == "placeholder":
             return
         visited.add(node)
