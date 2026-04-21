@@ -9354,6 +9354,25 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    def test_channels_last_channel_slice(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180984
+        # A channel-slice view of a channels_last tensor has channels-last-like
+        # strides but is not packed NHWC in memory. MPSGraph ops that support NHWC
+        # are only work with packed NHWC buffer, giving wrong results.
+        shared = torch.randn(2, 4, 8, 8, device="mps").contiguous(memory_format=torch.channels_last)
+        mps_slice = shared[:, :2]
+
+        weight = torch.randn(3, 2, 3, 3, device="mps")
+        self.assertEqual(F.conv2d(mps_slice.cpu(), weight.cpu()), F.conv2d(mps_slice, weight).cpu())
+
+        self.assertEqual(F.avg_pool2d(mps_slice.cpu(), 2), F.avg_pool2d(mps_slice, 2).cpu())
+        self.assertEqual(F.adaptive_avg_pool2d(mps_slice.cpu(), 2), F.adaptive_avg_pool2d(mps_slice, 2).cpu())
+
+        bn = nn.BatchNorm2d(2).eval()
+        bn_mps = nn.BatchNorm2d(2).to("mps").eval()
+        bn_mps.load_state_dict(bn.state_dict())
+        self.assertEqual(bn(mps_slice.cpu()), bn_mps(mps_slice).cpu())
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
