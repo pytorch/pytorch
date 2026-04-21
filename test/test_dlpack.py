@@ -368,13 +368,16 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_tensor_on_different_device(self, devices):
         dev0, dev1 = devices[:2]
 
-        with torch.device(dev0):
-            x = make_tensor((5,), dtype=torch.float32, device=dev0)
+        x = make_tensor((5,), dtype=torch.float32, device=dev0)
 
+        if self.device_type == "cuda":
+            ctx = torch.cuda.device(dev1)
+        else:
+            ctx = torch.device(dev1)
         with self.assertRaisesRegex(
             BufferError, r"Can't export tensors on a different CUDA device"
         ):
-            with torch.device(dev1):
+            with ctx:
                 x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
