@@ -2357,6 +2357,27 @@ class TestReductions(TestCase):
             ):
                 torch.nanmean(t)
 
+    def test_nanmean_opt_dtype_invalid(self, device):
+        # Tests that nanmean() raises consistent errors when dtype= is set
+        # to a non-floating-point type, regardless of whether the input
+        # tensor is empty or non-empty.
+        # See github.com/pytorch/pytorch/issues/131043
+        # uint8 has separate inconsistent behavior tracked separately
+        invalid_dtypes = [torch.int64, torch.bool, torch.int32, torch.int16]
+        shapes = [
+            (0,),    # empty 1D
+            (0, 3),  # empty 2D
+            (3,),    # non-empty 1D
+            (2, 3),  # non-empty 2D
+        ]
+        for dtype in invalid_dtypes:
+            for shape in shapes:
+                t = torch.zeros(shape, device=device, dtype=torch.float32)
+                with self.assertRaises(RuntimeError,
+                                       msg=f"Expected error for dtype={dtype}, shape={shape}"):
+                    torch.nanmean(t, dtype=dtype)
+
+
     @skipIfMPS
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
