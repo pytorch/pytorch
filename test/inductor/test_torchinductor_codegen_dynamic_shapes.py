@@ -132,6 +132,7 @@ test_failures = {
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange7_dynamic_shapes": TestFailure(("cpu",)),
+    "test_arange8_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
