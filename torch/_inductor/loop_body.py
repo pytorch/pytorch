@@ -135,10 +135,9 @@ class LoopBody:
             self._init_with_tracing(fn, args)
 
         self.indexing = None
-
-        # Analyze index_expr usage for int64 overflow fix (Issue #175966)
-        # Maps FX nodes -> (is_used_only_for_values, original_dtype)
-        self.index_expr_usage: dict[torch.fx.Node, tuple[bool, Any]] = analyze_index_expr_usage(self)
+        self.index_expr_usage: dict[torch.fx.Node, bool] = analyze_index_expr_usage(
+            self
+        )
 
     def get_original_num_rdims(self) -> int:
         assert self.has_partial_accumulate
@@ -852,109 +851,77 @@ class CaptureIndexing(WrapperHandler):
         self.tracer.create_proxy("output", "output", result, {})
 
 
-def analyze_index_expr_usage(loop_body: LoopBody) -> dict[torch.fx.Node, tuple[bool, Any]]:
+def analyze_index_expr_usage(
+    loop_body: LoopBody,
+) -> dict[torch.fx.Node, bool]:
     """
     Analyze the LoopBody's FX graph to determine which index_expr nodes
-    are used ONLY for values (never for indexing), and capture their original dtype.
-
-    This implements the IR-level use-chain analysis to fix int64 overflow bug
-    (Issue #175966). The bug occurs when int64 arithmetic is performed in int32
-    due to kernel index dtype override.
+    are used ONLY for values and which are used for indexing.
 
     Algorithm:
     1. Scan for terminal operations (load, store, store_reduction)
-    2. Mark ancestors as used for indexing or values based on argument position
-    3. Stop at load barriers (don't propagate "for values" through load index)
-    4. Conservative: if used for BOTH indexing and values, treat as indexing
-    5. Extract original dtype from ops.index_expr(expr, dtype) call
-
-    Terminal operations:
-    - ops.load(name, index) - index → INDEXING
-    - ops.store(name, index, value, mode) - index → INDEXING, value → VALUES
-    - ops.store_reduction(name, index, value) - index → INDEXING, value → VALUES
-
-    Barriers:
-    - ops.load() - result is VALUES, but don't propagate backward through index arg
+    2. Recursively parse search ancestorrs for indexing or values usage.
+    3. Stop at barriers
 
     Returns:
-        dict mapping FX node -> (is_used_only_for_values, original_dtype)
-        - is_used_only_for_values: True if CERTAIN it's only for values, False otherwise
-        - original_dtype: The dtype argument from ops.index_expr(expr, dtype) call
+        dict mapping FX node -> is_used_only_for_values
     """
     # Track what each FX node is used for
     used_for_indexing: set[torch.fx.Node] = set()
     used_for_values: set[torch.fx.Node] = set()
 
-    def mark_indexing_ancestors(node: torch.fx.Node, visited: set[torch.fx.Node] | None = None) -> None:
-        """Mark all ancestors as used for indexing"""
+    def mark_ancestors(
+        node: torch.fx.Node,
+        target_set: set[torch.fx.Node],
+        visited: set[torch.fx.Node] | None = None,
+    ) -> None:
+        """
+        Mark all ancestors by adding them to target_set, STOP at load barriers.
+
+        Load operations act as barriers: they break both indexing and value chains
+        because the loaded value is independent from the index used to load it.
+        """
         if visited is None:
             visited = set()
-        if node in visited or node.op == 'placeholder':
+        if node in visited or node.op == "placeholder":
             return
         visited.add(node)
 
-        used_for_indexing.add(node)
-
-        # Trace backward through inputs
-        for arg in node.args:
-            if isinstance(arg, torch.fx.Node):
-                mark_indexing_ancestors(arg, visited)
-        for kwarg in node.kwargs.values():
-            if isinstance(kwarg, torch.fx.Node):
-                mark_indexing_ancestors(kwarg, visited)
-
-    def mark_value_ancestors(node: torch.fx.Node, visited: set[torch.fx.Node] | None = None) -> None:
-        """Mark ancestors as used for values, STOP at load barriers"""
-        if visited is None:
-            visited = set()
-        if node in visited or node.op == 'placeholder':
-            return
-        visited.add(node)
-
-        # BARRIER: load breaks the value chain
-        # The loaded value depends on stored data, not the index's numeric value
-        if node.target == 'load':
+        if node.target == "load":
             return  # Don't propagate backward through load
 
-        used_for_values.add(node)
+        target_set.add(node)
 
         # Trace backward through inputs
         for arg in node.args:
             if isinstance(arg, torch.fx.Node):
-                mark_value_ancestors(arg, visited)
+                mark_ancestors(arg, target_set, visited)
         for kwarg in node.kwargs.values():
             if isinstance(kwarg, torch.fx.Node):
-                mark_value_ancestors(kwarg, visited)
+                mark_ancestors(kwarg, target_set, visited)
 
     # Scan graph for terminal operations
     for node in loop_body.root_block.graph.nodes:
-        if node.target in ('store', 'store_reduction'):
-            # ops.store(name, index, value, mode) - as call_method
-            # For call_method nodes: args[0]=self, args[1]=name, args[2]=index, args[3]=value, args[4]=mode
-            # ops.store_reduction(name, index, value) - as call_method
-            # For call_method nodes: args[0]=self, args[1]=name, args[2]=index, args[3]=value
+        if node.target in ("store", "store_reduction"):
             if len(node.args) > 2 and isinstance(node.args[2], torch.fx.Node):
-                mark_indexing_ancestors(node.args[2])
+                mark_ancestors(node.args[2], used_for_indexing)
             if len(node.args) > 3 and isinstance(node.args[3], torch.fx.Node):
-                mark_value_ancestors(node.args[3])
+                mark_ancestors(node.args[3], used_for_values)
 
-        elif node.target == 'load':
-            # ops.load(name, index) - as call_method
-            # For call_method nodes: args[0]=self, args[1]=name, args[2]=index
+        elif node.target == "load":
             if len(node.args) > 2 and isinstance(node.args[2], torch.fx.Node):
-                mark_indexing_ancestors(node.args[2])
+                mark_ancestors(node.args[2], used_for_indexing)
 
     # Build result: for each index_expr node, determine usage AND capture original dtype
-    # ULTRA-CONSERVATIVE: if in BOTH sets, treat as INDEXING (avoid Type 2 error)
-    result: dict[torch.fx.Node, tuple[bool, Any]] = {}
+    result: dict[torch.fx.Node, bool] = {}
     for node in loop_body.root_block.graph.nodes:
-        if node.target == 'index_expr':
+        if node.target == "index_expr":
             in_values = node in used_for_values
             in_indexing = node in used_for_indexing
 
             # Original dtype lookup not needed - we'll look it up from V.graph during codegen
             # Just return is_for_values_only
             is_for_values_only = in_values and not in_indexing
-            result[node] = (is_for_values_only, None)
+            result[node] = is_for_values_only
 
     return result

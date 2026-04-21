@@ -2135,18 +2135,43 @@ class TritonKernelOverrides(TritonOverrides):
         """
         Handles dtype selection for index expressions based on usage.
 
-        - For non-integer int 32/64 dtypes: Respect the requested dtype
-        - elif used for VALUES and original dtype is int64: Use int64 to preserve semantics
-        - elif used for INDEXING or original dtype is not int64: Use kernel index dtype (int32)
-        
-
-        The VALUE vs INDEXING distinction is determined by analyzing the
-        LoopBody FX graph to trace which ops.store argument position the
-        index_expr feeds into.
-
-        The original dtype is retrieved from V.kernel.current_node.node.dtype,
-        which preserves the user's dtype choice before type promotion.
+        - For non-integer int 32/64 dtypes: Respect the requested dtype.
+        - elif used for VALUES and original dtype is int64: Use int64 to preserve semantics.
+        - elif used for INDEXING or original dtype is not int64: Use kernel index dtype.
         """
+
+        def _cast_index_vars_to_int64(index_str: str) -> str:
+            """
+            Cast index variables to int64 for value computation.
+
+            This is used when an index_expr is determined to be used ONLY for computing
+            tensor values, the original dtype is int64, and
+            the kernel index dtype is int32.
+
+            Example:
+                Input:  "1000000000*x0"
+                Output: "1000000000*x0.to(tl.int64)"
+
+                Input:  "10000000*r0_0"  (reduction variable)
+                Output: "10000000*r0_0.to(tl.int64)"
+
+                When Triton evaluates: 1000000000 (int32) * x0.to(tl.int64) (int64)
+                Result: int64 (type promotion)
+
+            Args:
+                index_str: String containing index expression with index variables
+
+            Returns:
+                Modified string with .to(tl.int64) casts on index variables
+            """
+            import re
+
+            return re.sub(
+                r"\b(x\d+|xindex|r\d+_\d+)\b",
+                lambda m: f"{m.group(0)}.to(tl.int64)",
+                index_str,
+            )
+
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
@@ -2160,38 +2185,24 @@ class TritonKernelOverrides(TritonOverrides):
             shape = TritonSymbols.get_block_shape(indexing.index)
 
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-
-        # FIX for Issue #175966: Check if this index_expr is used for values vs indexing
-        # Algorithm: Trace VALUE chains backward from store operations
-        # - If index_expr is in VALUE chain AND may overflow → use int64
-        # - Otherwise → use kernel index dtype (int32)
         is_for_values_only = False
         index_str_to_use = indexing.index_str
-
-        # Check if current FX node is marked as "for values only" and get original dtype
-        # During codegen, V.interpreter.current_node is the FX node being executed
-        # V.kernel.current_node._body is the LoopBody containing the analysis
-
         current_fx_node = V.interpreter.current_node
         is_for_values_only = False
         original_dtype = None
 
+        # Find the original dtype from FX nodes before fusion.
         if current_fx_node:
-            # index_expr_usage now returns (is_for_values_only, original_dtype)
-            usage_info = V.kernel.current_node._body.index_expr_usage.get(current_fx_node, (False, None))
-            is_for_values_only, original_dtype = usage_info
-
-            # Try to find the original dtype from FX nodes in V.graph.user_to_last_uses
-            # The iota/arange FX node should have meta information with int64 dtype
-            # Only trust original_dtype if it's int64; otherwise look it up
-            if original_dtype != torch.int64 and hasattr(V, 'graph') and V.graph:
+            is_for_values_only = V.kernel.current_node._body.index_expr_usage.get(
+                current_fx_node, False
+            )
+            if original_dtype != torch.int64 and is_for_values_only:
                 # Check FX nodes for int64 dtype in meta
-                for user, last_uses in V.graph.user_to_last_uses.items():
+                for last_uses in V.graph.user_to_last_uses.values():
                     for fx_node in last_uses:
-                        # Check if FX node has meta with dtype information
-                        if hasattr(fx_node, 'meta') and 'val' in fx_node.meta:
-                            val = fx_node.meta['val']
-                            if hasattr(val, 'dtype') and val.dtype == torch.int64:
+                        val = fx_node.meta.get("val")
+                        if val is not None:
+                            if val.dtype == torch.int64:
                                 original_dtype = torch.int64
                                 break
                     if original_dtype == torch.int64:
@@ -2199,23 +2210,17 @@ class TritonKernelOverrides(TritonOverrides):
 
         # Determine dtype to use based on usage chain and original dtype
         if is_for_values_only and original_dtype == torch.int64:
-            # In VALUE chain AND original dtype was int64 → use int64 to preserve semantics
-            # This catches cases like: idx * 1e9 where idx came from int64 arange
-            # Even if type promotion changed final dtype to float32, the intermediate
-            # multiplication needs int64 to avoid overflow
             dtype_to_use = torch.int64
             if index_dtype == torch.int32:
-                index_str_to_use = cls._cast_index_vars_to_int64(indexing.index_str)
-            # else: kernel index dtype is already int64, no cast needed
+                index_str_to_use = _cast_index_vars_to_int64(indexing.index_str)
         elif dtype not in (torch.int32, torch.int64):
             # Non-integer dtypes: respect requested dtype
             dtype_to_use = dtype
         else:
-            # INDEXING chain OR original dtype was not int64 → use kernel index dtype (int32)
-            # Trust user's dtype choice: if they didn't specify int64, use int32
+            # INDEXING chain OR original dtype was not int64 → use kernel index dtyped
             dtype_to_use = index_dtype
 
-        # Casting violates this assert, set to false if we can cast.
+        # after we emit this var we cast it to the correct dtype
         orig = config.test_configs.runtime_triton_dtype_assert
         try:
             config.test_configs.runtime_triton_dtype_assert = False
@@ -2242,19 +2247,18 @@ class TritonKernelOverrides(TritonOverrides):
             # The var was generated with dtype_to_use (int64) and index vars cast if needed
             pass
         else:
-            # Original behavior: handle type promotion for indexing case
             # TODO: we are not always consistent in enforcing that the output of the index expr printing
             # results in the indexing dtype. So if we detect that we have an input which might type promote
             # to a dtype other than indexing dtype, add a cast.
             # Trying to avoid
-            dtype_check = index_dtype
+            dtype = index_dtype
             for index_var in expr.free_symbols:
                 if symbol_is_type(index_var, SymT.TMP):
-                    dtype_check = torch.promote_types(
-                        dtype_check, V.kernel.cse.varname_map[index_var.name].dtype
+                    dtype = torch.promote_types(
+                        dtype, V.kernel.cse.varname_map[index_var.name].dtype
                     )
 
-            if dtype_check != index_dtype:
+            if dtype != index_dtype:
                 var = V.kernel.cse.generate(
                     V.kernel.compute,
                     cls.to_dtype(var, index_dtype),
@@ -2264,47 +2268,6 @@ class TritonKernelOverrides(TritonOverrides):
 
         var.mask_vars = indexing.mask_vars
         return var
-
-    @classmethod
-    def _cast_index_vars_to_int64(cls, index_str: str) -> str:
-        """
-        Cast index variables to int64 for value computation.
-
-        This is used when an index_expr is determined to be used ONLY for computing
-        tensor values (not for indexing), and the requested dtype is int64 while
-        the kernel index dtype is int32.
-
-        Without this cast, int64 arithmetic would overflow when performed in int32.
-        By casting index variables (x0, x1, etc.) to int64, all arithmetic involving
-        them is promoted to int64, including multiplications with constants.
-
-        Example:
-            Input:  "1000000000*x0"
-            Output: "1000000000*x0.to(tl.int64)"
-
-            Input:  "10000000*r0_0"  (reduction variable)
-            Output: "10000000*r0_0.to(tl.int64)"
-
-            When Triton evaluates: 1000000000 (int32) * x0.to(tl.int64) (int64)
-            Result: int64 (type promotion)
-
-        Args:
-            index_str: String containing index expression with index variables
-
-        Returns:
-            Modified string with .to(tl.int64) casts on index variables
-        """
-        import re
-        # Cast index variables to tl.int64:
-        # - x0, x1, x2, ..., xindex (regular iteration variables)
-        # - r0_0, r1_2, etc. (reduction variables)
-        # Use word boundaries to avoid matching variables like "max0"
-        # This promotes all arithmetic involving these variables to int64
-        return re.sub(
-            r'\b(x\d+|xindex|r\d+_\d+)\b',
-            lambda m: f"{m.group(0)}.to(tl.int64)",
-            index_str
-        )
 
     @staticmethod
     def masked(mask, body, other):
