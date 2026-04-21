@@ -452,6 +452,21 @@ def _state_dict_fn(obj: nn.Module | torch.optim.Optimizer, api: str) -> Callable
     return call
 
 
+def _get_fsdp_process_group(
+    model: nn.Module, info: _StateDictInfo
+) -> dist.ProcessGroup | None:
+    if isinstance(model, FSDP):
+        process_group = model.process_group
+    elif info.fsdp_modules:
+        process_group = cast(FSDP, info.fsdp_modules[0]).process_group
+    else:
+        return None
+
+    if isinstance(process_group, tuple):
+        return process_group[0]
+    return process_group
+
+
 def _maybe_full_or_cpu_state_dict(
     state_dict: dict[str, Any], info: _StateDictInfo
 ) -> dict[str, Any]:
@@ -897,7 +912,12 @@ def _get_optim_state_dict(
         osd = _state_dict_fn(optim, "state_dict")()
         if info.fsdp_modules:
             with info.fsdp_context():
-                osd = FSDP.optim_state_dict(model, optim, osd)
+                osd = FSDP.optim_state_dict(
+                    model,
+                    optim,
+                    osd,
+                    group=_get_fsdp_process_group(model, info),
+                )
 
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
@@ -1107,7 +1127,10 @@ def _load_optim_state_dict(
 
             with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
-                    model, optim, optim_state_dict
+                    model,
+                    optim,
+                    optim_state_dict,
+                    group=_get_fsdp_process_group(model, info),
                 )
         elif info.full_state_dict:
             info.full_state_dict = False
