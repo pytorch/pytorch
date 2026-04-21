@@ -5418,6 +5418,22 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @requires_gpu()
+    @skip_if_gpu_halide  # slow
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
+    @parametrize("comprehensive_padding", (False, True))
+    def test_adaptive_avg_pool2d_flatten_sum(self, comprehensive_padding):
+        def fn(x):
+            y = F.adaptive_avg_pool2d(x, 7)
+            return y.flatten(1).sum(dim=-1)
+
+        with config.patch(comprehensive_padding=comprehensive_padding):
+            self.common(
+                fn,
+                (torch.randn(2, 33, 8, 8, device=self.device, dtype=torch.float64),),
+                check_lowp=False,
+            )
+
     @xfail_if_mps
     @skip_if_gpu_halide  # slow
     def test_adaptive_max_pool2d1(self):
