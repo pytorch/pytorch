@@ -47,7 +47,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
-          allowed_bots: "pytorch-auto-revert[bot]"
+          allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
             --model global.anthropic.claude-opus-4-6-v1
