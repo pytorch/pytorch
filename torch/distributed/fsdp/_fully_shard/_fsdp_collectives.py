@@ -728,10 +728,28 @@ def foreach_reduce(
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
-                # Only overlap the D2H copy (copying to pinned memory) if not
-                # accumulating gradients since the CPU add kernel depends on
-                # the copy result and we cannot run the add as a callback
-                non_blocking = fsdp_param.pin_memory and not to_accumulate_grad
+                # Only overlap the D2H copy (copying to pinned memory) when no
+                # in-backward CPU consumer of the grad exists. Two such
+                # consumers suppress the overlap:
+                #   - Accumulating grads: the CPU add kernel depends on the
+                #     copy result and we cannot run the add as a callback.
+                #   - Post-accumulate-grad hooks: user code (e.g.
+                #     optimizer-in-backward) reads ``param.grad`` on CPU
+                #     synchronously. With ``non_blocking=True`` the hook would
+                #     observe in-flight pinned memory — silently wrong
+                #     optimizer updates.
+                has_post_acc_grad_hook = bool(
+                    getattr(
+                        fsdp_param.sharded_param,
+                        "_post_accumulate_grad_hooks",
+                        None,
+                    )
+                )
+                non_blocking = (
+                    fsdp_param.pin_memory
+                    and not to_accumulate_grad
+                    and not has_post_acc_grad_hook
+                )
                 # Since the GPU sharded gradient is allocated in the RS stream,
                 # we can free it here by not keeping a ref without waiting for
                 # the D2H copy since future RS-stream ops run after the copy
