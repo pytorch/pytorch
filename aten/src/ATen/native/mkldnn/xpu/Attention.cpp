@@ -67,6 +67,17 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
   return !attn_mask_needs_grad;
 }
 
+bool check_deterministic(const sdp::sdp_params& params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (debug) {
+      TORCH_WARN("Flash attention XPU is not deterministic.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   constexpr auto supported_dtypes = std::to_array<at::ScalarType>(
       {at::kFloat, at::kBFloat16, at::kHalf}); // double is not supported
@@ -83,7 +94,8 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
            sdp::check_last_dim_stride_equals_1_dense<
                false /*ignore_singleton_dim*/>,
            check_head_dim_size_xpu,
-           check_no_grad});
+           check_grad,
+           check_deterministic});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
