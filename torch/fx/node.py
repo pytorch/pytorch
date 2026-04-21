@@ -683,10 +683,15 @@ class Node(_NodeBase):
                 type_annotation = (
                     f"{_type_repr(self.type)} " if self.type is not None else ""
                 )
+            stream_annotation = ""
+            custom = self.meta.get("custom")
+            if isinstance(custom, dict) and "stream" in custom:
+                stream_annotation = f", stream={custom['stream']}"
             return (
                 f"%{self.name} : {type_annotation}[num_users={len(self.users)}] = "
                 f"{self.op}[target={self._pretty_print_target(self.target)}]("
-                f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
+                f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)}"
+                f"{stream_annotation})"
             )
 
     @compatibility(is_backward_compatible=True)
