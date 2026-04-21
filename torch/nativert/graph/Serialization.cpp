@@ -354,7 +354,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
       } else if (arg.tag() == torch::_export::Argument::Tag::AS_NONE) {
         node->addInput(NamedArgument{
             input.get_name(),
-            graph->addValue(std::nullopt, Type::Kind::None, node)});
+            graph->addValue(std::nullopt, Type::Kind::None, nullptr)});
       } else {
         node->addAttribute(Attribute{
             input.get_name(),
