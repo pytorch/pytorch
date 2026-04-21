@@ -68,6 +68,13 @@ class TORCH_API MPSDevice {
    */
   unsigned getCoreCount() const;
 
+  /**
+   * Returns true if the device is an AMD discrete GPU (RDNA2/RDNA3).
+   * Detected by checking hasUnifiedMemory=false and isLowPower=false
+   * after already filtering out Intel via isLowPower=true.
+   */
+  bool isAMDGPU() const;
+
   ~MPSDevice();
 
  private:

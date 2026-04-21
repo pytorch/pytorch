@@ -118,6 +118,15 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
 
   if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_contiguous && !is_complex) {
+    // The MPSNDArrayMatrixMultiplication nograph path crashes on AMD RDNA2/RDNA3 GPUs
+    // when input_features >= 256 (discrete GPUs with no unified memory).
+    // Fall through to the graph path on those GPUs for large inputs.
+    bool is_amd = MPSDevice::getInstance()->isAMDGPU();
+    if (!(is_amd && input.size(-1) >= 256)) {
+      _mps_linear_nograph(input, weight, bias, output);
+      // Squeeze last dim of 1D linear
+      return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+    }
     _mps_linear_nograph(input, weight, bias, output);
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);

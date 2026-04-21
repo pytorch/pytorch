@@ -92,6 +92,16 @@ std::string MPSDevice::getName() const {
   }
 }
 
+bool MPSDevice::isAMDGPU() const {
+  // AMD discrete GPUs (RDNA2/RDNA3) are not low-power and do not have unified memory.
+  // Apple Silicon is low-power (integrated) and has unified memory.
+  // Intel GPUs are low-power. After filtering out Intel via isLowPower, an AMD GPU
+  // will have isLowPower=false and hasUnifiedMemory=false.
+  @autoreleasepool {
+    return ![_mtl_device isLowPower] && ![_mtl_device hasUnifiedMemory];
+  }
+}
+
 unsigned MPSDevice::getCoreCount() const {
   io_iterator_t iterator = 0;
   io_registry_entry_t entry = 0;
