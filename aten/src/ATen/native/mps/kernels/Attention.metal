@@ -1,5 +1,6 @@
 // Largely influeneced by
 // https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scaled_dot_product_attention.metal
+#include <ATen/native/mps/kernels/Attention.h>
 #include <c10/metal/utils.h>
 #include <metal_simdgroup>
 #include <metal_stdlib>
@@ -524,6 +525,425 @@ kernel void attention(
   }
 }
 
+// simdgroup_multiply_accumulate operates on 8x8 sub-tiles
+#define SUBTILE_SIZE 8
+// number of 8-wide sub-tiles across one tile dimension
+#define SUBTILE_GRID_SIZE (TILE_SIZE / SUBTILE_SIZE)
+// Threadgroup memory needed: two TILE_SIZExTILE_SIZE buffers. For 32x32 tiles,
+// this is 8 KB
+#define SMEM_FLOATS (2 * TILE_SIZE * TILE_SIZE)
+
+// Scaled matrix multiplication `r = scale * a @ b`.
+// `a` is size (M, N)
+// `b` is size (N, K)
+// `r` is size (M, K)
+//
+// For performance, this function uses a tiled matmul algorithm where each
+// threadgroup operates on one pair of TILE_SIZExTILE_SIZE tiles of the inputs
+// at a time, so that work can be done in `threadgroup` memory, which is faster
+// than `device` or `constant` memory.
+//
+// Each pair of threadgroup tiles is further broken up into 8x8 sub-tiles, whose
+// partial results are calculated with `simdgroup_multiply_accumulate`, which is
+// a performant way to calculate a matmul between two 8x8 matrices and
+// accumulate with previous results.
+//
+// Note: the pointer type for `a` is templated because both `constant` and
+// `device` pointer types need to be supported for this argument.
+template <typename T, typename A_ptr>
+static void mm_simdgroup(
+    device T* r,
+    uint32_t r_stride0,
+    uint32_t r_stride1,
+    A_ptr a,
+    uint32_t a_stride0,
+    uint32_t a_stride1,
+    constant T* b,
+    uint32_t b_stride0,
+    uint32_t b_stride1,
+    uint32_t M,
+    uint32_t N,
+    uint32_t K,
+    float scale,
+    uint32_t threadgroup_row,
+    uint32_t threadgroup_col,
+    uint simdgroup_idx,
+    threadgroup float* smem) {
+  threadgroup float* tile_a = smem;
+  threadgroup float* tile_b = smem + TILE_SIZE * TILE_SIZE;
+
+  const uint32_t num_M = (M + TILE_SIZE - 1) / TILE_SIZE;
+  const uint32_t num_K = (K + TILE_SIZE - 1) / TILE_SIZE;
+  const uint32_t num_N = (N + TILE_SIZE - 1) / TILE_SIZE;
+
+  // simdgroup_idx 0..15 are active, one for each 4x4 grid position of 8x8
+  // output sub-tiles.
+  // simdgroup_idx 16..31 are inactive of the simd multiply-accumulate, but they
+  // still help load tile data.
+  const bool simd_active =
+      (simdgroup_idx < (uint32_t)(SUBTILE_GRID_SIZE * SUBTILE_GRID_SIZE));
+  const uint32_t subtile_m =
+      simdgroup_idx / SUBTILE_GRID_SIZE; // 0..3 are active
+  const uint32_t subtile_k =
+      simdgroup_idx % SUBTILE_GRID_SIZE; // 0..3 are active
+
+  for (uint32_t tile_m = 0; tile_m < num_M; tile_m++) {
+    for (uint32_t tile_k = 0; tile_k < num_K; tile_k++) {
+      simdgroup_float8x8 subtile_r =
+          make_filled_simdgroup_matrix<float, 8, 8>(0.f);
+
+      for (uint32_t tile_n = 0; tile_n < num_N; tile_n++) {
+        // All 1024 threads cooperatively fill tile_a and tile_b
+        uint32_t a_row = tile_m * TILE_SIZE + threadgroup_row,
+                 a_col = tile_n * TILE_SIZE + threadgroup_col;
+        tile_a[threadgroup_row * TILE_SIZE + threadgroup_col] =
+            (a_row < M && a_col < N)
+            ? float(a[a_row * a_stride0 + a_col * a_stride1])
+            : 0.f;
+        uint32_t b_row = tile_n * TILE_SIZE + threadgroup_row,
+                 b_col = tile_k * TILE_SIZE + threadgroup_col;
+        tile_b[threadgroup_row * TILE_SIZE + threadgroup_col] =
+            (b_row < N && b_col < K)
+            ? float(b[b_row * b_stride0 + b_col * b_stride1])
+            : 0.f;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        // Active simdgroups compute their 8x8 sub-tile and accumulate into
+        // subtile_r.
+        if (simd_active) {
+          for (uint32_t subtile_n = 0; subtile_n < (uint32_t)SUBTILE_GRID_SIZE;
+               subtile_n++) {
+            simdgroup_float8x8 subtile_a, subtile_b;
+            // subtile_a <-- tile_a[subtile_m*8 .. subtile_m*8+7][subtile_n*8
+            // .. subtile_n*8+7]
+            simdgroup_load(
+                subtile_a,
+                tile_a,
+                TILE_SIZE,
+                ulong2(subtile_n * SUBTILE_SIZE, subtile_m * SUBTILE_SIZE));
+            // subtile_b <-- tile_b[subtile_n*8 .. subtile_n*8+7][subtile_k*8 ..
+            // subtile_k*8+7]
+            simdgroup_load(
+                subtile_b,
+                tile_b,
+                TILE_SIZE,
+                ulong2(subtile_k * SUBTILE_SIZE, subtile_n * SUBTILE_SIZE));
+            simdgroup_multiply_accumulate(
+                subtile_r, subtile_a, subtile_b, subtile_r);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+
+      // Scatter result back through smem, then write to r. The active
+      // simdgroups cover all sub-tiles of the output tile, so every position in
+      // tile_a is written.
+      if (simd_active) {
+        simdgroup_store(
+            subtile_r,
+            tile_a,
+            TILE_SIZE,
+            ulong2(subtile_k * SUBTILE_SIZE, subtile_m * SUBTILE_SIZE));
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      uint32_t r_row = tile_m * TILE_SIZE + threadgroup_row;
+      uint32_t r_col = tile_k * TILE_SIZE + threadgroup_col;
+      if (r_row < M && r_col < K) {
+        r[r_row * r_stride0 + r_col * r_stride1] =
+            T(tile_a[threadgroup_row * TILE_SIZE + threadgroup_col] * scale);
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+}
+
+// Find the batch and head offset of `mask` only if the mask is enabled for the
+// kernel.
+struct MaskBatchOffset {
+  template <typename T_MASK>
+  inline static constant T_MASK* apply(
+      constant T_MASK* mask,
+      uint32_t stride0,
+      uint32_t stride1,
+      uint32_t batch_idx,
+      uint32_t head_idx) {
+    return mask + stride0 * batch_idx + stride1 * head_idx;
+  }
+
+  template <>
+  inline constant void* apply(
+      constant void* mask,
+      uint32_t stride0,
+      uint32_t stride1,
+      uint32_t batch_idx,
+      uint32_t head_idx) {
+    return mask;
+  }
+};
+
+// Apply the attention mask if enabled for the kernel. The mask can either be a
+// float or a bool. void indicates that the mask is disabled.
+struct AttnMask {
+  template <typename T_MASK>
+  inline static float apply(float value, constant T_MASK* mask, uint32_t idx) {
+    auto masked_value = value + mask[idx];
+    return ::metal::isnan(masked_value) ? -INFINITY : masked_value;
+  }
+
+  template <>
+  inline float apply(float value, constant bool* mask, uint32_t idx) {
+    return mask[idx] ? value : -INFINITY;
+  }
+
+  template <>
+  inline float apply(float value, constant void* mask, uint32_t idx) {
+    return value;
+  }
+};
+
+// Apply the causal mask if enabled for the kernel. If enabled, the upper right
+// elements are masked out.
+struct CausalMask {
+  template <bool is_causal, enable_if_t<is_causal, bool> = true>
+  inline static float apply(float value, uint32_t row, uint32_t col) {
+    return (col <= row) ? value : -INFINITY;
+  }
+
+  template <bool is_causal, enable_if_t<!is_causal, bool> = true>
+  inline static float apply(float value, uint32_t row, uint32_t col) {
+    return value;
+  }
+};
+
+// Load a value from `attn` and apply masks
+template <typename T, typename T_MASK, bool is_causal>
+inline float load_attn_value(
+    device T* attn,
+    uint32_t attn_stride0,
+    uint32_t attn_stride1,
+    constant T_MASK* mask,
+    uint32_t mask_stride0,
+    uint32_t mask_stride1,
+    uint32_t row,
+    uint32_t col) {
+  auto attn_idx = row * attn_stride0 + col * attn_stride1;
+  auto mask_idx = row * mask_stride0 + col * mask_stride1;
+  return CausalMask::apply<is_causal>(
+      AttnMask::apply(static_cast<float>(attn[attn_idx]), mask, mask_idx),
+      row,
+      col);
+}
+
+// In-place softmax `attn = softmax(attn, dim=-1)`.
+// `attn` is size (L, S)
+//
+// Within each row of the input, the following steps are performed:
+//  1) Find `row_max`, the maximum value in the row
+//  2) Find `row_sum`, sum of `exp(value - row_max)` for each value.
+//  3) Write normalized `exp(value - row_max) / row_sum` to each value in place.
+//
+// The `mask` is applied when values are read from `attn`.
+//
+// For performance, the input is broken up into TILE_SIZE x TILE_SIZE tiles.
+// During step 1 and 2, each threadgroup operates on one tile of the input at a
+// time, so that the reduction work can be performed in threadgroup memory.
+// First, each thread in the threadgroup accumulates the max/sum of the values
+// in its assigned position in the tile and writes it into its spot in
+// threadgroup memory. Then, a binary reduction is performed on the rows of the
+// tile.
+template <typename T, typename T_MASK, bool is_causal>
+static void softmax_rows(
+    device T* attn,
+    uint32_t attn_stride0,
+    uint32_t attn_stride1,
+    constant T_MASK* mask,
+    uint32_t mask_stride0,
+    uint32_t mask_stride1,
+    uint32_t L,
+    uint32_t S,
+    uint32_t threadgroup_row,
+    uint32_t threadgroup_col,
+    threadgroup float* smem) {
+  const uint32_t num_tile_rows = (L + TILE_SIZE - 1) / TILE_SIZE;
+
+  // Iterate over each row of tiles.
+  for (uint32_t tile_row_idx = 0; tile_row_idx < num_tile_rows;
+       tile_row_idx++) {
+    const uint32_t row = tile_row_idx * TILE_SIZE + threadgroup_row;
+    const bool valid = row < L;
+
+    // Step 1- Find the max value in each row
+    float local_max = -INFINITY;
+    if (valid) {
+      for (uint32_t col = threadgroup_col; col < S; col += TILE_SIZE) {
+        float value = load_attn_value<T, T_MASK, is_causal>(
+            attn,
+            attn_stride0,
+            attn_stride1,
+            mask,
+            mask_stride0,
+            mask_stride1,
+            row,
+            col);
+        local_max = max(local_max, value);
+      }
+    }
+    smem[threadgroup_row * TILE_SIZE + threadgroup_col] = local_max;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Reduce the partial max values in threadgroup memory
+    for (uint32_t stride = TILE_SIZE / 2; stride > 0; stride >>= 1) {
+      if (threadgroup_col < stride)
+        smem[threadgroup_row * TILE_SIZE + threadgroup_col] =
+            max(smem[threadgroup_row * TILE_SIZE + threadgroup_col],
+                smem[threadgroup_row * TILE_SIZE + threadgroup_col + stride]);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    const float row_max = smem[threadgroup_row * TILE_SIZE];
+
+    // Step 2 - Find the exp sum in each row
+    float local_sum = 0.f;
+    if (valid) {
+      for (uint32_t col = threadgroup_col; col < S; col += TILE_SIZE) {
+        float value = load_attn_value<T, T_MASK, is_causal>(
+            attn,
+            attn_stride0,
+            attn_stride1,
+            mask,
+            mask_stride0,
+            mask_stride1,
+            row,
+            col);
+        float e = precise::exp(value - row_max);
+        local_sum += ::metal::isnan(e) ? 0 : e;
+      }
+    }
+    smem[threadgroup_row * TILE_SIZE + threadgroup_col] = local_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Reduce the partial sum values in threadgroup memory
+    for (uint32_t stride = TILE_SIZE / 2; stride > 0; stride >>= 1) {
+      if (threadgroup_col < stride)
+        smem[threadgroup_row * TILE_SIZE + threadgroup_col] +=
+            smem[threadgroup_row * TILE_SIZE + threadgroup_col + stride];
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    const float row_sum = smem[threadgroup_row * TILE_SIZE];
+
+    // Step 3 - Normalize in place
+    if (valid) {
+      for (uint32_t col = threadgroup_col; col < S; col += TILE_SIZE) {
+        float value = load_attn_value<T, T_MASK, is_causal>(
+            attn,
+            attn_stride0,
+            attn_stride1,
+            mask,
+            mask_stride0,
+            mask_stride1,
+            row,
+            col);
+        float e = precise::exp(value - row_max);
+        auto attn_idx = row * attn_stride0 + col * attn_stride1;
+        attn[attn_idx] = row_sum == 0 ? 0 : T(e / row_sum);
+      }
+    }
+  }
+}
+
+template <typename T, typename T_MASK, bool is_causal>
+kernel void sdpa(
+    device T* out [[buffer(0)]],
+    device T* attn [[buffer(1)]],
+    constant T* q [[buffer(2)]],
+    constant T* k [[buffer(3)]],
+    constant T* v [[buffer(4)]],
+    constant T_MASK* mask [[buffer(5)]],
+    constant SDPAParams<>& params [[buffer(6)]],
+    uint2 lid [[thread_position_in_threadgroup]], // (x=col, y=row)
+    uint2 tgid [[threadgroup_position_in_grid]], // one group per (batch, head)
+    uint simdgroup_idx [[simdgroup_index_in_threadgroup]] // 0..31
+) {
+  threadgroup float smem[SMEM_FLOATS];
+
+  // Find the batch and head offsets of each of the inputs and outputs
+  const uint32_t head_idx = tgid.x % params.num_heads;
+  const uint32_t batch_idx = tgid.x / params.num_heads;
+  out += params.out_strides[0] * batch_idx + params.out_strides[1] * head_idx;
+  attn +=
+      params.attn_strides[0] * batch_idx + params.attn_strides[1] * head_idx;
+  q += params.q_strides[0] * batch_idx + params.q_strides[1] * head_idx;
+  k += params.k_strides[0] * batch_idx + params.k_strides[1] * head_idx;
+  v += params.v_strides[0] * batch_idx + params.v_strides[1] * head_idx;
+  mask = MaskBatchOffset::apply(
+      mask,
+      params.mask_strides[0],
+      params.mask_strides[1],
+      batch_idx,
+      head_idx);
+
+  const uint32_t threadgroup_row = lid.y, threadgroup_col = lid.x;
+
+  // Matmul `q`, size (L, E), and `k^T`, size (E, S), then multiply by `scale`,
+  // and write output to `attn`.
+  mm_simdgroup<T, constant T*>(
+      attn,
+      params.attn_strides[2],
+      params.attn_strides[3],
+      q,
+      params.q_strides[2],
+      params.q_strides[3],
+      k,
+      // k needs to be transposed, which is accomplished by swapping the strides
+      params.k_strides[3],
+      params.k_strides[2],
+      params.L,
+      params.E,
+      params.S,
+      params.scale,
+      threadgroup_row,
+      threadgroup_col,
+      simdgroup_idx,
+      smem);
+
+  threadgroup_barrier(mem_flags::mem_device);
+
+  // Perform softmax to `attn` in-place.
+  softmax_rows<T, T_MASK, is_causal>(
+      attn,
+      params.attn_strides[2],
+      params.attn_strides[3],
+      mask,
+      params.mask_strides[2],
+      params.mask_strides[3],
+      params.L,
+      params.S,
+      threadgroup_row,
+      threadgroup_col,
+      smem);
+
+  threadgroup_barrier(mem_flags::mem_device);
+
+  // Matmul `attn`, size (L, S), and `v`, size (S, Ev), and write output to
+  // `out`.
+  mm_simdgroup<T, device T*>(
+      out,
+      params.out_strides[2],
+      params.out_strides[3],
+      attn,
+      params.attn_strides[2],
+      params.attn_strides[3],
+      v,
+      params.v_strides[2],
+      params.v_strides[3],
+      params.L,
+      params.S,
+      params.Ev,
+      /*scale=*/1.f,
+      threadgroup_row,
+      threadgroup_col,
+      simdgroup_idx,
+      smem);
+}
+
 #define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)   \
   template [[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM    \
                        "_" #VALUE_DIM)]] kernel void        \
@@ -624,3 +1044,31 @@ INSTANTIATE_SDPA_VECTOR_HEADS(bfloat);
 INSTANTIATE_ATTN_SHAPES_HELPER(float);
 INSTANTIATE_ATTN_SHAPES_HELPER(half);
 INSTANTIATE_ATTN_SHAPES_HELPER(bfloat);
+
+#define CAUSAL_SUFFIX_true "_causal"
+#define CAUSAL_SUFFIX_false ""
+
+#define REGISTER_SDPA(T, T_MASK, IS_CAUSAL)                                \
+  template[[host_name("sdpa_" #T                                           \
+                      "_" #T_MASK CAUSAL_SUFFIX_##IS_CAUSAL)]] kernel void \
+  sdpa<T, T_MASK, IS_CAUSAL>(                                              \
+      device T * out [[buffer(0)]],                                        \
+      device T * attn [[buffer(1)]],                                       \
+      constant T * q [[buffer(2)]],                                        \
+      constant T * k [[buffer(3)]],                                        \
+      constant T * v [[buffer(4)]],                                        \
+      constant T_MASK * mask [[buffer(5)]],                                \
+      constant SDPAParams<> & params [[buffer(6)]],                        \
+      uint2 lid [[thread_position_in_threadgroup]],                        \
+      uint2 tgid [[threadgroup_position_in_grid]],                         \
+      uint simdgroup_idx [[simdgroup_index_in_threadgroup]]);
+
+#define REGISTER_SDPA_MASK_TYPES(T) \
+  REGISTER_SDPA(T, void, false);    \
+  REGISTER_SDPA(T, void, true);     \
+  REGISTER_SDPA(T, bool, false);    \
+  REGISTER_SDPA(T, T, false);
+
+REGISTER_SDPA_MASK_TYPES(float);
+REGISTER_SDPA_MASK_TYPES(half);
+REGISTER_SDPA_MASK_TYPES(bfloat);
