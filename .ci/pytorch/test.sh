@@ -322,6 +322,17 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+    # Switch to TSan-instrumented CPython so that all subsequent python
+    # invocations (including the pre-test sanity checks below) use an
+    # interpreter that has the TSan runtime.
+    export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
+    python -m pip install "$(echo dist/*.whl)[opt-einsum]"
+    TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
+    export TSAN_OPTIONS
+    export PYTORCH_TEST_WITH_TSAN=1
+fi
+
 # The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
 # 1. The build is in debug mode
 # 2. The value 424242 is passed in
@@ -339,6 +350,29 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
+
+test_tsan() {
+  # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
+  # script when BUILD_ENVIRONMENT matches *-tsan*.
+  local test_status=0
+  python test/test_tsan.py -v || test_status=$?
+
+  # TSan appends .<pid> to log_path. Merge all reports into a single
+  # file with the _toprint.log suffix so the CI "Print remaining test
+  # logs" step picks them up automatically.
+  TSAN_REPORT=$(pwd)/test/test-reports/tsan_toprint.log
+  if ls "${TSAN_REPORT}".* 1>/dev/null 2>&1; then
+    cat "${TSAN_REPORT}".* > "${TSAN_REPORT}"
+    rm -f "${TSAN_REPORT}".*
+  fi
+
+  if [ "$test_status" -ne 0 ]; then
+    echo "TSan tests failed with exit code $test_status"
+    exit "$test_status"
+  fi
+
+  assert_git_not_dirty
+}
 
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
@@ -2295,6 +2329,8 @@ elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
+elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
+  test_tsan
 else
   install_torchvision
   install_monkeytype

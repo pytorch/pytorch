@@ -3,10 +3,8 @@
 import json
 import subprocess
 import sys
-import threading
 import time
 
-import torch
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -105,36 +103,6 @@ with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], wi
         self.assertFalse(
             "Python replay stack is empty during pop operation" in result.stderr
         )
-
-    def test_concurrent_profiling(self):
-        """Repeatedly start/stop profiling while background threads are active.
-
-        On free-threaded Python (3.14t+), this exercises concurrent access to
-        the profiler's per-thread state without GIL protection. Without the
-        thread-safety fixes (setprofileAllThreads, per-thread ValueCache,
-        StopTheWorldGuard), this crashes from heap corruption due to data
-        races on the shared hash maps.
-        """
-        stop = threading.Event()
-
-        def work():
-            while not stop.is_set():
-                d = {str(i): list(range(i % 10)) for i in range(20)}
-                _ = sorted(d.items(), key=lambda x: len(x[1]))
-                torch.ones(10) + torch.zeros(10)
-
-        threads = [threading.Thread(target=work) for _ in range(8)]
-        for t in threads:
-            t.start()
-
-        try:
-            for _ in range(30):
-                with torch.profiler.profile(with_stack=True, with_modules=True):
-                    torch.ones(10)
-        finally:
-            stop.set()
-            for t in threads:
-                t.join(timeout=5)
 
 
 if __name__ == "__main__":
