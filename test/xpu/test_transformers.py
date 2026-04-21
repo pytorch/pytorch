@@ -1,3 +1,5 @@
+# Owner(s): ["module: intel"]
+
 from collections import namedtuple
 
 import torch
