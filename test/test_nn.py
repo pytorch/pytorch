@@ -6740,6 +6740,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             groups = 2
             torch.native_channel_shuffle(input_tensor, groups)
 
+        # Regression test for #173500: the CompositeImplicitAutograd fallback
+        # (used by non-CPU backends like CUDA/MPS) used to skip validation and
+        # crash with a floating-point exception on groups=0. The meta device
+        # also routes through this fallback.
+        meta_tensor = torch.empty([1, 3, 2, 2], device="meta")
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups to divide channels in must be positive.*"):
+            torch.native_channel_shuffle(meta_tensor, 0)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of channels must be divisible by groups.*"):
+            torch.native_channel_shuffle(meta_tensor, 2)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "channel_shuffle expects input with > 2 dims,.*"):
+            torch.native_channel_shuffle(torch.empty([1, 2], device="meta"), 2)
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
