@@ -354,26 +354,18 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-_dtype_map: dict[str, torch.dtype] = {
+_dtype_map = {
     "float": torch.float,
     "float32": torch.float,
-    "double": torch.double,
-    "float64": torch.double,
     "int": torch.int,
     "int8": torch.int8,
     "int16": torch.int16,
     "int32": torch.int,
     "long": torch.long,
     "long int": torch.long,
-    "signed char": torch.int8,
-    "unsigned char": torch.uint8,
-    "bool": torch.bool,
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
-    "c10::BFloat16": torch.bfloat16,
-    "c10::Half": torch.float16,
-    "c10::complex<float>": torch.complex64,
-    "c10::complex<double>": torch.complex128,
+    "float64": torch.double,
 }
 
 
