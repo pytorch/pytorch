@@ -17,17 +17,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GITHUB_WORKSPACE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 echo "Architecture: $ARCH, GPU_ARCH_TYPE: ${GPU_ARCH_TYPE:-unset}, REPO_ROOT: $REPO_ROOT"
 
-# Use GCC 13 (matching the legacy manylinux2_28-builder images).
-# The test-infra image defaults to GCC 14 which:
-# - CUDA 12.6's nvcc rejects (only supports up to GCC 13)
-# - produces ld.gold incompatibilities with CMake 4.3's --dependency-file flag
-GCC_TOOLSET=13
-if [[ -d "/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin" ]]; then
-    export PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin:${PATH}"
-    export LD_LIBRARY_PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib64:/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib:${LD_LIBRARY_PATH:-}"
-    echo "Switched to gcc-toolset-${GCC_TOOLSET}: $(cc --version | head -1)"
-fi
-
 # Install OS packages
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]] || [[ "$OS_NAME" == *"CentOS"* ]] || [[ "$OS_NAME" == *"Red Hat"* ]]; then
