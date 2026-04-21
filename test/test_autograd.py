@@ -16135,11 +16135,11 @@ class TestAutogradMultipleDispatch(TestCase):
         grad = torch.randn(3, 3, device=device)
         out.backward(grad)
 
-        if "cuda" not in device:
+        if "cuda" not in device and "xpu" not in device:
             # bogus default gradient registered for Autograd is grad + 1
             self.assertEqual(t.grad, grad + 1)
         else:
-            # bogus gradient registered for AutogradCUDA is grad * 2
+            # bogus gradient registered for AutogradCUDA/AutogradXPU is grad * 2
             self.assertEqual(t.grad, grad * 2)
 
         # test registered AutogradNestedTensor formula
@@ -16212,7 +16212,7 @@ class TestAutogradMultipleDispatch(TestCase):
             err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
-            if "cuda" in device:
+            if "cuda" in device or "xpu" in device:
                 with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                     torch._test_autograd_multiple_dispatch(dual_input)
             else:
@@ -16235,8 +16235,8 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(t_view_copy, t_view)
         self.assertEqual(t.grad, t_ref.grad)
         # backward results are per-dispatch-key in derivatives.yaml
-        if "cuda" in device:
-            # gradient registered to AutogradCUDA is grad.reshape_as(self) + 1
+        if "cuda" in device or "xpu" in device:
+            # gradient registered to AutogradCUDA/AutogradXPU is grad.reshape_as(self) + 1
             self.assertEqual(t.grad, grad.reshape_as(t) + 1)
         else:
             # Default gradient registered is grad.reshape_as(self)
