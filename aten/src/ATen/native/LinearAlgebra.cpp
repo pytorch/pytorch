@@ -3828,7 +3828,7 @@ Tensor& _int_mm_acc_out_cpu(
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    #define COMPUTE_WITH_A_TYPE(a_type)                             \
+    #define COMPUTE_WITH_A_TYPE_ACC(a_type)                             \
     auto a = reinterpret_cast<const a_type*>(self.data_ptr());      \
     at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
       for (const auto idx : c10::irange(start, end)) {              \
@@ -3850,9 +3850,9 @@ Tensor& _int_mm_acc_out_cpu(
     });
 
     if (self.scalar_type() == at::kByte) {
-      COMPUTE_WITH_A_TYPE(uint8_t);
+      COMPUTE_WITH_A_TYPE_ACC(uint8_t);
     } else {
-      COMPUTE_WITH_A_TYPE(int8_t);
+      COMPUTE_WITH_A_TYPE_ACC(int8_t);
     }
   }
   return result;
