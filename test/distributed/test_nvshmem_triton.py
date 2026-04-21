@@ -1,52 +1,48 @@
 # Owner(s): ["oncall: distributed"]
 # To run:
-# python test/distributed/test_shmem_triton.py
+# python test/distributed/test_nvshmem_triton.py
 
 import sys
 
 import torch
-import torch.distributed._symmetric_memory as symm_mem
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    PLATFORM_SUPPORTS_SYMM_MEM,
-    skip_if_rocm_multiprocess,
-)
+
+# Import TEST_WITH_ROCM first to check for ROCm before importing NVSHMEM modules
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-# Skip entire module if CUDA or SHMEM backend is not available before
-# importing SHMEM-specific modules.
-if (
-    not torch.backends.cuda.is_built()
-    or not symm_mem.is_nvshmem_available()
-    or not PLATFORM_SUPPORTS_SYMM_MEM
-):
-    print("SHMEM backend (NVSHMEM/rocSHMEM) not available, skipping tests")
+# Skip entire module on ROCm before importing NVSHMEM-specific modules or running on CPU
+# NVSHMEM is NVIDIA-specific and can cause crashes during import on ROCm
+if TEST_WITH_ROCM or not torch.backends.cuda.is_built():
+    print("NVSHMEM not available on ROCm, skipping tests")
     sys.exit(0)
-
 
 import triton.language as tl
 
 import torch.distributed as dist
-import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
+import torch.distributed._symmetric_memory as symm_mem
+import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
-from torch.distributed._symmetric_memory._shmem_triton import requires_shmem
+from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_WITH_ROCM,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
 
 
-shmem_backend = shmem_triton.get_shmem_backend_module()
+if not symm_mem.is_nvshmem_available():
+    print("NVSHMEM not available, skipping tests")
+    sys.exit(0)
 
 
 def requires_h100():
     return skip_but_pass_in_sandcastle_if(
-        (not TEST_WITH_ROCM) and not IS_H100,
-        "NVSHMEM Triton tests require H100.",
+        not IS_H100,
+        "NVSHMEM requires H100. Skipping test on non-H100 GPU.",
     )
 
 
@@ -54,10 +50,11 @@ def requires_h100():
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
+
 # Shared Triton JIT kernels
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_put_kernel(
     dest,
@@ -65,10 +62,10 @@ def my_put_kernel(
     nelems,
     pe,
 ):
-    shmem_backend.put(dest, src, nelems, pe)
+    nvshmem.put(dest, src, nelems, pe)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_get_kernel(
     dest,
@@ -78,13 +75,13 @@ def my_get_kernel(
     nbi: tl.constexpr,  # use nonblocking interface if True
 ):
     if nbi:
-        shmem_backend.get_nbi(dest, src, nelems, pe)
-        shmem_backend.quiet()
+        nvshmem.get_nbi(dest, src, nelems, pe)
+        nvshmem.quiet()
     else:
-        shmem_backend.get(dest, src, nelems, pe)
+        nvshmem.get(dest, src, nelems, pe)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_putmem_signal_block_kernel(
     dst,
@@ -95,18 +92,16 @@ def my_putmem_signal_block_kernel(
     sig_op,
     peer,
 ):
-    shmem_backend.putmem_signal_block(
-        dst, src, size_bytes, signal, sig_val, sig_op, peer
-    )
+    nvshmem.putmem_signal_block(dst, src, size_bytes, signal, sig_val, sig_op, peer)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_signal_wait_until_kernel(signal, cmp_op, cmp_val):
-    shmem_backend.signal_wait_until(signal, cmp_op, cmp_val)
+    nvshmem.signal_wait_until(signal, cmp_op, cmp_val)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_signal_op_kernel(
     sig_addr,
@@ -114,26 +109,26 @@ def my_signal_op_kernel(
     sig_op,
     peer,
 ):
-    shmem_backend.signal_op(sig_addr, signal, sig_op, peer)
+    nvshmem.signal_op(sig_addr, signal, sig_op, peer)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_wait_until_kernel(
     ivar,
     cmp_op,
     cmp_val,
 ):
-    shmem_backend.wait_until(ivar, cmp_op, cmp_val)
+    nvshmem.wait_until(ivar, cmp_op, cmp_val)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_fence_kernel():
-    shmem_backend.fence()
+    nvshmem.fence()
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_put_with_fence_kernel(
     dst1,
@@ -146,18 +141,18 @@ def my_put_with_fence_kernel(
     peer,
 ):
     # First put
-    shmem_backend.put(dst1, src1, nelems, peer)
+    nvshmem.put(dst1, src1, nelems, peer)
     # Ensure the first put is ordered before the next.
-    shmem_backend.fence()
+    nvshmem.fence()
     # Second put
-    shmem_backend.put(dst2, src2, nelems, peer)
+    nvshmem.put(dst2, src2, nelems, peer)
     # Order the second put before flag update.
-    shmem_backend.fence()
+    nvshmem.fence()
     # Write the flag (single int64) to signal completion.
-    shmem_backend.put(flag_dst, flag_src, 1, peer)
+    nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_put_with_quiet_kernel(
     dst,
@@ -168,15 +163,15 @@ def my_put_with_quiet_kernel(
     peer,
 ):
     # Put data
-    shmem_backend.put(dst, src, nelems, peer)
+    nvshmem.put(dst, src, nelems, peer)
     # Call quiet to ensure put is complete
-    shmem_backend.quiet()
+    nvshmem.quiet()
     # Only after quiet, set the completion flag
     # This ensures the data put is complete before flag is set
-    shmem_backend.put(flag_dst, flag_src, 1, peer)
+    nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_barrier_test_kernel(
     dst,
@@ -187,8 +182,8 @@ def my_barrier_test_kernel(
     # the same kernel execution. Unlike other kernels that just wrap NVSHMEM
     # primitives, this one implements the full test logic to properly verify
     # device-side barrier synchronization.
-    my_pe = shmem_backend.my_pe()
-    n_pes = shmem_backend.n_pes()
+    my_pe = nvshmem.my_pe()
+    n_pes = nvshmem.n_pes()
 
     # Rank 0 broadcasts its value to all other ranks
     if my_pe == 0:
@@ -198,11 +193,11 @@ def my_barrier_test_kernel(
         # Put to all other ranks
         i = 1
         while i < n_pes:
-            shmem_backend.put(dst, src, nelems, i)
+            nvshmem.put(dst, src, nelems, i)
             i += 1
 
     # Synchronize all PEs
-    shmem_backend.barrier_all()
+    nvshmem.barrier_all()
 
     # Non-zero ranks increment the received value
     if my_pe != 0:
@@ -211,21 +206,21 @@ def my_barrier_test_kernel(
         tl.store(p_dst, received + 1)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_barrier_all_kernel():
-    shmem_backend.barrier_all()
+    nvshmem.barrier_all()
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_sync_test_kernel(
     local_data,
     remote_data,
     nelems,
 ):
-    my_pe = shmem_backend.my_pe()
-    n_pes = shmem_backend.n_pes()
+    my_pe = nvshmem.my_pe()
+    n_pes = nvshmem.n_pes()
 
     # Each PE writes a unique value to its local memory
     p_local = local_data.to(tl.pointer_type(tl.int32))
@@ -234,18 +229,18 @@ def my_sync_test_kernel(
 
     # sync_all() ensures local stores are visible to other PEs
     # but doesn't guarantee completion of any remote operations
-    shmem_backend.sync_all()
+    nvshmem.sync_all()
 
     # Now each PE reads from the next PE's memory to verify visibility
     # PE 0 reads from PE 1, PE 1 reads from PE 2, ..., PE n-1 reads from PE 0
     next_pe = (my_pe + 1) % n_pes
-    shmem_backend.get(remote_data, local_data, nelems, next_pe)
+    nvshmem.get(remote_data, local_data, nelems, next_pe)
 
     # The get should now see the value that the next PE wrote locally
     # because sync_all() made those local stores visible
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_alltoall_kernel(
     team_handle,
@@ -253,10 +248,10 @@ def my_alltoall_kernel(
     src,
     nelems_per_pe,
 ):
-    shmem_backend.alltoall(team_handle, dst, src, nelems_per_pe)
+    nvshmem.alltoall(team_handle, dst, src, nelems_per_pe)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_broadcast_kernel(
     team_handle,
@@ -265,10 +260,10 @@ def my_broadcast_kernel(
     nelems,
     pe_root,
 ):
-    shmem_backend.broadcast(team_handle, dst, src, nelems, pe_root)
+    nvshmem.broadcast(team_handle, dst, src, nelems, pe_root)
 
 
-@requires_shmem
+@requires_nvshmem
 @triton.jit
 def my_reduce_kernel(
     team_handle,
@@ -277,11 +272,11 @@ def my_reduce_kernel(
     nreduce,
     operation: tl.constexpr,
 ):
-    shmem_backend.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
+    nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
 @instantiate_parametrized_tests
-class SHMEMTritonTest(MultiProcContinuousTest):
+class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -292,6 +287,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_put(self) -> None:
@@ -343,6 +339,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 dst, torch.tensor(expected, device=self.device, dtype=dtype)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     @parametrize("nbi", [False, True])  # Test both blocking and nonblocking interfaces
@@ -382,6 +379,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_get_ring(self) -> None:
@@ -422,6 +420,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             out, expected_value * torch.ones(numel, dtype=dtype, device=self.device)
         )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_put_signal_set(self) -> None:
@@ -478,6 +477,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 flag, torch.tensor([SIGNAL_VAL], dtype=torch.int64, device=self.device)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_put_signal_add(self) -> None:
@@ -503,9 +503,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        # NVSHMEM_SIGNAL_ADD = 5  (nvshmem_common.h)
-        # ROCSHMEM_SIGNAL_ADD = 1 (rocshmem_common.hpp enum ROCSHMEM_SIGNAL_OPS)
-        NVSHMEM_SIGNAL_ADD = 1 if TEST_WITH_ROCM else 5
+        NVSHMEM_SIGNAL_ADD = 5  # atomic add operation
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
 
@@ -534,6 +532,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 flag, torch.tensor([SIGNAL_VAL], dtype=torch.int64, device=self.device)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_wait_until(self) -> None:
@@ -581,6 +580,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 peer,  # The target PE (Rank 0)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_signal_wait_until(self) -> None:
@@ -640,6 +640,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 ),
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_fence(self) -> None:
@@ -711,6 +712,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 flag, torch.tensor([flag_val], dtype=torch.int32, device=self.device)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_quiet(self) -> None:
@@ -759,6 +761,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             )
         dist.barrier()
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_barrier(self) -> None:
@@ -792,6 +795,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
                 dst, torch.tensor([43], device=self.device, dtype=dtype)
             )
 
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_sync(self) -> None:
@@ -834,7 +838,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.tensor([expected_remote], device=self.device, dtype=dtype),
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_alltoall(self) -> None:
@@ -880,7 +884,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             actual = dst[i * nelems_per_pe : (i + 1) * nelems_per_pe]
             torch.testing.assert_close(actual, torch.full_like(actual, expected))
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     def test_triton_broadcast(self) -> None:
@@ -933,7 +937,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -995,7 +999,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1080,7 +1084,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocm
     @requires_triton()
     @requires_h100()
     @parametrize(
