@@ -71,7 +71,7 @@ bool check_deterministic(const sdp::sdp_params& params, bool debug) {
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
     if (debug) {
-      TORCH_WARN("Flash attention XPU is not deterministic.");
+      TORCH_WARN("OneDNN attention on XPU is not deterministic.");
     }
     return false;
   }
