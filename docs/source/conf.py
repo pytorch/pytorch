@@ -2437,11 +2437,12 @@ def setup(app):
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
 
-    # Force serial reads to avoid pipe congestion from large env pickles.
-    # Sphinx's parallel read sends the entire environment (100s of MB for
-    # PyTorch) through a 64KB OS pipe per worker, which causes extreme
-    # slowdowns with many workers. Serial reads avoid this overhead while
-    # parallel writes (which send trivial payloads) remain enabled.
+    # Force serial reads and writes to avoid pipe congestion. Sphinx's
+    # parallel phases ship serialized state (env on read, doctrees on write)
+    # through 64KB OS pipes per worker. At PyTorch scale (100s of MB of env,
+    # ~2946 autodoc-heavy pages) the parent can only drain one pipe at a time
+    # while workers block on send, which deadlocks the build. Serial avoids
+    # the pipe entirely.
     from sphinx.builders import Builder
 
     _orig_read_serial = Builder._read_serial
@@ -2450,6 +2451,13 @@ def setup(app):
         return _orig_read_serial(self, docnames)
 
     Builder._read_parallel = _serial_read_ignoring_nproc
+
+    _orig_write_serial = Builder._write_serial
+
+    def _serial_write_ignoring_nproc(self, docnames, nproc=1):
+        return _orig_write_serial(self, docnames)
+
+    Builder._write_parallel = _serial_write_ignoring_nproc
 
     # Skip pickling doctrees to disk for the HTML builder. This is only used
     # for incremental rebuilds which don't apply in CI clean builds. Saves
