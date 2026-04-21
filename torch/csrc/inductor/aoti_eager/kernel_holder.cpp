@@ -362,7 +362,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         // String
         auto metadata = item_metadata.cast<py::dict>();
         auto str_value = metadata["string_value"].cast<std::string>();
-        parameter_metadata_list.emplace_back(str_value, arg_idx);
+        parameter_metadata_list.emplace_back(std::move(str_value), arg_idx);
       } else if (is_dtype) {
         // Dtype
         auto metadata = item_metadata.cast<py::dict>();
