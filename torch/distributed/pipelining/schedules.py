@@ -280,6 +280,11 @@ class _PipelineSchedule(ABC):
         # Derived
         self._has_backward = self._loss_fn is not None
 
+        # Extra keyword arguments forwarded to the loss function. Callers
+        # can set this dict before ``step()`` to pass additional kwargs
+        # (e.g. ``global_valid_tokens`` for chunked cross-entropy loss).
+        self._loss_kwargs: dict[str, Any] = {}
+
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
         logger.info("Using %s", self.__class__.__name__)
@@ -444,6 +449,7 @@ class _PipelineSchedule(ABC):
                         loss_fn=self._loss_fn,
                         target=target,
                         received_grad_meta=prev_stage_grad_meta,
+                        loss_kwargs=self._loss_kwargs,
                     )
                 bwd_initialized = True
 
@@ -554,7 +560,7 @@ class _PipelineSchedule(ABC):
         return arg_mbs, kwarg_mbs
 
     def _compute_loss(self, output, target):
-        return self._loss_fn(output, target)  # type: ignore[misc]
+        return self._loss_fn(output, target, **self._loss_kwargs)  # type: ignore[misc]
 
     def _split_inputs(
         self,
