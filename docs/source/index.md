@@ -421,8 +421,7 @@ Complete list of all PyTorch Python and C++ APIs.
 
 ## API List
 
-:::{dropdown} Complete PyTorch API Reference — all modules and packages
-:icon: list-unordered
+:::{card} {octicon}`list-unordered;1.5em` Complete PyTorch API Reference — all modules and packages
 
 **Core**
 
