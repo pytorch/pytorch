@@ -95,6 +95,12 @@ RUN chmod +x /usr/bin/actions-runner /usr/bin/entrypoint
 COPY --from=podman /tmp/podman /tmp/podman
 RUN apt-get update && apt -y install /tmp/podman/*.deb && /bin/rm -rfv /tmp/podman
 
+# Marker file so that pytorch/pytorch's setup-linux composite action detects
+# this as a container runner (see .github/actions/setup-linux/action.yml).
+# Without this, setup-linux runs `docker system prune -af`, which wipes the
+# manylinuxs390x-builder image that is preloaded below from manywheel-s390x.tar.
+RUN touch /.incontainer
+
 # amd64 Github Actions Runner.
 RUN useradd -m actions-runner
 USER actions-runner
