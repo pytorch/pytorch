@@ -163,10 +163,8 @@ class LoopBody:
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
-        self.has_partial_accumulate = bool(
-            self.root_block.graph.find_nodes(
-                op="call_method", target="partial_accumulate"
-            )
+        self.has_partial_accumulate = self.root_block.graph.find_nodes(
+            op="call_method", target="partial_accumulate"
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
