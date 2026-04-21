@@ -1563,7 +1563,9 @@ class DeviceCachingAllocator {
       cb(te);
     }
 
-    alloc_buffer.insertEntries(te);
+    if (record_history && !should_skip) {
+      alloc_buffer.insertEntries(te);
+    }
   }
 
   std::vector<SegmentInfo> snapshot(MempoolId_t mempool_id) {
