@@ -359,6 +359,7 @@ struct type_caster<c10::complex<T>> {
     return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
   }
 };
+
 template <>
 struct TORCH_PYTHON_API type_caster<c10::Layout> {
  public:
