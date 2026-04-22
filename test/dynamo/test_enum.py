@@ -569,6 +569,92 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = compiled_fn(x, 1)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "torch.distributed not available",
+    )
+    def test_pybind11_enum_as_dict_key(self):
+        """Test pybind11 enum (RedOpType) works as dict key without graph break."""
+        import torch.distributed as dist
+
+        op_mapping = {
+            dist.ReduceOp.SUM: 0,
+            dist.ReduceOp.MAX: 1,
+            dist.ReduceOp.AVG: 2,
+        }
+
+        def fn(x, op):
+            return x + op_mapping[op]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for op in (dist.ReduceOp.SUM, dist.ReduceOp.MAX, dist.ReduceOp.AVG):
+            torch._dynamo.reset()
+            ref = fn(x, op)
+            res = opt_fn(x, op)
+            self.assertEqual(ref, res)
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "torch.distributed not available",
+    )
+    def test_pybind11_enum_equality(self):
+        """Test pybind11 enum comparison without graph break."""
+        import torch.distributed as dist
+
+        def fn(x, op):
+            if op == dist.ReduceOp.PREMUL_SUM:
+                return x + 2
+            return x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x, dist.ReduceOp.SUM)
+        res = opt_fn(x, dist.ReduceOp.SUM)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, dist.ReduceOp.PREMUL_SUM)
+        res = opt_fn(x, dist.ReduceOp.PREMUL_SUM)
+        self.assertEqual(ref, res)
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "torch.distributed not available",
+    )
+    def test_pybind11_enum_identity(self):
+        """Test pybind11 enum identity check without graph break."""
+        import torch.distributed as dist
+
+        def fn(x, op):
+            if op is dist.ReduceOp.SUM:
+                return x * 2
+            return x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, dist.ReduceOp.SUM)
+        res = opt_fn(x, dist.ReduceOp.SUM)
+        self.assertEqual(ref, res)
+
+    def test_dispatch_key_as_dict_key(self):
+        """Test DispatchKey (also a pybind11 enum) works as dict key."""
+        d = {
+            torch.DispatchKey.CPU: 0,
+            torch.DispatchKey.CUDA: 1,
+        }
+
+        def fn(x, key):
+            return x + d[key]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, torch.DispatchKey.CPU)
+        res = opt_fn(x, torch.DispatchKey.CPU)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
