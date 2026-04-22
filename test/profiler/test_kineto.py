@@ -18,8 +18,8 @@ class SimpleKinetoInitializationTest(TestCase):
         """
         script = """
 import torch
-if torch.cuda.is_available() > 0:
-    torch.cuda.init()
+if torch.accelerator.is_available():
+    torch.accelerator.set_device_index(0)
 """
         try:
             subprocess.check_output(

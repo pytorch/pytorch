@@ -7,7 +7,13 @@ from unittest import skipIf
 import torch
 import torch.utils.cpp_extension
 from torch._environment import is_fbcode
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
+    TestCase,
+)
 
 
 if is_fbcode():
@@ -345,6 +351,104 @@ class CppThreadTestXPU(TestCase):
                 "aten::add": [self.ThreadCount, "CPU"],
             },
             mem=True,
+        )
+
+
+class CppThreadTestPrivateUse1(TestCase):
+    ThreadCount = 20
+    EventHandler = None
+    TraceObject = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super(CppThreadTestPrivateUse1, cls).setUpClass()
+        CppThreadTestPrivateUse1.EventHandler = PythonProfilerEventHandler()
+        cpp.ProfilerEventHandler.Register(CppThreadTestPrivateUse1.EventHandler)
+
+    @classmethod
+    def tearDownClass(cls):
+        if not is_fbcode():
+            torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+    def setUp(self) -> None:
+        super().setUp()
+        if not TEST_PRIVATEUSE1:
+            self.skipTest("Test machine does not have a PrivateUse1 backend")
+        global device
+        device = TEST_PRIVATEUSE1_DEVICE_TYPE
+
+        # this clears off events from initialization
+        self.start_profiler(False)
+        cpp.start_threads(1, IterationCount, False)
+
+    def start_profiler(self, profile_memory):
+        global KinetoProfiler
+        KinetoProfiler = torch.profiler.profile(
+            schedule=torch.profiler.schedule(
+                wait=1, warmup=1, active=ActivateIteration, repeat=1
+            ),
+            on_trace_ready=self.set_trace,
+            with_stack=True,
+            profile_memory=profile_memory,
+            record_shapes=True,
+        )
+
+    def set_trace(self, trace_obj) -> None:
+        CppThreadTestPrivateUse1.TraceObject = trace_obj
+
+    def assert_text(self, condition, text, msg):
+        if condition:
+            print(f"\33[32m{text}\33[0m")
+        else:
+            print(f"\33[31m{text}\33[0m")
+        self.assertTrue(condition, msg)
+
+    def check_trace(self, expected, mem=False) -> None:
+        blueprint("verifying trace")
+        event_list = CppThreadTestPrivateUse1.TraceObject.events()
+        for key, values in expected.items():
+            count = values[0]
+            min_count = count * (ActivateIteration - 1)
+            device_type = values[1]
+            filtered = filter(
+                lambda ev: ev.name == key
+                and str(ev.device_type) == f"DeviceType.{device_type}",
+                event_list,
+            )
+
+            actual = len(list(filtered))
+            if count == 1:  # test_without
+                count *= ActivateIteration
+                self.assert_text(
+                    actual == count,
+                    f"{key}: {actual} == {count}",
+                    "baseline event count incorrect",
+                )
+            else:
+                self.assert_text(
+                    actual >= min_count,
+                    f"{key}: {actual} >= {min_count}",
+                    "not enough event recorded",
+                )
+
+    def test_with_enable_profiler_in_child_thread_privateuse1(self) -> None:
+        self.start_profiler(False)
+        cpp.start_threads(self.ThreadCount, IterationCount, True)
+        self.check_trace(
+            {
+                "aten::add": [self.ThreadCount, "CPU"],
+                "user_function": [self.ThreadCount, "PrivateUse1"],
+            }
+        )
+
+    def test_without_enable_profiler_in_child_thread_privateuse1(self) -> None:
+        self.start_profiler(False)
+        cpp.start_threads(self.ThreadCount, IterationCount, False)
+        self.check_trace(
+            {
+                "aten::add": [1, "CPU"],
+                "user_function": [1, "PrivateUse1"],
+            }
         )
 
 
