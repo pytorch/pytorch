@@ -1838,7 +1838,7 @@ def xfailIfNoAcceleratorTriton(test_func):
         if spec is not None and _is_cpu_device_type(spec):
             try:
                 return test_func(*args, **kwargs)
-            except (ImportError, ModuleNotFoundError) as e:
+            except ImportError as e:
                 # This except block required only for TestUtilsCPU::test_get_device_tflops_cpu
                 # test_get_device_tflops imports triton directly in its body — even for CPU
                 if "triton" in str(e).lower():

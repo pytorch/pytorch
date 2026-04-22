@@ -2275,6 +2275,7 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
+@xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
     """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
 
