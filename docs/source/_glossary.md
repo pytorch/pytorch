@@ -18,7 +18,7 @@ Native Operation
 
 Custom Operation
    An Operation that is defined by users and is usually a {term}`Compound Operation`.
-   For example, this [tutorial](https://pytorch.org/docs/stable/notes/extending.html)
+   For example, this [tutorial](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
    details how to create Custom Operations.
 
 Kernel
