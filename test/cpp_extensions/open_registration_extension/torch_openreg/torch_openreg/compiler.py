@@ -3,6 +3,7 @@ import logging
 import torch
 from torch._dynamo.backends.registry import register_backend
 
+
 log = logging.getLogger(__name__)
 
 
@@ -13,7 +14,7 @@ def openreg(gm, example_inputs):
         if node.op == "placeholder" and "val" in node.meta:
             fake = node.meta["val"]
             if isinstance(fake, torch.Tensor):
-                assert fake.device.type in ("openreg", "cpu"), (
+                assert fake.device.type in ("openreg", "cpu"), (  # noqa: S101
                     f"Unexpected device {fake.device} in openreg backend"
                 )
 
