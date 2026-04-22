@@ -1371,7 +1371,7 @@ class CommonTemplate:
     #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
-    # This is now fixed by ensuring that that wild symbols only match integers
+    # This is now fixed by ensuring that wild symbols only match integers
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)

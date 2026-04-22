@@ -4354,7 +4354,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         cnt = CompileCounterWithBackend("inductor")
 
         # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
-        # hints to to compute strides.
+        # hints to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
             result2 = x.view(u0, u1) * 10
