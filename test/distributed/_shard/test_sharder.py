@@ -27,7 +27,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 BACKEND = dist.Backend.default_device_backend_map[device_type]
 
 # a simple collection of embedding bag implementation
