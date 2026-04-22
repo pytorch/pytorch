@@ -23,7 +23,6 @@ Custom Operation
 
 Kernel
     Refers to the "on device" implementation of a given operation. Reffering to the part of the Operation that actually computes the result.
-   operation executes.
 
 Compound Operation
    A Compound Operation is composed of other operations. Its kernel is usually
