@@ -693,19 +693,25 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
-            all_bases = kwargs["_all_bases"]
-            bases_to_clone = range(len(all_bases))
-            base_tensors_dct = dict(enumerate(all_bases))
-            new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
-                bases_to_clone,
-                base_tensors_dct,
-                node.target,
-                ReInplaceTrigger.AUTO_FUNC_V2,
-            )
-            # Stash the metadata. There is a pass later on where we decompose
-            # auto_functionalized into clones + a mutable op; this metadata
-            # tells the decomp to only clone the following inputs
-            node.meta["only_clone_these_tensors"] = new_bases_to_clone
+            if isinstance(
+                _mutable_op, torch._ops.OpOverload
+            ) and torch._library.utils.is_out(_mutable_op):
+                # Out args are write-only, always safe to reinplace (no clones needed)
+                node.meta["only_clone_these_tensors"] = []
+            else:
+                all_bases = kwargs["_all_bases"]
+                bases_to_clone = range(len(all_bases))
+                base_tensors_dct = dict(enumerate(all_bases))
+                new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
+                    bases_to_clone,
+                    base_tensors_dct,
+                    node.target,
+                    ReInplaceTrigger.AUTO_FUNC_V2,
+                )
+                # Stash the metadata. There is a pass later on where we decompose
+                # auto_functionalized into clones + a mutable op; this metadata
+                # tells the decomp to only clone the following inputs
+                node.meta["only_clone_these_tensors"] = new_bases_to_clone
         elif node.target is torch.ops.higher_order.auto_functionalized:
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args

@@ -1,9 +1,52 @@
 # Owner(s): ["module: custom-operators"]
 import torch
 from torch import Tensor
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library._out_variant import check_out_variant, to_out_variant
 from torch._library.utils import is_out
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+
+_test_lib = torch.library.Library("_TestOutVariant", "DEF")  # noqa: TOR901
+
+_test_lib.define("add(Tensor x, Tensor y) -> Tensor")
+_test_lib.define(
+    "add.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)",
+    tags=[torch.Tag.out],
+)
+
+
+def _add_out_impl(x: Tensor, y: Tensor, *, out: Tensor) -> Tensor:
+    out.copy_(x + y)
+    return out
+
+
+_test_lib.impl("add.out", _add_out_impl, "CompositeExplicitAutograd")
+_test_lib.impl("add.out", lambda x, y, *, out: out, "Meta")
+
+_test_lib.define(
+    "add_mul.out(Tensor x, Tensor y, *, Tensor(a!) add_out, Tensor(b!) mul_out) -> (Tensor(a!), Tensor(b!))",
+    tags=[torch.Tag.out],
+)
+
+
+def _add_mul_out_impl(
+    x: Tensor, y: Tensor, *, add_out: Tensor, mul_out: Tensor
+) -> tuple[Tensor, Tensor]:
+    add_out.copy_(x + y)
+    mul_out.copy_(x * y)
+    return add_out, mul_out
+
+
+_test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
+_test_lib.impl(
+    "add_mul.out", lambda x, y, *, add_out, mul_out: (add_out, mul_out), "Meta"
+)
 
 
 class TestOutVariant(TestCase):
@@ -283,6 +326,89 @@ class TestOutVariant(TestCase):
                 tags=[torch.Tag.out],
             )
 
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_compile_out(self, backend):
+        def fn(x, y, out):
+            return torch.ops._TestOutVariant.add.out(x, y, out=out)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        out = torch.empty(3, 4)
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(x, y, out)
+        self.assertEqual(result, x + y)
+        self.assertEqual(out, x + y)
+
+    def test_compile_out_functionalized_graph(self):
+        def fn(x, y, out):
+            return torch.ops._TestOutVariant.add.out(x, y, out=out)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        out = torch.empty(3, 4)
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(x, y, out)
+
+        self.assertEqual(result, x + y)
+        self.assertEqual(out, x + y)
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOutVariant.add.out, x = arg0_1, y = arg1_1, _out_size = (3, 4), _out_stride = (4, 1), _out_dtype = torch.float32, _out_device = device(type='cpu'), _all_bases = []);  arg0_1 = arg1_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg2_1, auto_functionalized_v2);  arg2_1 = copy_ = None
+    return (auto_functionalized_v2,)""",
+        )
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+    def test_compile_out_uses_v2_hop_when_config_off(self):
+        def fn(x, y, out):
+            return torch.ops._TestOutVariant.add.out(x, y, out=out)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        out = torch.empty(3, 4)
+
+        backend = AotEagerAndRecordGraphs()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, y, out)
+
+        self.assertEqual(result, x + y)
+        self.assertEqual(out, x + y)
+        self.assertIn("auto_functionalized_v2", backend.fw_graphs[0].code)
+        self.assertNotIn(
+            "torch.ops.higher_order.auto_functionalized(",
+            backend.fw_graphs[0].code,
+        )
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_compile_multi_out(self, backend):
+        def fn(x, y):
+            # Out tensors have different dtype and stride to test that
+            # per-tensor properties are handled correctly.
+            add_out = torch.empty(3, 4)
+            mul_out = torch.empty(4, 3, dtype=torch.float64).t()
+            return torch.ops._TestOutVariant.add_mul.out(
+                x, y, add_out=add_out, mul_out=mul_out
+            )
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        add_result, mul_result = compiled_fn(x, y)
+        self.assertEqual(add_result, x + y)
+        self.assertEqual(add_result.dtype, torch.float32)
+        self.assertEqual(add_result.stride(), (4, 1))
+        self.assertEqual(mul_result, (x * y).to(torch.float64))
+        self.assertEqual(mul_result.dtype, torch.float64)
+        self.assertEqual(mul_result.stride(), (1, 3))
+
+
+instantiate_parametrized_tests(TestOutVariant)
 
 if __name__ == "__main__":
     run_tests()
