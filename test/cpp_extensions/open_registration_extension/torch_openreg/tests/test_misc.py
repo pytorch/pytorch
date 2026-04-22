@@ -16,6 +16,16 @@ class TestBackendModule(TestCase):
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
             torch.utils.rename_privateuse1_backend("dev")
 
+    def test_profiler_activity_alias(self):
+        """Test ProfilerActivity exposes device-specific alias for PrivateUse1"""
+        from torch._C._profiler import ProfilerActivity
+
+        self.assertTrue(hasattr(ProfilerActivity, "OPENREG"))
+        self.assertEqual(ProfilerActivity.OPENREG, ProfilerActivity.PrivateUse1)
+        self.assertEqual(
+            repr(ProfilerActivity.OPENREG), "<ProfilerActivity.OPENREG: 5>"
+        )
+
     def test_backend_module_registration(self):
         """Test backend module registration error handling"""
 

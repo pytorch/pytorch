@@ -76,9 +76,25 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         >>> a = torch.ones(2, device="foo")
 
     """
+    from torch._C._profiler import ProfilerActivity
+
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
+    # Mirror the rename in ProfilerActivity so users can write e.g.
+    # ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1.
+    pu1 = ProfilerActivity.PrivateUse1
+    alias = backend_name.upper()
+    setattr(ProfilerActivity, alias, pu1)
+
+    original_repr = ProfilerActivity.__repr__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<ProfilerActivity.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    ProfilerActivity.__repr__ = custom_repr
 
 
 def _check_register_once(module, attr) -> None:
