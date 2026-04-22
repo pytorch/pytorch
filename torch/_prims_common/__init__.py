@@ -2028,11 +2028,10 @@ def check(
 # May return False when input sizes are data-dependent and the property is not
 # determined.
 def are_strides_like_channels_last_or_false(
-    shape: Sequence[int], strides: Sequence[int]
+    shape: Sequence[int | torch.SymInt], strides: Sequence[int | torch.SymInt]
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_true,
-        statically_known_true,
+        guard_or_true
     )
 
     ndim = len(shape)

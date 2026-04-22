@@ -241,7 +241,6 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
 
 
 @dataclasses.dataclass(slots=True)

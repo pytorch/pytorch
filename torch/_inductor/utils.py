@@ -1428,7 +1428,7 @@ def argsort_sym(
         def evaluate(expr: bool | torch.SymInt | sympy.Expr) -> bool:
             if isinstance(expr, bool):
                 return expr
-            return shape_env.evaluate_expr(expr, size_oblivious=True)
+            return shape_env.evaluate_expr(expr)
 
         if evaluate(a_val < b_val):
             return -1

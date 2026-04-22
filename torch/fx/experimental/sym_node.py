@@ -544,10 +544,10 @@ class SymNode:
         # NB: Only for integers!
         return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
-    def evaluate(self, size_oblivious: bool = False) -> bool | int | float:
+    def evaluate(self) -> bool | int | float:
         if self.shape_env is None:
             raise RuntimeError("shape_env is required to evaluate")
-        return self.shape_env.evaluate_sym_node(self, size_oblivious)
+        return self.shape_env.evaluate_sym_node(self)
 
     # You can manually trigger a guard with this function
     def guard_int(self, file: builtins.str, line: int) -> int:
@@ -620,7 +620,7 @@ class SymNode:
         """
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.evaluate(size_oblivious=True)
+        r = self.evaluate()
         try:
             return bool(r)
         except Exception:

@@ -2905,12 +2905,12 @@ def as_storage_and_layout(
     raise NotImplementedError
 
 
-def is_stride_order_storage_and_layout(
+def is_stride_order_storage_and_layout_or_false(
     x: IRNode, stride_order: Sequence[int | Integer]
 ) -> bool:
     try:
         _buffer, layout = as_storage_and_layout(x, freeze=False)
-        return layout.is_stride_ordered(stride_order)
+        return layout.is_stride_ordered_or_false(stride_order)
     except NotImplementedError:
         return False
 
@@ -4022,14 +4022,16 @@ class Layout(OutputSpec):
                 return False
         return True
 
-    def is_stride_ordered(self, order: Sequence[int]) -> bool:
+    def is_stride_ordered_or_false(self, order: Sequence[int]) -> bool:
         assert len(self.stride) == len(order)
 
-        # ignore dimensions of size 1, they dont affect layout
+        sizevars = V.graph.sizevars
+
+        # ignore dimensions known to be of size 1, they dont affect layout
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if V.graph.sizevars.optimization_hint(dim, fallback=2) != 1
+            if not sizevars.statically_known_equals(dim, 1)
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
@@ -4046,22 +4048,43 @@ class Layout(OutputSpec):
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
             stride_ordered[order[i]] = stride[i]
-        # check if it is in ascending order
+
+        # check if it is in ascending order using symbolic-aware comparison
+        # Uses sizevars APIs to handle symbolic expressions, including
+        # divisibility checks for unbacked symbols (e.g. u0 < 2048*u0).
+        #
+        # NOTE: the divisibility and GCD heuristics below are not fully sound
+        # for unbacked symints when a factor can be zero. For example,
+        # Mod(u4*u1, u1) == 0 leads us to conclude u1 <= u4*u1, but if u4=0
+        # and u1>0 then u4*u1=0 < u1. In practice strides come from size
+        # products where sizes >= 1, so this is unlikely to be hit.
+        # See also the TODO in sizevars.evaluate_min for the same issue.
         for i in range(len(order) - 1):
-            expr = stride_ordered[i] > stride_ordered[i + 1]
-            if not isinstance(expr, bool):
-                expr = V.graph._shape_env.evaluate_expr(
-                    stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
-                )
-            if expr:
+            a, b = stride_ordered[i], stride_ordered[i + 1]
+            # we want to ensure a<=b, guarding on the decision for backed symbols
+            if sizevars.guard_or_false(sympy.Eq(a, 0)):
+                continue
+            if sizevars.guard_or_false(sympy.Gt(a, b)):
                 return False
+            if sizevars.guard_or_false(sympy.Le(a, b)):
+                continue
+            if sizevars.guard_or_false(sympy.Eq(sympy.Mod(b, a), 0)):
+                continue
+            # Last resort: evaluate_min has additional heuristics (GCD, Min/Max)
+            try:
+                if sizevars.evaluate_min(a, b) == a:
+                    continue
+            except TypeError:
+                pass
+            return False
         return True
 
-    def is_channels_last_stride_ordered(self) -> bool:
-        # create channels_last order(NCHW, NCDHW, the C is the first order).
-        order = [0] + list(reversed(range(1, len(self.stride) - 1)))
-        order = [len(order)] + order
-        return self.is_stride_ordered(order)
+    def is_channels_last_stride_ordered_or_false(self) -> bool:
+        from torch._prims_common import are_strides_like_channels_last_or_false
+
+        size = V.graph.sizevars.to_symints_or_ints(self.size)
+        stride = V.graph.sizevars.to_symints_or_ints(self.stride)
+        return are_strides_like_channels_last_or_false(size, stride)
 
     @staticmethod
     def _pad_strides(
@@ -6747,9 +6770,10 @@ class ExternKernel(InputsKernel):
                     # the current size and stride already satisfies this order.
                     # However by freezing it to the required order, the layout will be changed to:
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-                    use_current_stride_order = is_stride_order_storage_and_layout(
-                        x, order
-                    ) and not free_unbacked_symbols(x.get_layout().stride)
+                    use_current_stride_order = (
+                        is_stride_order_storage_and_layout_or_false(x, order)
+                        and not free_unbacked_symbols(x.get_layout().stride)
+                    )
                     # fix flexiblelayout to be FixedLayout with stride_order
                     as_storage_and_layout(
                         x,
@@ -6789,7 +6813,7 @@ class ExternKernel(InputsKernel):
                 )
 
             if isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
-                (order and x.get_layout().is_stride_ordered(order))
+                (order and x.get_layout().is_stride_ordered_or_false(order))
                 or (
                     exact_strides
                     and significant_strides_equal(
@@ -6821,7 +6845,7 @@ class ExternKernel(InputsKernel):
                         "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
                 elif isinstance(real_layout, FixedLayout) and (
-                    (order and real_layout.is_stride_ordered(order))
+                    (order and real_layout.is_stride_ordered_or_false(order))
                     or (
                         exact_strides
                         and significant_strides_equal(
@@ -6833,7 +6857,7 @@ class ExternKernel(InputsKernel):
 
         # TODO - Storage to InputBuffer
         if isinstance(x, InputBuffer) and (
-            (order and x.get_layout().is_stride_ordered(order))
+            (order and x.get_layout().is_stride_ordered_or_false(order))
             or (
                 exact_strides
                 and significant_strides_equal(
@@ -6896,7 +6920,7 @@ class ExternKernel(InputsKernel):
             exact_strides=exact_strides,
         )
         if order:
-            assert is_stride_order_storage_and_layout(x, order)
+            assert is_stride_order_storage_and_layout_or_false(x, order)
         elif expanded_dims:
             assert orig_size is not None and exact_strides is not None
             x = torch._inductor.lowering.expand(x, orig_size)

@@ -568,13 +568,11 @@ class SizeVarAllocator:
     def evaluate_expr(
         self,
         left: Expr | sympy.logic.boolalg.Boolean,
-        size_oblivious: bool = False,
         fallback_value: bool | None = None,
     ) -> bool:
         assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
         return self.shape_env.evaluate_expr(
             sympy.sympify(left),
-            size_oblivious=size_oblivious,
             fallback_value=fallback_value,
         )
 
