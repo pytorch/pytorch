@@ -1095,6 +1095,7 @@ def lp_pool3d(
 
     See :class:`~torch.nn.LPPool3d` for details.
     """
+    # isinstance guard skips this on fx.Proxy so test_fx.py PROXY_ITERATED still surfaces.
     if isinstance(norm_type, (int, float)) and norm_type == 0:
         raise ValueError("norm_type must not be 0")
     if has_torch_function_unary(input):
@@ -1138,6 +1139,7 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
+    # isinstance guard skips this on fx.Proxy so test_fx.py PROXY_ITERATED still surfaces.
     if isinstance(norm_type, (int, float)) and norm_type == 0:
         raise ValueError("norm_type must not be 0")
     if has_torch_function_unary(input):
@@ -1178,6 +1180,7 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
+    # isinstance guard skips this on fx.Proxy so test_fx.py PROXY_ITERATED still surfaces.
     if isinstance(norm_type, (int, float)) and norm_type == 0:
         raise ValueError("norm_type must not be 0")
     if has_torch_function_unary(input):
