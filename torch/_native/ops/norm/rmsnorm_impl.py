@@ -147,6 +147,9 @@ def _fused_rms_norm_backward_impl(
 
 
 def register_rmsnorm_overrides() -> None:
+    if not os.environ.get("TORCH_USE_QUACK_KERNELS"):
+        return
+
     if not _quack_available():
         log.debug("quack-kernels not installed, skipping RMSNorm overrides")
         return
