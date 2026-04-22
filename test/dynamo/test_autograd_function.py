@@ -2175,6 +2175,36 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(x_ref.grad, x_c.grad)
 
+    def test_aliased_intermediate_captured_by_side_effect(self):
+        # An intermediate that aliases an input is captured via side effect
+        # and used by the outer graph. filter_aliased_intermediates drops it
+        # from the subgraph outputs, but the outer graph still needs it.
+        # We should get a clear error telling the user to clone.
+        captured = []
+
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                view = x.view(-1)
+                captured.append(view)
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.expand(8)
+
+        def fn(x):
+            out = Bar.apply(x)
+            return out + captured[0].sum()
+
+        x = torch.randn(8, requires_grad=True)
+        captured.clear()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aliases an input or output.*clone",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
     """Tests for autograd.Function compatibility with torch.func transforms.
