@@ -327,14 +327,15 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
             py::isinstance<py::list>(metadata["tensor_list"]));
         auto tensor_list = metadata["tensor_list"].cast<py::list>();
         std::vector<TensorMetadata> test_list_metadata;
-        for (auto item_tensor : tensor_list) {
+        test_list_metadata.reserve(tensor_list.size());
+        for (const auto& item_tensor : tensor_list) {
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
               py::isinstance<py::dict>(item_tensor));
           auto metadata = item_tensor.cast<py::dict>();
-          auto tensor_metadata = build_tensor_metadata(metadata);
-          test_list_metadata.push_back(tensor_metadata);
+          test_list_metadata.push_back(build_tensor_metadata(metadata));
         }
-        parameter_metadata_list.emplace_back(test_list_metadata, arg_idx);
+        parameter_metadata_list.emplace_back(
+            std::move(test_list_metadata), arg_idx);
       } else if (is_scalar) {
         // Scalar
         auto metadata = item_metadata.cast<py::dict>();
@@ -362,7 +363,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         // String
         auto metadata = item_metadata.cast<py::dict>();
         auto str_value = metadata["string_value"].cast<std::string>();
-        parameter_metadata_list.emplace_back(str_value, arg_idx);
+        parameter_metadata_list.emplace_back(std::move(str_value), arg_idx);
       } else if (is_dtype) {
         // Dtype
         auto metadata = item_metadata.cast<py::dict>();
@@ -404,7 +405,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     aoti_kernel_metadata.parameter_metadata_list_ =
         std::move(parameter_metadata_list);
     aoti_kernel_metadata.kernel_runner_ = load_aoti_model_runner(kernel_path);
-    aoti_kernel_cache_.push_back(aoti_kernel_metadata);
+    aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
   }
 }
 
