@@ -3161,10 +3161,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
-        tiling_scores_i = combo_meta.get(f"tiling_scores_{i}")
-        inductor_meta_i = dict(inductor_meta_clean)
-        if tiling_scores_i is not None:
-            inductor_meta_i["tiling_scores"] = tiling_scores_i
+        # Per-sub-kernel inductor_meta passthrough packed by combo_grid_meta()
+        # via TritonKernel.inductor_meta_per_kernel(). Forward into
+        # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
+        # pick configs based on the actual sub-kernel .
+        inductor_meta_i = {
+            **inductor_meta_clean,
+            **combo_meta.get(f"inductor_meta_{i}", {}),
+        }
+        tiling_scores_i = inductor_meta_i.get("tiling_scores")
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
