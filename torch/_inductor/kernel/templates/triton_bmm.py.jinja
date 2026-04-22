@@ -2,6 +2,7 @@
     M = {{size("A", -2)}}
     N = {{size("B", -1)}}
     K = {{size("A", -1)}}
+    BATCH = {{size("A", 0)}}
 
     stride_aq = {{stride("A", 0)}}
     stride_am = {{stride("A", 1)}}
@@ -25,22 +26,26 @@
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
 
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
         ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
     else:
         ram = rm % M
-    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
         rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
     else:
         rbn = rn % N
 
-    rk = tl.arange(0, BLOCK_K)
+    rk = tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
 
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
+    # Reconstruct batch index from grid_y/grid_z split (handles batch > 65535)
+    idx_q = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(INDEX_DTYPE)
+    # Clamp to valid range for safe pointer arithmetic; out-of-bounds CTAs are
+    # masked off at the store below.
+    idx_q_clamped = tl.minimum(idx_q, BATCH - 1)
+    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q_clamped*stride_aq)
+    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q_clamped*stride_bq)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
     for k in range(K, 0, -BLOCK_K):
@@ -55,12 +60,14 @@
         B += BLOCK_K * stride_bk
 
     # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+    idx_q = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(INDEX_DTYPE)
     idx_m = rm[:, None]
     idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
+    mask = (idx_m < M) & (idx_n < N) & (idx_q < BATCH)
 
+    # cast accumulator to output dtype
+    acc = acc.to(OUT_DTYPE)
     # inductor generates a suffix
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}

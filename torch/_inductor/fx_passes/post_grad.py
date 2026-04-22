@@ -365,6 +365,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 )
             )
 
+    if config.aten_distributed_optimizations.enable_low_contention_collectives:
+        from torch._inductor.fx_passes.low_contention_collectives import (
+            replace_collectives_with_low_contention,
+        )
+
+        GraphTransformObserver(
+            gm, "replace_collectives_with_low_contention"
+        ).apply_graph_pass(replace_collectives_with_low_contention)
+
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
@@ -1695,7 +1704,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     ]:
         return False
     # Inductor falls back to aten.index_put_.
-    # index_put_ will will call nonzero() and perform a H2D sync if
+    # index_put_ will call nonzero() and perform a H2D sync if
     # any of its indices are bool/byte tensors
     # However, it will short-circuit this H2D sync and run mask_fill_
     # if the value we are putting is a cpu scalar.

@@ -11,6 +11,7 @@ import re
 import unittest
 
 import torch
+import torch._inductor.config as inductor_config
 import torch._inductor.metrics
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor.codegen.wrapper import (
@@ -27,8 +28,12 @@ from torch._inductor.stream_constants import (
 from torch._inductor.stream_utils import get_stream_name
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    TEST_WITH_ROCM,
+)
 
 
 def _extract_wrapper_body(code):
@@ -217,9 +222,9 @@ class TestUserStreamCompile(InductorTestCase):
         # Verify correctness
         self.assertEqual(result, expected)
 
-        # Verify generated code contains stream handling
-        # Streams are acquired from a pool, so check for pool usage or context manager
+        # Verify generated code contains stream handling and synchronize survives
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_compile_preserves_stream_semantics(self):
         """Test that compiled code preserves stream execution semantics."""
@@ -243,8 +248,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream context is present in generated code
+        # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_multiple_stream_contexts(self):
         """Test compilation with multiple stream context switches."""
@@ -274,12 +280,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify multiple stream contexts in generated code
-        # The scheduler may optimize stream usage; check for at least 1 stream context
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 1 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify stream contexts and synchronization survive
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 1)
+        self.assertIn("synchronize_stream", code)
 
     def test_nested_stream_contexts(self):
         """Test compilation with nested stream contexts."""
@@ -307,12 +310,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify nested stream contexts
-        # The scheduler may optimize stream usage; check for at least 1 stream context
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 1 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify nested stream contexts and synchronization survive
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 1)
+        self.assertIn("synchronize_stream", code)
 
     def test_stream_context_with_data_dependency(self):
         """Test stream contexts with data flowing between streams."""
@@ -339,8 +339,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream context is present
+        # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_event_record_and_wait(self):
         """Test compilation with explicit event record and wait."""
@@ -371,17 +372,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations in generated code
-        # Events may be generated as custom ops (torch.ops.streams.record_event/wait_event)
-        # or as internal event methods (.record_event()/.wait())
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_event_record_on_stream(self):
         """Test event recording on a specific stream."""
@@ -414,16 +407,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event record/wait with explicit stream args
-        # Events may be generated as custom ops or internal event methods
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_multiple_events_multiple_streams(self):
         """Test multiple events synchronizing multiple streams."""
@@ -462,12 +448,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify multiple events and streams
-        # Events may be internally managed, not explicitly constructed
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 2)
-        self.assertGreaterEqual(wait_count, 2)
+        # Verify multiple events and streams survive as custom ops
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_event_wait_without_record(self):
         """Test that waiting on unrecorded event works (no-op)."""
@@ -496,15 +479,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations (may appear as custom ops or methods)
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_stream_wait_event(self):
         """Test stream.wait_event() method."""
@@ -533,11 +510,8 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream.wait_event is present (may appear as custom ops or methods)
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify stream.wait_event survives compilation as custom op
+        self.assertIn("wait_event", code)
 
     def test_bidirectional_stream_sync(self):
         """Test bidirectional synchronization between streams."""
@@ -577,13 +551,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify bidirectional sync - multiple records and waits
-        # These may appear as custom ops (torch.ops.streams.record_event/wait_event)
-        # or as internal event methods (.record_event()/.wait())
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 2)
-        self.assertGreaterEqual(wait_count, 2)
+        # Verify bidirectional sync - multiple records and waits as custom ops
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_three_streams_pipeline(self):
         """Test pipeline pattern with three streams."""
@@ -626,13 +596,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify three-stage pipeline with 3 streams
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        self.assertGreaterEqual(record_count, 2)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_parallel_streams_join(self):
         """Test parallel work on multiple streams joining at the end."""
@@ -679,15 +645,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify parallel streams joining
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 3)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 3)
 
     def test_fan_out_fan_in(self):
         """Test fan-out from one stream to multiple, then fan-in."""
@@ -733,10 +693,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify fan-out/fan-in pattern
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 4)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 4)
 
     def test_four_streams_diamond(self):
         """Test diamond pattern: one start, two parallel, one end."""
@@ -785,15 +743,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify diamond pattern
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 4)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 4)
 
     def test_stream_reuse_across_iterations(self):
         """Test that streams can be reused across loop iterations."""
@@ -821,16 +773,10 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream reuse in loop
+        # Verify stream reuse in loop — events survive compilation
         self.assertIn("torch.cuda.stream", code)
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_no_fusion_across_streams(self):
         """Test that operations on different streams are not fused together."""
@@ -871,7 +817,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        # 3 kernels: s1 pointwise, s2 pointwise, and the final add on
+        # the default stream (which is a third stream context).
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     def test_no_fusion_across_streams_with_dependency(self):
         """Test no fusion when there's a data dependency across streams."""
@@ -935,6 +883,256 @@ class TestUserStreamCompile(InductorTestCase):
         # All pointwise ops on same stream should fuse into 1 kernel
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_no_fusion_simple_dependency_across_streams(self):
+        """Regression: a single pointwise consumed across a stream boundary must not fuse."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s1.synchronize()
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Must be 2 separate kernels on 2 streams, not fused into 1
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @torch._inductor.config.patch(combo_kernels=True)
+    def test_no_combo_kernel_fusion_across_streams(self):
+        """Combo kernels must not group nodes on different streams."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y, z, w):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            # Independent pointwise ops on different streams at the same
+            # topological level — combo kernels must not merge them.
+            a = x + y
+            event.record()
+            with torch.cuda.stream(s):
+                event.wait()
+                b = z + w
+            s.synchronize()
+            return a, b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        z = torch.randn(1024, device="cuda")
+        w = torch.randn(1024, device="cuda")
+
+        expected = fn(x, y, z, w)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x, y, z, w)
+
+        self.assertEqual(result, expected)
+        # 2 kernels: one per stream. Without the stream-aware fix, combo
+        # kernels would merge them into 1.
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @torch._inductor.config.patch(combo_kernels=True)
+    def test_combo_kernel_fusion_within_same_stream(self):
+        """Combo kernels should still group independent nodes on the same stream."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y):
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # Two independent pointwise ops on the same stream — eligible
+                # for combo kernel fusion.
+                a = x * 2
+                b = y * 3
+
+            s.synchronize()
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x, y)
+
+        self.assertEqual(result, expected)
+        # With combo kernels, the two independent ops on the same stream
+        # should be combined, yielding fewer kernels than without.
+        self.assertLessEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    def test_cross_stream_stride_copy(self):
+        """A contiguous copy forced by a non-contiguous slice across streams
+        must run on the consumer's stream, not the producer's."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+
+            with torch.cuda.stream(s1):
+                a = x + 1
+                b = a[:, ::2]  # non-contiguous slice
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                c = b.contiguous()
+                d = c + 1
+            s2.synchronize()
+            return d
+
+        x = torch.randn(64, 64, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        # Verify: s1 gets the pointwise (x+1), s2 gets the fused copy + add.
+        # The contiguous copy is fused into the s2 triton kernel (which reads
+        # from the s1 output buffer with strided indexing).  If the copy were
+        # incorrectly placed on s1, we'd see 2 kernels on s1 instead of 1.
+        wrapper = _extract_wrapper_body(code)
+        lines = wrapper.split("\n")
+        current_stream = None
+        stream_kernels: dict[str | None, list[str]] = {}
+        for line in lines:
+            stripped = line.strip()
+            if "with torch.cuda.stream(" in stripped:
+                if "stream1" in stripped:
+                    current_stream = "s1"
+                elif "stream2" in stripped:
+                    current_stream = "s2"
+                elif "default_stream" in stripped:
+                    current_stream = "default"
+            elif ".run(" in stripped:
+                stream_kernels.setdefault(current_stream, []).append(stripped)
+
+        self.assertEqual(
+            len(stream_kernels.get("s1", [])),
+            1,
+            f"Expected 1 kernel on s1, got: {stream_kernels}",
+        )
+        self.assertEqual(
+            len(stream_kernels.get("s2", [])),
+            1,
+            f"Expected 1 kernel on s2, got: {stream_kernels}",
+        )
+
+    def test_no_buffer_reuse_across_streams(self):
+        """Buffer produced on one stream must not be reused in-place on another."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a + 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        # The second kernel should allocate a fresh buffer, not reuse
+        # the one produced on the other stream
+        wrapper = _extract_wrapper_body(code)
+        self.assertIn("record_event", wrapper)
+        self.assertIn("wait_event", wrapper)
+        self.assertNotIn("buf0; del buf0", wrapper)
+
+    def test_stream_record_wait_event_not_dropped(self):
+        """stream.record_event() and stream.wait_event() must survive compilation."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+        self.assertIn("synchronize_stream", code)
+
+    def test_stream_synchronize_not_dropped(self):
+        """stream.synchronize() must survive compilation and appear in wrapper code."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x + 1
+            s.synchronize()
+            b = a * 2
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("synchronize_stream", code)
+
+    def test_stream_wait_stream_not_dropped(self):
+        """stream.wait_stream() must survive compilation and appear in wrapper code."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("wait_stream", code)
+        self.assertIn("synchronize_stream", code)
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -961,13 +1159,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[1024]"):
         l_x_ = L_x_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
         a: "f32[1024]" = l_x_ * 2
 
         b: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
@@ -982,14 +1180,18 @@ arg0_1, = args
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
+    stream1 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
+        arg0_1 = copy_if_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        buf1 = buf0; del buf0
+        raw_stream = get_raw_stream(0)
+        triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
+    with torch.cuda.stream(default_stream):
+        buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         stream0 = get_raw_stream(0)
-        triton_kernel.run(buf1, arg0_1, 1024, stream=stream0)
-    return (buf1, )""",
+        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=stream0)
+        torch.ops.streams.synchronize_stream.default(1)
+    return (buf3, )""",
         )
 
     def test_codegen_structure_pipeline(self):
@@ -1025,43 +1227,38 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
-        record_event = torch.ops.streams.record_event(1, 2);  record_event = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index_2 = None
+        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(1, 0);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(2, 1);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
         return (b,)
-""",  # noqa: B950
+""",
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
+        FileCheck().run(
             """\
-arg0_1, arg1_1, arg2_1 = args
-torch.ops.streams.record_event.default(1, 2)
-torch.ops.streams.wait_event.default(1, 0)
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
-    with torch.cuda.stream(default_stream):
-        buf2 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.mm(arg0_1, arg1_1, out=buf2)
-    with torch.cuda.stream(stream1):
-        buf3 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.mm(buf2, arg2_1, out=buf3)
-    return (buf3, )""",
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: record_event
+# CHECK: with torch.cuda.stream(stream1):
+# CHECK: wait_event
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: synchronize_stream""",
+            wrapper_body,
         )
 
     def test_codegen_structure_three_stream_pipeline(self):
@@ -1109,65 +1306,60 @@ class GraphModule(torch.nn.Module):
         l_w2_ = L_w2_
         l_w3_ = L_w3_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1)
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2)
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
+        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(5);  get_external_object_by_index_4 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(3, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(4, 1);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(3, 1);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(4, 2);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(4, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(5, 2);  record_event_1 = None
 
-        wait_event_1 = torch.ops.streams.wait_event(4, 2);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(5, 3);  wait_event_1 = None
 
         c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_1 = get_external_object_by_index_1.synchronize();  get_external_object_by_index_1 = synchronize_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
 
-        synchronize_2 = get_external_object_by_index_2.synchronize();  get_external_object_by_index_2 = synchronize_2 = None
+        synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
         return (c,)
-""",  # noqa: B950
+""",
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
+        FileCheck().run(
             """\
-arg0_1, arg1_1, arg2_1, arg3_1 = args
-torch.ops.streams.record_event.default(3, 0)
-torch.ops.streams.wait_event.default(3, 1)
-torch.ops.streams.record_event.default(4, 1)
-torch.ops.streams.wait_event.default(4, 2)
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
-    stream2 = get_external_object_by_index(1)
-    stream3 = get_external_object_by_index(2)
-    with torch.cuda.stream(stream1):
-        buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.mm(arg0_1, arg1_1, out=buf4)
-    with torch.cuda.stream(stream2):
-        buf5 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.mm(buf4, arg2_1, out=buf5)
-    with torch.cuda.stream(stream3):
-        buf6 = buf4; del buf4
-        extern_kernels.mm(buf5, arg3_1, out=buf6)
-    return (buf6, )""",
+# CHECK: with torch.cuda.stream(stream1):
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: record_event
+# CHECK: with torch.cuda.stream(stream2):
+# CHECK: wait_event
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: record_event
+# CHECK: with torch.cuda.stream(stream3):
+# CHECK: wait_event
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream""",
+            wrapper_body,
         )
 
     def test_codegen_structure_parallel_matmuls(self):
@@ -1210,59 +1402,335 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1)
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(3, 1);  record_event = None
 
         b: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(3, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(4, 2);  record_event_1 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
-        wait_event = torch.ops.streams.wait_event(2, 4);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(3, 0);  wait_event = None
 
-        wait_event_1 = torch.ops.streams.wait_event(3, 4);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(4, 0);  wait_event_1 = None
 
         c: "f32[32, 32]" = a + b;  a = b = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_1 = get_external_object_by_index_1.synchronize();  get_external_object_by_index_1 = synchronize_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
         return (c,)
-""",  # noqa: B950
+""",
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
+        FileCheck().run(
             """\
-arg0_1, arg1_1, arg2_1 = args
-torch.ops.streams.record_event.default(2, 0)
-torch.ops.streams.record_event.default(3, 1)
-torch.ops.streams.wait_event.default(2, 4)
-torch.ops.streams.wait_event.default(3, 4)
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
-    stream2 = get_external_object_by_index(1)
-    with torch.cuda.stream(stream1):
-        buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.mm(arg0_1, arg1_1, out=buf4)
-    with torch.cuda.stream(default_stream):
-        buf5 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
-        extern_kernels.addmm(buf4, arg0_1, arg2_1, alpha=1, beta=1, out=buf5)
-    return (buf5, )""",  # noqa: B950
+# CHECK: with torch.cuda.stream(stream1):
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: record_event
+# CHECK: with torch.cuda.stream(stream2):
+# CHECK: copy_if_misaligned
+# CHECK: extern_kernels.mm(
+# CHECK: record_event
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: wait_event
+# CHECK: triton_kernel.run(
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream""",
+            wrapper_body,
         )
+
+
+@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+class TestStreamOrderingStress(InductorTestCase):
+    """Stress tests verifying that interleaved event record/wait ops
+    produce correct ordering under compilation.  Each test uses large
+    matmuls so there is real GPU work, and repeats many iterations so
+    that race conditions (if ordering is wrong) surface reliably."""
+
+    N = 4096  # matrix size — big enough for real GPU work
+    ITERS = 20  # repetitions per test
+
+    def _check_compiled_matches_eager(self, fn, *args):
+        """Run fn eagerly and compiled, assert results match over ITERS runs."""
+        compiled_fn = torch.compile(fn)
+        for _ in range(self.ITERS):
+            expected = fn(*args)
+            actual = compiled_fn(*args)
+            # Full device sync as a safety net to ensure all stream work
+            # is visible before comparing results.
+            torch.cuda.synchronize()
+            if not isinstance(expected, (tuple, list)):
+                expected, actual = [expected], [actual]
+            for e, a in zip(expected, actual):
+                self.assertEqual(a, e)
+
+    @staticmethod
+    def _heavy_matmul_chain(x, w, depth=8):
+        """Chain of matmuls to create substantial GPU work (~ms).
+        Used to widen the race window between streams so that missing
+        synchronization is observable."""
+        h = x
+        for _ in range(depth):
+            h = h @ w
+        return h
+
+    # ------------------------------------------------------------------
+    # 1. Race: producer does heavy work, consumer reads the result.
+    #    Without the event.wait() the consumer would launch immediately
+    #    and read stale memory because the producer chain hasn't finished.
+    # ------------------------------------------------------------------
+    def test_race_producer_consumer(self):
+        N = self.N
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+
+            # Heavy producer on default stream — takes real GPU time
+            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            e.record()
+
+            with torch.cuda.stream(s):
+                e.wait()  # removing this would cause a race
+                b = a + 1
+
+            s.synchronize()
+            return b
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9  # use scaled identity for stability
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 2. Race: ping-pong where each direction has heavy work.
+    #    Both event.wait() calls are load-bearing.
+    # ------------------------------------------------------------------
+    def test_race_ping_pong(self):
+        N = self.N
+
+        def fn(x, w):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            with torch.cuda.stream(s1):
+                a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                e1.wait(s2)
+                b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
+                e2.record(s2)
+
+            with torch.cuda.stream(s1):
+                e2.wait(s1)
+                c = b + a
+
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 3. Race: fan-out where the producer is slow.
+    #    All three consumers depend on the producer finishing.
+    # ------------------------------------------------------------------
+    def test_race_fan_out(self):
+        N = self.N
+
+        def fn(x, w):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            s3 = torch.cuda.Stream()
+            e = torch.cuda.Event()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            e3 = torch.cuda.Event()
+
+            # Slow producer
+            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            e.record()
+
+            with torch.cuda.stream(s1):
+                e.wait()
+                r1 = a * 2
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                e.wait()
+                r2 = a * 3
+                e2.record(s2)
+
+            with torch.cuda.stream(s3):
+                e.wait()
+                r3 = a * 4
+                e3.record(s3)
+
+            e1.wait()
+            e2.wait()
+            e3.wait()
+            result = r1 + r2 + r3
+
+            s1.synchronize()
+            s2.synchronize()
+            s3.synchronize()
+            return result
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 4. Race: diamond pattern with heavy work on both branches.
+    #    The join must wait for both branches.
+    # ------------------------------------------------------------------
+    def test_race_diamond(self):
+        N = self.N
+
+        def fn(x, w):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e_fork = torch.cuda.Event()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            base = x @ w
+            e_fork.record()
+
+            with torch.cuda.stream(s1):
+                e_fork.wait()
+                branch1 = TestStreamOrderingStress._heavy_matmul_chain(
+                    torch.relu(base), w
+                )
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                e_fork.wait()
+                branch2 = TestStreamOrderingStress._heavy_matmul_chain(
+                    torch.sigmoid(base), w
+                )
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            result = branch1 + branch2
+
+            s1.synchronize()
+            s2.synchronize()
+            return result
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.5
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 5. Race: 4-stage pipeline where each stage is heavy.
+    #    Every event.wait() is load-bearing.
+    # ------------------------------------------------------------------
+    def test_race_pipeline(self):
+        N = self.N
+
+        def fn(x, w):
+            streams = [torch.cuda.Stream() for _ in range(4)]
+            events = [torch.cuda.Event() for _ in range(3)]
+
+            with torch.cuda.stream(streams[0]):
+                h = TestStreamOrderingStress._heavy_matmul_chain(x, w, depth=4)
+                events[0].record(streams[0])
+
+            with torch.cuda.stream(streams[1]):
+                events[0].wait(streams[1])
+                h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
+                events[1].record(streams[1])
+
+            with torch.cuda.stream(streams[2]):
+                events[1].wait(streams[2])
+                h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
+                events[2].record(streams[2])
+
+            with torch.cuda.stream(streams[3]):
+                events[2].wait(streams[3])
+                h = h + x  # quick consumer — races if wait is missing
+
+            for s in streams:
+                s.synchronize()
+            return h
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 6. Race: back-to-back sync, both directions carry heavy work
+    # ------------------------------------------------------------------
+    def test_race_back_to_back(self):
+        N = self.N
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            e1.record()
+
+            with torch.cuda.stream(s):
+                e1.wait()
+                b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
+                e2.record(s)
+
+            e2.wait()
+            c = b + 1
+
+            s.synchronize()
+            return c
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 7. Race: triton kernel on user stream.
+    #    Without the triton stream fix the kernel launches on the default
+    #    stream and reads stale/in-progress data from the user stream.
+    # ------------------------------------------------------------------
+    def test_race_triton_on_user_stream(self):
+        N = self.N
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+
+            with torch.cuda.stream(s):
+                # Heavy matmul chain produces data on user stream
+                a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+                # Triton pointwise on the same user stream — without fix
+                # this launches on the default stream
+                b = torch.relu(a)
+                e.record(s)
+
+            e.wait()
+            s.synchronize()
+            return b
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
@@ -1334,11 +1802,8 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
 
     def test_generic_stream_multiple(self):
         """Test compilation with multiple torch.Stream instances."""
@@ -1380,11 +1845,10 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream handling
-        self.assertTrue(
-            "torch.cuda.stream" in code or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify stream handling and event ops survive
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_generic_event_record_on_stream(self):
         """Test torch.Event.record() with explicit stream argument."""
@@ -1419,11 +1883,8 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
@@ -1476,12 +1937,410 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
+@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+class TestPDLWithMultiStream(InductorTestCase):
+    """Tests that PDL (Programmatic Dependent Launch) composes safely with
+    user-annotated multi-stream code under torch.compile.
+
+    PDL's GDC intrinsics are stream-local: gdc_wait/gdc_launch_dependents
+    only govern the overlap between consecutive kernels on the *same* CUDA
+    stream.  Cross-stream ordering is handled entirely by CUDA events at the
+    wrapper level.  These tests verify that enabling PDL in the presence of
+    multi-stream code doesn't break correctness, doesn't interfere with
+    stream-level invariants (no cross-stream fusion, event ops preserved),
+    and still applies within each stream's own kernel sequence.
+    """
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_single_side_stream(self):
+        """PDL metadata is emitted for a kernel on a side stream."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x * 2
+                b = a + 1
+            s.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        result, (wrapper_code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("torch.cuda.stream", wrapper_code)
+        self.assertIn("synchronize_stream", wrapper_code)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_correctness_with_multiple_streams(self):
+        """Enabling PDL with independent side streams produces correct results."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            with torch.cuda.stream(s1):
+                a = x * 2 + 1
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                b = x * 3 + 2
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(compiled_fn(x), expected)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        # s1 kernel, s2 kernel, and default-stream add kernel
+        (
+            FileCheck()
+            # s1 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # s2 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # default stream add
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_cross_stream_events_preserved(self):
+        """Event record/wait for cross-stream sync must survive with PDL on.
+
+        PDL is stream-local so it cannot replace event-based cross-stream
+        ordering.  Verify the events are still in the generated code."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            a = x * 2 + 1
+            event.record()
+
+            with torch.cuda.stream(s):
+                event.wait()
+                b = a + 3
+
+            s.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+
+        # Both kernels (default + side stream) get PDL intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # default stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # side stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_same_stream_consecutive_kernels(self):
+        """Two consecutive kernels on the same side stream should both get PDL.
+
+        This is the case where PDL is actually useful: the second kernel can
+        overlap with the first via GDC intrinsics because they share a stream."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x, y):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                # Two separate fused groups on the same stream
+                a = x**2 + x
+                y.copy_(a)
+            s.synchronize()
+            return y
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.empty(1024, device="cuda")
+        expected = fn(x, y.clone())
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(compiled_fn(x, y.clone()), expected)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x, y.clone())
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_no_fusion_across_streams(self):
+        """PDL must not cause cross-stream ops to be fused."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            with torch.cuda.stream(s1):
+                a = x * 2
+                b = a + 1
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                c = x * 3
+                d = c + 2
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            return b + d
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result = compiled_fn(x)
+        self.assertEqual(result, expected)
+
+        # 3 kernels: s1 pointwise, s2 pointwise, default stream add
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+
+        # All 3 kernels should have PDL with GDC intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # s1 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # s2 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # default stream add
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_stress_multistream_correctness(self):
+        """Stress test: heavy work across streams with PDL must produce
+        correct results over many iterations to surface any races.
+
+        Uses 4096x4096 matmuls (matching TestStreamOrderingStress) so the
+        GPU work is long enough that a missing event.wait() would cause
+        the consumer to read stale data."""
+        from torch._inductor.utils import run_and_get_code
+
+        N = 4096
+        ITERS = 20
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+
+            h = x
+            for _ in range(4):
+                h = h @ w
+            e.record()
+
+            with torch.cuda.stream(s):
+                e.wait()
+                out = torch.relu(h) + 1.0
+
+            s.synchronize()
+            return out
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+
+        # Verify codegen once before the stress loop
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w)
+        # Wrapper must have stream context and event sync
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn("wait_event", code)
+        # The relu+add pointwise kernel should have PDL
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(code)
+
+        for _ in range(ITERS):
+            expected = fn(x, w)
+            actual = compiled_fn(x, w)
+            torch.cuda.synchronize()
+            self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_mutation_across_streams(self):
+        """Buffer mutation on one stream, read on another, with PDL enabled.
+
+        The mutation is on a locally-created buffer (not an input) to avoid
+        the dynamo guard that forbids event.record() after input mutation."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            # Produce a new buffer (not input mutation) then record
+            a = x * 2
+            event.record()
+
+            with torch.cuda.stream(s):
+                event.wait()
+                # In-place add on side stream
+                a.add_(1)
+
+            s.synchronize()
+            return a
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+
+        # Both kernels (default + side stream) get PDL intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # default stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # side stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@torch._inductor.config.patch({"triton.cudagraphs": True})
+class TestStreamCudagraphInteraction(InductorTestCase):
+    """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
+
+    def test_implicit_current_stream_with_cudagraphs(self):
+        """Event record/wait with implicit current stream must work under cudagraph capture.
+
+        The implicit current stream resolves at runtime via torch.cuda.current_stream(),
+        which correctly returns the cudagraph capture stream during recording.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            ev.record()
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait()
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_explicit_current_stream_with_cudagraphs(self):
+        """Passing torch.cuda.current_stream() explicitly must also work under capture.
+
+        The user writes ev.record(torch.cuda.current_stream()) which is
+        semantically identical to ev.record() — both should resolve to the
+        capture stream during cudagraph recording, not the stale default stream.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            cur = torch.cuda.current_stream()
+            ev.record(cur)
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait(cur)
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestStreamCodegen)
 instantiate_parametrized_tests(TestUserStreamCompile)
+instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
+instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
 if __name__ == "__main__":

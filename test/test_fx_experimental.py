@@ -907,6 +907,40 @@ terrible spacing
         else:
             raise RuntimeError("Expected the subgraph to have an output node.")
 
+    def test_split_module_tuple_return(self):
+        from torch._inductor.compile_fx import graph_returns_tuple
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x + y
+                return a * x
+
+        gm = torch.fx.symbolic_trace(M())
+
+        # Assign ops to different partitions so a single-output submodule exists.
+        def partition_fn(node):
+            return 0 if node.target == operator.add else 1
+
+        # Without tuple_return: single-output submodules return a bare value.
+        sp = split_module(gm, None, partition_fn)
+        self.assertTrue(
+            any(
+                not graph_returns_tuple(submod)
+                for submod in sp.children()
+            ),
+            "expected at least one non-tuple-returning submodule",
+        )
+        x, y = torch.randn(4), torch.randn(4)
+        self.assertEqual(sp(x, y), gm(x, y))
+
+        # With tuple_return: all submodules return a tuple.
+        sp_boxed = split_module(gm, None, partition_fn, tuple_return=True)
+        self.assertTrue(
+            all(graph_returns_tuple(submod) for submod in sp_boxed.children()),
+            "all submodules should return a tuple with tuple_return=True",
+        )
+        self.assertEqual(sp_boxed(x, y), gm(x, y))
+
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):

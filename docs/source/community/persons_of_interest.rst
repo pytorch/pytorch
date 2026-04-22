@@ -346,9 +346,12 @@ ExecuTorch (Edge, Mobile)
 
 -  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
 -  Jacob Szwejbka (`JacobSzwejbka <https://github.com/JacobSzwejbka>`__)
+-  Digant Desai (`digantdesai <https://github.com/digantdesai>`__)
 -  (emeritus) Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
 -  (emeritus) Dave Bort (`dbort <https://github.com/dbort>`__)
 -  (emeritus) Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
+-  (emeritus) Mengwei Liu (`larryliu0820 <https://github.com/larryliu0820>`__)
+-  (emeritus) Chen Lai (`cccclai <https://github.com/cccclai>`__)
 
 TorchCodec
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

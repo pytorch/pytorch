@@ -306,7 +306,7 @@ class TestCompilerBisector(TestCase):
                     if "submod_" in name:
                         # the test case is simple enough that using
                         # the original example_inputs works for sub
-                        # moule
+                        # module
                         submod.forward = torch._inductor.standalone_compile(
                             submod,
                             example_inputs,

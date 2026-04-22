@@ -1156,7 +1156,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "multiple times"):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            def foo(x: torch.Tensor) -> torch.Tensor:
                 raise NotImplementedError
 
         # Unless we delete the original op.
@@ -1164,14 +1164,14 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         # Smoke test
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
@@ -1775,7 +1775,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
     numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
-    return numpy_view_copy""",  # noqa: B950
+    return numpy_view_copy""",
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
@@ -2380,6 +2380,56 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
             OSError, "Could not load this library: .*libnoexist.so"
         ):
             torch.ops.load_library("libnoexist.so")
+
+    def test_list_scalar_type(self):
+        lib = self.lib()
+        lib.define("scalar_list(Tensor x, ScalarType[] dts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "scalar_list", "CPU")
+        def _(x, dts):
+            nonlocal received
+            received = dts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.scalar_list(x, [torch.float32, torch.bfloat16])
+        self.assertEqual(received, [torch.float32, torch.bfloat16])
+
+    def test_list_layout(self):
+        lib = self.lib()
+        lib.define("layout_list(Tensor x, Layout[] layouts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "layout_list", "CPU")
+        def _(x, layouts):
+            nonlocal received
+            received = layouts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.layout_list(x, [torch.strided, torch.sparse_coo])
+        self.assertEqual(received, [torch.strided, torch.sparse_coo])
+
+    def test_list_memory_format(self):
+        lib = self.lib()
+        lib.define("memfmt_list(Tensor x, MemoryFormat[] fmts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "memfmt_list", "CPU")
+        def _(x, fmts):
+            nonlocal received
+            received = fmts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.memfmt_list(
+            x, [torch.contiguous_format, torch.channels_last]
+        )
+        self.assertEqual(received, [torch.contiguous_format, torch.channels_last])
 
 
 def op_with_incorrect_schema(testcase, name):

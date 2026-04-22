@@ -97,6 +97,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -119,6 +120,12 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._ordered_set import OrderedSet
 
+from .cache_key import (
+    CODE_CACHE_KEY_STRATEGY,
+    COMPACT_CACHE_KEY_STRATEGY,
+    FX_GRAPH_CACHE_KEY_STRATEGY,
+    SYSTEM_CACHE_KEY_STRATEGY,
+)
 from .output_code import CompiledFxGraph
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -150,6 +157,8 @@ LOCK_TIMEOUT = config.file_lock_timeout
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
+
+AOTAUTOGRAD_CACHE_PREFIX = "a"
 
 
 def get_cpp_wrapper_cubin_path_name() -> str:
@@ -213,9 +222,7 @@ class CacheBase:
             # If cuda is not installed, none of the above config is relevant.
             system = {}
 
-        system["hash"] = hashlib.sha256(
-            json.dumps(system, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        system["hash"] = SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system)
 
         return system
 
@@ -333,16 +340,13 @@ def get_lock_dir() -> str:
 
 
 def sha256_hash(data: bytes) -> str:
-    # [:51] to strip off the "Q====" suffix common to every hash value.
-    return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
+    return COMPACT_CACHE_KEY_STRATEGY.key(data)
 
 
 def code_hash(code: str | bytes, extra: str | bytes = "") -> str:
-    hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra:
-        extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
-        hashing_str = hashing_str + b"||" + extra_b
-    return "c" + sha256_hash(hashing_str)
+        return CODE_CACHE_KEY_STRATEGY.key(code, extra)
+    return CODE_CACHE_KEY_STRATEGY.key(code)
 
 
 def get_path(
@@ -522,6 +526,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
+                torch.SymBool: functools.partial(self._reduce_symbool),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
@@ -598,6 +603,14 @@ class FxGraphCachePickler(pickle.Pickler):
         # entity with SymInt args is safe to reuse.
         return (_ident, (str(s),))
 
+    def _reduce_symbool(self, s: torch.SymBool) -> tuple[Callable[[T], T], tuple[str]]:
+        """
+        Custom reducer to pickle SymBools.
+        """
+        # Same approach as _reduce_symint: use the string representation for
+        # hashing.  Guards ensure correctness on cache reload.
+        return (_ident, (str(s),))
+
     def _reduce_unsupported(self, s: Any) -> NoReturn:
         """
         Custom reducer to handle any objects that we don't support and therefore
@@ -668,7 +681,14 @@ class FxGraphCachePickler(pickle.Pickler):
         Serialize an object and return a hash of the bytes.
         """
         serialized_data = self.dumps(obj)
-        return sha256_hash(serialized_data)
+        return COMPACT_CACHE_KEY_STRATEGY.key(serialized_data)
+
+    def get_key(self, obj: Any) -> str:
+        """
+        Serialize an object and return an FX graph cache key.
+        """
+        serialized_data = self.dumps(obj)
+        return FX_GRAPH_CACHE_KEY_STRATEGY.key(serialized_data)
 
     def debug_lines(self, inp: FxGraphHashDetails) -> list[str]:
         """
@@ -800,6 +820,9 @@ class BypassFxGraphCache(Exception):
     """
 
 
+_warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
+
+
 def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """Resolve the effective pre-grad pass timing from the config.
 
@@ -821,6 +844,21 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     if timing == "default":
         supports_late = custom_pass is None or has_uuid
         timing = "late" if supports_late else "early"
+        if timing == "early" and custom_pass:
+            pass_name = type(custom_pass).__qualname__
+            if pass_name not in _warned_pre_grad_pass_missing_uuid:
+                _warned_pre_grad_pass_missing_uuid.add(pass_name)
+                log.warning(
+                    "pre_grad_custom_pass %s does not implement uuid(); "
+                    "falling back to early timing (pre-grad pass cache will be bypassed). "
+                    "Implement uuid() on your CustomGraphPass to enable caching.",
+                    pass_name,
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile",
+                    pre_grad_pass_missing_uuid=True,
+                    pre_grad_pass_name=pass_name,
+                )
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(
@@ -832,14 +870,21 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     return timing
 
 
+@dataclasses.dataclass
+class HashableOpaqueValue:
+    ordinal: int
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
     a safe and stable cache key.
     """
 
-    # Excluded kwargs param that are not stable between runs
-    EXCLUDED_KWARGS = ["graph_id"]
+    # Excluded kwargs param that are not stable between runs or that
+    # don't affect compiled output (like compile_region_name which is
+    # just a debug label).
+    EXCLUDED_KWARGS = ["graph_id", "compile_region_name"]
 
     def __init__(
         self,
@@ -849,7 +894,19 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
-        self.example_inputs = example_inputs
+        # Replace opaque references with hashable ordinals. What's important
+        # is that if the same reference appears twice then it's the same hash
+        # value for each.
+        processed_inputs: list[InputType | HashableOpaqueValue] = []
+        seen_opaques: dict[int, HashableOpaqueValue] = {}
+        for inp in example_inputs:
+            if is_opaque_reference_type(type(inp)):
+                if id(inp) not in seen_opaques:
+                    seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
+                processed_inputs.append(seen_opaques[id(inp)])
+            else:
+                processed_inputs.append(inp)
+        self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
@@ -931,6 +988,12 @@ class FxGraphHashDetails:
             torch.is_deterministic_algorithms_warn_only_enabled(),
             torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
+
+        # Provenance tracking level affects whether provenance data is stored
+        # in the CompiledFxGraph, so it must be part of the cache key.
+        # Note: the "trace" prefix is excluded from _cache_config_ignore_prefix,
+        # so we add this explicitly.
+        self.provenance_tracking_level = config.trace.provenance_tracking_level
 
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
@@ -1071,7 +1134,7 @@ def compiled_fx_graph_hash(
 
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = "f" + pickler.get_hash(details)
+    key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
@@ -1626,6 +1689,11 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                     raise BypassFxGraphCache(
                         f"Can't cache HigherOrderOperator: {node.target.name()}"
                     )
+                # TODO: this check is broken in two ways:
+                # 1. FX uses "get_attr" (with underscore), not "getattr"
+                # 2. It only checks for ScriptObject, not FakeScriptObject
+                # Fixing it would also bypass AOTAutogradCache (which calls
+                # _check_can_cache), so we'd need to decouple the two first.
                 if node.op == "getattr" and isinstance(
                     getattr(gm, node.target), torch._C.ScriptObject
                 ):
@@ -1714,7 +1782,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-            log.info("Bypassing FX Graph Cache because '%s'", e)  # noqa: G200
+            log.info("Bypassing FX Graph Cache because '%s'", e)
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
             cache_info = {
@@ -2541,9 +2609,13 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            gpu_codecache: ROCmCodeCache | CUDACodeCache = (
-                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
-            )
+            cache_cls = {
+                "rocm": ROCmCodeCache,
+                "cuda": CUDACodeCache,
+                "xpu": XPUCodeCache,
+            }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
+
+            gpu_codecache = cache_cls()
             gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
             # clear the list of aot kernels after each linking
             gpu_codecache.aot_kernels_o.clear()
@@ -2670,6 +2742,26 @@ end
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
             )
+
+            if gpu_kernels_o and device_type == "xpu":
+                so_build_options = CppTorchDeviceOptions(
+                    compiler="icpx",
+                    vec_isa=picked_vec_isa,
+                    device_type=device_type,
+                    aot_mode=graph.aot_mode,
+                    use_relative_path=use_relative_path,
+                    extra_flags=[
+                        "-fsycl",
+                        "-fsycl-targets=intel_gpu_pvc",
+                        "-Xspirv-translator",
+                        (
+                            "-spirv-ext="
+                            "+SPV_INTEL_split_barrier,"
+                            "+SPV_INTEL_2d_block_io,"
+                            "+SPV_INTEL_subgroup_matrix_multiply_accumulate"
+                        ),
+                    ],
+                )
 
             obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
             so_builder = CppBuilder(
@@ -3030,9 +3122,12 @@ class CppCodeCache:
         # the optimized_code argument is present at all, since that's how the user of
         # this function opts in, but we do compilation and linking in one step if the
         # optimized_code argument is empty (as a micro-optimization).
+        # On GPU the C++ wrapper is just glue — the real kernels are compiled
+        # separately by Triton/CUDA.  Always use -O1 to cut compile time.
+        min_optimize = optimized_code is not None or device_type != "cpu"
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
-            min_optimize=optimized_code is not None,
+            min_optimize=min_optimize,
             # pyrefly: ignore [bad-argument-type]
             **compile_command,
         )
@@ -3080,7 +3175,7 @@ class CppCodeCache:
                     main_build_option.precompiled_header = _precompile_header(
                         header,
                         main_cmd_line,
-                        min_optimize=optimized_code is not None,
+                        min_optimize=min_optimize,
                         **compile_command,
                     )
 
@@ -3180,7 +3275,15 @@ def _worker_compile_cpp(
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    _loaded_module_names: OrderedSet[str] = OrderedSet()
+
+    @staticmethod
+    def cache_clear() -> None:
+        CppPythonBindingsCodeCache.cache.clear()
+        for name in CppPythonBindingsCodeCache._loaded_module_names:
+            sys.modules.pop(name, None)
+        CppPythonBindingsCodeCache._loaded_module_names.clear()
+
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -3293,6 +3396,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
+        CppPythonBindingsCodeCache._loaded_module_names.add(module_name)
         assert spec.loader is not None
         spec.loader.exec_module(module)
         return module
@@ -3362,7 +3466,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 @clear_on_fresh_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+
+    @staticmethod
+    def cache_clear() -> None:
+        CppWrapperCodeCache.cache.clear()
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
@@ -3976,8 +4084,12 @@ class DLLWrapper:
     ) -> None:
         self.lib_path = lib_path
         self.is_open = False
-        self.DLL = cdll.LoadLibrary(lib_path)
-        self.is_open = True
+        self.open()
+
+    def open(self) -> None:
+        if not self.is_open:
+            self.DLL = cdll.LoadLibrary(self.lib_path)
+            self.is_open = True
 
     def close(self) -> None:
         if self.is_open:
@@ -3986,7 +4098,16 @@ class DLLWrapper:
 
     def _dlclose(self) -> None:
         f_dlclose = None
+        # During Python interpreter shutdown, importing modules or calling
+        # dlclose is unsafe. Silently skip cleanup in that case.
+        try:
+            import sys
 
+            if sys.is_finalizing():
+                return
+        except Exception:
+            # import machinery may already be torn down
+            return
         if is_linux():
             syms = CDLL(None)
             if not hasattr(syms, "dlclose"):
@@ -4211,7 +4332,7 @@ class CUTLASSCodeCache:
                         f.write(f"// {cls._BACKEND} {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("%s %s: %s", cls._BACKEND, operation_name, cmd)
-                    cmd_parts = cmd.split(" ")
+                    cmd_parts = shlex.split(cmd)
                     try:
                         if cls._use_re_build():
                             from triton.fb.re_build_helper import run_build_command
@@ -4358,6 +4479,63 @@ class CUDACodeCache(CUTLASSCodeCache):
             ]
         )
         return extra
+
+
+from torch._inductor.codegen.xpu import compile_utils as xpu_compile_utils
+
+
+@clear_on_fresh_cache
+class XPUCodeCache(CUTLASSCodeCache):
+    _SOURCE_CODE_SUFFIX = "cpp"
+    _BACKEND = "XPU"
+    dll_cache: dict[str, DLLWrapper] = {}
+
+    @classmethod
+    def _use_re_build(cls) -> bool:
+        return False
+
+    @classmethod
+    def _compile_command(
+        cls,
+        src_files: list[str],
+        dst_file: str,
+        dst_file_ext: str,
+        extra_args: list[str] | None = None,
+    ) -> str:
+        return xpu_compile_utils.xpu_compile_command(
+            src_files, dst_file, dst_file_ext, extra_args=extra_args
+        )
+
+    @classmethod
+    def _source_code_extra(cls) -> str:
+        extra = repr(
+            [
+                xpu_compile_utils._sycl_compiler(),
+                xpu_compile_utils._sycl_compiler_options(),
+                cutlass_key(),
+            ]
+        )
+        return extra
+
+    @classmethod
+    def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
+        """
+        Compiles source code and loads the generated .so file.
+        Returns a tuple of DLLWrapper, hash_key, source_code_path
+        """
+
+        if dst_file_ext != "so":
+            raise RuntimeError(
+                f"Only support loading a .so file for now. "
+                f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
+            )
+        dst_file_path, hash_key, source_code_path = cls.compile(
+            source_code, dst_file_ext
+        )
+        if dst_file_path not in cls.dll_cache:
+            cls.dll_cache[dst_file_path] = DLLWrapper(dst_file_path)
+
+        return (cls.dll_cache[dst_file_path], hash_key, source_code_path)
 
 
 @clear_on_fresh_cache

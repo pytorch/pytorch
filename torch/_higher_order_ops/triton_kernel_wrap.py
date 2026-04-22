@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
+    from torch._guards import Source
     from torch._inductor.dependencies import ReadWrites
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
@@ -334,10 +335,9 @@ def generate_ttir(
                 return True
         return False
 
-    def is_tensor_like_arg(arg: Any) -> bool:
-        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
-            return True
-        return False
+    def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+        param_idx = kernel.arg_names.index(name)
+        return kernel.params[param_idx].is_constexpr or arg is None
 
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
@@ -347,9 +347,15 @@ def generate_ttir(
     #   * N sizes, for a rank-N tensor
     # To account for this, we inject some fake arg names as placeholders for
     # the stride and size parameters.
-    def get_tensor_names(name: str, arg: Any) -> list[str]:
-        if isinstance(arg, Tensor):
-            return [name]
+    #
+    # Additionally, tensors and scalars are both included as TTIR parameters,
+    # whereas `constexpr` are inlined, and None are excluded. We both preserve
+    # scalars and tensors as this matters for "odd" ordering,
+    # eg. [tensor, scalar, tensor].
+    def get_arg_names(name: str, arg: Any) -> list[str]:
+        if _is_constexpr_or_none(name, arg):
+            return []
+
         if is_stable_tensor_descriptor_arg(arg):
             stable_meta = maybe_unpack_tma_stable_metadata(
                 tma_descriptor_metadata[name]
@@ -362,11 +368,12 @@ def generate_ttir(
             names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
             names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
             return names
-        return []
 
-    ordered_tensor_names = list(
+        return [name]
+
+    ordered_arg_names = list(
         itertools.chain.from_iterable(
-            get_tensor_names(name, arg) for name, arg in ordered_args.items()
+            get_arg_names(name, arg) for name, arg in ordered_args.items()
         )
     )
 
@@ -456,8 +463,12 @@ def generate_ttir(
             return attrs
 
     specialization = _get_specialization(ordered_args.values())
+    # Triton explicitly interprets ASTSource.constants entries as constexpr
+    # Thus, only None and arguments marked `is_constexpr` should be treated as such.
     constants = {
-        name: arg for name, arg in ordered_args.items() if not is_tensor_like_arg(arg)
+        name: arg
+        for name, arg in ordered_args.items()
+        if _is_constexpr_or_none(name, arg)
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -529,7 +540,7 @@ def generate_ttir(
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
-    return ttir_module, ordered_tensor_names
+    return ttir_module, ordered_arg_names
 
 
 def ttir_to_functions(
@@ -904,6 +915,7 @@ def analyze_kernel_access(
     fn_name: str,
     num_args: int,
     tensor_names: tuple[str, ...],
+    tensor_arg_indices: frozenset[int] | None,
 ) -> TensorAccesses:
     """
     Analyzes the graph to detect which arguments are written to and which are read.
@@ -978,12 +990,16 @@ def analyze_kernel_access(
                     )
                 # Create placeholder names for nested function arguments
                 nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
+
+                # Do not pass tensor_arg_indices, most outer call of
+                # analyze_kernel_access will filter Param nodes.
                 accesses = analyze_kernel_access(
                     functions,
                     # pyrefly: ignore [bad-argument-type]
                     op.fn_call_name,
                     len(op.args),
                     nested_names,
+                    None,
                 )
                 # Map back from StarDep names to args
                 written_set = {dep.name for dep in accesses.read_writes.writes}
@@ -996,6 +1012,15 @@ def analyze_kernel_access(
             else:
                 write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
                 read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
+
+    # For these ops, only the first argument (base pointer) refers to actual
+    # memory. The remaining arguments are shape/stride/offset metadata and
+    # should not be traced during mutation analysis.
+    POINTER_ONLY_OPS = {
+        "tt.make_tensor_ptr",
+        "tt.advance",
+        "tt.make_tensor_descriptor",
+    }
 
     def _find_arg_access_count(
         initial_stack: list[Param | Intermediate],
@@ -1011,6 +1036,8 @@ def analyze_kernel_access(
             if isinstance(arg, Param):
                 if arg.idx >= num_args:
                     continue
+                if tensor_arg_indices is not None and arg.idx not in tensor_arg_indices:
+                    continue
                 if arg.idx not in access_count:
                     access_count[arg.idx] = 1
                 else:
@@ -1019,7 +1046,10 @@ def analyze_kernel_access(
                 for op in ops[arg]:
                     if skip_loads and op.name == "tt.load":
                         continue
-                    stack.extend(op.args)
+                    if op.name in POINTER_ONLY_OPS:
+                        stack.append(op.args[0])
+                    else:
+                        stack.extend(op.args)
 
         return access_count
 
@@ -1072,12 +1102,14 @@ def identify_accessed_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
+
     from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.ir import TensorBox
 
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_tensor_names = generate_ttir(
+        ttir_module, ordered_arg_names = generate_ttir(
             kernel, kwargs, tma_descriptor_metadata
         )
 
@@ -1099,21 +1131,30 @@ def identify_accessed_tensors(
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_access.reset()
         get_tma_stores.reset()
+
+        # Build frozenset of indices corresponding to tensor args only.
+        # Used to filter out scalars which are transitively captured as mutated
+        # during traversal.
+        tensor_arg_indices = frozenset(
+            i
+            for i, name in enumerate(ordered_arg_names)
+            if isinstance(kwargs.get(name), (Tensor, TensorBox))
+        )
+
         return analyze_kernel_access(
             functions,
             kernel_name,
-            len(ordered_tensor_names),
-            tuple(ordered_tensor_names),
+            len(ordered_arg_names),
+            tuple(ordered_arg_names),
+            tensor_arg_indices,
         )
     except Exception:
-        import torch._inductor.ir
-
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
             exc_info=True,
         )
         if ttir_module is not None:
-            log.debug("TTIR:\n%s", str(ttir_module))
+            log.debug("TTIR:\n%s", ttir_module)
         if functions is not None:
             log.debug("functions:")
             for name, fn in functions.items():
@@ -1124,7 +1165,7 @@ def identify_accessed_tensors(
         all_tensor_names = [
             key
             for key, value in kwargs.items()
-            if isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
+            if isinstance(value, (Tensor, TensorBox))
         ]
         all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
@@ -1158,8 +1199,10 @@ def identify_triton_stores(source_code: str) -> TritonStores:
 
     tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
     """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
 
-    tree = ast.parse(source_code)
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
     stores = []
 
     def _extract_arg(node, arg_name, positional_index):
@@ -1298,7 +1341,7 @@ def triton_kernel_wrapper_mutation_dense(
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
             if (exp_meta := maybe_unpack_tma_experimental_metadata(v)) is not None:
-                from triton.tools.experimental_descriptor import (  # noqa: F401
+                from triton.tools.experimental_descriptor import (
                     create_1d_tma_descriptor,
                     create_2d_tma_descriptor,
                 )
@@ -1435,7 +1478,13 @@ def get_mutated_tensors(
     tensor_accesses = identify_accessed_tensors(
         kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
     )
-    return [dep.name for dep in tensor_accesses.read_writes.writes]
+    # Filter to only tensor kwargs: with Triton 3.7+, ordered_arg_names
+    # includes scalars, so writes may reference non-tensor args like SymInts.
+    return [
+        dep.name
+        for dep in tensor_accesses.read_writes.writes
+        if isinstance(kwargs.get(dep.name), Tensor)
+    ]
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
@@ -1691,7 +1740,7 @@ class TritonHOPifier:
         kwargs: dict,
     ) -> list["TritonConfig"]:
         # Reimplement autotuner.prune_configs(...) here
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py   # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
         # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
@@ -1818,6 +1867,30 @@ class TritonHOPifier:
                     "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
 
+    @staticmethod
+    def get_kernel_source(
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+    ) -> "Source | None":
+        kernel_source = getattr(variable, "kernel_source", None)
+        if kernel_source is None:
+            kernel_source = getattr(variable, "source", None)
+        return kernel_source
+
+    def recreate_variable(
+        self,
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+        *,
+        kernel: "TritonKernelType",
+        kernel_idx: int | None,
+        grid: "TritonGridType | None",
+    ) -> "TritonKernelVariable | TraceableTritonKernelWrapper":
+        return type(variable)(
+            kernel=kernel,
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kernel_source=self.get_kernel_source(variable),
+        )
+
     def call_getitem(
         self,
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
@@ -1830,7 +1903,8 @@ class TritonHOPifier:
                 "Triton kernels should be called with only a single grid"
             )
 
-        return type(variable)(
+        return self.recreate_variable(
+            variable,
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
@@ -1849,8 +1923,11 @@ class TritonHOPifier:
         kwargs.pop("warmup", None)
         # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
         return self.call_triton_kernel(
-            type(variable)(
-                kernel=variable.kernel, kernel_idx=variable.kernel_idx, grid=grid
+            self.recreate_variable(
+                variable,
+                kernel=variable.kernel,
+                kernel_idx=variable.kernel_idx,
+                grid=grid,
             ),
             args,
             kwargs,
@@ -1955,7 +2032,12 @@ class TritonHOPifier:
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         SPECIAL_CONFIG_NAMES = {
@@ -2000,7 +2082,12 @@ class TritonHOPifier:
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if isinstance(variable.kernel, Autotuner):
@@ -2040,11 +2127,16 @@ class TritonHOPifier:
                     new_kernel = autotune(
                         configs=new_configs, prune_configs_by=prune_configs_by, key=[]
                     )(variable.kernel.fn)
-                    new_var = type(variable)(new_kernel, None, variable.grid)
+                    new_var = self.recreate_variable(
+                        variable,
+                        kernel=new_kernel,
+                        kernel_idx=None,
+                        grid=variable.grid,
+                    )
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # These are the default values in upstream Triton
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         default_perf_model = None
         default_early_config_prune = None
 
@@ -2100,7 +2192,12 @@ class TritonHOPifier:
             new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = self.recreate_variable(
+                variable,
+                kernel=new_kernel,
+                kernel_idx=None,
+                grid=variable.grid,
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # Both for grid's meta as well as for the kernel, we need combined
@@ -2308,15 +2405,18 @@ class TraceableTritonKernelWrapper:
     kernel: "TritonKernelType"
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
+    kernel_source: "Source | None"
 
     def __init__(
         self,
         kernel: "TritonKernelType",
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
+        kernel_source: "Source | None" = None,
     ) -> None:
         self.kernel = None
         self.grid = None
+        self.kernel_source = kernel_source
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         if self.kernel is None:
             raise AssertionError("kernel was not initialized properly")

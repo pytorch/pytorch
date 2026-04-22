@@ -45,6 +45,16 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+# Remove onnxruntime if present to avoid interference with non-ONNX tests
+if [[ "$TEST_CONFIG" != "onnx" ]]; then
+  pip uninstall -y onnxruntime 2>/dev/null || true
+fi
+
+# Remove dill to test that serialization works without it
+if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+  pip uninstall -y dill 2>/dev/null || true
+fi
+
 echo "Environment variables:"
 env
 
@@ -130,9 +140,7 @@ if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH
 fi
 
 # Get fully qualified path using realpath
-if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
-fi
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 
 # Reduce set of tests to include when running run_test.py
 if [[ -n $TESTS_TO_INCLUDE ]]; then
@@ -145,11 +153,34 @@ env
 
 echo "Testing pytorch"
 
+# Set OMP_NUM_THREADS to nproc/4 on k8s ARC runners if not already set.
+#
+# We use nproc (cgroup-aware) rather than os.cpu_count() because on k8s (ARC)
+# pods, os.cpu_count() returns the host's CPU count (e.g., 192) rather than
+# the pod's cpuset allocation (e.g., 16).
+#
+# We use nproc/4 rather than nproc because OpenMP spin-waits at thread barriers.
+# When thread count equals cpuset size (e.g., 16 threads on 16 CPUs), spinning
+# barrier threads monopolize all CPUs and the OS must context-switch to let
+# actual work complete. This causes ~5000x slowdowns on small tensor ops
+# (e.g., aten::copy_ on 147KB: ~34ms instead of ~7us). Using nproc/4 leaves
+# headroom for the main thread and for NUM_PROCS=3 parallel test processes.
+if [[ -z "${OMP_NUM_THREADS:-}" ]] && [[ -n "${USE_ARC:-}" ]]; then
+  OMP_NUM_THREADS=$(( $(nproc) / 4 ))
+  # Floor of 4: low OMP_NUM_THREADS (1-2) changes floating-point reduction
+  # order, causing numerical mismatches in tests with tight tolerances
+  # (e.g., test_batchnorm_nhwc_cpu).
+  if [[ "$OMP_NUM_THREADS" -lt 4 ]]; then
+    OMP_NUM_THREADS=4
+  fi
+  export OMP_NUM_THREADS
+fi
+
 export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" ]]; then
+if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -223,12 +254,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   timeout 30 xpu-smi discovery || true
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
-  # JIT C++ extensions require ninja (installed from requirements-ci.txt).
-  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
-  # but this script should be runnable by any user, including root
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+# JIT C++ extensions require ninja (installed from requirements-ci.txt).
+# ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+# but this script should be runnable by any user, including root
+export PATH="$HOME/.local/bin:$PATH"
 
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   # TODO: revisit this once the CI is stabilized on aarch64 linux
@@ -293,6 +322,17 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+    # Switch to TSan-instrumented CPython so that all subsequent python
+    # invocations (including the pre-test sanity checks below) use an
+    # interpreter that has the TSan runtime.
+    export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
+    python -m pip install "$(echo dist/*.whl)[opt-einsum]"
+    TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
+    export TSAN_OPTIONS
+    export PYTORCH_TEST_WITH_TSAN=1
+fi
+
 # The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
 # 1. The build is in debug mode
 # 2. The value 424242 is passed in
@@ -300,8 +340,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
     echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
-elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
-    # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
+else
     echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
     (cd test && python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 fi
@@ -311,6 +350,29 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
+
+test_tsan() {
+  # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
+  # script when BUILD_ENVIRONMENT matches *-tsan*.
+  local test_status=0
+  python test/test_tsan.py -v || test_status=$?
+
+  # TSan appends .<pid> to log_path. Merge all reports into a single
+  # file with the _toprint.log suffix so the CI "Print remaining test
+  # logs" step picks them up automatically.
+  TSAN_REPORT=$(pwd)/test/test-reports/tsan_toprint.log
+  if ls "${TSAN_REPORT}".* 1>/dev/null 2>&1; then
+    cat "${TSAN_REPORT}".* > "${TSAN_REPORT}"
+    rm -f "${TSAN_REPORT}".*
+  fi
+
+  if [ "$test_status" -ne 0 ]; then
+    echo "TSan tests failed with exit code $test_status"
+    exit "$test_status"
+  fi
+
+  assert_git_not_dirty
+}
 
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
@@ -367,9 +429,11 @@ test_python_smoke_b200() {
   assert_git_not_dirty
 }
 
+
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
   time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -421,6 +485,15 @@ test_h100_cutlass_backend() {
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
+test_xpu_sycl_tla_backend() {
+  # Inductor sycl-tla backend tests for XPU
+  # shellcheck disable=SC1091
+  source  /opt/intel/oneapi/mkl/latest/env/vars.sh
+  sycl_tla_dir=$(realpath "./third_party/sycl-tla")
+  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+}
+
 test_lazy_tensor_meta_reference_disabled() {
   export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
   echo "Testing lazy tensor operations without meta reference"
@@ -437,12 +510,16 @@ test_dynamo_core() {
 }
 
 test_dynamo_cpython() {
+  # Disable TD for cpython since it's pretty cheap to run the cpython tests (< 10 min)
+  # and if TD is enabled, only 25% of the tests will be executed
+  export NO_TD=1
   time python test/run_test.py \
     --include-cpython-tests \
     --dynamo \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
+  unset NO_TD
 }
 
 test_dynamo_wrapped_shard() {
@@ -549,7 +626,7 @@ test_inductor_shard() {
 
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
+    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 }
@@ -615,8 +692,10 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_triton_kernels\
+  # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
+  # Will drop this after AOTInductor also switches to lazy Triton compilation.
+  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
@@ -732,6 +811,10 @@ test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" ]]; then
+    mkdir -p "$TEST_REPORTS_DIR/profiler_traces"
+  fi
+
   local suite="$1"
   shift
 
@@ -791,51 +874,101 @@ test_perf_for_dashboard() {
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
-        if [[ "$target" == "accuracy" ]]; then
           # Also collect Export pass rate and display as a separate row
+          if [[ "$target" == "accuracy" ]]; then
           $TASKSET python "benchmarks/dynamo/$suite.py" \
               "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
               --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
         fi
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --deterministic "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_deterministic_perf_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --batch-invariant "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
     done
   done
@@ -864,9 +997,15 @@ test_single_dynamo_benchmark() {
   fi
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    local profiler_trace_flags=()
+    if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" ]]; then
+      mkdir -p "$TEST_REPORTS_DIR/profiler_traces"
+      profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${name}_${suite}")
+    fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --performance --disable-cudagraphs --inductor \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}" \
+      "${profiler_trace_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_perf_for_dashboard "$suite" \
@@ -918,6 +1057,49 @@ test_inductor_pallas() {
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
+}
+
+setup_torch_trace() {
+  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
+    return
+  fi
+  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
+  mkdir -p "$trace_dir"
+  export TORCH_TRACE="$trace_dir"
+  echo "TORCH_TRACE enabled: writing structured trace logs to $trace_dir"
+}
+
+collect_tlparse_output() {
+  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
+    return
+  fi
+  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
+  local test_reports_dir
+  test_reports_dir=$(pwd)/test/test-reports
+
+  if [[ ! -d "$trace_dir" ]] || [[ -z "$(ls -A "$trace_dir" 2>/dev/null)" ]]; then
+    echo "No torch trace files found in $trace_dir, skipping tlparse"
+    return
+  fi
+
+  echo "Collecting tlparse output from $trace_dir"
+
+  # Install tlparse if not already available
+  if ! command -v tlparse &>/dev/null; then
+    pip install tlparse 2>/dev/null || {
+      echo "Warning: failed to install tlparse, skipping HTML generation"
+      return
+    }
+  fi
+
+  # Run tlparse to generate HTML report
+  mkdir -p "$test_reports_dir/tlparse_output"
+  tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$trace_dir" 2>&1 || {
+    echo "Warning: tlparse failed to generate HTML output"
+    return
+  }
+
+  echo "TLParse output generated in $test_reports_dir/tlparse_output/"
 }
 
 test_dynamo_benchmark() {
@@ -1000,6 +1182,147 @@ test_inductor_torchbench_smoketest_perf() {
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_huggingface_training.csv"
   done
+}
+
+test_unbacked_parity_smoketest() {
+  # Check that unbacked batch-only has performance parity with backed batch-only
+  # Fails if any model regresses >THRESHOLD% consistently across 3 retries
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local THRESHOLD=1.0
+  local MAX_RETRIES=3
+  local MODELS="MobileBertForMaskedLM|DistilBertForMaskedLM|DistillGPT2|T5Small"
+
+  # Issue 6: Write per-run output files for post-failure debugging
+  run_comparison() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    python benchmarks/dynamo/huggingface.py \
+      --compare-backed-unbacked \
+      --performance --inference --inductor --device cuda \
+      --filter "$MODELS" 2>&1 | tee "$output_file"
+  }
+
+  check_regressions() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    # Parse the comparison table and check for regressions > threshold
+    # Returns 0 if regressions found, 1 if no regressions
+    local regressions=()
+    while IFS= read -r line; do
+      # Issue 3: Broadened regex to match model names with hyphens, slashes, dots
+      # Match lines like: "  ModelName                      10.000      10.500    +5.0%"
+      if [[ "$line" =~ ^[[:space:]]+([A-Za-z0-9_./-]+)[[:space:]]+([0-9.]+)[[:space:]]+([0-9.]+)[[:space:]]+\+([0-9.]+)% ]]; then
+        local model="${BASH_REMATCH[1]}"
+        local diff="${BASH_REMATCH[4]}"
+        # Nit: Use awk instead of bc -l to avoid dependency on bc
+        if awk "BEGIN{exit !($diff > $THRESHOLD)}"; then
+          regressions+=("$model:+${diff}%")
+        fi
+      fi
+    done < "$output_file"
+
+    if [[ ${#regressions[@]} -gt 0 ]]; then
+      echo "Regressions found: ${regressions[*]}"
+      return 0
+    fi
+    return 1
+  }
+
+  check_failures() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    # Issue 2: Check for any model failure — not just paired failures.
+    # Specifically flags when unbacked fails but backed succeeds (regression signal).
+    # Returns 0 if failures found, 1 if no failures
+    local current_model=""
+    local backed_failed=false
+    local unbacked_failed=false
+    local both_failures=()
+    local unbacked_only_failures=()
+
+    # Append a sentinel header so the loop naturally evaluates the last real model
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^---[[:space:]]+([A-Za-z0-9_./-]+)[[:space:]]+--- ]]; then
+        if [[ -n "$current_model" ]]; then
+          if $backed_failed && $unbacked_failed; then
+            both_failures+=("$current_model")
+          elif $unbacked_failed && ! $backed_failed; then
+            unbacked_only_failures+=("$current_model")
+          fi
+        fi
+        current_model="${BASH_REMATCH[1]}"
+        backed_failed=false
+        unbacked_failed=false
+      elif [[ "$line" =~ backed.*FAILED|backed.*TIMEOUT|backed.*ERROR ]]; then
+        backed_failed=true
+      elif [[ "$line" =~ unbacked.*FAILED|unbacked.*TIMEOUT|unbacked.*ERROR ]]; then
+        unbacked_failed=true
+      fi
+    done < <(cat "$output_file"; echo "--- END ---")
+
+    local has_failures=false
+    if [[ ${#both_failures[@]} -gt 0 ]]; then
+      echo "❌ FAILURES DETECTED: Both backed and unbacked failed for: ${both_failures[*]}"
+      has_failures=true
+    fi
+    if [[ ${#unbacked_only_failures[@]} -gt 0 ]]; then
+      echo "❌ FAILURES DETECTED: Unbacked failed (but backed succeeded) for: ${unbacked_only_failures[*]}"
+      has_failures=true
+    fi
+
+    if $has_failures; then
+      return 0
+    fi
+    return 1
+  }
+
+  # Run initial comparison
+  echo "=== Run 1/$MAX_RETRIES ==="
+  run_comparison 1
+
+  # Check for failures first
+  if check_failures 1; then
+    echo "❌ Test failed: Models failed to run (see above for details)"
+    exit 1
+  fi
+
+  # Check for regressions
+  if ! check_regressions 1; then
+    echo "✅ PASSED: No regressions above ${THRESHOLD}% threshold"
+    exit 0
+  fi
+
+  # Regression detected - retry to confirm
+  local regression_count=1
+  for ((retry=2; retry<=MAX_RETRIES; retry++)); do
+    echo ""
+    echo "=== Retry $retry/$MAX_RETRIES (potential regression detected) ==="
+    run_comparison "$retry"
+
+    # Issue 4: Also check for failures on retries (e.g., intermittent OOM)
+    if check_failures "$retry"; then
+      echo "❌ Test failed: Models failed on retry $retry (see above for details)"
+      exit 1
+    fi
+
+    if check_regressions "$retry"; then
+      ((regression_count++))
+    fi
+  done
+
+  # Check if regression was consistent (majority of runs)
+  local required=$((MAX_RETRIES / 2 + 1))
+  if [[ $regression_count -ge $required ]]; then
+    echo ""
+    echo "❌ REGRESSION CONFIRMED: Detected in $regression_count/$MAX_RETRIES runs (threshold: ${THRESHOLD}%)"
+    exit 1
+  else
+    echo ""
+    echo "✅ PASSED: Regressions were not consistent ($regression_count/$MAX_RETRIES runs, needed $required)"
+    exit 0
+  fi
 }
 
 test_inductor_set_cpu_affinity(){
@@ -1513,7 +1836,9 @@ EOF
     fi
 
     # Ensure invalid item is in the test output.
-    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
+    # Use a here-string instead of a pipe to avoid SIGPIPE when grep -q
+    # exits early on large output (causes exit code 141 with pipefail).
+    grep -q "${invalid_item_name}" <<< "${test_output}" && ret=$? || ret=$?
 
     if [ $ret -ne 0 ]; then
         cat << EOF
@@ -1657,74 +1982,6 @@ EOF
   assert_git_not_dirty
 }
 
-test_bazel() {
-  set -e -o pipefail
-
-  # bazel test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  get_bazel
-
-  if [[ "$CUDA_VERSION" == "cpu" ]]; then
-    # Test //c10/... without Google flags and logging libraries. The
-    # :all_tests target in the subsequent Bazel invocation tests
-    # //c10/... with the Google libraries.
-    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-      --no//c10:use_gflags --no//c10:use_glog //c10/...
-
-    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
-  else
-    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
-    tools/bazel test --test_timeout=480 --test_output=errors \
-      //:any_test \
-      //:autograd_test \
-      //:dataloader_test \
-      //:dispatch_test \
-      //:enum_test \
-      //:expanding_array_test \
-      //:fft_test \
-      //:functional_test \
-      //:grad_mode_test \
-      //:inference_mode_test \
-      //:init_test \
-      //:jit_test \
-      //:memory_test \
-      //:meta_tensor_test \
-      //:misc_test \
-      //:moduledict_test \
-      //:modulelist_test \
-      //:modules_test \
-      //:namespace_test \
-      //:nested_test \
-      //:nn_utils_test \
-      //:operations_test \
-      //:ordered_dict_test \
-      //:parallel_benchmark_test \
-      //:parameterdict_test \
-      //:parameterlist_test \
-      //:sequential_test \
-      //:serialize_test \
-      //:special_test \
-      //:static_test \
-      //:support_test \
-      //:tensor_flatten_test \
-      //:tensor_indexing_test \
-      //:tensor_options_cuda_test \
-      //:tensor_options_test \
-      //:tensor_test \
-      //:torch_dist_autograd_test \
-      //:torch_include_test \
-      //:transformer_test \
-      //:test_bazel \
-      //c10/cuda/test:test \
-      //c10/test:core_tests \
-      //c10/test:typeid_test \
-      //c10/test:util/ssize_test \
-      //c10/test:util_base_tests
-  fi
-}
-
 test_benchmarks() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install "pytest-benchmark==3.2.3"
@@ -1795,37 +2052,6 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-test_linux_aarch64() {
-  python test/run_test.py --include test_modules test_utils test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-        test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
-        distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
-        test_linalg \
-        test_jit test_jit_autocast test_ops_jit \
-        test_nn nn/test_convolution functorch/test_ops functorch/test_aotdispatch \
-        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
-
-  # Dynamo tests
-  python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
-       dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
-       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
-
-  # Inductor tests
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
-       inductor/test_config inductor/test_control_flow inductor/test_coordinate_descent_tuner inductor/test_fx_fusion \
-       inductor/test_group_batch_fusion inductor/test_inductor_freezing inductor/test_inductor_utils \
-       inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
-       inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
-       inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
-       inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
-       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
-       inductor/test_cpu_select_algorithm inductor/test_cpu_repro \
-       inductor/test_aot_inductor inductor/test_fused_attention \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
-}
-
 test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1893,11 +2119,14 @@ test_openreg() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+if [[ "${TEST_CONFIG}" == "onnx" ]]; then
+  install_torchvision
+  "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
+elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
@@ -1907,8 +2136,6 @@ if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
     python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
-elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
-  test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
@@ -1959,7 +2186,9 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  setup_torch_trace
   test_inductor_distributed
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
@@ -1973,11 +2202,19 @@ elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
-  test_dynamo_benchmark huggingface "$id"
+  setup_torch_trace
+  if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
+    test_unbacked_parity_smoketest
+  else
+    test_dynamo_benchmark huggingface "$id"
+  fi
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  setup_torch_trace
   test_dynamo_benchmark timm_models "$id"
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio
   install_torchvision
@@ -2008,19 +2245,27 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
       LIBTBB_PATH="$(find "$(dirname "$(which python)")/../lib/" -name libtbb.so.12)"
       export LD_PRELOAD="$LIBTBB_PATH":"$LD_PRELOAD"
     fi
+    setup_torch_trace
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
+    collect_tlparse_output
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
+  setup_torch_trace
   PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti_cpp
   fi
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
+  setup_torch_trace
   test_inductor_core
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
+  setup_torch_trace
   test_inductor_shard "${SHARD_NUMBER}"
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
@@ -2062,8 +2307,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
-elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
-  test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
@@ -2086,6 +2329,8 @@ elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
+elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
+  test_tsan
 else
   install_torchvision
   install_monkeytype

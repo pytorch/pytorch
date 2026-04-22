@@ -34,7 +34,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
-from torch._utils import render_call
+from torch._utils import _is_privateuse1_backend_available, render_call
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -44,6 +44,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
+    TraceableWrapperSubclass,
 )
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
-    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -183,8 +183,10 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
-) -> list[Tensor | int | SymInt | OpaqueType]:
+    subclass: Tensor | TraceableWrapperSubclass,
+    *,
+    out: list[Tensor | int | SymInt | OpaqueBase],
+) -> list[Tensor | int | SymInt | OpaqueBase]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -457,6 +459,25 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
 
+        # Propagate grad_dtype here rather than in meta_converter because
+        # meta tensors don't carry autograd metadata.
+        # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
+        # FunctionalTensor view whose base was mutated (e.g. via set_())
+        # triggers lazy view replay through __torch_dispatch__, which
+        # errors without an active FunctionalTensorMode.
+        inner_t = (
+            torch._from_functional_tensor(t.elem)
+            if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor)
+            else t
+        )
+        if (
+            inner_t.requires_grad
+            and inner_t.is_leaf
+            and inner_t.grad_dtype != inner_t.dtype
+            and out.is_leaf
+        ):
+            out.grad_dtype = inner_t.grad_dtype
+
         from torch._dynamo.source import RandomValueSource
 
         value = None
@@ -665,7 +686,9 @@ class SymNumberMemoDescriptor:
         return r
 
     def __set__(
-        self, obj: FakeTensor, value: torch.SymInt | torch.SymFloat | None
+        self,
+        obj: FakeTensor,
+        value: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | None,
     ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
@@ -1437,6 +1460,7 @@ class FakeTensorMode(TorchDispatchMode):
         return not (
             torch.cuda.is_available()
             or (hasattr(torch, "hpu") and torch.hpu.is_available())
+            or _is_privateuse1_backend_available()
         )
 
     @property
@@ -2334,7 +2358,7 @@ class FakeTensorMode(TorchDispatchMode):
                     "mismatched_fake_kernel",
                     metadata_fn=lambda: {
                         "op": str(func),
-                        "reason": f"mismatch between fake value {fake} and real value {real}",  # noqa: F821
+                        "reason": f"mismatch between fake value {fake} and real value {real}",
                     },
                 )
                 return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
@@ -2678,7 +2702,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # we shouldn't broadly catch all errors here;
                 # some come from real-kernel mutation/aliasing checks we want to run.
                 # add more exception types as needed.
-                log.debug(  # noqa: G200
+                log.debug(
                     "real-tensor fallback failed for %s: %s; silently ignoring",
                     func,
                     exc,
@@ -2741,9 +2765,7 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            s, int(real_t)
-                        )
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2904,8 +2926,10 @@ class FakeTensorMode(TorchDispatchMode):
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
+                # pyrefly: ignore [bad-argument-count]
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
+                    # pyrefly: ignore [bad-return]
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
@@ -3076,7 +3100,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def create_symbolic_nested_int(
         self, *, nt_tensor_id: int | None = None
-    ) -> torch.SymInt:
+    ) -> IntLikeType:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor

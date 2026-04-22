@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
 import copy
 import math
 from dataclasses import dataclass
@@ -615,13 +614,13 @@ class GraphModule(torch.nn.Module):
 
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = l_x_.clone();  l_x_ = None
-            outs: "f32[]" = mul * clone
+            outs: "f32[]" = mul * clone;  mul = clone = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((outs, mul, clone), (l_weird_b, l_weird_c))
+            return ((outs,), (l_weird_b, l_weird_c))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad: "f32[]", unused_0, unused_1, l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
@@ -844,7 +843,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, gO):
                 return torch.tensor(float("nan")).expand(10, 10)
 
-        def run_fn(a):  # noqa: F841
+        def run_fn(a):
             out = MyFunc2.apply(a)
             return out.sum()
 
@@ -1136,13 +1135,13 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             t: "f32[3, 4]" = l_weight_.t()
-            y: "f32[5, 4]" = l_x_.matmul(t)
+            y: "f32[5, 4]" = l_x_.matmul(t);  t = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((y, t), (l_weight_, l_x_))
+            return ((y,), (l_weight_, l_x_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y: "f32[5, 4]", unused_0, l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
+        def forward(self, y: "f32[5, 4]", l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
@@ -1668,7 +1667,7 @@ class GraphModule(torch.nn.Module):
             mask = block_start < n_elements
             grad_out = tl.load(grad_out_ptr + block_start, mask=mask)
             # Read offsets (read-only, not written back)
-            _offsets_val = tl.load(offsets_ptr + 0)  # noqa: F841
+            _offsets_val = tl.load(offsets_ptr + 0)
             tl.store(grad_x_ptr + block_start, grad_out, mask=mask)
 
         class FnWithReadOnlyBwdInput(torch.autograd.Function):
@@ -1806,13 +1805,13 @@ class GraphModule(torch.nn.Module):
 
             result: "f32[s17, 8]" = a * b
 
-            out: "f32[s17, 8]" = a + b
+            out: "f32[s17, 8]" = a + b;  b = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((result, out, a, b), (s17, a, cos, result))
+            return ((result, out), (s17, a, cos, result))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", unused_0, unused_1, s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
+        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[s17, 8]" = a * grad_b;  a = grad_b = None
@@ -2051,17 +2050,17 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = l_module_b * 5;  l_module_b = None
-            mul_1: "f32[4, 4]" = mul * l_input_data_values
-            output_tensor: "f32[4, 4]" = 4 + mul_1
+            mul_1: "f32[4, 4]" = mul * l_input_data_values;  mul = None
+            output_tensor: "f32[4, 4]" = 4 + mul_1;  mul_1 = None
 
-            out: "f32[4, 4]" = output_tensor + l_x_
+            out: "f32[4, 4]" = output_tensor + l_x_;  output_tensor = None
             out_1: "f32[4, 4]" = l_input_data_values + l_x_;  l_input_data_values = l_x_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((out, out_1, mul, mul_1, output_tensor), ())
+            return ((out, out_1), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]", unused_0, unused_1, unused_2):
+        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = grad_output * 4;  mul = None
@@ -2132,6 +2131,49 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
         res = opt_fn(input_data, x)
         self.assertEqual(ref, res)
+
+    def test_inplace_op_with_side_effect_wrong_grad(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/180642
+        # In-place op inside autograd.Function.forward combined with a side
+        # effect (list append) causes collect_intermediate_outputs to add a
+        # pre-mutation alias as an extra subgraph output. Because the alias
+        # shares the same TensorImpl as the real return value,
+        # set_gradient_edge overwrites output_nr, routing the backward
+        # gradient to the wrong slot and producing zero gradients.
+        captured = []
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                intermediate = torch.sin(x)
+                captured.append(intermediate)
+                loss = torch.tensor(0.0, device=x.device)
+                loss += x.sum()
+                return loss
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.expand(8)
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(8, device="cpu", requires_grad=True)
+
+        # Eager reference
+        x_ref = x.detach().clone().requires_grad_(True)
+        captured.clear()
+        out_ref = fn(x_ref)
+        out_ref.backward()
+
+        # Compiled
+        torch._dynamo.reset()
+        captured.clear()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c.backward()
+
+        self.assertEqual(x_ref.grad, x_c.grad)
 
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
