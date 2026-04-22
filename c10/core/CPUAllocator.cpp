@@ -7,9 +7,8 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/Logging.h>
 
-// TODO: rename flag to C10
 C10_DEFINE_bool(
-    caffe2_report_cpu_memory_usage,
+    c10_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage")
 
@@ -206,13 +205,13 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
   }
   auto profile_memory = memoryProfilingEnabled();
   size_t allocated = 0;
-  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+  if (FLAGS_c10_report_cpu_memory_usage || profile_memory) {
     std::lock_guard<std::mutex> guard(mutex_);
     size_table_[ptr] = nbytes;
     allocated_ += nbytes;
     allocated = allocated_;
   }
-  if (FLAGS_caffe2_report_cpu_memory_usage) {
+  if (FLAGS_c10_report_cpu_memory_usage) {
     LOG(INFO) << "C10 alloc " << nbytes << " bytes, total alloc " << allocated
               << " bytes.";
   }
@@ -230,7 +229,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   size_t nbytes = 0;
   auto profile_memory = memoryProfilingEnabled();
   size_t allocated = 0;
-  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+  if (FLAGS_c10_report_cpu_memory_usage || profile_memory) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = size_table_.find(ptr);
     if (it != size_table_.end()) {
@@ -251,7 +250,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   if (nbytes == 0) {
     return;
   }
-  if (FLAGS_caffe2_report_cpu_memory_usage) {
+  if (FLAGS_c10_report_cpu_memory_usage) {
     LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc " << allocated
               << " bytes.";
   }
@@ -268,7 +267,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
 void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   auto profile_memory = memoryProfilingEnabled();
   size_t allocated = 0;
-  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+  if (FLAGS_c10_report_cpu_memory_usage || profile_memory) {
     std::lock_guard<std::mutex> guard(mutex_);
 
     allocated = allocated_;
@@ -276,7 +275,7 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   if (nbytes == 0) {
     return;
   }
-  if (FLAGS_caffe2_report_cpu_memory_usage) {
+  if (FLAGS_c10_report_cpu_memory_usage) {
     LOG(INFO) << "C10 Out of Memory. Trying to allocate " << nbytes
               << " bytes, total alloc " << allocated << " bytes.";
   }
