@@ -813,7 +813,7 @@ class IRNode:
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return False
 
-    def mark_reuse(self, users: int) -> None:
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
         pass
 
     def realize_hint(self) -> None:
@@ -2981,8 +2981,8 @@ class BaseView(IRNode):
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        return self.data.mark_reuse(users, has_non_fusible_users)
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
@@ -9375,8 +9375,8 @@ class MutableBox(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return self.data.has_large_inner_fn(threshold)
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        return self.data.mark_reuse(users, has_non_fusible_users)
 
     def realize_hint(self) -> None:
         return self.data.realize_hint()
@@ -9600,7 +9600,9 @@ class StorageBox(MutableBox):
             )
         )
 
-    def should_realize_on_reuse(self, users: int) -> bool:
+    def should_realize_on_reuse(
+        self, users: int, has_non_fusible_users: bool = False
+    ) -> bool:
         """
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
@@ -9612,14 +9614,30 @@ class StorageBox(MutableBox):
                 heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-            return (
-                self.num_reads() > config.realize_reads_threshold
-                or self.has_large_inner_fn()
+            if self.has_large_inner_fn():
+                return True
+            # Size-aware cost model comparing total memory traffic:
+            #   Inline:      total_read_bytes * users
+            #   Materialize: total_read_bytes + output_bytes * (1 + users)
+            # This naturally handles broadcast reads (small buffers are
+            # cheap to re-read) and dtype promotions (fp32 outputs cost
+            # more to write than bf16 inputs cost to read).
+            total_read_bytes = sum(
+                V.graph.get_dep_size_hint(dep) for dep in self.get_reads()
             )
+            output_bytes = (
+                V.graph.sizevars.optimization_hint(self.data.get_numel(), fallback=0)
+                * self.data.dtype.itemsize
+            )
+            if total_read_bytes > 0 and output_bytes > 0:
+                if has_non_fusible_users:
+                    return total_read_bytes > output_bytes
+                return total_read_bytes * (users - 1) >= output_bytes * (1 + users)
+            return self.num_reads() > config.realize_reads_threshold
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        if self.should_realize_on_reuse(users):
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        if self.should_realize_on_reuse(users, has_non_fusible_users):
             self.realize()
 
     def num_reads(self) -> int:
