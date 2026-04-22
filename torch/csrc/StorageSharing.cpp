@@ -584,9 +584,6 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
     auto shandle =
         c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
 
-    TORCH_CHECK(
-        shandle.is_fd && shandle.is_dma_buf,
-        "XPU IPC requires DMA-BUF handle export");
     THPObjectPtr handle_tuple(PyTuple_New(2));
     THPObjectPtr _fd(PyLong_FromLongLong(shandle.fd));
     THPObjectPtr _alloc_size(PyLong_FromLongLong(shandle.alloc_size));

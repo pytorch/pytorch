@@ -1886,11 +1886,7 @@ class NativeCachingAllocator : public XPUAllocator {
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   struct MemHandleCacheEntry {
     MemHandleCacheEntry(c10::DeviceIndex device, const std::string& handle)
-        : device_(device),
-          initialized_(false),
-          from_dma_buf_(false),
-          fd_(-1),
-          alloc_size_(0) {
+        : device_(device), initialized_(false), fd_(-1), alloc_size_(0) {
       auto& ze_ipc_api = get_ze_ipc_api();
 
       if (handle.rfind("dmabuf:", 0) == 0) {
@@ -1898,7 +1894,6 @@ class NativeCachingAllocator : public XPUAllocator {
         TORCH_CHECK(
             fd_end != std::string::npos,
             "invalid dmabuf handle format for XPU IPC");
-        from_dma_buf_ = true;
         fd_ = std::stoll(handle.substr(7, fd_end - 7));
         alloc_size_ =
             static_cast<size_t>(std::stoull(handle.substr(fd_end + 1)));
@@ -1915,18 +1910,14 @@ class NativeCachingAllocator : public XPUAllocator {
           "Level Zero DMA-BUF IPC APIs are unavailable");
     }
 
-    // Initialize the IPC handle (called outside the cache lock)
     void init() {
       if (initialized_) {
         return;
       }
 
-      // Ensure device pool is properly initialized in this process
-      // This is critical for multiprocessing scenarios (spawn/forkserver)
-      // where child processes need to perform device initialization again.
+      // Child processes created via spawn/forkserver must initialize XPU state.
       at::DeviceGuard guard(at::Device(at::kXPU, device_));
-      c10::xpu::device_count_ensure_non_zero(); // Ensure device pool is
-                                                // initialized
+      c10::xpu::device_count_ensure_non_zero();
 
       ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
           xpu::get_device_context());
@@ -1935,34 +1926,30 @@ class NativeCachingAllocator : public XPUAllocator {
 
       auto& ze_ipc_api = get_ze_ipc_api();
 
-      if (from_dma_buf_) {
-        ze_external_memory_import_fd_t import_desc = {};
-        import_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
-        import_desc.pNext = nullptr;
-        import_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
-        import_desc.fd = static_cast<int>(fd_);
+      ze_external_memory_import_fd_t import_desc = {};
+      import_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+      import_desc.pNext = nullptr;
+      import_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+      import_desc.fd = static_cast<int>(fd_);
 
-        ze_device_mem_alloc_desc_t alloc_desc = {};
-        alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
-        alloc_desc.pNext = &import_desc;
-        alloc_desc.flags = 0;
-        alloc_desc.ordinal = 0;
+      ze_device_mem_alloc_desc_t alloc_desc = {};
+      alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+      alloc_desc.pNext = &import_desc;
+      alloc_desc.flags = 0;
+      alloc_desc.ordinal = 0;
 
-        const auto alloc_result = ze_ipc_api.alloc_device(
-            ze_context_,
-            &alloc_desc,
-            alloc_size_,
-            kDeviceAlignment,
-            ze_device,
-            &xpu_ipc_ptr_);
-        TORCH_CHECK(
-            alloc_result == ZE_RESULT_SUCCESS,
-            "zeMemAllocDevice (DMA-BUF import) failed with code ",
-            static_cast<int>(alloc_result));
-        initialized_ = true;
-        return;
-      }
-      TORCH_CHECK(false, "unexpected non-DMA-BUF XPU IPC path");
+      const auto alloc_result = ze_ipc_api.alloc_device(
+          ze_context_,
+          &alloc_desc,
+          alloc_size_,
+          kDeviceAlignment,
+          ze_device,
+          &xpu_ipc_ptr_);
+      TORCH_CHECK(
+          alloc_result == ZE_RESULT_SUCCESS,
+          "zeMemAllocDevice (DMA-BUF import) failed with code ",
+          static_cast<int>(alloc_result));
+      initialized_ = true;
     }
 
     void clear() {
@@ -1975,19 +1962,14 @@ class NativeCachingAllocator : public XPUAllocator {
         return;
       }
 
-      if (from_dma_buf_) {
-        const auto free_result =
-            ze_ipc_api.free_device(ze_context_, xpu_ipc_ptr_);
-        if (free_result != ZE_RESULT_SUCCESS) {
-          TORCH_WARN(
-              "zeMemFree (DMA-BUF import) failed with code ",
-              static_cast<int>(free_result));
-        }
-        xpu_ipc_ptr_ = nullptr;
-        return;
+      const auto free_result =
+          ze_ipc_api.free_device(ze_context_, xpu_ipc_ptr_);
+      if (free_result != ZE_RESULT_SUCCESS) {
+        TORCH_WARN(
+            "zeMemFree (DMA-BUF import) failed with code ",
+            static_cast<int>(free_result));
       }
-
-      TORCH_CHECK(false, "unexpected non-DMA-BUF XPU IPC clear path");
+      xpu_ipc_ptr_ = nullptr;
     }
 
     void* ptr() const {
@@ -2000,7 +1982,6 @@ class NativeCachingAllocator : public XPUAllocator {
     void* xpu_ipc_ptr_{nullptr};
     std::weak_ptr<void> wp_;
     bool initialized_;
-    bool from_dma_buf_;
     int64_t fd_;
     size_t alloc_size_;
   };
@@ -2186,11 +2167,8 @@ class NativeCachingAllocator : public XPUAllocator {
         "zeMemGetAllocProperties did not provide a valid DMA-BUF fd for XPU IPC");
 
     return {
-        std::string(),
         storage_offset_bytes,
-        true,
         static_cast<int64_t>(export_fd.fd),
-        true,
         static_cast<int64_t>(base_block->size)};
   }
 
@@ -2220,6 +2198,9 @@ class NativeCachingAllocator : public XPUAllocator {
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
       TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
+      // Our entry lost the race; release its device allocation before
+      // discarding.
+      entry.clear();
       return devptr;
     }
 
