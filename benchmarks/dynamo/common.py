@@ -4218,6 +4218,7 @@ def setup_batch_invariant(args):
     if not torch.cuda.is_available():
         return
     setup_determinism(args)
+    inductor_config.batch_invariant = True
     inductor_config.triton.cudagraphs = False
     torch.backends.cuda.preferred_blas_library("cublaslt")
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
