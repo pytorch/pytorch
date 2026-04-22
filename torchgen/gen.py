@@ -70,6 +70,7 @@ from torchgen.model import (
     OptionalType,
     SchemaKind,
     SelfArgument,
+    should_generate_inplace_meta_kernel,
     STRUCTURED_DISPATCH_KEYS,
     TensorOptionsArguments,
     Type,
@@ -2304,10 +2305,7 @@ def gen_source_files(
                             else [g]
                         )
                         if any(
-                            f.func.kind() is SchemaKind.inplace
-                            and not backend_index.has_kernel(f)
-                            and not f.has_composite_kernel
-                            and len(f.func.returns) == 1
+                            should_generate_inplace_meta_kernel(f, backend_index)
                             for f in fns
                         ):
                             is_registered = True

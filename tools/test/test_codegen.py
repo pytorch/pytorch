@@ -25,9 +25,11 @@ from torchgen.model import (
     Location,
     NativeFunction,
     OperatorName,
+    should_generate_inplace_meta_kernel,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import Target
 
 
 class TestCreateDerivative(unittest.TestCase):
@@ -389,6 +391,82 @@ TORCH_API bool kernel_1();
 } // namespace at
         """
         self.assertEqual("\n".join(declaration), target)
+
+
+class TestInplaceMetaKernelGeneration(unittest.TestCase):
+    def setUp(self) -> None:
+        # An inplace op with CPU dispatch only (no Meta entry)
+        self.inplace_func, _ = NativeFunction.from_yaml(
+            {
+                "func": "my_op_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+                "dispatch": {"CPU": "my_op_cpu"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        # A non-inplace (functional) op
+        self.functional_func, _ = NativeFunction.from_yaml(
+            {
+                "func": "my_func(Tensor self) -> Tensor",
+                "dispatch": {"CPU": "my_func_cpu"},
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+
+        # Meta BackendIndex with no explicit kernels
+        self.meta_backend_index = BackendIndex(
+            dispatch_key=DispatchKey.Meta,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={},
+        )
+
+        self.selector = SelectiveBuilder.get_nop_selector()
+
+    def test_inplace_op_generates_meta_declaration(self) -> None:
+        """Unstructured inplace ops should get a TORCH_API meta declaration."""
+        reg = dest.RegisterDispatchKey(
+            self.meta_backend_index,
+            target=Target.NAMESPACED_DECLARATION,
+            selector=self.selector,
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+        )
+        result = reg(self.inplace_func)
+        self.assertTrue(len(result) > 0)
+        self.assertTrue(any("TORCH_API" in decl for decl in result))
+
+    def test_functional_op_no_meta_declaration(self) -> None:
+        """Non-inplace ops without explicit Meta kernel should not generate."""
+        reg = dest.RegisterDispatchKey(
+            self.meta_backend_index,
+            target=Target.NAMESPACED_DECLARATION,
+            selector=self.selector,
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+        )
+        result = reg(self.functional_func)
+        self.assertEqual(result, [])
+
+    def test_shared_helper_matches(self) -> None:
+        """should_generate_inplace_meta_kernel agrees with RegisterDispatchKey."""
+        self.assertTrue(
+            should_generate_inplace_meta_kernel(
+                self.inplace_func, self.meta_backend_index
+            )
+        )
+        self.assertFalse(
+            should_generate_inplace_meta_kernel(
+                self.functional_func, self.meta_backend_index
+            )
+        )
 
 
 # Test for native_function_generation
