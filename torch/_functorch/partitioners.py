@@ -3319,6 +3319,112 @@ def choose_saved_values_set(
     )[0]
 
 
+def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
+    """Compute a forward-looking structural hash for each node.
+
+    Each node's hash captures its "role" in the graph toward the output:
+    hash(self_key, sorted(cone_hash(user) for user in users)).
+
+    For placeholders, self_key uses tensor metadata instead of the node name
+    (which varies across ranks). This makes the hash invariant to the original
+    node naming and ordering.
+    """
+    hashes: dict[torch.fx.Node, str] = {}
+    for node in reversed(list(graph.nodes)):
+        if node.op == "placeholder":
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor):
+                # Exclude shape: different ranks may have different input
+                # shapes (e.g., shard sizes) for structurally identical graphs.
+                self_key: tuple[Any, ...] = (
+                    "placeholder",
+                    str(val.dtype),
+                    val.requires_grad,
+                )
+            elif isinstance(val, torch.SymInt):
+                self_key = ("placeholder", "symint")
+            else:
+                self_key = ("placeholder",)
+        elif node.op == "output":
+            self_key = ("output",)
+        else:
+            self_key = (node.op, str(node.target))
+
+        user_hashes = tuple(sorted(hashes[u] for u in node.users))
+        hashes[node] = hashlib.sha256(
+            str((self_key, user_hashes)).encode("utf-8")
+        ).hexdigest()
+
+    return hashes
+
+
+def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
+    """Build a canonical name mapping for graph nodes using Kahn's algorithm.
+
+    Returns a dict mapping each node to a deterministic name like "node_0",
+    "node_1", etc. The mapping is invariant to the original node ordering and
+    naming, so structurally equivalent graphs (e.g., traced with different dict
+    iteration orders across distributed ranks) produce identical mappings.
+
+    Does NOT modify the graph.
+    """
+    cone = _cone_hashes(graph)
+
+    indeg: dict[torch.fx.Node, int] = dict.fromkeys(graph.nodes, 0)
+    for node in graph.nodes:
+        for user in node.users:
+            indeg[user] += 1
+
+    canonical_idx: dict[torch.fx.Node, int] = {}
+
+    def _canonical_key(node: torch.fx.Node) -> tuple[Any, ...]:
+        if node.op == "placeholder":
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor):
+                # Exclude shape: different ranks may have different input
+                # shapes (e.g., shard sizes) for structurally identical graphs.
+                meta_key: tuple[Any, ...] = (
+                    str(val.dtype),
+                    val.requires_grad,
+                )
+            elif isinstance(val, torch.SymInt):
+                meta_key = ("symint",)
+            else:
+                meta_key = ()
+            return (0, meta_key, cone[node])
+        elif node.op == "get_attr":
+            return (1, str(node.target))
+        elif node.op == "output":
+            return (3,)
+        else:
+            input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
+            return (2, str(node.target), input_indices)
+
+    # Seed the heap with nodes that have no dependencies.
+    # The counter ensures deterministic ordering when keys are equal.
+    counter = 0
+    ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
+    for node in graph.nodes:
+        if indeg[node] == 0:
+            heapq.heappush(ready, (_canonical_key(node), counter, node))
+            counter += 1
+
+    canonical_order: list[fx.Node] = []
+
+    while ready:
+        _, _, cur = heapq.heappop(ready)
+        canonical_order.append(cur)
+        canonical_idx[cur] = len(canonical_idx)
+
+        for user in cur.users:
+            indeg[user] -= 1
+            if indeg[user] == 0:
+                heapq.heappush(ready, (_canonical_key(user), counter, user))
+                counter += 1
+
+    return {node: f"node_{i}" for i, node in enumerate(canonical_order)}
+
+
 def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
@@ -3333,12 +3439,33 @@ def _sync_decision_cross_ranks(
                 return True
         return False
 
+    if not (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+        and torch.distributed.get_world_size() > 1
+        and has_collectives(joint_graph)
+    ):
+        return saved_values
+
+    canonical = _canonical_node_names(joint_graph)
+    reverse_canonical = {v: k for k, v in canonical.items()}
+
     def has_same_nodes(joint_graph: torch.fx.Graph) -> bool:
-        # proxy to check if the graph is the same across different GPUs.
-        # We only consider the name and order of nodes. A more robust way
-        # would be to check the hash of the whole graph (disregarding input shapes),
-        # this is a reasonable first-order approximation.
-        node_str = "/".join(x.name for x in joint_graph.nodes)
+        # Use canonical names for a hash that is invariant to node ordering
+        # and naming. This correctly identifies structurally equivalent graphs
+        # even when different ranks trace with different dict iteration orders.
+        def _node_hash_str(n: torch.fx.Node) -> str:
+            # For placeholders, n.target is the rank-local name (e.g.,
+            # primals_1) which may refer to different inputs on different
+            # ranks. Use only the canonical name and op for these.
+            if n.op == "placeholder":
+                return f"{canonical[n]}:{n.op}"
+            return f"{canonical[n]}:{n.op}:{n.target}"
+
+        node_str = "/".join(
+            _node_hash_str(n)
+            for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
+        )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
         with no_dispatch(), unset_fake_temporarily():
@@ -3346,25 +3473,22 @@ def _sync_decision_cross_ranks(
             torch.distributed.all_gather_object(all_inputs, inputs)
         return all(all_inputs[0] == x for x in all_inputs)
 
-    if (
-        torch.distributed.is_available()
-        and torch.distributed.is_initialized()
-        and torch.distributed.get_world_size() > 1
-        and has_collectives(joint_graph)
-        and has_same_nodes(joint_graph)
-    ):
+    if has_same_nodes(joint_graph):
         with no_dispatch(), unset_fake_temporarily():
-            objects = [[x.name for x in saved_values]]
+            # Communicate saved values using canonical names so that
+            # node names (which may differ across ranks) don't matter.
+            objects = [[canonical[x] for x in saved_values]]
             saved_ops_names_all_ranks: list[list[str]] = [
                 [] for _ in range(torch.distributed.get_world_size())
             ]
             torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
-            name_to_node = get_name_to_node(joint_graph)
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
             for idx, saved_ops_names in enumerate(saved_ops_names_all_ranks):
-                saved_nodes = [name_to_node[op_name] for op_name in saved_ops_names]
+                saved_nodes = [
+                    reverse_canonical[op_name] for op_name in saved_ops_names
+                ]
                 saved_size = 0
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
@@ -3394,7 +3518,7 @@ def _sync_decision_cross_ranks(
             )
 
             saved_values = [
-                name_to_node[n] for n in saved_ops_names_all_ranks[picked_rank_idx]
+                reverse_canonical[n] for n in saved_ops_names_all_ranks[picked_rank_idx]
             ]
 
     return saved_values

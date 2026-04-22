@@ -2320,6 +2320,188 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_node_order(self):
+        # Reproduces the cross-rank sync bug: when ranks have topologically
+        # identical graphs but different node creation orders (from different
+        # dict iteration orders in Dynamo tracing), the old name-based hash in
+        # has_same_nodes returns False → sync skipped → divergent min-cut.
+        #
+        # Both ranks have the same topology:
+        #   p1 → all_gather → wait → relu → output[0]
+        #   p2 → neg → output[1]
+        # But the computation nodes are created in different orders across
+        # ranks, producing different graph.nodes iteration orders.
+        import hashlib
+
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+
+        if self.rank == 0:
+            # Rank 0: deep path created first during tracing
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+        else:
+            # Rank 1: shallow path created first during tracing
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((relu_node, neg_node))
+
+        # Verify the bug condition: the old name-based hash diverges because
+        # graph.nodes iteration order differs across ranks.
+        node_str = "/".join(x.name for x in test_graph.nodes)
+        local_hash = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self._init_process_group()
+
+        all_hashes = [None, None]
+        torch.distributed.all_gather_object(all_hashes, local_hash)
+        self.assertNotEqual(all_hashes[0], all_hashes[1])
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        if self.rank == 0:
+            saved_values = [relu_node]
+        else:
+            saved_values = [neg_node]
+
+        # With the canonical naming fix, sync succeeds despite different
+        # node orderings. Both ranks agree on the same saved node.
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(len(result), 1)
+
+        # All ranks should agree on the result
+        result_targets = [None, None]
+        torch.distributed.all_gather_object(result_targets, str(result[0].target))
+        self.assertEqual(result_targets[0], result_targets[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_invalid_node_error(self):
+        # Reproduces the "Node X was invalid, but is output" assertion error.
+        #
+        # When two ranks have isomorphic graphs with matching node names and
+        # iteration order (so has_same_nodes returns True), but the same name
+        # maps to structurally different nodes across ranks, the old name-based
+        # sync communicates the wrong saved values. Using these wrong values
+        # for backward graph extraction triggers the assertion.
+        #
+        # Setup: both ranks create two relu nodes in the same order, but
+        # wire them to different placeholders:
+        #   Rank 0: relu="relu(p1)", relu_1="relu(p2)"
+        #   Rank 1: relu="relu(p2)", relu_1="relu(p1)"
+        # The backward computation needs relu(p1). On rank 0 that's "relu",
+        # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
+        # rank 1 gets relu(p2) instead → backward extraction fails.
+        from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch.partitioners import (
+            _extract_graph_with_inputs_outputs,
+            _sync_decision_cross_ranks,
+        )
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+        t1 = test_graph.placeholder("tangents_1")
+        t1.meta["val"] = torch.randn(10, 8)
+
+        # Both ranks create relu nodes in the same order → same auto-names.
+        # But the wiring to placeholders differs across ranks.
+        if self.rank == 0:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+        else:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        # Collective (required for has_collectives to return True)
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (relu_a,),
+        )
+        wt = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.wait_tensor.default,
+            (ag,),
+        )
+        wt.meta["val"] = torch.randn(10, 8)
+
+        # Backward: grad depends on relu(p1) specifically.
+        # On rank 0 that's relu_a, on rank 1 that's relu_b.
+        relu_p1 = relu_a if self.rank == 0 else relu_b
+        grad = test_graph.create_node(
+            "call_function", torch.ops.aten.mul.Tensor, (t1, relu_p1)
+        )
+        grad.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((wt, relu_b, grad))
+
+        self._init_process_group()
+
+        # Each rank correctly identifies relu(p1) as the node to save.
+        saved_values = [relu_p1]
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+
+        # Extract backward subgraph using the synced saved values.
+        # Without the fix: wrong node → "Node mul was invalid, but is output"
+        bwd_inputs = [t1] + result
+        bwd_outputs = [grad]
+        bwd_descs = [PlainAOTOutput(idx=0)]
+        _extract_graph_with_inputs_outputs(
+            test_graph, bwd_inputs, bwd_outputs, bwd_descs
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_align_runtime_estimations_across_all_distributed_ranks(self):
         from torch._inductor.ir import ExternKernel
         from torch._inductor.scheduler import (
