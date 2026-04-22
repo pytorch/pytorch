@@ -417,7 +417,21 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
 }
 
 inline void copy_to(const Tensor& dst, const Tensor& src) {
-  if (dst.sym_sizes().equals(src.sym_sizes())) {
+  // Use TORCH_GUARD_OR_FALSE with sym_eq to avoid data-dependent-expression
+  // errors with unbacked symbolic sizes.  When we can't prove equality,
+  // we fall through to the broadcast/expand path.
+  auto dst_sizes = dst.sym_sizes();
+  auto src_sizes = src.sym_sizes();
+  bool same_sizes = dst_sizes.size() == src_sizes.size();
+  if (same_sizes) {
+    for (size_t i = 0; i < dst_sizes.size(); ++i) {
+      if (!TORCH_GUARD_OR_FALSE(sym_eq(dst_sizes[i], src_sizes[i]))) {
+        same_sizes = false;
+        break;
+      }
+    }
+  }
+  if (same_sizes) {
     // A shortcut to avoid generating hard-coded constant sizes during tracing.
     // This is not a perfect solution: when src & dst have different shapes,
     // constants will still appear. Users can workaround that case by
