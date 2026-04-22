@@ -439,6 +439,18 @@ class CachingAutotuner(KernelInterface):
         self._debug_call: _TritonKernelCall | None = None
         self._profiler_ctx: _RecordFunctionFast | None = None
 
+        # Cached launcher for fast path — bypasses all preamble after first
+        # successful steady-state launch.  Set to None until populated.
+        self._cached_launcher: LauncherType | None = None
+        # Pre-compute static eligibility for launcher caching.  These flags
+        # are set once in __init__ and never change, so we avoid re-checking
+        # them on every kernel launch.
+        self._cache_eligible = (
+            not self.triton_interpret
+            and not self.dump_launch_params
+            and not self.dump_launch_tensors
+        )
+
         # Compile-time info included in runtime logginging
         self.compile_id: CompileId | None = None
         self.is_backward = False
@@ -727,12 +739,14 @@ class CachingAutotuner(KernelInterface):
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+        self._cached_launcher = None
         self.fn._hash_lock = None
         return old_values
 
     def restore_after_unpickle(
         self, old_values: tuple[Any, Any, Any, Any, Any, Any] | None
     ) -> None:
+        self._cached_launcher = None
         if old_values:
             (
                 self.fn.fn,
@@ -1734,6 +1748,27 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         """Launch triton kernel call and return result."""
+        # --- FAST PATH ---
+        # After the first successful launch in steady state, cache the launcher
+        # and skip all preamble on subsequent calls (~2µs savings).
+        # Conditions here deliberately differ from the cache-population block
+        # below: we re-check dynamic conditions (profiler, debug mode) every
+        # call so enabling them at runtime falls back to the slow path.
+        # Static conditions (interpret, dump flags, launcher count) were
+        # already validated when the cache was populated.
+        # `not kwargs` is checked here but not at population time because
+        # inductor steady-state never passes kwargs; if it somehow does, the
+        # slow path handles it correctly.
+        fast = self._cached_launcher
+        if (
+            fast is not None
+            and not benchmark_run
+            and not kwargs
+            and not autograd_profiler._is_profiler_enabled
+            and not get_active_debug_mode()
+        ):
+            return fast(*args, stream=stream)
+
         debug_mode = get_active_debug_mode()
         if debug_mode:
             arg_names = list(self.triton_meta.get("signature", {}).keys())
@@ -1806,6 +1841,19 @@ class CachingAutotuner(KernelInterface):
             result = launcher(*args, **kwargs, stream=stream)
         finally:
             self._post_launch()
+
+        # Populate fast path: cache the launcher for future calls.  Static
+        # conditions (interpret, dump flags) are pre-computed in _cache_eligible;
+        # only dynamic conditions are checked here.
+        if (
+            self._cached_launcher is None
+            and self._cache_eligible
+            and not benchmark_run
+            and not debug_mode
+            and not autograd_profiler._is_profiler_enabled
+            and len(self.launchers) == 1
+        ):
+            self._cached_launcher = launcher
         return result
 
     def _interpret_args_grid(
