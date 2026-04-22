@@ -18,42 +18,29 @@ Native Operation
 
 Custom Operation
    An Operation that is defined by users and is usually a {term}`Compound Operation`.
-   For example, this [tutorial](https://pytorch.org/docs/stable/notes/extending.html)
+   For example, this [tutorial](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html
    details how to create Custom Operations.
 
 Kernel
    Implementation of a PyTorch operation, specifying what should be done when an
    operation executes.
 
-Compound Operation
-   A Compound Operation is composed of other operations. Its kernel is usually
+Composite Operation
+   A Composite Operation is composed of other operations. Its kernel is usually
    device-agnostic. There are two variants of this: Composite Implicit Autograd, where no
    autograd formula is required as it is derived implicitly from the operations composing this
-   one. And Composite Explicit Autograd, where there is an explicit autograd formula.
-
-Composite Operation
-   Same as {term}`Compound Operation`.
+   one. And Composite Explicit Autograd, where there is an explicit autograd formula
 
 Non-Leaf Operation
-   Same as {term}`Compound Operation`.
-
-Leaf Operation
-   An operation that's considered a basic operation, as opposed to a {term}`Compound
-   Operation`. Leaf Operation always has dispatch functions defined, usually has a
-   derivative function defined as well.
+   Same as {term}`Composite Operation`.
 
 Device Kernel
    Device-specific kernel of a {term}`Leaf Operation`.
-
-Compound Kernel
-   Opposed to {term}`Device Kernels<Device Kernel>`, Compound kernels are usually
-   device-agnostic and belong to {term}`Compound Operations<Compound Operation>`.
 
 JIT
    Just-In-Time Compilation.
 
 Tracing
-   Using `torch.jit.trace` on a function to get an executable that can be optimized
-   using just-in-time compilation.
+   In PyTorch, tracing is a way to convert a PyTorch model (or function) into a static computation graph by running it once (or a few times) with example inputs and recording (“tracing”) the tensor operations that actually execute.
 
 ```
