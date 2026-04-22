@@ -146,30 +146,6 @@ case "${GPU_ARCH_TYPE:-cpu}" in
         export NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
         export NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
-        # aarch64 CUDA: use NVPL for BLAS/LAPACK and wire ACL into oneDNN.
-        # Without these, CMake falls back to searching for MKL (x86-only) and
-        # oneDNN is built without ARM Compute Library acceleration. These are
-        # written to $GITHUB_ENV so they reach the "Build wheel" step.
-        if [[ "$ARCH" == "aarch64" ]]; then
-            if [[ ! -f /usr/local/lib/libnvpl_blas_lp64_gomp.so.0 ]]; then
-                echo "ERROR: NVPL BLAS not found at /usr/local/lib/libnvpl_blas_lp64_gomp.so.0"
-                exit 1
-            fi
-            if [[ ! -d /acl ]]; then
-                echo "ERROR: ARM Compute Library not found at /acl"
-                exit 1
-            fi
-            echo "Using NVPL BLAS/LAPACK and ACL for MKLDNN on CUDA aarch64"
-            if [[ -n "${GITHUB_ENV:-}" ]]; then
-                {
-                    echo "BLAS=NVPL"
-                    echo "USE_MKLDNN=1"
-                    echo "USE_MKLDNN_ACL=1"
-                    echo "ACL_ROOT_DIR=/acl"
-                } >> "$GITHUB_ENV"
-            fi
-        fi
-
         echo "CUDA ${CUDA_VERSION} environment configured"
         ;;
 
