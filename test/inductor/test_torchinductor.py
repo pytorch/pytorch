@@ -13129,6 +13129,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1e-2,  # to pass lowp check on GPU
         )
 
+    @skip_if_halide
+    @skip_if_pallas  # cpp-only fusion path
+    @skip_if_triton_cpu
+    def test_group_norm_sdpa_bmm_cpu_cpp_fusion(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("cpu only")
+
+        group_norm = nn.GroupNorm(1, 7).eval()
+        rrelu = nn.RReLU().eval()
+
+        def fn(x):
+            y = torch.sigmoid(x)
+            z = group_norm(x)
+            z = F.scaled_dot_product_attention(z, z, z)
+            z = rrelu(z)
+            return torch.bmm(y, z)
+
+        torch.manual_seed(0)
+        x = torch.randn((8, 7, 7))
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     @xfail_if_mps_unimplemented
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
