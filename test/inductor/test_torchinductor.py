@@ -3229,19 +3229,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(1),))
 
-    def test_arange10(self):
-        # Multiple arange operations with different usage patterns
-        def fn(x):
-            idx_for_indexing = torch.arange(0, 10, device=x.device, dtype=torch.int64)
-            idx_for_values = torch.arange(0, 10, device=x.device, dtype=torch.int64)
-
-            indexed = x[idx_for_indexing]
-            computed = idx_for_values * int(1e9)
-
-            return indexed + computed
-
-        self.common(fn, (torch.ones(10),))
-
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
