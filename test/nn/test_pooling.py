@@ -501,6 +501,13 @@ class TestPoolingNN(NNTestCase):
                 input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1)
             )
 
+    @parametrize_test("dim", [1, 2, 3])
+    def test_lp_pool_rejects_zero_norm_type(self, dim):
+        fn = getattr(F, f"lp_pool{dim}d")
+        x = torch.randn(*([1, 3] + [8] * dim))
+        with self.assertRaisesRegex(ValueError, "norm_type"):
+            fn(x, norm_type=0, kernel_size=2)
+
 
 class TestPoolingNNDeviceType(NNTestCase):
     @expectedFailureMPS  # No double, float shape prop does not work
