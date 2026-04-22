@@ -5649,6 +5649,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["tiling_scores"] = self.tiling_scores
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
+        if (
+            config.benchmark_kernel
+            or config.profile_bandwidth
+            or (config.benchmark_combo_kernel)
+        ):
+            num_gb = self.estimate_kernel_num_bytes() / 1e9
+            if num_gb is not None:
+                out["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel or config.benchmark_combo_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                out["kernel_flop"] = flops
         return out
 
     def codegen_kernel(self, name=None) -> str:
@@ -5844,16 +5856,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 inductor_meta["add_persistent_rblock"] = True
 
-        num_gb = None
-        if config.benchmark_kernel or config.profile_bandwidth:
-            num_gb = self.estimate_kernel_num_bytes() / 1e9
-            if num_gb is not None:
-                inductor_meta["kernel_num_gb"] = num_gb
-        if config.benchmark_kernel:
-            flops = self.estimate_flops()
-            if flops is not None:
-                inductor_meta["kernel_flop"] = flops
-
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5941,7 +5943,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb))
+            code.splice(
+                self.codegen_kernel_benchmark(
+                    inductor_meta.get("kernel_num_gb")  # type: ignore[arg-type]
+                )
+            )
 
         return code.getvalue()
 
