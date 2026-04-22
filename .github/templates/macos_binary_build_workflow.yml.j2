@@ -7,28 +7,9 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-{%- macro set_runner_specific_vars() -%}
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          # shellcheck disable=SC2129
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          # shellcheck disable=SC2129
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          # shellcheck disable=SC2129
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-{%- endmacro %}
-
-{%- macro setup_python(py_ver) -%}
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
-          python-version: "!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}"
-          freethreaded: !{{ "true" if py_ver.endswith('t') else "false" }}
+{#- Derive the setup-python micro-version from a DESIRED_PYTHON like "3.13" or "3.13t" -#}
+{%- macro setup_python_version(py_ver) -%}
+!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}
 {%- endmacro %}
 
 on:
@@ -59,19 +40,63 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{%- for config in build_configs %}
-  !{{ config["build_name"] }}-build:
+{%- if build_configs %}
+  {%- set first = build_configs[0] %}
+  wheel-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ macos_runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config, true) }}
-    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
-    {%- endif %}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in build_configs %}
+          - desired_python: "!{{ config["python_version"] }}"
+            setup_python_version: "!{{ setup_python_version(config["python_version"]) }}"
+            freethreaded: !{{ "true" if config["python_version"].endswith('t') else "false" }}
+            build_name: !{{ config["build_name"] }}
+        {%- endfor %}
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: !{{ first["package_type"] }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: !{{ first["desired_cuda"] }}
+      GPU_ARCH_TYPE: !{{ first["gpu_arch_type"] }}
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      {%- if first.pytorch_extra_install_requirements is defined and first.pytorch_extra_install_requirements|d('')|length > 0 %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ first.pytorch_extra_install_requirements }}
+      {%- endif %}
     steps:
-      !{{ set_runner_specific_vars() }}
-      !{{ setup_python(config.get("python_version", "3.10")) }}
-      !{{ common.checkout(deep_clone=False) }}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          # shellcheck disable=SC2129
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: ${{ matrix.setup_python_version }}
+          freethreaded: ${{ matrix.freethreaded }}
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Populate binary env
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
@@ -91,7 +116,7 @@ jobs:
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
-{%- if config["package_type"] == "wheel" %}
+{%- if first["package_type"] == "wheel" %}
       - name: Test PyTorch wheel
         run: |
           set -eux -o pipefail
@@ -115,17 +140,47 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: !{{ config["build_name"] }}
+          name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
-{%- endfor %}
+
+  wheel-upload:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        {%- for config in build_configs %}
+          - desired_python: "!{{ config["python_version"] }}"
+            build_name: !{{ config["build_name"] }}
+        {%- endfor %}
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: !{{ first["package_type"] }}
+      DESIRED_CUDA: !{{ first["desired_cuda"] }}
+      GPU_ARCH_TYPE: !{{ first["gpu_arch_type"] }}
+      DOCKER_IMAGE: !{{ first["container_image"] }}
+      DOCKER_IMAGE_TAG_PREFIX: !{{ first["container_image_tag_prefix"] }}
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      build_name: ${{ matrix.build_name }}
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+{%- endif %}
 
 {%- for lt_config in libtorch_extraction_configs %}
   !{{ lt_config["build_name"] }}-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ lt_config["source_wheel_build_name"] }}-build
+    needs: wheel-build
     runs-on: !{{ macos_runner }}
     timeout-minutes: 60
     env:
@@ -138,7 +193,11 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
-      !{{ setup_python("3.10") }}
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10.4"
+          freethreaded: false
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
