@@ -2358,13 +2358,9 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
 
 
 def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
-    """Copy a single dynamo attribute from src to dst, or remove it from dst
-    if src doesn't have it. Uses .copy() for container types (set, dict) to
-    avoid shared references between src and dst, and assigns directly for
-    primitive types like bool (e.g., _has_dynamo_dim_marking)."""
+    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
     if hasattr(src, attr):
-        val = getattr(src, attr)
-        setattr(dst, attr, val.copy() if hasattr(val, "copy") else val)
+        setattr(dst, attr, getattr(src, attr).copy())
     elif hasattr(dst, attr):
         delattr(dst, attr)
 
@@ -2382,8 +2378,6 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
-    _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
-    _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
 
 def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:

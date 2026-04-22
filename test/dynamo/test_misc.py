@@ -1602,9 +1602,6 @@ str(L['x'].device) == 'cpu'
 L['x'].requires_grad == False
 L['x'].ndimension() == 2
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
-hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False
-hasattr(L['x'], '_dynamo_unbacked_indices') == False
-hasattr(L['x'], '_dynamo_static_indices') == False
 L['x'] is L['y']
 not ___dict_contains('aaaaaaaa', G['sys'].modules)
 not ___dict_contains('bbbbbbbb', G['sys'].modules)
