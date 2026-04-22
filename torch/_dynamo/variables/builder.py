@@ -3941,13 +3941,13 @@ def _automatic_dynamic(
     specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
-        marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
-        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", ())
-        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", ())
-        marked_weak_dynamic = i in getattr(
-            e, "_dynamo_weak_dynamic_indices", ()
-        ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
-        marked_static = i in getattr(e, "_dynamo_static_indices", ())
+        marked_strict_unbacked = i in getattr(
+            e, "_dynamo_strict_unbacked_indices", set()
+        )
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
+        marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 

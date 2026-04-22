@@ -308,11 +308,9 @@ class GuardManager:
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
-    def add_dimension_marking_guard(
+    def add_dynamic_indices_guard(
         self,
-        expected_attrs: dict[str, Any],
-        absent_attrs: list[str],
-        dependent_attrs: dict[str, tuple[Any, str]],
+        value: set[Any],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
