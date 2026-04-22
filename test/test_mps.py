@@ -4036,13 +4036,11 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(a.cpu(), torch.arange(256, dtype=dtype))
 
     def test_blocking_storage_copy_with_pyobj(self):
-        # Hangs if the blocking MPS copy path captures a Python-wrapped storage (GIL deadlock)
-        tensors = [torch.randn(100, device="mps") for _ in range(50)]
+        # Hangs if the blocking CPU->MPS copy path captures a Python-wrapped src storage
         for _ in range(50):
-            joined = b"".join(
-                bytes(t.untyped_storage().cpu()) for t in tensors
-            )
-            self.assertEqual(len(joined), 50 * 100 * 4)
+            src_cpu = torch.empty(1_000_000, dtype=torch.uint8).untyped_storage()
+            dst_mps = torch.empty(1_000_000, dtype=torch.uint8, device="mps").untyped_storage()
+            dst_mps.copy_(src_cpu, non_blocking=False)
 
     def test_synchronize_releases_gil_with_async_copy(self):
         # Hangs if torch.mps.synchronize() holds the GIL across waitUntilCompleted
