@@ -13,9 +13,8 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_utils import requires_cuda, skipIfXpu
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu_and_triton
-from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE, 
 	HAS_GPU,
