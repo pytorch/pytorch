@@ -9,6 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
+from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
 
 
 HAS_GPU = torch.cuda.is_available()
@@ -103,6 +104,7 @@ class TestFusionRegionDetection(InductorTestCase):
             "Ops before and after mm should not be in the same fusion region",
         )
 
+    @xfailIfNoAcceleratorTriton
     def test_collapse_and_expand_fusion_regions(self):
         """Test collapse creates call_module nodes and expand restores graph."""
         from torch._inductor.fx_passes.fusion_regions import (
@@ -173,6 +175,7 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertIsNotNone(qr_node)
         self.assertFalse(is_fusible_node(qr_node))
 
+    @xfailIfNoAcceleratorTriton
     def test_collapse_expand_preserves_correctness(self):
         """Test that collapse and expand preserve numerical correctness.
 
