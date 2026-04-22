@@ -24,7 +24,7 @@ Custom Operation
 Kernel
     Refers to the "on device" implementation of a given operation. Reffering to the part of the Operation that actually computes the result.
 
-Compound Operation
+Composite Operation
    A Compound Operation is composed of other operations. Its kernel is usually
    device-agnostic. There are two variants of this: Composite Implicit Autograd, where no
    autograd formula is required as it is derived implicitly from the operations composing this
