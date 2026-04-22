@@ -2191,22 +2191,30 @@ class TritonKernelOverrides(TritonOverrides):
         is_for_values_only = False
         original_dtype = None
 
-        # Find the original dtype from FX nodes before fusion.
+        # Check if this index_expr has int64 iota ancestor via origin_node tracing
         if current_fx_node:
-            is_for_values_only = V.kernel.current_node._body.index_expr_usage.get(
-                current_fx_node, False
+            # Lazy evaluation: only analyze once when first index_expr is encountered
+            if V.kernel.current_node._body.index_expr_usage is None:
+                from ..loop_body import analyze_index_expr_usage
+
+                # Get IR node data (e.g., Pointwise) which has origin_node
+                ir_data = None
+                if hasattr(V.kernel.current_node, "node"):
+                    scheduler_node = V.kernel.current_node.node
+                    if hasattr(scheduler_node, "data"):
+                        ir_data = scheduler_node.data
+                V.kernel.current_node._body.index_expr_usage = analyze_index_expr_usage(
+                    V.kernel.current_node._body, ir_data
+                )
+
+            usage_info = V.kernel.current_node._body.index_expr_usage.get(
+                current_fx_node, (False, False)
             )
-            if original_dtype != torch.int64 and is_for_values_only:
-                # Check FX nodes for int64 dtype in meta
-                for last_uses in V.graph.user_to_last_uses.values():
-                    for fx_node in last_uses:
-                        val = fx_node.meta.get("val")
-                        if val is not None:
-                            if hasattr(val, "dtype") and val.dtype == torch.int64:
-                                original_dtype = torch.int64
-                                break
-                    if original_dtype == torch.int64:
-                        break
+            is_for_values_only, has_int64_iota = usage_info
+
+            # Set original_dtype if this is a value computation from int64 iota
+            if is_for_values_only and has_int64_iota:
+                original_dtype = torch.int64
 
         # Determine dtype to use based on usage chain and original dtype
         if is_for_values_only and original_dtype == torch.int64:

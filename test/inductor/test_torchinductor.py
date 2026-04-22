@@ -3220,6 +3220,28 @@ class CommonTemplate:
         x = torch.zeros(1, device=self.device)
         self.common(fn, (x,))
 
+    def test_arange9(self):
+        # Reduction operation with int64 values
+        def fn(x):
+            idx = torch.arange(0, 100, device=x.device, dtype=torch.int64)
+            val = idx * int(1e7)  # Large but < INT32_MAX
+            return val.sum()
+
+        self.common(fn, (torch.zeros(1),))
+
+    def test_arange10(self):
+        # Multiple arange operations with different usage patterns
+        def fn(x):
+            idx_for_indexing = torch.arange(0, 10, device=x.device, dtype=torch.int64)
+            idx_for_values = torch.arange(0, 10, device=x.device, dtype=torch.int64)
+
+            indexed = x[idx_for_indexing]
+            computed = idx_for_values * int(1e9)
+
+            return indexed + computed
+
+        self.common(fn, (torch.ones(10),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x

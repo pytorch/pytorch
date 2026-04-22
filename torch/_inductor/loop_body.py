@@ -134,11 +134,9 @@ class LoopBody:
             self._init_with_copy(fn, args, allow_same_symbol_in_index)
         else:
             self._init_with_tracing(fn, args)
+            self.index_expr_usage: dict[torch.fx.Node, tuple[bool, bool]] | None = None
 
         self.indexing = None
-        self.index_expr_usage: dict[torch.fx.Node, bool] = analyze_index_expr_usage(
-            self
-        )
 
     def get_original_num_rdims(self) -> int:
         assert self.has_partial_accumulate
@@ -190,6 +188,7 @@ class LoopBody:
         self.op_counts = other.op_counts
         self.root_block = other.root_block.clone(self)
         self.has_partial_accumulate = other.has_partial_accumulate
+        self.index_expr_usage = other.index_expr_usage
 
         submodules = {**other.submodules}
         submodules.pop("get_index")
@@ -852,24 +851,77 @@ class CaptureIndexing(WrapperHandler):
         self.tracer.create_proxy("output", "output", result, {})
 
 
+def _has_int64_iota_ancestor(dynamo_fx_node: torch.fx.Node | None) -> bool:
+    """
+    Trace backwards through Dynamo FX graph to find int64 iota ancestors.
+
+    Args:
+        dynamo_fx_node: Starting node in Dynamo FX graph (origin_node from IR)
+
+    Returns:
+        True if this node has an int64 iota ancestor that's used for int64 computation
+        (i.e., NOT immediately converted to float via convert_element_type)
+    """
+    if not dynamo_fx_node:
+        return False
+
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
+
+    def trace_backwards(node: torch.fx.Node) -> bool:
+        if node in visited or node.op == "placeholder":
+            return False
+        visited.add(node)
+
+        # Check if this is int64 iota used for int64 computation
+        if node.target == torch.ops.prims.iota.default:
+            val = node.meta.get("val")
+            if val is not None and hasattr(val, "dtype") and val.dtype == torch.int64:
+                # Check if any user is NOT convert_element_type (int64 usage)
+                for user in node.users:
+                    if user.target != torch.ops.prims.convert_element_type.default:
+                        return True
+            return False
+
+        # Recursively check inputs
+        for arg in node.args:
+            if isinstance(arg, torch.fx.Node):
+                if trace_backwards(arg):
+                    return True
+        for kwarg in node.kwargs.values():
+            if isinstance(kwarg, torch.fx.Node):
+                if trace_backwards(kwarg):
+                    return True
+
+        return False
+
+    return trace_backwards(dynamo_fx_node)
+
+
 def analyze_index_expr_usage(
     loop_body: LoopBody,
-) -> dict[torch.fx.Node, bool]:
+    ir_node: Any = None,
+) -> dict[torch.fx.Node, tuple[bool, bool]]:
     """
     Analyze the LoopBody's FX graph to determine which index_expr nodes
-    are used ONLY for values and which are used for indexing.
+    are used ONLY for values and which have int64 origins.
 
     Algorithm:
     1. Scan for terminal operations (load, store, store_reduction)
-    2. Recursively parse search ancestorrs for indexing or values usage.
+    2. Recursively parse search ancestors for indexing or values usage
     3. Stop at barriers
+    4. Trace back through IR origin_node to find int64 iota ancestors
+
+    Args:
+        loop_body: The LoopBody to analyze
+        ir_node: Optional IR node (e.g., Pointwise) with origin_node to Dynamo FX graph
 
     Returns:
-        dict mapping FX node -> is_used_only_for_values
+        dict mapping FX node -> (is_used_only_for_values, has_int64_iota_ancestor)
     """
     # Track what each FX node is used for
     used_for_indexing: OrderedSet[torch.fx.Node] = OrderedSet()
     used_for_values: OrderedSet[torch.fx.Node] = OrderedSet()
+    used_by_comparison: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def mark_ancestors(
         node: torch.fx.Node,
@@ -901,8 +953,14 @@ def analyze_index_expr_usage(
             if isinstance(kwarg, torch.fx.Node):
                 mark_ancestors(kwarg, target_set, visited)
 
-    # Scan graph for terminal operations
     for node in loop_body.root_block.graph.nodes:
+        # These sproduce booleans not values.
+        if node.target in ("lt", "le", "gt", "ge", "eq", "ne"):
+            for arg in node.args:
+                if isinstance(arg, torch.fx.Node):
+                    used_by_comparison.add(arg)
+
+        # Trace terminal operations
         if node.target in ("store", "store_reduction"):
             if len(node.args) > 2 and isinstance(node.args[2], torch.fx.Node):
                 mark_ancestors(node.args[2], used_for_indexing)
@@ -913,16 +971,26 @@ def analyze_index_expr_usage(
             if len(node.args) > 2 and isinstance(node.args[2], torch.fx.Node):
                 mark_ancestors(node.args[2], used_for_indexing)
 
-    # Build result: for each index_expr node, determine usage AND capture original dtype
-    result: dict[torch.fx.Node, bool] = {}
+    # Build result: for each index_expr node, determine usage and int64 iota ancestry
+    result: dict[torch.fx.Node, tuple[bool, bool]] = {}
+
+    origin_fx_node = None
+    if ir_node and hasattr(ir_node, "get_origin_node"):
+        origin_fx_node = ir_node.get_origin_node()
+
     for node in loop_body.root_block.graph.nodes:
         if node.target == "index_expr":
             in_values = node in used_for_values
             in_indexing = node in used_for_indexing
+            in_comparison = node in used_by_comparison
+            is_for_values_only = in_values and not in_indexing and not in_comparison
 
-            # Original dtype lookup not needed - we'll look it up from V.graph during codegen
-            # Just return is_for_values_only
-            is_for_values_only = in_values and not in_indexing
-            result[node] = is_for_values_only
+            has_int64_iota = False
+            if is_for_values_only and origin_fx_node:
+                # The origin_node is for the entire buffer/operation
+                # Trace backwards from it through the Dynamo graph
+                has_int64_iota = _has_int64_iota_ancestor(origin_fx_node)
+
+            result[node] = (is_for_values_only, has_int64_iota)
 
     return result
