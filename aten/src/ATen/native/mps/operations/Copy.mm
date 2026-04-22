@@ -116,13 +116,20 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    c10::Storage dst_storage = dst.storage();
-    id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                         length:alignedLength
-                                                        options:options
-                                                    deallocator:^(void*, NSUInteger) {
-                                                      (void)dst_storage;
-                                                    }];
+    // Only capture on non_blocking - capturing across waitUntilCompleted would
+    // deadlock Metal's completion thread on the GIL.
+    id<MTLBuffer> destBuffer;
+    if (non_blocking) {
+      c10::Storage dst_storage = dst.storage();
+      destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
+                                             length:alignedLength
+                                            options:options
+                                        deallocator:^(void*, NSUInteger) {
+                                          (void)dst_storage;
+                                        }];
+    } else {
+      destBuffer = [device newBufferWithBytesNoCopy:alignedPtr length:alignedLength options:options deallocator:nil];
+    }
     id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
     Tensor maybeCastedSource;
     bool needsBlit = true;
@@ -179,13 +186,19 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    c10::Storage src_storage = src.storage();
-    id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                           length:alignedLength
-                                                          options:options
-                                                      deallocator:^(void*, NSUInteger) {
-                                                        (void)src_storage;
-                                                      }];
+    // See note in copy_from_mps_ above.
+    id<MTLBuffer> sourceBuffer;
+    if (non_blocking) {
+      c10::Storage src_storage = src.storage();
+      sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
+                                               length:alignedLength
+                                              options:options
+                                          deallocator:^(void*, NSUInteger) {
+                                            (void)src_storage;
+                                          }];
+    } else {
+      sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr length:alignedLength options:options deallocator:nil];
+    }
 
     uint64_t profile_id =
         getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
