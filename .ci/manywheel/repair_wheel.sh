@@ -45,6 +45,27 @@ if [[ "${USE_CUDA:-0}" == "1" ]]; then
     FORCE_RPATH="--force-rpath"
 fi
 
+# Build list of extra libraries to bundle for aarch64.
+# CPU builds link against OpenBLAS/libgfortran; CUDA builds link against NVPL.
+# Both use ARM Compute Library (ACL) when available.
+AARCH64_DEPS=()
+if [[ "$ARCH" == "aarch64" ]]; then
+    [[ -f /usr/lib64/libgfortran.so.5 ]] && AARCH64_DEPS+=("/usr/lib64/libgfortran.so.5")
+    if [[ -d /acl/build ]]; then
+        for lib in libarm_compute.so libarm_compute_graph.so; do
+            [[ -f "/acl/build/$lib" ]] && AARCH64_DEPS+=("/acl/build/$lib")
+        done
+    fi
+    if [[ "${USE_CUDA:-0}" == "1" ]]; then
+        for lib in libnvpl_blas_lp64_gomp.so.0 libnvpl_lapack_lp64_gomp.so.0 \
+                   libnvpl_blas_core.so.0 libnvpl_lapack_core.so.0; do
+            [[ -f "/usr/local/lib/$lib" ]] && AARCH64_DEPS+=("/usr/local/lib/$lib")
+        done
+    else
+        [[ -f /opt/OpenBLAS/lib/libopenblas.so.0 ]] && AARCH64_DEPS+=("/opt/OpenBLAS/lib/libopenblas.so.0")
+    fi
+fi
+
 mkdir -p "$OUTPUT_DIR"
 for whl in "$INPUT_DIR"/*.whl; do
     WORK=$(mktemp -d)
@@ -55,6 +76,11 @@ for whl in "$INPUT_DIR"/*.whl; do
     cp "$LIBGOMP_PATH" "$UNPACKED/torch/lib/libgomp.so.1"
     find "$UNPACKED/torch" -maxdepth 1 -name '*.so*' -exec \
         $PATCHELF --replace-needed libgomp.so.1 libgomp.so.1 {} \;
+
+    # Bundle aarch64 BLAS/LAPACK/ACL dependencies
+    for dep in "${AARCH64_DEPS[@]}"; do
+        cp -L "$dep" "$UNPACKED/torch/lib/$(basename "$dep")"
+    done
 
     # Set RPATH on top-level .so files (_C.so etc.)
     find "$UNPACKED/torch" -maxdepth 1 -type f -name '*.so*' | while read sofile; do
