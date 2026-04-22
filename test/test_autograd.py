@@ -16160,37 +16160,89 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(my_count[0], 9)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_save_tensor(self):
-        recomputed_ops = []
-
         def policy_fn(ctx, op, *args, **kwargs):
-            if ctx.is_recompute:
-                recomputed_ops.append(op)
             return CheckpointPolicy.PREFER_RECOMPUTE
 
-        def fn(x):
-            a = torch.sin(x)
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        y = torch.randn(512, 512, device="cuda")
+
+        def fn_save(x, y):
+            a = torch.mm(x, y)
             save_tensor(a)
-            b = torch.cos(a)
-            return b
+            return a.sin().sum()
 
-        x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
-        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
-        out.sum().backward()
+        def fn_no_save(x, y):
+            return torch.mm(x, y).sin().sum()
 
-        self.assertNotIn(torch.ops.aten.sin.default, recomputed_ops)
-        self.assertIn(torch.ops.aten.cos.default, recomputed_ops)
+        def get_bw_flops(f):
+            f().backward()
+            out = f()
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
 
-        x2 = x.detach().clone().requires_grad_(True)
-        torch.cos(torch.sin(x2)).sum().backward()
-        self.assertEqual(x.grad, x2.grad)
+        ctx = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        bw_no_save = get_bw_flops(
+            lambda: checkpoint(fn_no_save, x, y, use_reentrant=False, context_fn=ctx))
+        bw_save = get_bw_flops(
+            lambda: checkpoint(fn_save, x, y, use_reentrant=False, context_fn=ctx))
+
+        # Without save_tensor, mm is recomputed during backward: 2 flops
+        # With save_tensor, mm is cached: 1 flop
+        self.assertEqual(bw_no_save, 2.0)
+        self.assertEqual(bw_save, 1.0)
+
+        # Gradient correctness
+        x3 = torch.randn_like(x, requires_grad=True)
+        out = checkpoint(fn_save, x3, y, use_reentrant=False, context_fn=ctx)
+        out.backward()
+        x4 = x3.detach().clone().requires_grad_(True)
+        torch.mm(x4, y).sin().sum().backward()
+        self.assertEqual(x3.grad, x4.grad)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_save_tensor_noop_outside_context(self):
         x = torch.randn(3, requires_grad=True)
         a = torch.sin(x)
         save_tensor(a)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_sac_saved_tensor_hooks(self):
+        packed = []
+        unpacked = []
+
+        def pack(t):
+            packed.append(t)
+            return t
+
+        def unpack(t):
+            unpacked.append(t)
+            return t
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            return torch.cos(torch.sin(x))
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            out.sum().backward()
+
+        self.assertTrue(len(packed) > 0, "pack hook should have been called")
+        self.assertTrue(len(unpacked) > 0, "unpack hook should have been called")
+
+        x2 = x.detach().clone().requires_grad_(True)
+        torch.cos(torch.sin(x2)).sum().backward()
+        self.assertEqual(x.grad, x2.grad)
 
 
 class TestAutogradMultipleDispatch(TestCase):
