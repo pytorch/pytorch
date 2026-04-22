@@ -2818,7 +2818,9 @@ class TestMaxAutotune(TestCase):
 
             addmm_size, _ = bias_meta["addmm"]
             self.assertEqual(
-                len(addmm_size), 1, f"Expected addmm bias input rank 1, got {addmm_size}"
+                len(addmm_size),
+                1,
+                f"Expected addmm bias input rank 1, got {addmm_size}",
             )
 
             bias_addmm_size, bias_addmm_stride = bias_meta["bias_addmm"]
