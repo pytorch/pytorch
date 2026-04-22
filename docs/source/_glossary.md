@@ -17,8 +17,8 @@ Native Operation
    An operation that comes natively with PyTorch ATen, for example `aten::matmul`.
 
 Custom Operation
-   An Operation that is defined by users and is usually a {term}`Composite Operation`.
-   For example, this [tutorial](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html
+   An Operation that is defined by users and is usually a {term}`Compound Operation`.
+   For example, this [tutorial](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
    details how to create Custom Operations.
 
 Kernel
@@ -35,5 +35,5 @@ JIT
 
 Tracing
    In PyTorch, tracing is a way to convert a PyTorch model (or function) into a static computation graph by running it once (or a few times) with example inputs and recording (“tracing”) the tensor operations that actually execute.
-
+gi
 ```
