@@ -14155,6 +14155,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
     @slowTest
     def test_fuse_large_params(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("Metal has a 31-buffer argument limit per kernel")
+
         def pt2_optimizer_step(optimizer):
             @torch.compile()
             def f():
