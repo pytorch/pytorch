@@ -1,1 +1,4 @@
-from . import rmsnorm_impl  # noqa: F401
+from .rmsnorm_impl import register_rmsnorm_overrides
+
+
+register_rmsnorm_overrides()

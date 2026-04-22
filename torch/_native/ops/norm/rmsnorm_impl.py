@@ -174,6 +174,3 @@ def register_rmsnorm_overrides() -> None:
 
     cu.register_op_override("aten", "_fused_rms_norm", "CUDA", fwd_impl)
     cu.register_op_override("aten", "_fused_rms_norm_backward", "CUDA", bwd_impl)
-
-
-register_rmsnorm_overrides()
