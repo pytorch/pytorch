@@ -1535,14 +1535,12 @@ auto Engine::ready_queue(
     return cpu_ready_queue;
   } else {
     c10::DeviceIndex device_index = device.index();
+    TORCH_INTERNAL_ASSERT(
+        device_index >= 0, "Expected non-negative device index");
 
     ensure_device_queues_allocated(device_index + 1);
     ensure_device_thread_started(device_index);
 
-    TORCH_INTERNAL_ASSERT(
-        0 <= device_index &&
-        device_index <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device_index);
   }
@@ -1555,13 +1553,12 @@ auto Engine::ready_queue_by_index(
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    TORCH_INTERNAL_ASSERT(
+        device_index >= 0, "Expected non-negative device index");
+
     ensure_device_queues_allocated(device_index + 1);
     ensure_device_thread_started(device_index);
 
-    TORCH_INTERNAL_ASSERT(
-        0 <= device_index &&
-        device_index <
-            static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     return device_ready_queues_.at(device_index);
   }
 }
@@ -1607,23 +1604,25 @@ void Engine::ensure_device_queues_allocated(c10::DeviceIndex required_size) {
 
   for (c10::DeviceIndex i = old_size; i < new_size; ++i) {
     device_ready_queues_[i] = std::make_shared<ReadyQueue>();
+    device_thread_started_[i].store(false, std::memory_order_relaxed);
+    device_thread_ready_[i].store(false, std::memory_order_relaxed);
   }
 
   device_queues_size_.store(new_size, std::memory_order_release);
 }
 
 void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 &&
+      device_index < device_queues_size_.load(std::memory_order_acquire),
+      "Device index out of bounds");
+
   if (device_thread_ready_[device_index].load(std::memory_order_acquire)) {
     return;
   }
 
   {
     std::lock_guard<std::mutex> lock(device_queues_init_mutex_);
-
-    TORCH_INTERNAL_ASSERT(
-        device_index >= 0 &&
-        device_index < static_cast<c10::DeviceIndex>(device_thread_ready_.size()),
-        "Device index out of bounds");
 
     if (device_thread_ready_[device_index].load(std::memory_order_acquire)) {
       return;
