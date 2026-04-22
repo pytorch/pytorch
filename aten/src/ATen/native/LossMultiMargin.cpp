@@ -221,6 +221,8 @@ void multi_margin_loss_backward_out_cpu_template(
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
   multi_margin_loss_shape_check(nframe, dim, ndims, input, target, weight);
+  multi_margin_loss_backward_grad_output_shape_check(
+      grad_output, target, nframe, reduction);
   grad_input.resize_as_(input);
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -66,6 +67,30 @@ namespace at::native {
           "inconsistent weight size, expected ", dim, " but got ",
           weight->sizes());
     }
+}
+
+inline void multi_margin_loss_backward_grad_output_shape_check(
+    const Tensor& grad_output,
+    const Tensor& target,
+    int64_t nframe,
+    int64_t reduction) {
+  if (reduction != at::Reduction::None) {
+    return;
+  }
+  // The backward kernels index grad_output per sample, so it must match
+  // the forward output shape: [nframe] for a 1-D target, [] for a 0-D one.
+  if (target.dim() > 0) {
+    TORCH_CHECK(
+        grad_output.dim() == 1 && grad_output.size(0) == nframe,
+        "multi_margin_loss_backward: expected grad_output to have shape [",
+        nframe, "] when reduction='none', but got ", grad_output.sizes());
+  } else {
+    TORCH_CHECK(
+        grad_output.dim() == 0,
+        "multi_margin_loss_backward: expected grad_output to be a 0-D scalar "
+        "when reduction='none' with a 0-D target, but got ",
+        grad_output.sizes());
+  }
 }
 
 } // namespace at::native
