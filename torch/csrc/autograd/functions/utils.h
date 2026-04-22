@@ -15,8 +15,7 @@
 
 namespace torch::autograd {
 
-using function_constructor =
-    std::function<c10::intrusive_ptr<Node>(edge_list&&)>;
+using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
 
 /**
  * Wraps the tensor outputs in variables and creates the grad_fn and sets the
@@ -66,7 +65,7 @@ inline bool compute_requires_grad(Args&&... args) {
 
 inline void set_history(
     const at::Tensor& variable,
-    const c10::intrusive_ptr<Node>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   TORCH_CHECK(grad_fn != nullptr);
   if (variable.defined()) {
     // If the codegen triggers this, you most likely want to add your newly
@@ -85,7 +84,7 @@ inline void set_history(
 
 inline void set_history(
     const std::vector<Variable>& variables,
-    const c10::intrusive_ptr<Node>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }
