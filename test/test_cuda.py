@@ -2189,7 +2189,7 @@ torch.cuda.synchronize()
                     # thread 1 calls cublasSetStream()
                     # thread 0 launches its raw gemm, which it thinks is in
                     #          its own stream, but is actually in thread 1's stream.
-                    # thread 0 enqueues its div_, which IS is its own stream,
+                    # thread 0 enqueues its div_, which IS in its own stream,
                     #          but actually now races with its gemm.
                     results[t] = torch.mm(results[t], weight)
                     results[t].div_(float(size))
@@ -2245,7 +2245,7 @@ torch.cuda.synchronize()
                         # thread 1 calls setCuDNNStreamToCurrent()
                         # thread 0 launches its raw convolution, which it thinks is in
                         #          its own stream, but is actually in thread 1's stream.
-                        # thread 0 enqueues its div_, which IS is its own stream,
+                        # thread 0 enqueues its div_, which IS in its own stream,
                         #          but now races with its convolution.
                         results[t] = torch.nn.functional.conv2d(
                             results[t], weight, padding=0
@@ -2305,7 +2305,7 @@ torch.cuda.synchronize()
                     # thread 1 calls cublasSetStream()
                     # thread 0 launches its raw gemm, which it thinks is in
                     #          its own stream, but is actually in thread 1's stream.
-                    # thread 0 enqueues its div_, which IS is its own stream,
+                    # thread 0 enqueues its div_, which IS in its own stream,
                     #          but actually now races with its gemm.
                     results[t] = weight.mm(results[t])
                     results[t].div_(float(size))
