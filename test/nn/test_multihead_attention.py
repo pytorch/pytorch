@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
+    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -951,6 +952,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, query, query)
 
     @dtypes(torch.double)
+    @xfailIfNoAcceleratorTriton
     def test_fast_path_check_with_mask_does_not_break_in_compile(self, device, dtype):
         # Test TransformerEncoder fast path determination with src_key_padding_mask set.
         # Specifically, ensure the mask left-align check doesn't fail in torch.compile.

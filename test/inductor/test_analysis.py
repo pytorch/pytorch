@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_XPU,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -289,6 +290,7 @@ class TestAnalysis(TestCase):
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_diff(self, device, dtype):
         """
         diff, testing out the nruns feature too.
@@ -403,6 +405,7 @@ class TestAnalysis(TestCase):
             (True, "TRITON"),
         ],
     )
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
@@ -556,6 +559,7 @@ class TestAnalysis(TestCase):
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_combine_profiles(self, device, dtype):
         """
         Test combining multiple profiles into a single profile.

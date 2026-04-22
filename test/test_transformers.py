@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
+    xfailIfNoAcceleratorTriton,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -2992,6 +2993,7 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
@@ -3029,6 +3031,7 @@ class TestSDPACudaOnly(NNTestCase):
             for use_compile in [False, True]:
                 test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_cudnn_attention_broadcast_stride_zero(self, device, dtype):
@@ -3091,6 +3094,7 @@ class TestSDPACudaOnly(NNTestCase):
         out = fn(q, k, v)
         self.assertEqual(out.shape, (B, H, S, D_v))
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):
         q = torch.randn(2, 8, 1024, 128, dtype=torch.half, device='cuda', requires_grad=True)
@@ -3623,6 +3627,7 @@ class TestSDPACudaOnly(NNTestCase):
                 if torch._fused_sdp_choice(query, key, value) != SDPBackend.EFFICIENT_ATTENTION.value:
                     raise AssertionError("expected EFFICIENT_ATTENTION backend")
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")

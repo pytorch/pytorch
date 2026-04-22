@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -3676,6 +3677,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
