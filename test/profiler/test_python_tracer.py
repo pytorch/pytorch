@@ -30,7 +30,7 @@ class TestPythonTracer(TestCase):
         names = ["Alice", "Bob"]
 
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.PrivateUse1], with_stack=True
         ) as prof:
             sorted(names, key=get_key)
 
@@ -56,7 +56,7 @@ class TestPythonTracer(TestCase):
         from sys import monitoring
 
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.PrivateUse1], with_stack=True
         ):
             name = monitoring.get_tool(2)
             if vi.micro < 5:
