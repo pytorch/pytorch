@@ -421,9 +421,9 @@ class TestFullyShardHSDPMemory(FSDPTest):
         #   - 1x unsharded bf16 block params (prefetched all-gather for the
         #     next block's backward compute)
         #   - 2x fp32 reduce-scatter input (current block + previous block
-        #     still held in reduce_scatter_states)
+        #     still held in comm_ctx.reduce_scatter_buffer)
         #   - 2x fp32 all-reduce output (current block + previous block's
-        #     orphaned buffer held by comm_ctx.all_reduce_state).
+        #     orphaned buffer held by comm_ctx.all_reduce_buffer).
         #     THIS is the term the fix bounds at 2; the bug made it O(n_layers).
         per_layer_fp32_mb = block_numel * 4 / dp_shard_size / 1e6
         expected_peak_mb = (
