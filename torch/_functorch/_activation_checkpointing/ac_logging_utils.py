@@ -65,6 +65,12 @@ def create_activation_checkpointing_logging_structure_payload(
     normalized_memories_banned_nodes: list[float],
     runtimes_banned_nodes: list[float],
     min_cut_saved_values: list[Node],
+    memory_budget: float,
+    min_act_size: float,
+    max_act_size: float,
+    saved_values_act_size: float,
+    more_aggressive_saved_values_mem_ratio: float,
+    aggressive_recomputation_saved_values_mem_ratio: float,
 ) -> dict[str, Any]:
     """
     Creates a structured payload for logging activation checkpointing information.
@@ -83,6 +89,12 @@ def create_activation_checkpointing_logging_structure_payload(
         runtimes_banned_nodes: Runtime values for banned nodes, used as input to the
             knapsack algorithm.
         min_cut_saved_values: List of nodes saved by the min-cut algorithm.
+        memory_budget: The memory budget ratio (0 to 1) used for activation checkpointing.
+        min_act_size: Minimum activation size in GB (size when saving only inputs).
+        max_act_size: Maximum activation size in GB (size when saving all runtime-optimized values).
+        saved_values_act_size: Estimated activation size in GB for the saved values.
+        more_aggressive_saved_values_mem_ratio: Memory ratio for more aggressive recomputation strategy.
+        aggressive_recomputation_saved_values_mem_ratio: Memory ratio for fully aggressive recomputation strategy.
 
     Returns:
         A dictionary containing structured logging information for activation checkpointing.
@@ -104,6 +116,12 @@ def create_activation_checkpointing_logging_structure_payload(
         "Knapsack Input Memories": normalized_memories_banned_nodes,
         "Knapsack Input Runtimes": runtimes_banned_nodes,
         "Min Cut Solution Saved Values": [node.name for node in min_cut_saved_values],
+        "Memory Budget": memory_budget,
+        "Min Activation Size (GB)": min_act_size,
+        "Max Activation Size (GB)": max_act_size,
+        "Saved Values Activation Size (GB)": saved_values_act_size,
+        "More Aggressive Saved Values Mem Ratio": more_aggressive_saved_values_mem_ratio,
+        "Aggressive Recomputation Saved Values Mem Ratio": aggressive_recomputation_saved_values_mem_ratio,
     }
     return activation_checkpointing_logging_structure_payload
 
@@ -118,6 +136,12 @@ def create_structured_trace_for_min_cut_info(
     normalized_memories_banned_nodes: list[float],
     runtimes_banned_nodes: list[float],
     min_cut_saved_values: list[Node],
+    memory_budget: float,
+    min_act_size: float,
+    max_act_size: float,
+    saved_values_act_size: float,
+    more_aggressive_saved_values_mem_ratio: float,
+    aggressive_recomputation_saved_values_mem_ratio: float,
 ) -> None:
     """
     Creates a structured trace for minimum cut information in the graph.
@@ -133,6 +157,12 @@ def create_structured_trace_for_min_cut_info(
             (typically scaled between 0 and 1 for relative comparison).
         runtimes_banned_nodes: Runtime costs associated with each banned node.
         min_cut_saved_values: Nodes that are saved as part of the minimum cut solution.
+        memory_budget: The memory budget ratio (0 to 1) used for activation checkpointing.
+        min_act_size: Minimum activation size in GB (size when saving only inputs).
+        max_act_size: Maximum activation size in GB (size when saving all runtime-optimized values).
+        saved_values_act_size: Estimated activation size in GB for the saved values.
+        more_aggressive_saved_values_mem_ratio: Memory ratio for more aggressive recomputation strategy.
+        aggressive_recomputation_saved_values_mem_ratio: Memory ratio for fully aggressive recomputation strategy.
     """
     # Create a dictionary to store recomputable node information
     recomputable_node_info: dict[str, int] = {
@@ -178,6 +208,12 @@ def create_structured_trace_for_min_cut_info(
             normalized_memories_banned_nodes=normalized_memories_banned_nodes,
             runtimes_banned_nodes=runtimes_banned_nodes,
             min_cut_saved_values=min_cut_saved_values,
+            memory_budget=memory_budget,
+            min_act_size=min_act_size,
+            max_act_size=max_act_size,
+            saved_values_act_size=saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=aggressive_recomputation_saved_values_mem_ratio,
         )
     )
 
