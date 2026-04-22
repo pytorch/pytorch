@@ -1280,6 +1280,47 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_grad_layout_enforcement_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_grad_layout_enforcement_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_grad_layout_enforcement_enabled");
+  }
+  auto enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_grad_layout_enforcement_enabled(
+      enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_grad_layout_enforcement_enabled(
+    PyObject* self,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state()
+          .get_grad_layout_enforcement_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(obj)) {
@@ -1693,6 +1734,14 @@ static PyMethodDef methods[] = {
     {"_is_view_replay_enabled", is_view_replay_enabled, METH_NOARGS, nullptr},
     {"_set_view_replay_enabled",
      castPyCFunctionWithKeywords(set_view_replay_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_grad_layout_enforcement_enabled",
+     is_grad_layout_enforcement_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_grad_layout_enforcement_enabled",
+     castPyCFunctionWithKeywords(set_grad_layout_enforcement_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_set_graph_exec_group", set_graph_exec_group, METH_O, nullptr},
