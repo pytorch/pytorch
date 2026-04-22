@@ -41,7 +41,6 @@ Non-Leaf Operation
 Device Kernel
    Device-specific kernel of a {term}`Leaf Operation`.
 
-   Opposed to {term}`Device Kernels<Device Kernel>`, Compound kernels are usually
    device-agnostic and belong to {term}`Compound Operations<Compound Operation>`.
 
 JIT
