@@ -423,8 +423,6 @@ class BaseListVariable(VariableTracker):
                 ],
                 {},
             )
-        elif name == "__iter__":
-            return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -686,6 +684,17 @@ class RangeVariable(BaseListVariable):
             key = key.nb_index_impl(tx)
         return self.getitem_const(tx, key)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
+        if not all(var.is_python_constant() for var in self.items):
+            # Can't represent a `range_iterator` without well defined bounds
+            return variables.misc.DelayGraphBreakVariable(
+                msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
+            )
+        return RangeIteratorVariable(
+            self.start(), self.stop(), self.step(), self.range_length()
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -695,16 +704,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__iter__":
-            if not all(var.is_python_constant() for var in self.items):
-                # Can't represent a `range_iterator` without well defined bounds
-                return variables.misc.DelayGraphBreakVariable(
-                    msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
-                )
-            return RangeIteratorVariable(
-                self.start(), self.stop(), self.step(), self.range_length()
-            )
-        elif name in ("count", "__contains__"):
+        if name in ("count", "__contains__"):
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
             x = args[0].as_python_constant()
@@ -1007,6 +1007,10 @@ class ListVariable(CommonListMethodsVariable):
             # Non-self-referential: use simple codegen
             codegen.foreach(self.items)
             codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
+        return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
     def call_method(
         self,
@@ -1342,6 +1346,13 @@ class DequeVariable(CommonListMethodsVariable):
             return VariableTracker.build(tx, name in collections.deque.__dict__)
         return super().call_obj_hasattr(tx, name)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
+        # TODO(guilhermeleobas): Replace this by a proper DequeIteratorVariable
+        # that keeps track of the maxlen and doesn't allow iterating over more
+        # items than maxlen.
+        return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
 
 class TupleVariable(BaseListVariable):
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
@@ -1355,6 +1366,10 @@ class TupleVariable(BaseListVariable):
 
     def debug_repr(self) -> str:
         return self.debug_repr_helper("(", ")")
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
+        return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
@@ -1739,11 +1754,6 @@ class RangeIteratorVariable(IteratorVariable):
     # PyRangeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L896
     _cpython_type = type(iter(range(0)))
 
-    # only needed for isinstance(..., range_iterator) to work
-    _nonvar_fields = {
-        "iter_obj",
-    }
-
     def __init__(
         self, start: int, stop: int, step: int, len_: int, **kwargs: Any
     ) -> None:
@@ -1752,6 +1762,10 @@ class RangeIteratorVariable(IteratorVariable):
         self.stop = stop
         self.step = step
         self.len = len_
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        """Range iterators are their own iterator."""
+        return self
 
     def call_method(
         self,
@@ -1762,8 +1776,6 @@ class RangeIteratorVariable(IteratorVariable):
     ) -> VariableTracker:
         if name == "__next__":
             return self.next_variable(tx)
-        elif name == "__iter__":
-            return self
         return super().call_method(tx, name, args, kwargs)
 
     def call_obj_hasattr(

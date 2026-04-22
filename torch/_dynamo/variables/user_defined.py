@@ -568,6 +568,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.len_impl(tx)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__iter__")
+        if m:
+            source = self.source and AttrSource(self.source, "__iter__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        try:
+            items = self.unpack_var_sequence(tx)
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
+        except NotImplementedError:
+            pass
+        return super().tp_iter_impl(tx)
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -1525,6 +1541,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args,
             kwargs,
         )
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__iter__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.tp_iter_impl(tx)
+
+        if isinstance(method, types.FunctionType):
+            source_fn = self.source and self.get_source_by_walking_mro(tx, "__iter__")
+            return variables.UserMethodVariable(
+                method,
+                self,
+                source_fn=source_fn,
+                source=self.source,
+            ).call_function(tx, [], {})
+        return super().tp_iter_impl(tx)
 
     @staticmethod
     @functools.cache
