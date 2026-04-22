@@ -460,12 +460,17 @@ def can_auto_functionalize(
         # Skip schema returns -> None
         return True
     if isinstance(op, OpOverload):
-        # The returns of OpOverload must not alias anything
-        for ret in schema.returns:
-            if ret.alias_info is None and type(ret.type) is torch.TensorType:
-                continue
-            # Not yet supported: List[Tensor] return.
-            return False
+        if torch._library.utils.is_out(op):
+            # Out ops have aliased returns (returns alias the mutable args).
+            # This is fine because the mutable args are write-only output buffers.
+            pass
+        else:
+            # The returns of OpOverload must not alias anything
+            for ret in schema.returns:
+                if ret.alias_info is None and type(ret.type) is torch.TensorType:
+                    continue
+                # Not yet supported: List[Tensor] return.
+                return False
         if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
             return False
     return True
@@ -675,11 +680,74 @@ def do_auto_functionalize_v2(
         else:
             normalized_kwargs[arg.name] = arg.default_value
 
-    # List of the name of args that get mutated (according to the schema)
+    if isinstance(op, OpOverload) and torch._library.utils.is_out(op):
+        return _do_auto_functionalize_v2_for_out_operator(
+            ctx, op, schema, normalized_kwargs
+        )
+    return _do_auto_functionalize_v2_for_generic_mutable_operator(
+        ctx, op, schema, normalized_kwargs
+    )
+
+
+def _do_auto_functionalize_v2_for_out_operator(
+    ctx: Any,
+    op: OpOverload,
+    schema: Any,
+    normalized_kwargs: dict[str, Any],
+) -> Any:
+    """Handle functionalization for out= operators.
+
+    Out= operators have write-only mutable args. These are not inputs to
+    auto_functionalized_v2; we encode their tensor properties so the dense
+    impl can create empty tensors.
+    """
+    mutable_args_names, _ = get_mutable_args_from_schema(schema)
+
+    # Save references to the original FunctionalTensors for post-call sync
+    out_arg_originals = [normalized_kwargs[name] for name in mutable_args_names]
+
+    # Encode tensor properties and remove the actual out tensors from kwargs
+    for arg_name in mutable_args_names:
+        arg = normalized_kwargs[arg_name]
+        normalized_kwargs[f"_{arg_name}_size"] = arg.size()
+        normalized_kwargs[f"_{arg_name}_stride"] = arg.stride()
+        normalized_kwargs[f"_{arg_name}_dtype"] = arg.dtype
+        normalized_kwargs[f"_{arg_name}_device"] = arg.device
+        del normalized_kwargs[arg_name]
+
+    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=[])
+
+    with ctx.redispatch_to_next():
+        unwrapped_outs = auto_functionalized_v2(
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
+        )
+
+    # For out= ops, the functional HOP returns exactly the out tensors.
+    # auto_functionalized_v2 returns a bare tensor for single return,
+    # tuple for multiple.
+    results = unwrapped_outs if isinstance(unwrapped_outs, tuple) else (unwrapped_outs,)
+    for orig_arg, result in zip(out_arg_originals, results, strict=True):
+        ctx.replace(orig_arg, result)
+        ctx.commit_update(orig_arg)
+        ctx.sync(orig_arg)
+
+    return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+
+
+def _do_auto_functionalize_v2_for_generic_mutable_operator(
+    ctx: Any,
+    op: Any,
+    schema: Any,
+    normalized_kwargs: dict[str, Any],
+) -> Any:
+    """Handle functionalization for generic mutable operators via the
+    auto_functionalized_v2 HOP."""
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
 
     # A list of all bases of mutable args without duplication
-    all_bases = []
+    all_bases: list[Any] = []
     all_bases_addresses: list[int] = []
 
     # Map arg_name to the index of its base in all_bases.
@@ -922,11 +990,16 @@ def auto_functionalized_v2_dense(
             raise AssertionError(f"Expected HopSchema, got {type(schema)}")
         _callable_op = HopInstance(_mutable_op, schema)
 
+    _is_out = isinstance(_mutable_op, OpOverload) and torch._library.utils.is_out(
+        _mutable_op
+    )
+
     op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
         schema,
         kwargs,
         _all_bases,
         _only_clone_these_bases,
+        _is_out,
     )
 
     out = call_op(
@@ -935,6 +1008,9 @@ def auto_functionalized_v2_dense(
         op_kwargs_new,
     )
 
+    if _is_out:
+        return out  # type: ignore[return-value]
+
     if isinstance(out, tuple):
         return (*out, *all_bases_new)  # type: ignore[return-value]
     else:
@@ -942,9 +1018,25 @@ def auto_functionalized_v2_dense(
 
 
 def _generate_new_op_kwargs_from_bases(
-    schema, kwargs, all_bases, _only_clone_these_bases
+    schema, kwargs, all_bases, _only_clone_these_bases, _is_out
 ):
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
+
+    if _is_out:
+        # For out= ops, _all_bases is empty. Create empty tensors from the
+        # metadata that was encoded by _do_auto_functionalize_v2_for_out_operator.
+        new_kwargs = dict(**kwargs)
+        created_out_tensors = []
+        for arg_name in mutable_args_names:
+            size = new_kwargs.pop(f"_{arg_name}_size")
+            stride = new_kwargs.pop(f"_{arg_name}_stride")
+            dtype = new_kwargs.pop(f"_{arg_name}_dtype")
+            device = new_kwargs.pop(f"_{arg_name}_device")
+            t = torch.empty_strided(size, stride, dtype=dtype, device=device)
+            new_kwargs[arg_name] = t
+            created_out_tensors.append(t)
+        return new_kwargs, created_out_tensors
+
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
     )
@@ -1031,6 +1123,7 @@ def auto_functionalized_v2_proxy(
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},
             all_bases,
             _only_clone_these_bases,
+            _is_out=False,
         )
 
         _, materialized_kwargs = materialize_callable_in_args(
