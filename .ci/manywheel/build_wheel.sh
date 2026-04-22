@@ -11,19 +11,18 @@ set -ex
 OUTPUT_DIR="$1"
 
 ARCH=$(uname -m)
+echo "build_wheel.sh: ARCH=$ARCH GPU_ARCH_TYPE=${GPU_ARCH_TYPE:-unset} DESIRED_CUDA=${DESIRED_CUDA:-unset}"
 
-# MKL cmake paths (x86_64 only)
-if [[ -d /opt/intel/include ]]; then
-    export CMAKE_INCLUDE_PATH="/opt/intel/include"
-    export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib"
-fi
-
-# aarch64: use NVPL (CUDA) or OpenBLAS (CPU) for BLAS/LAPACK and wire ACL
-# into oneDNN. Without an explicit BLAS choice, CMake falls back to searching
-# for MKL (x86-only) and oneDNN is built without ARM Compute Library
-# acceleration. Exported here so they land in the same shell as the cmake
-# invocation below.
-if [[ "$ARCH" == "aarch64" ]]; then
+if [[ "$ARCH" == "x86_64" ]]; then
+    # MKL is installed at /opt/intel by .ci/docker/common/install_mkl.sh
+    if [[ -d /opt/intel/include ]]; then
+        export CMAKE_INCLUDE_PATH="/opt/intel/include"
+        export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib"
+    fi
+elif [[ "$ARCH" == "aarch64" ]]; then
+    # Use NVPL (CUDA) or OpenBLAS (CPU) for BLAS/LAPACK and wire ACL into
+    # oneDNN. Without an explicit BLAS choice, CMake falls back to searching
+    # for MKL (x86-only) and oneDNN is built without ACL acceleration.
     if [[ ! -d /acl ]]; then
         echo "ERROR: ARM Compute Library not found at /acl"
         exit 1
