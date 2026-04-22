@@ -805,8 +805,6 @@ class AsyncCompile:
         _compile_end()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
-        from concurrent.futures import TimeoutError as _FutTimeoutError
-
         kernels = {
             key: value
             for key, value in scope.items()
@@ -825,33 +823,6 @@ class AsyncCompile:
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
-            # Best-effort bound on compile-worker hangs: if the underlying
-            # concurrent.futures.Future has not resolved within
-            # compile_worker_wait_timeout, raise with a diagnostic instead of
-            # stalling until the outer CI timeout (30 min) kills the job. We
-            # only bound actual cross-process futures; CodeCacheFuture
-            # subclasses without a .future attribute are synchronous.
-            underlying: Future | None = None
-            if isinstance(result, Future):
-                underlying = result
-            else:
-                underlying = getattr(result, "future", None)
-                if not isinstance(underlying, Future):
-                    underlying = None
-            if underlying is not None and wait_timeout > 0:
-                try:
-                    underlying.result(timeout=wait_timeout)
-                except _FutTimeoutError as e:
-                    raise RuntimeError(
-                        f"Inductor compile-worker future for {key!r} did not "
-                        f"complete within {wait_timeout}s; the compile-worker "
-                        "subprocess pool may have deadlocked. Python stacks "
-                        "from a SIGUSR1 dump should be earlier in the log. "
-                        "Override with TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT."
-                    ) from e
-                except BrokenProcessPool:
-                    # Fall through to the outer handler for a consistent message.
-                    pass
             try:
                 kernel = result.result(timeout=wait_timeout)
                 scope[key] = kernel
