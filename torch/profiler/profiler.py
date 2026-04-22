@@ -250,6 +250,12 @@ class _KinetoProfile:
             import torch._inductor.config as inductor_config
 
             self.has_cudagraphs = inductor_config.triton.cudagraphs
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle. "
+                "Only events from the current cycle will be reported. "
+                "To keep events across cycles, set acc_events=True."
+            )
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -267,12 +273,6 @@ class _KinetoProfile:
                 activity_filters=self.activity_filters
                 if self.activity_filters
                 else None,
-            )
-        if (self.profiler is not None) and (not self.acc_events):
-            _warn_once(
-                "Warning: Profiler clears events at the end of each cycle."
-                "Only events from the current cycle will be reported."
-                "To keep events across cycles, set acc_events=True."
             )
         self.profiler._prepare_trace()
 
