@@ -1084,11 +1084,16 @@ Operator Tags
 .. This module is only used internally for ROCm builds.
 .. py:module:: torch.utils.hipify
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
 .. py:module:: torch.utils.model_dump
 
 .. currentmodule:: torch.utils.model_dump
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_inline_skeleton
+    get_model_info
 
 .. py:module:: torch.utils.viz
 .. py:module:: torch.quasirandom

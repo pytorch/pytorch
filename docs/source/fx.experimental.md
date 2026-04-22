@@ -312,6 +312,7 @@ These APIs are experimental and subject to change without notice.
     transform_to_z3
     transform_var
     evaluate_conditional_with_constraints
+    iterate_till_fixed_point
 ```
 
 ## torch.fx.experimental.migrate_gradual_types.constraint
@@ -414,8 +415,26 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     apply_padding
+    broadcast_dim
     calc_last_two_dims
     create_equality_constraints_for_broadcasting
+    gen_all_reshape_possibilities
+    gen_broadcasting_constraints
+    gen_consistency_constraints
+    gen_greatest_upper_bound
+    gen_lists_of_dims
+    generate_all_broadcasting_possibilities_no_padding
+    generate_all_int_dyn_dim_possibilities
+    generate_binconstraint_d
+    generate_binconstraint_t
+    generate_broadcasting
+    generate_calc_maxpool
+    generate_calc_product
+    generate_conj
+    generate_d_gub
+    generate_disj
+    generate_gub
+    generate_reshape
     is_target_div_by_dim
     no_broadcast_dim_with_index
     register_transformation_rule
@@ -749,6 +768,7 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     check_for_type_equality
+    convert_eq
     infer_symbolic_types
     infer_symbolic_types_single_pass
     substitute_all_types
