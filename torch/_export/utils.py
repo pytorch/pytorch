@@ -216,6 +216,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
 
 
 def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch.compiler.is_exporting():
+        return None
+
     if not torch._C._is_torch_function_mode_enabled():
         return None
 
