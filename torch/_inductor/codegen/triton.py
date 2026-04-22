@@ -7067,6 +7067,8 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 
     # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
     def codegen(self) -> str:
+        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+
         with self:
             index_vars = self.split_and_set_ranges(
                 self.scheduler_node.fused_epilogue.get_ranges()
@@ -7098,10 +7100,11 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         # then, we need to inject the additional `load` and `compute` lines generated when we `codegen` the epilogue nodes
 
         src_lines = src_with_store_replaced.splitlines()
+        kernel_stores = identify_triton_stores(src_with_store_replaced)
 
         # identify the store again, because the previous parse-modify-unparse could've change its location
         # python ast lineno is 1-indexed
-        store_line_index = self.kernel_stores.stores[0].store_node.lineno - 1
+        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
 
         indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
 
