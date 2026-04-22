@@ -4198,21 +4198,6 @@ Tensor linalg_qr_backward(
 }
 
 
-// Return the inverted permutation vector P^-1 = P^T, dimensions P: (*batch, n)
-at::Tensor invertP(const at::Tensor& P) {
-    TORCH_CHECK(P.scalar_type() == at::kLong, "P must be int64 for indexing.");
-    auto Pt = at::zeros_like(P);
-    int64_t ndim = P.dim();
-    int64_t n = P.size(-1);
-    // Build shape [1, 1, ..., 1, n] same number of dims as P, but all batch dims are 1
-    std::vector<int64_t> idx_shape(ndim, 1);
-    idx_shape[ndim - 1] = n;
-    auto idx = at::arange(n, P.options());  // idx: shape [n]
-    auto idx_exp = idx.view(idx_shape).expand_as(P);  // reshape to [1, 1, ..., 1, n]
-    Pt.scatter_(-1, P, idx_exp);  // Scatter: Pt[..., P[..., j]] = j
-    return Pt;
-}
-
 Tensor linalg_qr_piv_backward(
     const Tensor& gQ,
     const Tensor& gR,
@@ -4242,11 +4227,14 @@ Tensor linalg_qr_piv_backward(
       "mode='complete' and nrows > ncols.");
 
     auto P_dense = P.contiguous();
-    auto Pt = invertP(P_dense);
     auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
-    auto Pt_expanded = Pt.toType(at::kLong).unsqueeze(-2).expand_as(gA);   // (*batch, m, n)
-    return gA.take_along_dim(Pt_expanded, -1);
+    auto P_expanded = P_dense.toType(at::kLong).unsqueeze(-2).expand_as(gA);
+    auto out = at::empty_like(gA);
+    out.scatter_(-1, P_expanded, gA);
+
+    return out;
 }
+
 
 std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
     const Tensor& dA,
