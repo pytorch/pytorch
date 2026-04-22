@@ -28,7 +28,6 @@ user_guide/index
 pytorch-api
 notes
 community/index
-_glossary
 ```
 
 ## Indices and tables

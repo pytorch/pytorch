@@ -17,25 +17,18 @@ Native Operation
    An operation that comes natively with PyTorch ATen, for example `aten::matmul`.
 
 Custom Operation
-   An Operation that is defined by users and is usually a {term}`Compound Operation`.
+   An Operation that is defined by users and is usually a {term}`Composite Operation`.
    For example, this [tutorial](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html
    details how to create Custom Operations.
 
 Kernel
-   Implementation of a PyTorch operation, specifying what should be done when an
-   operation executes.
+    Refers to the "on device" implementation of a given operation. Reffering to the part of the Operation that actually computes the result.
 
 Composite Operation
    A Composite Operation is composed of other operations. Its kernel is usually
    device-agnostic. There are two variants of this: Composite Implicit Autograd, where no
    autograd formula is required as it is derived implicitly from the operations composing this
    one. And Composite Explicit Autograd, where there is an explicit autograd formula
-
-Non-Leaf Operation
-   Same as {term}`Composite Operation`.
-
-Device Kernel
-   Device-specific kernel of a {term}`Leaf Operation`.
 
 JIT
    Just-In-Time Compilation.
