@@ -221,7 +221,9 @@ class CppThreadTest(TestCase):
         )
 
 
-instantiate_device_type_tests(CppThreadTest, globals(), only_for=("cuda", "xpu"))
+instantiate_device_type_tests(
+    CppThreadTest, globals(), only_for=("cuda", "xpu", "privateuse1")
+)
 
 if __name__ == "__main__":
     run_tests()
