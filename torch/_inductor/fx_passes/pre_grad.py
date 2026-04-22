@@ -22,6 +22,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
+from ..custom_graph_pass import get_active_passes
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
@@ -353,9 +354,13 @@ def pre_grad_passes(
                 apply_gumbel_max_trick_pass.apply
             )
 
+    custom_pre_grad_passes = []
     if config.pre_grad_custom_pass is not None:
-        GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
-            config.pre_grad_custom_pass
+        custom_pre_grad_passes.append(config.pre_grad_custom_pass)
+    custom_pre_grad_passes.extend(get_active_passes().pre_grad_passes)
+    for idx, custom_pre_grad_pass in enumerate(custom_pre_grad_passes):
+        GraphTransformObserver(gm, f"pre_grad_custom_pass_{idx}").apply_graph_pass(
+            custom_pre_grad_pass
         )
 
     stable_topological_sort(gm.graph)

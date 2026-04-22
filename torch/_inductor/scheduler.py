@@ -54,6 +54,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,
 )
+from .custom_graph_pass import get_active_passes
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -3213,8 +3214,12 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
+        pre_fusion_custom_passes = []
         if config._pre_fusion_custom_pass is not None:
-            self.nodes = config._pre_fusion_custom_pass(self.nodes)
+            pre_fusion_custom_passes.append(config._pre_fusion_custom_pass)
+        pre_fusion_custom_passes.extend(get_active_passes().pre_fusion_custom_passes)
+        for pre_fusion_custom_pass in pre_fusion_custom_passes:
+            self.nodes = pre_fusion_custom_pass(self.nodes)
 
         if config.distributed_max_autotune_gemm:
             from . import distributed_autotune
@@ -3232,8 +3237,12 @@ class Scheduler:
         self._populate_stream_assignments()
 
         self.nodes = self.fuse_nodes(self.nodes)
+        post_fusion_custom_passes = []
         if config._post_fusion_custom_pass is not None:
-            self.nodes = config._post_fusion_custom_pass(self.nodes)
+            post_fusion_custom_passes.append(config._post_fusion_custom_pass)
+        post_fusion_custom_passes.extend(get_active_passes().post_fusion_custom_passes)
+        for post_fusion_custom_pass in post_fusion_custom_passes:
+            self.nodes = post_fusion_custom_pass(self.nodes)
 
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)

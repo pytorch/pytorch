@@ -24,6 +24,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..custom_graph_pass import get_active_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -655,9 +656,13 @@ def joint_graph_passes(
     # must occur before other passes
     canonicalize_aten_ir_passes(graph)
 
+    joint_pre_custom_passes = []
     if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
+        joint_pre_custom_passes.append(config.joint_custom_pre_pass)
+    joint_pre_custom_passes.extend(get_active_passes().joint_pre_passes)
+    for idx, joint_custom_pre_pass in enumerate(joint_pre_custom_passes):
+        GraphTransformObserver(graph, f"joint_custom_pre_pass_{idx}").apply_graph_pass(
+            joint_custom_pre_pass
         )
         count += 1
 
@@ -698,9 +703,13 @@ def joint_graph_passes(
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
+    joint_post_custom_passes = []
     if config.joint_custom_post_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
-            config.joint_custom_post_pass
+        joint_post_custom_passes.append(config.joint_custom_post_pass)
+    joint_post_custom_passes.extend(get_active_passes().joint_post_passes)
+    for idx, joint_custom_post_pass in enumerate(joint_post_custom_passes):
+        GraphTransformObserver(graph, f"joint_custom_post_pass_{idx}").apply_graph_pass(
+            joint_custom_post_pass
         )
         count += 1
 
