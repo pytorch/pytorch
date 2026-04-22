@@ -38,7 +38,10 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheBase,
     CUDACodeCache,
+    FxGraphCacheKeyGenerator,
     FxGraphCachePickler,
+    FxGraphCacheStore,
+    FxGraphGuardEvaluator,
     FxGraphHashDetails,
     PyCodeCache,
     TensorMetadata,
@@ -2678,6 +2681,72 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
     def uuid(self) -> bytes | str | None:
         return self._uuid
+
+
+class TestFxGraphCacheDecomposition(TestCase):
+    def test_store_writes_local_entries_under_key_directory(self):
+        store = FxGraphCacheStore
+        key = "fabcdef"
+        content = b"serialized graph"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch("torch._inductor.codecache.cache_dir", return_value=tmpdir):
+                store.write_local(key, content)
+                subdir = os.path.join(tmpdir, "fxgraph", key[1:3], key)
+
+                self.assertEqual(store.local_dir_for_key(key), subdir)
+                self.assertTrue(os.path.isdir(subdir))
+                entries = os.listdir(subdir)
+                self.assertEqual(len(entries), 1)
+                with open(os.path.join(subdir, entries[0]), "rb") as f:
+                    self.assertEqual(f.read(), content)
+
+                store.clear()
+                self.assertFalse(os.path.exists(os.path.join(tmpdir, "fxgraph")))
+
+    def test_guard_evaluator_uses_injected_shape_env(self):
+        class FakeShapeEnv:
+            def __init__(self):
+                self.evaluate_calls = []
+                self.produce_calls = []
+
+            def evaluate_guards_expression(self, expr, values):
+                self.evaluate_calls.append((expr, values))
+                return expr == "ok" and values == [3]
+
+            def get_pruned_guards(self, symints):
+                return ["guard"]
+
+            def produce_guards_expression(self, placeholders, guards):
+                self.produce_calls.append((placeholders, guards))
+                return "produced"
+
+        shape_env = FakeShapeEnv()
+        evaluator = FxGraphGuardEvaluator(shape_env)
+
+        self.assertTrue(evaluator.cache_lookup_evaluator(None)("ok", [3]))
+        self.assertEqual(shape_env.evaluate_calls, [("ok", [3])])
+
+        def custom(expr, values):
+            return expr == "custom"
+
+        self.assertTrue(evaluator.cache_lookup_evaluator(custom)("custom", []))
+
+        self.assertEqual(evaluator.guards_expression(["not-a-symint"]), "produced")
+        self.assertEqual(shape_env.produce_calls, [([], ["guard"])])
+
+    def test_key_generator_prepare_key_bypass_is_isolated(self):
+        counters.clear()
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        key_info, cache_info = FxGraphCacheKeyGenerator().prepare_key(
+            gm, [], {}, [], remote=False
+        )
+
+        self.assertIsNone(key_info)
+        self.assertEqual(cache_info["cache_state"], "bypass")
+        self.assertEqual(cache_info["cache_bypass_reason"], "No shape env")
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
 
 
 class TestFxGraphCacheHashing(TestCase):

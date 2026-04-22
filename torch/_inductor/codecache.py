@@ -35,7 +35,7 @@ from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self
+from typing_extensions import override, Protocol, Self
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -820,6 +820,24 @@ class BypassFxGraphCache(Exception):
     """
 
 
+def _current_shape_env() -> ShapeEnv | None:
+    """
+    Helper to get the shape env from the tracing context.
+    """
+    ctx = torch._guards.TracingContext.try_get()
+    if not ctx or not ctx.fake_mode:
+        return None
+    return ctx.fake_mode.shape_env
+
+
+def _filter_backed_symints(inputs: Sequence[InputType]) -> list[torch.SymInt]:
+    """
+    Get the backed SymInt objects from the input list. Note that we can never
+    have guards that depend on unbacked symint.
+    """
+    return [s for s in inputs if isinstance(s, torch.SymInt) and has_guarding_hint(s)]
+
+
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
@@ -1069,7 +1087,7 @@ class FxGraphHashDetails:
         # Include hint overrides in the cache key because _reduce_symint
         # only hashes symbol names, not hint values.
         self.var_to_hint_override: dict[str, int] = {}
-        shape_env = FxGraphCache._get_shape_env()
+        shape_env = _current_shape_env()
         if shape_env is not None and shape_env.var_to_hint_override:
             self.var_to_hint_override = {
                 str(sym): val
@@ -1312,80 +1330,202 @@ class GuardedCache(Generic[T]):
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
         """
-        return [
-            s for s in inputs if isinstance(s, torch.SymInt) and has_guarding_hint(s)
-        ]
+        return _filter_backed_symints(inputs)
 
     @classmethod
     def _get_shape_env(cls: type[GuardedCache[T]]) -> ShapeEnv | None:
         """
         Helper to get the shape env from the tracing context.
         """
-        ctx = torch._guards.TracingContext.try_get()
-        if not ctx or not ctx.fake_mode:
-            return None
-        return ctx.fake_mode.shape_env
+        return _current_shape_env()
 
 
-@CacheArtifactFactory.register
-class InductorCacheArtifact(CacheArtifact):
-    @override
-    def populate_cache(self) -> None:
-        FxGraphCache._write_to_local_cache(self.key, self.content)
+class GuardEvaluator(Protocol):
+    def get_shape_env(self) -> ShapeEnv | None: ...
 
-    @override
+    def backed_symints(self, inputs: Sequence[InputType]) -> list[torch.SymInt]: ...
+
+    def hints(self, inputs: Sequence[InputType]) -> list[int]: ...
+
+    def cache_lookup_evaluator(
+        self,
+        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool] | None,
+    ) -> Callable[[str, list[int] | list[torch.SymInt]], bool]: ...
+
+    def guards_expression(self, example_inputs: Sequence[InputType]) -> str | None: ...
+
+
+class FxGraphGuardEvaluator(GuardEvaluator):
+    def __init__(self, shape_env: ShapeEnv | None = None) -> None:
+        self._shape_env = shape_env
+
+    def get_shape_env(self) -> ShapeEnv | None:
+        if self._shape_env is not None:
+            return self._shape_env
+        return _current_shape_env()
+
+    def backed_symints(self, inputs: Sequence[InputType]) -> list[torch.SymInt]:
+        return _filter_backed_symints(inputs)
+
+    def hints(self, inputs: Sequence[InputType]) -> list[int]:
+        return [guarding_hint_or_throw(s) for s in self.backed_symints(inputs)]
+
+    def cache_lookup_evaluator(
+        self,
+        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool] | None,
+    ) -> Callable[[str, list[int] | list[torch.SymInt]], bool]:
+        # If this config is turned on, everything is a guard hit and we check nothing.
+        # This also means cache hits do not add dynamic guards to the shape env.
+        if config.unsafe_skip_cache_dynamic_shape_guards:
+            return lambda x, y: True
+
+        if evaluate_guards is not None:
+            return evaluate_guards
+
+        shape_env = self.get_shape_env()
+        assert shape_env is not None
+        return shape_env.evaluate_guards_expression
+
+    def guards_expression(self, example_inputs: Sequence[InputType]) -> str | None:
+        shape_env = self.get_shape_env()
+        assert shape_env is not None
+        symints = self.backed_symints(example_inputs)
+        guards = shape_env.get_pruned_guards(symints)
+        return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
+
+
+@dataclasses.dataclass
+class SerializedFxGraphCacheEntry:
+    content: bytes
+    time_taken_ns: int | None
+
+
+class FxGraphCacheStore:
     @staticmethod
-    def type() -> str:
-        return "inductor"
-
-
-class FxGraphCache(GuardedCache[CompiledFxGraph]):
-    """
-    Supports caching and reusing compiled Fx graphs.
-
-    The overall strategy is as follows:
-    - This cache stores entries on disk. When saving an entry, we can't
-      serialize callables (that could be C++, Triton, etc.), so we serialize
-      their own disk cache location. We then recreate the compiled artifact
-      after fetching from disk.
-    - For indexing the cache, we gather the fields relevant to identifying an
-      FxGraph (the graph module, graph inputs, system settings etc.) into an
-      FxGraphCacheDetails object, pickle it, and compute a hash for the key.
-      See FxGraphCachePickler.
-    - Among the metadata we store, we also include a guards expression that's
-      appropriate for validating any symbols for Tensor arguments that have
-      symbolic bounds. On cache lookup then, we evaluate those guards in the
-      current context to validate that a cached entry can be served.
-    - A given graph could have multiple compiled versions, corresponding to
-      different sets of guards. Therefore, we store cache entries in the form:
-          <temp dir>/<fx graph hash>/<serialized metadata>
-    - On lookup, we compute the key from the graph details, iterate over all
-      leaf files in the corresponding subdirectory, deserialize the entry, and
-      evaluate its guards expression. If the evaluation succeeds, we have a
-      cache hit. If it fails, we compile the graph and store a new entry.
-    - Finally, on a cache hit, we need to make sure any guards that would
-      have been created during compilation are added to the current context.
-    """
-
-    # TODO(masnesral): Investigate whether it's beneficial to store compiled graphs
-    # in an in-memory cache after loading from disk.
-    @staticmethod
-    def _get_tmp_dir() -> str:
+    def top_level_dir() -> str:
         """
         Get the toplevel temporary directory for storing compiled graphs.
         """
         return os.path.join(cache_dir(), "fxgraph")
 
     @classmethod
-    def _get_tmp_dir_for_key(cls: type[FxGraphCache], key: str) -> str:
+    def local_dir_for_key(cls, key: str) -> str:
         """
         Return the disk location for a given cache key.
         """
-        return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
+        return os.path.join(cls.top_level_dir(), key[1:3], key)
 
     @classmethod
-    def _record_result(
-        cls: type[FxGraphCache],
+    def write_local(cls, key: str, content: bytes) -> None:
+        subdir = cls.local_dir_for_key(key)
+        os.makedirs(subdir, exist_ok=True)
+
+        # Use a hash of the serialized CompiledFxGraph to get a unique file
+        # name. The specific name doesn't matter since a lookup involves
+        # iterating over all entries in the parent subdir.
+        path = os.path.join(subdir, sha256_hash(content))
+        write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
+    def write_remote(
+        key: str,
+        content: bytes,
+        remote_cache: RemoteCache[JsonDataTy] | None,
+        time_taken_ns: int | None,
+    ) -> None:
+        if remote_cache is None:
+            return
+
+        time_taken_ms = int((time_taken_ns or 0) // 1e6)
+        cache_data: JsonDataTy = {
+            "data": base64.b64encode(content).decode("ascii"),
+            "time_taken_ms": time_taken_ms,
+        }
+        remote_cache.put(key, cache_data)
+
+    @classmethod
+    def store(
+        cls,
+        key: str,
+        entry: SerializedFxGraphCacheEntry,
+        local: bool,
+        remote_cache: RemoteCache[JsonDataTy] | None,
+    ) -> None:
+        if local:
+            cls.write_local(key, entry.content)
+        cls.write_remote(key, entry.content, remote_cache, entry.time_taken_ns)
+
+    @staticmethod
+    def get_remote_cache() -> RemoteCache[JsonDataTy] | None:
+        """
+        Attempts to load the remote cache, returns None on error.
+        """
+        cache_id = "fx-graph-v1"
+        return create_cache(
+            cache_id,
+            config.is_fbcode(),
+            "FbRemoteFxGraphCache",
+            "RemoteFxGraphCache",
+        )
+
+    @classmethod
+    def clear(cls) -> None:
+        """
+        Clear out the on-disk cache.
+        """
+        try:
+            shutil.rmtree(cls.top_level_dir())
+        except FileNotFoundError:
+            pass
+
+
+class FxGraphCacheSerializer:
+    def __init__(self, guard_evaluator: GuardEvaluator | None = None) -> None:
+        self.guard_evaluator = guard_evaluator or FxGraphGuardEvaluator()
+
+    def serialize(
+        self,
+        compiled_graph: OutputCode,
+        example_inputs: Sequence[InputType],
+    ) -> SerializedFxGraphCacheEntry | None:
+        from .compile_fx import CompiledFxGraph
+
+        assert isinstance(compiled_graph, CompiledFxGraph), (
+            f"serialization for {type(compiled_graph)} NYI"
+        )
+
+        compiled_graph.guards_expr = self.guard_evaluator.guards_expression(
+            example_inputs
+        )
+        try:
+            backend = torch.utils._triton.triton_backend()
+            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                backend
+            )
+        except Exception:
+            pass
+
+        disk_compiled_graph = copy(compiled_graph)
+        disk_compiled_graph.prepare_for_serialization()
+
+        try:
+            content = pickle.dumps(disk_compiled_graph)
+        except Exception:
+            log.warning(
+                "fx graph cache unable to serialize compiled graph", exc_info=True
+            )
+            counters["inductor"]["fxgraph_cache_pickle_error"] += 1
+            return None
+
+        return SerializedFxGraphCacheEntry(
+            content=content,
+            time_taken_ns=disk_compiled_graph._time_taken_ns,
+        )
+
+
+class FxGraphCacheEventLogger:
+    @staticmethod
+    def record_guarded_lookup(
         key: str,
         local_hit: bool,
         local_miss: bool,
@@ -1427,18 +1567,183 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
 
     @staticmethod
+    def record_bypass(reason: str, remote: bool) -> dict[str, Any]:
+        counters["inductor"]["fxgraph_cache_bypass"] += 1
+        log.info("Bypassing FX Graph Cache because '%s'", reason)
+        if remote:
+            log_cache_bypass("bypass_fx_graph", reason)
+        return {
+            "cache_state": "bypass",
+            "cache_bypass_reason": reason,
+            "cache_event_time": time_ns(),
+        }
+
+    @staticmethod
+    def record_load_result(
+        key: str,
+        compiled_graph: CompiledFxGraph | None,
+        cache_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        if compiled_graph is not None:
+            log.info("fx graph cache hit for key %s", key)
+            counters["inductor"]["fxgraph_cache_hit"] += 1
+            cache_info["cache_state"] = "hit"
+
+            if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                cache_info["time_saved_ns"] = time_saved_ns
+                CompileEventLogger.try_(
+                    CompileEventLogger.increment_toplevel,
+                    "distributed_ephemeral_timeout_us",
+                    time_saved_ns // 1000,
+                )
+                if (
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+        else:
+            log.info("fx graph cache miss for key %s", key)
+            counters["inductor"]["fxgraph_cache_miss"] += 1
+            cache_info["cache_state"] = "miss"
+
+        return cache_info
+
+
+class FxGraphCacheKeyGenerator:
+    """
+    Validates cacheability and builds stable FX graph cache keys.
+    """
+
+    def __init__(self, guard_evaluator: GuardEvaluator | None = None) -> None:
+        self.guard_evaluator = guard_evaluator or FxGraphGuardEvaluator()
+
+    @staticmethod
+    def check_for_hop(gm: torch.fx.GraphModule) -> None:
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    raise BypassFxGraphCache(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                # TODO: this check is broken in two ways:
+                # 1. FX uses "get_attr" (with underscore), not "getattr"
+                # 2. It only checks for ScriptObject, not FakeScriptObject
+                # Fixing it would also bypass AOTAutogradCache (which calls
+                # check_can_cache), so we'd need to decouple the two first.
+                if node.op == "getattr" and isinstance(
+                    getattr(gm, node.target), torch._C.ScriptObject
+                ):
+                    raise BypassFxGraphCache("Can't cache torchbind objects")
+
+    def check_can_cache(self, gm: torch.fx.GraphModule) -> None:
+        """
+        Check some conditions that would preclude caching and raise BypassFxGraphCache
+        to bypass in case caching is not possible.
+        """
+        # Custom passes must implement the CustomGraphPass or we don't
+        # know how to include them in the cache key calculation.
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if resolve_pre_grad_pass_timing() != "early":
+            assert not config.pre_grad_custom_pass or (
+                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                and config.pre_grad_custom_pass.uuid()
+            ), "Unsupported pre grad custom pass"
+        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported post grad custom pass")
+        # Same with the joint custom passes
+        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported joint custom pass")
+        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
+        # and ensure they are not passing us raw callables
+        if config._pre_fusion_custom_pass is not None:
+            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
+        for p in config._fuse_ddp_communication_passes:
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
+
+        # Freezing can embed constants that wouldn't be static across runs.
+        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
+            "pytorch/inductor:allow_freezing_with_caching"
+        ):
+            raise BypassFxGraphCache("Skipping graph with frozen constants")
+
+        if config.aot_inductor.use_runtime_constant_folding:
+            raise BypassFxGraphCache(
+                "Runtime constant folding can introduce constants that aren't "
+                "static across runs"
+            )
+
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        if CompilerBisector.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            raise BypassFxGraphCache
+
+        # The treatment of guards in the caching implementation requires that
+        # we have a shape env.
+        if self.guard_evaluator.get_shape_env() is None:
+            log.debug("fx graph cache no shape env")
+            raise BypassFxGraphCache("No shape env")
+
+        # We skip caching if there are any HOPs or torchbind objects.
+        self.check_for_hop(gm)
+
+    def prepare_key(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
+        inputs_to_check: Sequence[int],
+        remote: bool,
+    ) -> tuple[tuple[str, list[str]] | None, dict[str, Any]]:
+        """
+        Checks that the inductor input is cacheable, then computes
+        and returns the cache key for the input.
+        Returns (key_info, cache_info) where:
+        - key_info is (hash_key, debug_lines), and
+        - cache_info will contain debug info in the event of BypassFxGraphCache.
+        """
+        try:
+            self.check_can_cache(gm)
+            key, debug_lines = compiled_fx_graph_hash(
+                gm, example_inputs, fx_kwargs, inputs_to_check
+            )
+        except BypassFxGraphCache as e:
+            cache_info = FxGraphCacheEventLogger.record_bypass(str(e), remote)
+            return None, cache_info
+        # If key exists, then cache_info will come from load_with_key
+        return (key, debug_lines), {}
+
+
+INDUCTOR_CACHE_ARTIFACT_TYPE = "inductor"
+
+
+class FxGraphCacheArtifactHandler:
+    """
+    Handles cache artifact recording and cache-hit post-compile restoration.
+    """
+
+    @staticmethod
+    def record(key: str, content: bytes) -> None:
+        CacheArtifactManager.record_artifact(INDUCTOR_CACHE_ARTIFACT_TYPE, key, content)
+
+    @staticmethod
     def cache_hit_post_compile(
         graph: CompiledFxGraph,
         cache_info: dict[str, Any],
         constants: CompiledFxGraphConstants,
     ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
         """
-        Cache specific post compile steps that need to run if we find a graph in the cache
-        This includes putting bundled triton artifacts in the right place,
-        reloading the PyCodeCache artifact, etc.
-
-        These don't always happen (i.e. on a cache miss, so they are in a separate function from
-        CompiledFxGraph.post_compile)
+        Cache specific post compile steps that need to run if we find a graph in the cache.
         """
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
@@ -1528,6 +1833,110 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         return graph, cache_info
 
+
+@CacheArtifactFactory.register
+class InductorCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        FxGraphCacheStore.write_local(self.key, self.content)
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return INDUCTOR_CACHE_ARTIFACT_TYPE
+
+
+class FxGraphCache(GuardedCache[CompiledFxGraph]):
+    """
+    Supports caching and reusing compiled Fx graphs.
+
+    The overall strategy is as follows:
+    - This cache stores entries on disk. When saving an entry, we can't
+      serialize callables (that could be C++, Triton, etc.), so we serialize
+      their own disk cache location. We then recreate the compiled artifact
+      after fetching from disk.
+    - For indexing the cache, we gather the fields relevant to identifying an
+      FxGraph (the graph module, graph inputs, system settings etc.) into an
+      FxGraphCacheDetails object, pickle it, and compute a hash for the key.
+      See FxGraphCachePickler.
+    - Among the metadata we store, we also include a guards expression that's
+      appropriate for validating any symbols for Tensor arguments that have
+      symbolic bounds. On cache lookup then, we evaluate those guards in the
+      current context to validate that a cached entry can be served.
+    - A given graph could have multiple compiled versions, corresponding to
+      different sets of guards. Therefore, we store cache entries in the form:
+          <temp dir>/<fx graph hash>/<serialized metadata>
+    - On lookup, we compute the key from the graph details, iterate over all
+      leaf files in the corresponding subdirectory, deserialize the entry, and
+      evaluate its guards expression. If the evaluation succeeds, we have a
+      cache hit. If it fails, we compile the graph and store a new entry.
+    - Finally, on a cache hit, we need to make sure any guards that would
+      have been created during compilation are added to the current context.
+    """
+
+    # Stateful helpers are instances so they can share the guard evaluator.
+    # Stateless helpers are class references used as namespaces.
+    _guard_evaluator = FxGraphGuardEvaluator()
+    _key_generator = FxGraphCacheKeyGenerator(_guard_evaluator)
+    _store = FxGraphCacheStore
+    _serializer = FxGraphCacheSerializer(_guard_evaluator)
+    _artifacts = FxGraphCacheArtifactHandler
+    _event_logger = FxGraphCacheEventLogger
+
+    # TODO(masnesral): Investigate whether it's beneficial to store compiled graphs
+    # in an in-memory cache after loading from disk.
+    @staticmethod
+    def _get_tmp_dir() -> str:
+        """
+        Get the toplevel temporary directory for storing compiled graphs.
+        """
+        return FxGraphCache._store.top_level_dir()
+
+    @classmethod
+    def _get_tmp_dir_for_key(cls: type[FxGraphCache], key: str) -> str:
+        """
+        Return the disk location for a given cache key.
+        """
+        return FxGraphCache._store.local_dir_for_key(key)
+
+    @classmethod
+    def _record_result(
+        cls: type[FxGraphCache],
+        key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        FxGraphCache._event_logger.record_guarded_lookup(
+            key,
+            local_hit=local_hit,
+            local_miss=local_miss,
+            remote_hit=remote_hit,
+            remote_miss=remote_miss,
+        )
+
+    @staticmethod
+    def cache_hit_post_compile(
+        graph: CompiledFxGraph,
+        cache_info: dict[str, Any],
+        constants: CompiledFxGraphConstants,
+    ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
+        """
+        Cache specific post compile steps that need to run if we find a graph in the cache
+        This includes putting bundled triton artifacts in the right place,
+        reloading the PyCodeCache artifact, etc.
+
+        These don't always happen (i.e. on a cache miss, so they are in a separate function from
+        CompiledFxGraph.post_compile)
+        """
+        return FxGraphCache._artifacts.cache_hit_post_compile(
+            graph, cache_info, constants
+        )
+
     @staticmethod
     def _lookup_graph(
         key: str,
@@ -1547,20 +1956,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         what constitutes a guard success. Normally, a guard hit happens if
         `shape_env.evaluate_guards_expression` returns True.
         """
-        shape_env = FxGraphCache._get_shape_env()
+        shape_env = FxGraphCache._guard_evaluator.get_shape_env()
         assert shape_env is not None
 
-        symints = FxGraphCache._filter_backed_symints(example_inputs)
-        hints = [guarding_hint_or_throw(s) for s in symints]
-
-        # If this config is turned on, everything is a guard hit and we check nothing
-        if config.unsafe_skip_cache_dynamic_shape_guards:
-            # This also makes it so we don't add anything to the dynamic
-            # shape environment
-            evaluate_guards = lambda x, y: True  # noqa: E731
-
-        if evaluate_guards is None:
-            evaluate_guards = shape_env.evaluate_guards_expression
+        symints = FxGraphCache._guard_evaluator.backed_symints(example_inputs)
+        hints = FxGraphCache._guard_evaluator.hints(example_inputs)
+        evaluate_guards = FxGraphCache._guard_evaluator.cache_lookup_evaluator(
+            evaluate_guards
+        )
 
         cache_info: dict[str, Any] = dict()
 
@@ -1584,9 +1987,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 return None, cache_info
 
         if pickled_content is not None:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, pickled_content
-            )
+            FxGraphCache._artifacts.record(key, pickled_content)
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1600,15 +2001,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content, make_dirs=True)
+        FxGraphCache._store.write_local(key, content)
 
     @staticmethod
     def _save_graph(
@@ -1621,83 +2014,20 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         Store a serialized CompiledFxGraph on disk.
         """
-        from .compile_fx import CompiledFxGraph
-
-        assert isinstance(compiled_graph, CompiledFxGraph), (
-            f"serialization for {type(compiled_graph)} NYI"
-        )
-
-        # Before serializing, compute the guard expression that will be used to
-        # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
-        # sufficient to consider only the SymInt args to the fx graph since the
-        # Tensor shapes are already captured in the hash for the cache key. Any
-        # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
-        shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
-        symints = FxGraphCache._filter_backed_symints(example_inputs)
-        guards = shape_env.get_pruned_guards(symints)
-        compiled_graph.guards_expr = shape_env.produce_guards_expression(
-            placeholders=symints, guards=guards
-        )
-        try:
-            backend = torch.utils._triton.triton_backend()
-            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
-                backend
-            )
-        except Exception:
-            pass
-        disk_compiled_graph = copy(compiled_graph)
-        disk_compiled_graph.prepare_for_serialization()
-
-        try:
-            content = pickle.dumps(disk_compiled_graph)
-        except Exception:
-            log.warning(
-                "fx graph cache unable to serialize compiled graph", exc_info=True
-            )
-            counters["inductor"]["fxgraph_cache_pickle_error"] += 1
+        entry = FxGraphCache._serializer.serialize(compiled_graph, example_inputs)
+        if entry is None:
             return
 
         try:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, content
-            )
-            if local:
-                FxGraphCache._write_to_local_cache(key, content)
-
-            if remote_cache:
-                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
-                cache_data: JsonDataTy = {
-                    "data": base64.b64encode(content).decode("ascii"),
-                    "time_taken_ms": time_taken_ms,
-                }
-                remote_cache.put(key, cache_data)
+            FxGraphCache._artifacts.record(key, entry.content)
+            FxGraphCache._store.store(key, entry, local, remote_cache)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
     def _check_for_hop(gm: torch.fx.GraphModule) -> None:
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                # TODO: this check is broken in two ways:
-                # 1. FX uses "get_attr" (with underscore), not "getattr"
-                # 2. It only checks for ScriptObject, not FakeScriptObject
-                # Fixing it would also bypass AOTAutogradCache (which calls
-                # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        FxGraphCache._key_generator.check_for_hop(gm)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule) -> None:
@@ -1705,57 +2035,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Custom passes must implement the CustomGraphPass or we don't
-        # know how to include them in the cache key calculation.
-        # When timing is EARLY, pre-grad passes already ran before the cache
-        # lookup so there's nothing to validate here.
-        if resolve_pre_grad_pass_timing() != "early":
-            assert not config.pre_grad_custom_pass or (
-                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                and config.pre_grad_custom_pass.uuid()
-            ), "Unsupported pre grad custom pass"
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported post grad custom pass")
-        # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported joint custom pass")
-        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
-        # and ensure they are not passing us raw callables
-        if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
-        for p in config._fuse_ddp_communication_passes:
-            if callable(p) and not isinstance(p, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
-
-        # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
-            "pytorch/inductor:allow_freezing_with_caching"
-        ):
-            raise BypassFxGraphCache("Skipping graph with frozen constants")
-
-        if config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache(
-                "Runtime constant folding can introduce constants that aren't "
-                "static across runs"
-            )
-
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
-            raise BypassFxGraphCache
-
-        # The treatment of guards in the caching implementation requires that
-        # we have a shape env.
-        if FxGraphCache._get_shape_env() is None:
-            log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env")
-
-        # We skip caching if there are any HOPs or torchbind objects.
-        FxGraphCache._check_for_hop(gm)
+        FxGraphCache._key_generator.check_can_cache(gm)
 
     @staticmethod
     def prepare_key(
@@ -1775,37 +2055,16 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         NB: It is possible to have this function return a union instead. But
         I personally believe it is more annoying/difficult to read in that format.
         """
-        try:
-            FxGraphCache._check_can_cache(gm)
-            key, debug_lines = compiled_fx_graph_hash(
-                gm, example_inputs, fx_kwargs, inputs_to_check
-            )
-        except BypassFxGraphCache as e:
-            counters["inductor"]["fxgraph_cache_bypass"] += 1
-            log.info("Bypassing FX Graph Cache because '%s'", e)
-            if remote:
-                log_cache_bypass("bypass_fx_graph", str(e))
-            cache_info = {
-                "cache_state": "bypass",
-                "cache_bypass_reason": str(e),
-                "cache_event_time": time_ns(),
-            }
-            return None, cache_info
-        # If key exists, then cache_info will come from load_with_key
-        return (key, debug_lines), {}
+        return FxGraphCache._key_generator.prepare_key(
+            gm, example_inputs, fx_kwargs, inputs_to_check, remote
+        )
 
     @staticmethod
     def get_remote_cache() -> RemoteCache[JsonDataTy] | None:
         """
         Attempts to load the remote cache, returns None on error.
         """
-        cache_id = "fx-graph-v1"
-        return create_cache(
-            cache_id,
-            config.is_fbcode(),
-            "FbRemoteFxGraphCache",
-            "RemoteFxGraphCache",
-        )
+        return FxGraphCache._store.get_remote_cache()
 
     @staticmethod
     def load_with_key(
@@ -1833,39 +2092,19 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             "components": debug_lines,
             "cache_event_time": time_ns(),
         }
-        if compiled_graph is not None:
-            log.info("fx graph cache hit for key %s", key)
-            counters["inductor"]["fxgraph_cache_hit"] += 1
-            cache_info["cache_state"] = "hit"
-
-            if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
-                cache_info["time_saved_ns"] = time_saved_ns
-                CompileEventLogger.try_(
-                    CompileEventLogger.increment_toplevel,
-                    "distributed_ephemeral_timeout_us",
-                    time_saved_ns // 1000,
-                )
-                if (
-                    ephemeral_increase
-                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
-                ) != 0:
-                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
-        else:
-            log.info("fx graph cache miss for key %s", key)
-            counters["inductor"]["fxgraph_cache_miss"] += 1
-            cache_info["cache_state"] = "miss"
-
-        return compiled_graph, cache_info
+        return (
+            compiled_graph,
+            FxGraphCache._event_logger.record_load_result(
+                key, compiled_graph, cache_info
+            ),
+        )
 
     @staticmethod
     def clear() -> None:
         """
         Clear out the on-disk cache.
         """
-        try:
-            shutil.rmtree(FxGraphCache._get_tmp_dir())
-        except FileNotFoundError:
-            pass
+        FxGraphCache._store.clear()
 
 
 @functools.cache
