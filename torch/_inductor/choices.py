@@ -95,7 +95,7 @@ class FusionScore:
 
 class InductorChoices:
     """
-    This class contains a collection of default heuristics that effect performance of our generated
+    This class contains a collection of default heuristics that affect performance of our generated
     code.  We try to not put correctness requirements in this file.
 
     You can override the choices made here by doing:
@@ -104,6 +104,9 @@ class InductorChoices:
                 ...
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
+
+    Subclasses used with inductor_choices_class must implement uuid() for
+    cache key computation.
     """
 
     def get_config_heuristics(
@@ -360,17 +363,16 @@ class InductorChoices:
         return fused_name
 
     @staticmethod
-    def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
+    def should_use_cooperative_reduction(
+        device: torch.device, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
         if config.triton.force_cooperative_reductions:
             return True
-        if (
-            not config.triton.cooperative_reductions
-            or V.graph.get_current_device_or_throw().type == "cpu"
-        ):
+        if not config.triton.cooperative_reductions or device.type == "cpu":
             return False
 
-        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -378,11 +380,9 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
-        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # TODO(laith) What if hint(reduction_numel) >= threshold ?
         # shall we compare hints instead
-        return V.graph.sizevars.statically_known_geq(
-            features.reduction_numel, threshold
-        )
+        return V.graph.sizevars.statically_known_geq(reduction_numel, threshold)
 
     @staticmethod
     def should_use_persistent_reduction(
@@ -417,7 +417,7 @@ class InductorChoices:
             lower = next_power_of_2(int(lower))
             upper = next_power_of_2(int(upper))
 
-            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # If we are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
             # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
@@ -475,7 +475,12 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            if reduction_numel_hint <= 8192:
+            # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
+            # TODO: test more hardwares
+            no_split_threshold = (
+                524288 if props.major is not None and props.major >= 10 else 8192
+            )
+            if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
                 split_size = min_elements_per_thread
@@ -655,11 +660,10 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, buffer_overlap_score, is_mix_order_reduction = typing.cast(
-            tuple[int, int, bool],
+        memory_score, buffer_overlap_score, is_mix_order_reduction = (
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
-            ),
+            )
         )
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),

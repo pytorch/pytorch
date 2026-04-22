@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-# flake8: noqa: B950
 
 import functools
 import json
@@ -70,6 +69,11 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
+from torch.testing._internal.common_utils import (  # noqa: F401
+    MI200_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -176,6 +180,21 @@ def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=Non
         enable_gqa=enable_gqa,
         kernel_options=kernel_options,
     )
+
+
+def flex_attention_fwd(q, k, v, score_mod, block_mask, scale):
+    # Uses the HOP directly because flex_attention_backward expects lse in log2
+    # scale, but the public flex_attention API converts lse to natural log.
+    out, lse, _ = flex_attention_hop(
+        q,
+        k,
+        v,
+        score_mod,
+        block_mask.as_tuple(),
+        scale,
+        {},
+    )
+    return out, lse
 
 
 def create_block_mask_test(score_mod, query, key):
@@ -4846,7 +4865,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
-""",  # noqa: B950
+""",
         )
         # Save the AOT graphs
         aot_graphs = []
@@ -4894,10 +4913,197 @@ class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
-""".replace(  # noqa: B950
-                "GPU_TYPE", torch.device(device).type
-            ),
+""".replace("GPU_TYPE", torch.device(device).type),
         )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_direct_backward_preserves_explicit_buffers(self, device):
+        mask_buffer = torch.full((), 128, device=device, dtype=torch.int32)
+
+        def score_mod(score, b, h, m, n):
+            return score
+
+        def mask_mod(b, h, m, n):
+            return m + mask_buffer >= n
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=2,
+            H=2,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        scale = 1.0 / 16**0.5
+
+        dtype = torch.float32
+        q = torch.randn(
+            (2, 2, 128, 16),
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.randn(
+            (2, 2, 128, 16),
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        v = torch.randn(
+            (2, 2, 128, 16),
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        sdpa_partial = create_attention(score_mod, block_mask)
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+
+        backward_grad = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+
+        out, logsumexp = flex_attention_fwd(
+            q,
+            k,
+            v,
+            score_mod,
+            block_mask,
+            scale,
+        )
+
+        @torch.compile(fullgraph=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {},
+                (),
+                (),
+            )
+
+        with torch.no_grad():
+            dq, dk, dv, _ = compiled_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+
+        fudge_factor = 10.0
+        self._check_equal(q_gold.grad, q_ref.grad, dq, fudge_factor, "Grad_Query")
+        self._check_equal(k_gold.grad, k_ref.grad, dk, fudge_factor, "Grad_Key")
+        self._check_equal(v_gold.grad, v_ref.grad, dv, fudge_factor, "Grad_Value")
+
+    @supported_platform
+    @skip_on_cpu
+    def test_direct_backward_supports_symint_score_mod_buffers(self, device):
+        def score_mod(score, b, h, m, n, head_dim):
+            return score
+
+        def mask_mod(b, h, m, n):
+            return m >= n
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=2,
+            H=2,
+            Q_LEN=128,
+            KV_LEN=128,
+            device=device,
+        )
+        scale = 1.0 / 16**0.5
+        dtype = torch.float32
+        q = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        k = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        v = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+        backward_grad = torch.randn((2, 2, 128, 16), dtype=dtype, device=device)
+
+        out, logsumexp = flex_attention_fwd(
+            q,
+            k,
+            v,
+            _identity,
+            block_mask,
+            scale,
+        )
+        static_head_dim = q.shape[-1]
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def compiled_literal_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {},
+                (static_head_dim,),
+                (),
+            )
+
+        @torch.compile(backend="aot_eager", fullgraph=True, dynamic=True)
+        def compiled_bw(query, key, value, fwd_out, lse, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                fwd_out,
+                lse,
+                grad_out,
+                None,
+                score_mod,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {},
+                (query.shape[-1],),
+                (),
+            )
+
+        with torch.no_grad():
+            ref_dq, ref_dk, ref_dv, ref_buffer_grads = compiled_literal_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+            compiled_dq, compiled_dk, compiled_dv, compiled_buffer_grads = compiled_bw(
+                q,
+                k,
+                v,
+                out.detach(),
+                logsumexp.detach(),
+                backward_grad,
+            )
+
+        torch.testing.assert_close(compiled_dq, ref_dq)
+        torch.testing.assert_close(compiled_dk, ref_dk)
+        torch.testing.assert_close(compiled_dv, ref_dv)
+        self.assertEqual(compiled_buffer_grads, ref_buffer_grads)
 
     @supported_platform
     def test_tensor_subclass_dispatch_order(self, device):

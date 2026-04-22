@@ -55,6 +55,9 @@ if torch.backends.mps.is_available():
             "cos",
             "cosh",
             "cross",
+            "cumsum",
+            "cumprod",
+            "cumulative_trapezoid",
             "diag",
             "diag_embed",
             "diagflat",
@@ -96,6 +99,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.householder_product",
             "linalg.svd",
+            "linalg.vander",
             "linalg.vecdot",
             "linalg.vector_norm",
             "log10",
@@ -104,6 +108,7 @@ if torch.backends.mps.is_available():
             "log",
             "logaddexp",
             "logaddexp2",
+            "logcumsumexp",
             "mH",
             "mT",
             "masked_fill",
@@ -126,6 +131,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.l1_loss",
+            "nn.functional.linear",
             "nn.functional.normalize",
             "nn.functional.padcircular",
             "nn.functional.pairwise_distance",
@@ -136,6 +142,7 @@ if torch.backends.mps.is_available():
             "nn.functional.triplet_margin_with_distance_loss",
             "nn.functional.unfold",
             "nonzero",
+            "nonzero_static",
             "norm",
             "normfro",
             "norminf",
@@ -148,6 +155,7 @@ if torch.backends.mps.is_available():
             "randn",
             "ravel",
             "real",
+            "repeat",
             "repeat_interleave",
             "reshape_as",
             "reshape",
@@ -186,6 +194,7 @@ if torch.backends.mps.is_available():
             "tanh",
             "tan",
             "tensor_split",
+            "tile",
             "transpose",
             "transpose_copy",
             "tril",
@@ -279,6 +288,8 @@ if torch.backends.mps.is_available():
             "logical_xor",
             "logsumexp",
             "long",
+            "masked.cumsum",
+            "masked.cumprod",
             "masked.mean",
             "masked.normalize",
             "masked.prod",
@@ -333,7 +344,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "frexp": None,
             "geqrf": None,
-            "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -622,7 +632,6 @@ if torch.backends.mps.is_available():
             "float_power": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
-            "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
@@ -821,6 +830,10 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
+            # MPS uses float32 intermediates (opmath_t) while CPU uses native
+            # half/bfloat16 precision, causing unbounded divergence.
+            # Half precision is covered by test_grid_sampler_3d_half_precision.
+            "nn.functional.grid_sample": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -916,11 +929,8 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
-            "grid_sampler_2d": None,
-            "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
@@ -937,8 +947,6 @@ if torch.backends.mps.is_available():
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
-            # derivative for aten::nextafter is not implemented on CPU
-            "nextafter": None,
             # derivative for aten::floor_divide is not implemented on CPU
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU

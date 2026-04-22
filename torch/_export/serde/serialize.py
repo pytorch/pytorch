@@ -153,6 +153,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
     torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
+    torch.uint32: ScalarType.UINT32,
+    torch.uint64: ScalarType.UINT64,
 }
 
 
@@ -1520,6 +1522,12 @@ class GraphModuleSerializer(metaclass=Final):
             ):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
+            elif all(
+                isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
+                for a in arg
+            ):
+                # list of float lists (List[List[float]])
+                return Argument.create(as_float_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -2175,7 +2183,14 @@ class ExportedProgramSerializer(metaclass=Final):
 
         self.pickle_protocol = pickle_protocol
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
+    def serialize(
+        self,
+        exported_program: ep.ExportedProgram,
+        *,
+        serialize_state_dict: bool = True,
+        serialize_constants: bool = True,
+        serialize_example_inputs: bool = True,
+    ) -> _SerializedProgram:
         """
         Args:
             exported_program: Exported Program to serialize
@@ -2219,13 +2234,29 @@ class ExportedProgramSerializer(metaclass=Final):
         new_state_dict = remove_proxy_from_state_dict(
             exported_program.state_dict, in_place=False
         )
+        serialized_state_dict = b""
+        if serialize_state_dict:
+            serialized_state_dict = serialize_torch_artifact(
+                new_state_dict, self.pickle_protocol
+            )
+
+        serialized_constants = b""
+        if serialize_constants:
+            serialized_constants = serialize_torch_artifact(
+                constants, self.pickle_protocol
+            )
+
+        serialized_example_inputs = b""
+        if serialize_example_inputs:
+            serialized_example_inputs = serialize_torch_artifact(
+                exported_program.example_inputs, self.pickle_protocol
+            )
+
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(new_state_dict, self.pickle_protocol),
-            serialize_torch_artifact(constants, self.pickle_protocol),
-            serialize_torch_artifact(
-                exported_program.example_inputs, self.pickle_protocol
-            ),
+            serialized_state_dict,
+            serialized_constants,
+            serialized_example_inputs,
         )
 
 
@@ -3071,6 +3102,8 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
+            elif typ_ == "as_float_lists":
+                return [list(floats) for floats in value]
             elif typ_ == "as_nested_tensors":
                 # nested list of tensors (List[List[Tensor]])
                 return [
@@ -3590,11 +3623,20 @@ def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    *,
+    serialize_state_dict: bool = True,
+    serialize_constants: bool = True,
+    serialize_example_inputs: bool = True,
 ) -> SerializedArtifact:
     with _enable_graph_inputs_of_type_nn_module(exported_program.example_inputs):
         serialized_program = ExportedProgramSerializer(
             opset_version, pickle_protocol
-        ).serialize(exported_program)
+        ).serialize(
+            exported_program,
+            serialize_state_dict=serialize_state_dict,
+            serialize_constants=serialize_constants,
+            serialize_example_inputs=serialize_example_inputs,
+        )
     if not isinstance(serialized_program.exported_program, ExportedProgram):
         raise AssertionError(
             f"expected ExportedProgram, got {type(serialized_program.exported_program).__name__}"
@@ -3759,6 +3801,8 @@ def _canonicalize_graph(
         elif a.type == "as_operator":
             return None
         elif a.type == "as_int_lists":
+            return None
+        elif a.type == "as_float_lists":
             return None
         elif a.type == "as_string_to_argument":
             return None

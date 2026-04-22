@@ -5,7 +5,7 @@ description: Review PyTorch pull requests for code quality, test coverage, secur
 
 # PyTorch PR Review Skill
 
-Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility. Linting, formatting, type checking, and import ordering are handled by CI.
+Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility.
 
 ## Usage Modes
 
@@ -115,90 +115,40 @@ only the diff and commit log need to be fetched via git.
 
 A single line of code can have deep cross-cutting implications: a missing device guard causes silent data corruption on multi-GPU, a missing `Composite` dispatch key breaks every out-of-tree backend, a manual dtype check instead of `TensorIterator` silently skips type promotion. **Treat every line as potentially load-bearing.**
 
-Do not skim. Do not summarize the diff and move on. Read every changed line and ask: *does this interact with existing PyTorch infrastructure that the author may not know about?* When uncertain, **investigate** — spawn a sub-agent to read the surrounding code, the infrastructure the PR should be using, or the tests that should exist. The cost of a false negative (missing a real issue) is much higher than the cost of investigation.
+1. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
+2. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
+3. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
+4. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
+6. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
+7. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
+8. **No repetition** — Each observation appears in exactly one section of the review output.
+
+### Using sub-agents
+
+The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code, infrastructure the PR should be using, or tests that should exist. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
 
 ## Review Workflow
 
-### Step 1: Fetch PR Information
-
-**Local CLI mode**: Use `gh` commands to get PR metadata, changed files, full diff,
-existing comments/reviews, and associated issue information.
-
-**Local Branch mode**: Use `git diff` and `git log` against `main` as shown in the
-Local Branch Mode section above.
-
-**GitHub Actions mode**: PR metadata, comments, and reviews are already in the prompt.
-Use `git diff origin/<baseBranch>...HEAD` for the full diff and
-`git log origin/<baseBranch>..HEAD --oneline` for the commit log.
-
-### Step 2: Understand Context
+### Step 1: Understand Context
 
 Before reviewing, build understanding of what the PR touches and why:
 1. Identify the purpose of the change from title/description/issue
 2. Group changes by type (new code, tests, config, docs)
 3. Note the scope of changes (files affected, lines changed)
-4. **Spawn sub-agents to read the unchanged code surrounding each changed file.** The diff alone is not enough — you need to understand the existing patterns, base classes, and infrastructure in the files being modified. For each significantly changed file, a sub-agent should read the full file (or the relevant class/function) and report back: what patterns does this file follow? What infrastructure does it use? What invariants does it maintain?
+4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
 
-### Step 3: Deep Review — Line-by-Line with Investigation
+### Step 2: Deep Review
 
-This is the core of the review. Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
+Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
 
-**How to use sub-agents during review:**
+### Step 3: Check Backward Compatibility
 
-The checklist is large. You cannot hold the full context of every infrastructure system in your head. Instead, when you encounter a changed line that touches a checklist area, **spawn a sub-agent** to investigate whether the checklist item applies. For example:
+Evaluate BC implications per [bc-guidelines.md](bc-guidelines.md). For non-trivial BC questions, spawn a sub-agent to search for existing callers of the modified API.
 
-- A PR adds a new C++ kernel → spawn a sub-agent to check: Does it use TensorIterator? DispatchStub? Structured kernels? AT_DISPATCH? Does it have a meta implementation? A Composite fallback?
-- A PR adds a new test → spawn a sub-agent to check: Does an OpInfo exist for this op? Is the test device-generic? Does it use make_tensor, @dtypes, TestCase?
-- A PR modifies autograd code → spawn a sub-agent to check: Is derivatives.yaml the right place? Does it use setup_context? Does it have gradcheck tests?
-- A PR adds a new operator → spawn a sub-agent to check: Is it in native_functions.yaml? Does it have proper tags? A Composite dispatch? Meta/fake impls? Schema annotations?
+### Step 4: Formulate Review
 
-**Spawn sub-agents in parallel** for independent investigation areas. A typical review of a medium PR should spawn 3-8 sub-agents. Large PRs touching multiple subsystems may need more.
-
-**Checklist areas** (see [review-checklist.md](review-checklist.md) for full details):
-- Code quality and design
-- PyTorch infrastructure — C++ kernels (TensorIterator, DispatchStub, AT_DISPATCH, device guards), CUDA/device management, operator registration and codegen (native_functions.yaml, Composite dispatch, meta/fake implementations), autograd (derivatives.yaml, autograd.Function, gradcheck), Python utilities (pytree, __torch_function__, logging), nn module patterns, Dynamo/Inductor/compile, FX/export, type promotion, serialization, distributed, tensor subclasses
-- Testing adequacy (OpInfo, ModuleInfo, device-generic tests, @dtypes, @parametrize, make_tensor)
-- Security considerations
-- Thread safety and concurrency (Python, C++, CPython C API, NoGIL)
-- Performance implications
-- Any behavior change not expected by author
-
-### Step 4: Check Backward Compatibility
-
-Evaluate BC implications. See [bc-guidelines.md](bc-guidelines.md) for:
-- What constitutes a BC-breaking change
-- Required deprecation patterns
-- Common BC pitfalls
-
-For non-trivial BC questions (e.g., "does changing this default break downstream users?"), spawn a sub-agent to search for existing callers of the modified API.
-
-### Step 5: Formulate Review
-
-Structure your review with actionable feedback organized by category. Every finding should be traceable to a specific line in the diff and a specific checklist item.
-
-## Review Areas
-
-| Area | Focus | Reference |
-|------|-------|-----------|
-| Code Quality | Abstractions, patterns, complexity | [review-checklist.md](review-checklist.md) |
-| API Design | New patterns, flag-based access, broader implications | [review-checklist.md](review-checklist.md) |
-| C++ Kernels | TensorIterator, DispatchStub, AT_DISPATCH, structured kernels, device guards, memory format | [review-checklist.md](review-checklist.md) |
-| CUDA/Device | C10_CUDA_CHECK, stream/event guards, recordStream, CUDA graphs, AcceleratorHooks | [review-checklist.md](review-checklist.md) |
-| Op Registration | native_functions.yaml, Composite fallback, meta/fake impls, tags, schema annotations | [review-checklist.md](review-checklist.md) |
-| Autograd | derivatives.yaml, autograd.Function patterns, gradcheck, forward-mode AD, vmap | [review-checklist.md](review-checklist.md) |
-| Python Utils | __torch_function__, pytree, logging, deprecation, backends context | [review-checklist.md](review-checklist.md) |
-| nn Modules | ModuleList/Dict, nn.init, parametrize, state_dict versioning, LazyModule | [review-checklist.md](review-checklist.md) |
-| Dynamo/Inductor | @register_lowering, decompositions, CustomGraphPass, config.patch, graph breaks | [review-checklist.md](review-checklist.md) |
-| FX/Export | PassBase, PassManager, Interpreter, subgraph rewriter, ShapeProp, make_fx | [review-checklist.md](review-checklist.md) |
-| Type Promotion | elementwise_dtypes, TensorIterator dtype handling, result_type, promoteTypes | [review-checklist.md](review-checklist.md) |
-| Serialization | weights_only, safe_globals, skip_data | [review-checklist.md](review-checklist.md) |
-| Distributed | DeviceMesh, distributed testing with MultiThreadedPG | [review-checklist.md](review-checklist.md) |
-| Tensor Subclasses | _make_wrapper_subclass, __tensor_flatten__/__unflatten__ | [review-checklist.md](review-checklist.md) |
-| Testing | OpInfo, ModuleInfo, device-generic, @dtypes, @parametrize, make_tensor | [review-checklist.md](review-checklist.md) |
-| Security | Injection, credentials, input handling | [review-checklist.md](review-checklist.md) |
-| Performance | Regressions, device handling, memory, profiling, benchmarking | [review-checklist.md](review-checklist.md) |
-| Thread Safety | Data races, GIL assumptions, NoGIL, CPython C API | [review-checklist.md](review-checklist.md) |
-| BC | Breaking changes, deprecation | [bc-guidelines.md](bc-guidelines.md) |
+Structure your review with actionable feedback organized by category. Every finding should be traceable to a specific line in the diff.
 
 ## Output Format
 
@@ -240,6 +190,8 @@ Reference the specific infrastructure the PR should be using.]
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
+Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**.
+
 [Brief justification for recommendation]
 ```
 
@@ -258,20 +210,9 @@ When requested, add file-specific feedback with line references:
 - `torch/nn/modules/linear.py:78` - This allocation could be moved outside the loop
 ```
 
-## Key Principles
-
-1. **Investigate, don't guess** - When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant infrastructure code. A reviewer who guesses wrong provides negative value. A reviewer who investigates and reports findings provides immense value.
-2. **Every line matters** - A single missing `C10_CUDA_KERNEL_LAUNCH_CHECK()`, a single `weights_only=False`, a single missing Composite dispatch key — each of these is a real bug that affects real users. Do not skip lines.
-3. **No repetition** - Each observation appears in exactly one section. Never repeat the same issue, concern, or suggestion across multiple sections. If an issue spans categories (e.g., a security issue that also affects performance), place it in the most relevant section only.
-4. **Focus on what CI cannot check** - Don't comment on formatting, linting, or type errors
-5. **Be specific** - Reference file paths and line numbers. Every finding should point to a concrete line in the diff.
-6. **Be actionable** - Provide concrete suggestions with the right infrastructure to use, not vague concerns. If flagging a missing pattern, name the function/class/file the author should use.
-7. **Be proportionate** - Minor issues shouldn't block, but note them
-8. **Assume competence** - The author knows PyTorch; explain only non-obvious context. The value of this review is in catching infrastructure patterns the author may not know about, not in explaining basic programming.
-
 ## Files to Reference
 
-When reviewing, consult these project files for context. **Spawn sub-agents to read these** rather than relying on memory — the files change frequently:
+When reviewing, consult these project files for context — read them rather than relying on memory, as they change frequently:
 - `CLAUDE.md` - Coding style philosophy and testing patterns
 - `CONTRIBUTING.md` - PR requirements and review process
 - `torch/testing/_internal/common_utils.py` - Test patterns and utilities

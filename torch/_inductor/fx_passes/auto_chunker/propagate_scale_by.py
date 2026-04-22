@@ -172,6 +172,8 @@ def propagate_requires_no_scaling(out_node: Node) -> bool:
         aten.expand.default,
         aten.squeeze.dim,
         aten.unsqueeze.default,
+        aten.gather.default,
+        aten.scatter_add.default,
         aten.view.default,
     ]
 )
@@ -189,6 +191,16 @@ def propagate_general_copy(out_node: Node) -> bool:
     assert out_meta is not None
     out_meta.scale_by = scale_by
     return True
+
+
+@register_propagate_rule(aten.scatter.value)
+def propagate_scatter_value(out_node: Node) -> bool:
+    # The backward of scatter.value always has value=0 (gradient of a constant),
+    # so S * scatter(x, idx, 0) = scatter(S*x, idx, 0) holds.
+    value = out_node.args[3]
+    if value != 0:
+        return False
+    return propagate_general_copy(out_node)
 
 
 @register_propagate_rule(

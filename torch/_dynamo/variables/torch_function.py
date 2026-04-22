@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE
+from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -203,12 +203,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
@@ -216,7 +216,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
@@ -489,7 +489,7 @@ def call_torch_function(
     #
     # Also notice the `cls` is not explicitly passed in the reference
     # implementations:
-    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374
     # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
     tf_args = [
         fn,
@@ -576,7 +576,7 @@ def dispatch_torch_function(
     unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
-        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        explanation=f"All __torch_function__ overrides for function {fn} returned NotImplemented",
         hints=[
             *graph_break_hints.USER_ERROR,
         ],

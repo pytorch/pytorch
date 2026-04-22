@@ -547,6 +547,7 @@ def grad(
         result = tuple(
             output
             if output is not None
+            # pyrefly: ignore [bad-argument-type]
             else torch.zeros_like(input, requires_grad=create_graph)
             for (output, input) in zip(result, inputs)
         )
@@ -570,7 +571,7 @@ def _is_checkpoint_valid():
     return Variable._execution_engine.is_checkpoint_valid()
 
 
-def variable(*args, **kwargs):  # noqa: D103
+def variable(*args, **kwargs):
     raise RuntimeError(
         "torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead"
     )

@@ -15,7 +15,6 @@ import math
 import random
 import re
 import copy
-import os
 import tempfile
 import unittest
 import warnings
@@ -83,52 +82,6 @@ if torch.get_default_dtype() is not torch.float32:
 load_tests = load_tests  # noqa: PLW0127
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
-
-@contextlib.contextmanager
-def torch_vital_set(value):
-    stash = None
-    if 'TORCH_VITAL' in os.environ:
-        stash = os.environ['TORCH_VITAL']
-    os.environ['TORCH_VITAL'] = value
-    try:
-        yield
-    finally:
-        if stash:
-            os.environ['TORCH_VITAL'] = stash
-        else:
-            del os.environ['TORCH_VITAL']
-
-# Tests Vital Signs for Torch
-# FIXME: document or deprecate whatever this is
-class TestBasicVitalSigns(TestCase):
-    def test_basic_vitals(self):
-        with torch_vital_set(''):
-            self.assertFalse(torch.vitals_enabled())
-        with torch_vital_set('ON'):
-            self.assertTrue(torch.vitals_enabled())
-
-    def test_basic_vitals_read_write(self):
-        with torch_vital_set('ON'):
-            self.assertTrue(torch.vitals_enabled())
-            # This tests the code path of setting a vital
-            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
-            self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
-            self.assertIn('CUDA.used', torch.read_vitals())
-
-    def test_dataloader_vitals(self):
-        with torch_vital_set('ON'):
-            inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-            tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-            dataset = torch.utils.data.TensorDataset(inps, tgts)
-            torch.utils.data.DataLoader(dataset, batch_size=2)
-            self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
-
-# FIXME: document or deprecate whatever this is
-class TestVitalSignsCuda(TestCase):
-    @onlyCUDA
-    def test_cuda_vitals_gpu_only(self, device):
-        with torch_vital_set('ON'):
-            self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
@@ -1860,6 +1813,22 @@ class TestTorchDeviceType(TestCase):
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
 
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -5002,6 +4971,27 @@ class TestTorchDeviceType(TestCase):
     # in this case the strategy is to purposefully cause a graph break to happen
     # in-between the two write operations, by adding checks between them, so
     # that they have to materialize in the expected order.
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_const_data_ptr(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+
+        # For a regular tensor, const_data_ptr and data_ptr return the same address
+        self.assertEqual(t.const_data_ptr(), t.data_ptr())
+
+        clone = t._lazy_clone()
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        # const_data_ptr should not trigger COW materialization
+        addr = clone.const_data_ptr()
+        self.assertEqual(addr, t.const_data_ptr())
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+    # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):
@@ -10593,31 +10583,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertTrue(called)
 
-    def test_storage_thread_safety(self):
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        NUM_ITERS = 10
-        NUM_THREADS = 4
-
-        # Concurrent calls to tensor.untyped_storage()
-        def access_untyped_storage(tensor, barrier):
-            barrier.wait()
-            return weakref.ref(tensor.untyped_storage())
-
-        for i in range(NUM_ITERS):
-            tensor = torch.tensor([1.0, 2.0, 3.0])
-            barrier = threading.Barrier(NUM_THREADS)
-            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-                futures = [
-                    executor.submit(access_untyped_storage, tensor, barrier)
-                    for _ in range(NUM_THREADS)
-                ]
-
-                # Check that all the storages returned were the same
-                for future in futures:
-                    self.assertEqual(future.result()(), tensor.untyped_storage())
-
     # FIXME: move to test_linalg
     @torch.inference_mode()
     def test_bmm_multithreaded(self):
@@ -10670,6 +10635,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(expect, res2)
         finally:
             torch.set_num_threads(num_threads)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_bmm_matmul_mixed_dtype_error(self):
+        a = torch.randn(2, 8, 8, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device="cuda", dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.bmm(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.matmul(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
     def test_conj_neg_tolist(self):
         x = torch.randn(2, dtype=torch.cfloat)
@@ -10993,7 +10975,6 @@ class TestTensorDeviceOps(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
-instantiate_device_type_tests(TestVitalSignsCuda, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')

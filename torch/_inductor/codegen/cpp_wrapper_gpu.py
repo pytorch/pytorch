@@ -77,165 +77,6 @@ def signature_is_tma_desc(sig: str | None) -> bool:
     return False
 
 
-# Lazy compile helper code - only included in JIT mode
-LAZY_COMPILE_HELPER = """
-#include <torch/csrc/inductor/aoti_torch/utils.h>
-
-struct LazyKernelCompileResult {
-    std::string cubin_path;
-    std::string mangled_name;
-    int num_warps;
-    int shared_mem;
-    int xblock;
-    int yblock;
-    int zblock;
-    int r0block;
-    int rsplit;
-    int rsplit_size;
-    int config_index;
-    int global_scratch;
-    int profile_scratch;
-};
-
-static PyObject* (*_THPVariable_Wrap)(const at::TensorBase&) = nullptr;
-static int32_t (*_THPUtils_unpackInt)(PyObject*) = nullptr;
-
-// Cached module and function references
-static PyObject* triton_lazy_compile_module = nullptr;
-static PyObject* start_kernel_compile = nullptr;
-static PyObject* run_triton_kernel_with_autotune = nullptr;
-
-static inline void loadLazyCompileFuncs() {
-    if (triton_lazy_compile_module == nullptr) {
-        triton_lazy_compile_module = PyImport_ImportModule("torch._inductor.runtime.triton_lazy_compile");
-        AOTI_TORCH_CHECK(triton_lazy_compile_module, "Failed to import triton_lazy_compile");
-
-        start_kernel_compile = PyObject_GetAttrString(triton_lazy_compile_module, "start_kernel_compile");
-        AOTI_TORCH_CHECK(start_kernel_compile, "Failed to get start_kernel_compile");
-
-        run_triton_kernel_with_autotune = PyObject_GetAttrString(triton_lazy_compile_module, "run_triton_kernel_with_autotune");
-        AOTI_TORCH_CHECK(run_triton_kernel_with_autotune, "Failed to get run_triton_kernel_with_autotune");
-
-        RAIIPyObject guards_mod = PyImport_ImportModule("torch._C._dynamo.guards");
-        AOTI_TORCH_CHECK(guards_mod, "Failed to import torch._C._dynamo.guards");
-
-        RAIIPyObject wrap_addr = PyObject_GetAttrString(guards_mod, "_torchinductor_thp_variable_wrap");
-        AOTI_TORCH_CHECK(wrap_addr, "Failed to get _torchinductor_thp_variable_wrap");
-        _THPVariable_Wrap = reinterpret_cast<decltype(_THPVariable_Wrap)>(PyLong_AsVoidPtr(wrap_addr));
-        AOTI_TORCH_CHECK(_THPVariable_Wrap, "THPVariable_Wrap not resolved");
-
-        RAIIPyObject unpack_addr = PyObject_GetAttrString(guards_mod, "_torchinductor_thputils_unpack_int");
-        AOTI_TORCH_CHECK(unpack_addr, "Failed to get _torchinductor_thputils_unpack_int");
-        _THPUtils_unpackInt = reinterpret_cast<decltype(_THPUtils_unpackInt)>(PyLong_AsVoidPtr(unpack_addr));
-        AOTI_TORCH_CHECK(_THPUtils_unpackInt, "THPUtils_unpackInt not resolved");
-    }
-}
-
-static inline std::string getStringAttr(PyObject* obj, const char* attr) {
-    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
-    AOTI_TORCH_CHECK(val, "Failed to get attribute");
-    return PyUnicode_AsUTF8(val);
-}
-
-static inline int getIntAttr(PyObject* obj, const char* attr) {
-    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
-    AOTI_TORCH_CHECK(val, "Failed to get attribute");
-    return _THPUtils_unpackInt(val);
-}
-
-static inline int getOptionalIntAttr(PyObject* obj, const char* attr, int sentinel = -1) {
-    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
-    AOTI_TORCH_CHECK(val, "Failed to get attribute");
-    return (val.get() != Py_None) ? _THPUtils_unpackInt(val) : sentinel;
-}
-
-static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
-    LazyKernelCompileResult compile_result;
-    compile_result.cubin_path = getStringAttr(result, "cubin_path");
-    compile_result.mangled_name = getStringAttr(result, "mangled_name");
-    compile_result.num_warps = getIntAttr(result, "num_warps");
-    compile_result.shared_mem = getIntAttr(result, "shared_mem");
-    compile_result.xblock = getIntAttr(result, "xblock");
-    compile_result.yblock = getIntAttr(result, "yblock");
-    compile_result.zblock = getIntAttr(result, "zblock");
-    compile_result.r0block = getIntAttr(result, "r0block");
-    compile_result.rsplit = getIntAttr(result, "rsplit");
-    compile_result.rsplit_size = getIntAttr(result, "rsplit_size");
-    compile_result.config_index = getOptionalIntAttr(result, "config_index");
-    compile_result.global_scratch = getOptionalIntAttr(result, "global_scratch");
-    compile_result.profile_scratch = getOptionalIntAttr(result, "profile_scratch");
-    return compile_result;
-}
-
-template<typename T>
-static inline PyObject* convertArgToPython(const T& arg) {
-    using DecayedT = std::decay_t<T>;
-    if constexpr (std::is_same_v<DecayedT, AtenTensorHandle>) {
-        at::Tensor* tensor_ptr = torch::aot_inductor::tensor_handle_to_tensor_pointer(arg);
-        return _THPVariable_Wrap(*tensor_ptr);
-    } else if constexpr (std::is_same_v<DecayedT, torch::aot_inductor::RAIIAtenTensorHandle>) {
-        at::Tensor* tensor_ptr = torch::aot_inductor::tensor_handle_to_tensor_pointer(arg.get());
-        return _THPVariable_Wrap(*tensor_ptr);
-    } else if constexpr (std::is_same_v<DecayedT, bool>) {
-        PyObject* py_arg = arg ? Py_True : Py_False;
-        Py_INCREF(py_arg);
-        return py_arg;
-    } else if constexpr (std::is_integral_v<DecayedT>) {
-        return PyLong_FromLongLong(static_cast<long long>(arg));
-    } else if constexpr (std::is_floating_point_v<DecayedT>) {
-        return PyFloat_FromDouble(static_cast<double>(arg));
-    } else {
-        AOTI_TORCH_CHECK(false, "Invalid input type to convertArgToPython");
-    }
-}
-
-template<typename... Args>
-static inline LazyKernelCompileResult runTritonKernelWithAutotune(
-        const std::string& kernel_name,
-        cudaStream_t stream,
-        const Args&... kernel_args) {
-    py::gil_scoped_acquire_simple acquire;
-
-    constexpr size_t num_args = sizeof...(Args);
-    RAIIPyObject py_args_list = PyList_New(num_args);
-    AOTI_TORCH_CHECK(py_args_list, "Failed to create args list");
-
-    size_t idx = 0;
-    auto add_arg = [&py_args_list, &idx](PyObject* py_arg) {
-        AOTI_TORCH_CHECK(py_arg, "Failed to convert argument");
-        PyList_SetItem(py_args_list, idx++, py_arg);
-    };
-    (add_arg(convertArgToPython(kernel_args)), ...);
-
-    RAIIPyObject call_args = PyTuple_Pack(3,
-        PyUnicode_FromString(kernel_name.c_str()),
-        PyLong_FromVoidPtr(stream),
-        py_args_list.get()
-    );
-    AOTI_TORCH_CHECK(call_args, "Failed to create call args");
-
-    RAIIPyObject result = PyObject_CallObject(run_triton_kernel_with_autotune, call_args);
-    AOTI_TORCH_CHECK(result, "Failed to run kernel with autotuning");
-
-    return extractCompileResult(result);
-}
-
-static inline void startKernelCompile(const std::string& kernel_name, const std::string& kernel_source) {
-    py::gil_scoped_acquire_simple acquire;
-
-    RAIIPyObject py_name = PyUnicode_FromString(kernel_name.c_str());
-    RAIIPyObject py_source = PyUnicode_FromString(kernel_source.c_str());
-    AOTI_TORCH_CHECK(py_name && py_source, "Failed to create Python strings");
-
-    RAIIPyObject call_args = PyTuple_Pack(2, py_name.get(), py_source.get());
-    AOTI_TORCH_CHECK(call_args, "Failed to create call args");
-
-    RAIIPyObject result = PyObject_CallObject(start_kernel_compile, call_args);
-    AOTI_TORCH_CHECK(result, "Failed to start kernel compilation");
-}
-"""
-
-
 def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
     """Unpack a StableTMADescriptor into kernel launch args.
 
@@ -348,7 +189,7 @@ class DeferredTritonCallWrapper:
         )
 
         # Write function signature
-        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
         with prefix.indent():
             for i, param in enumerate(param_lines):
                 comma = "," if i < len(param_lines) - 1 else ""
@@ -553,12 +394,14 @@ class DeferredTritonCallWrapper:
         device_type, _ = wrapper.codegen_device(torch.device(get_gpu_type())).split(
             ", "
         )
+        device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
         for scratch_name in ("global_scratch", "profile_scratch"):
             size_expr = f"{kernel_name}_result.{scratch_name}"
             var = f"{scratch_name}_ptr"
             prefix.splice(
-                f"""\
-                CUdeviceptr {var} = 0;
+                maybe_hipify_code_wrapper(
+                    f"""\
+                {device_ptr_type} {var} = 0;
                 RAIIAtenTensorHandle {var}_tensor;
                 if ({size_expr} > 0) {{
                     int64_t {var}_size[] = {{{size_expr}}};
@@ -568,9 +411,10 @@ class DeferredTritonCallWrapper:
                         1, {var}_size, {var}_stride, {dtype_str},
                         {device_type}, device_idx_, &{var}_handle));
                     {var}_tensor = RAIIAtenTensorHandle({var}_handle);
-                    {var} = reinterpret_cast<CUdeviceptr>({var}_tensor.data_ptr());
+                    {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
                 }}
             """
+                )
             )
             call_args_str += f", &{var}"
         return call_args_str
@@ -621,11 +465,17 @@ class DeferredTritonCallWrapper:
         )
         call_args_str = self._generate_lazy_scratch(prefix, wrapper, call_args_str)
 
+        launch_args = (
+            f"{kernel_name}, grid_0, grid_1, grid_2,"
+            f" {kernel_name}_result.num_warps,"
+            f" {kernel_name}_result.shared_mem,"
+            f" kernel_args_, stream_"
+        )
+
         prefix.splice(
             f"""\
             void* kernel_args_[] = {{{call_args_str}}};
-            launchKernel({kernel_name}, grid_0, grid_1, grid_2,
-                {kernel_name}_result.num_warps, {kernel_name}_result.shared_mem, kernel_args_, stream_);
+            launchKernel({launch_args});
             """
         )
 
@@ -634,10 +484,6 @@ class DeferredTritonCallWrapper:
         Generate C++ code that embeds Triton source and compiles it at runtime.
         """
         prefix = wrapper.prefix
-        if not wrapper._lazy_compile_helper_emitted:
-            prefix.splice(LAZY_COMPILE_HELPER)
-            wrapper._lazy_compile_helper_emitted = True
-
         kernel_name = self.kernel_name
         # Track kernel names for parallel initialization
         wrapper._lazy_kernel_names.append(kernel_name)
@@ -652,9 +498,8 @@ class DeferredTritonCallWrapper:
         )
         prefix.writeline(kernel_var_decl)
         # Use delimited raw string to handle )" in kernel source
-        kernel_body = (
-            f'R"TRITON(\n{self.kernel_name_to_body.get(kernel_name, "")}\n)TRITON"'
-        )
+        kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
+        kernel_body = f'R"TRITON(\n{kernel_source_str}\n)TRITON"'
         prefix.writeline(f"static const char* {kernel_name}_source = {kernel_body};")
         prefix.writeline(f"static LazyKernelCompileResult {kernel_name}_result;")
 
@@ -670,19 +515,32 @@ class DeferredTritonCallWrapper:
         tma_tensor_args = self.tma_tensor_args
         num_autotune_args = len(wrapper_arg_names) - len(tma_tensor_args)
         autotune_arg_list = []
-        for name in wrapper_arg_names[:num_autotune_args]:
+        # Track which args need scalar extraction for the autotune call.
+        # UnwrapUnspecArg args are 0-dim tensors in C++ that Triton expects
+        # as Python scalars; we use codegen_tensor_item to extract them.
+        scalar_extractions: list[tuple[str, str, torch_dtype]] = []
+        for idx, name in enumerate(wrapper_arg_names[:num_autotune_args]):
             if name in tma_signature_types:
                 autotune_arg_list.append(f"_tma_tensor_{name}")
+            elif isinstance(self.arg_types[idx], UnwrapUnspecArg):
+                scalar_var = f"_autotune_scalar_{name}"
+                scalar_extractions.append((name, scalar_var, self.arg_types[idx].dtype))
+                autotune_arg_list.append(scalar_var)
             else:
                 autotune_arg_list.append(name)
         autotune_args = ", ".join(autotune_arg_list)
         # Lazy compile with autotuning on first invocation
         with prefix.indent():
-            prefix.splice(
-                f"""\
-                if ({kernel_name} == nullptr) {{
+            prefix.writeline(f"if ({kernel_name} == nullptr) {{")
+            with prefix.indent():
+                for tensor_name, scalar_var, dtype in scalar_extractions:
+                    wrapper.codegen_tensor_item(
+                        dtype, tensor_name, scalar_var, indented_buffer=prefix
+                    )
+                prefix.splice(
+                    f"""\
                     {kernel_name}_result = runTritonKernelWithAutotune(
-                        "{kernel_name}", stream_, {autotune_args});
+                        _module_pending_kernels, "{kernel_name}", stream_, {autotune_args});
 
                     {kernel_name} = loadKernel(
                         {kernel_name}_result.cubin_path,
@@ -691,9 +549,9 @@ class DeferredTritonCallWrapper:
 
                     // First invocation already ran the kernel, so return early
                     return;
-                }}
-                """
-            )
+                    """
+                )
+            prefix.writeline("}")
 
             self._generate_lazy_grid(prefix)
             self._generate_lazy_launch(
@@ -776,8 +634,9 @@ class DeferredTritonCallWrapper:
         ]
         arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
+        num_ctas = params.get("config", {}).get("num_ctas", 1)
         scratch_spaces = {
-            name: params[name]
+            name: params[name] * num_ctas
             for name in ["global_scratch", "profile_scratch"]
             if params.get(name, None) is not None
         }
@@ -799,8 +658,6 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
-        if wrapper.device == "xpu":
-            launch_kernel_args.append(str(params["threads_per_warp"]))
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -955,7 +812,6 @@ class CppWrapperGpu(CppWrapperCpu):
         self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
-        self._lazy_compile_helper_emitted = False
         self._lazy_kernel_names: list[str] = []
 
     @staticmethod
@@ -1076,7 +932,7 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generate parallel kernel compilation initialization function
         if self._lazy_kernel_names:
             start_compile_calls = "\n    ".join(
-                f'startKernelCompile("{name}", {name}_source);'
+                f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
                 for name in self._lazy_kernel_names
             )
             self.prefix.splice(
@@ -1084,6 +940,8 @@ class CppWrapperGpu(CppWrapperCpu):
 // Start parallel compilation of all Triton kernels
 static inline void start_all_triton_kernel_compiles() {{
     loadLazyCompileFuncs();
+    _module_pending_kernels = PyDict_New();
+    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");
     {start_compile_calls}
 }}
 
@@ -1317,6 +1175,7 @@ static struct TritonKernelCompileInit {{
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -1424,7 +1283,7 @@ static struct TritonKernelCompileInit {{
                 self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
@@ -1434,9 +1293,8 @@ static struct TritonKernelCompileInit {{
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
-    @staticmethod
     def prepare_triton_wrapper_args(
-        call_args: list[Any], arg_types: list[Any]
+        self, call_args: list[Any], arg_types: list[Any]
     ) -> tuple[list[Any], list[Any]]:
         assert len(call_args) == len(arg_types), (call_args, arg_types)
         new_args = []
@@ -1450,7 +1308,10 @@ static struct TritonKernelCompileInit {{
             elif isinstance(arg, bool):
                 new_args.append(str(arg).lower())
             elif isinstance(arg, (int, float, SymbolicCallArg)):
-                new_args.append(str(arg))
+                if isinstance(arg, float):
+                    new_args.append(self.generate_float_value(arg))
+                else:
+                    new_args.append(str(arg))
             else:
                 new_args.append(cexpr(V.graph.sizevars.simplify(arg)))
             new_args_types.append(arg_type)

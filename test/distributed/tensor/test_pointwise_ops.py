@@ -548,7 +548,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         res = aten.div.Scalar(dt, 2)
         self.assertEqual(
@@ -559,7 +559,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) / 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
     @with_comms
     def test_mul_div_scalar_norm_partial(self):
@@ -591,7 +591,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt + 1
         expected = sum(i for i in range(self.world_size)) + 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial - scalar -> replicate
@@ -603,12 +603,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt - 1
         expected = sum(i for i in range(self.world_size)) - 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         res = 7 - dt
         expected = 7 - sum(i for i in range(self.world_size))
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial + regular partial -> partial
@@ -617,14 +617,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         # regular partial - regular partial -> partial
         res = dt - dt
         self.assertEqual(res.to_local(), rank - rank)
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 0)
+        self.assertEqual(res.full_tensor(), 0)
 
     @with_comms
     def test_add_sub_scalar_norm_partial(self):
@@ -638,7 +638,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm + 1
 
-        self.assertEqual(norm, 11)
+        self.assertEqual(norm.full_tensor(), 11)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
@@ -647,7 +647,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm - 1
 
-        self.assertEqual(norm, 9)
+        self.assertEqual(norm.full_tensor(), 9)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
     @with_comms
@@ -1235,6 +1235,76 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         self.assertIsInstance(d_params[0], DTensor)
         self.assertEqual(d_params[0].placements, (Shard(0),))
+
+    @with_comms
+    def test_new_pointwise_ops(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        shard_spec = [Shard(0)]
+
+        # hardshrink: non-decreasing unary, decomp-blocked
+        inp = torch.randn(8, 5, device=self.device_type)
+        dt = DTensor.from_local(inp, device_mesh, shard_spec)
+        self.assertEqual(
+            torch.nn.functional.hardshrink(dt).to_local(),
+            torch.nn.functional.hardshrink(inp),
+        )
+
+        # lcm: binary integer pointwise
+        a = torch.randint(1, 100, (8, 5), device=self.device_type)
+        b = torch.randint(1, 100, (8, 5), device=self.device_type)
+        da = DTensor.from_local(a, device_mesh, shard_spec)
+        db = DTensor.from_local(b, device_mesh, shard_spec)
+        self.assertEqual(torch.lcm(da, db).to_local(), torch.lcm(a, b))
+
+        # special_xlog1py and special_entr
+        pos = torch.rand(8, 5, device=self.device_type) + 0.1
+        dp = DTensor.from_local(pos, device_mesh, shard_spec)
+        self.assertEqual(
+            torch.special.xlog1py(dp, dp).to_local(),
+            torch.special.xlog1py(pos, pos),
+        )
+        self.assertEqual(
+            torch.special.entr(dp).to_local(),
+            torch.special.entr(pos),
+        )
+
+    @with_comms
+    def test_new_special_pointwise_ops(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        shard_spec = [Shard(0)]
+
+        # Unary special functions
+        inp = torch.rand(8, 5, device=self.device_type) + 0.1
+        dt = DTensor.from_local(inp, device_mesh, shard_spec)
+        for op in [
+            torch.special.airy_ai,
+            torch.special.bessel_y0,
+            torch.special.bessel_y1,
+            torch.special.modified_bessel_i0,
+            torch.special.modified_bessel_i1,
+            torch.special.modified_bessel_k0,
+            torch.special.modified_bessel_k1,
+            torch.special.scaled_modified_bessel_k0,
+            torch.special.scaled_modified_bessel_k1,
+        ]:
+            self.assertEqual(op(dt).to_local(), op(inp))
+
+        # Binary special polynomial ops
+        x = torch.rand(8, 5, device=self.device_type)
+        n = torch.randint(0, 5, (8, 5), device=self.device_type, dtype=x.dtype)
+        dx = DTensor.from_local(x, device_mesh, shard_spec)
+        dn = DTensor.from_local(n, device_mesh, shard_spec)
+        for op in [
+            torch.special.chebyshev_polynomial_t,
+            torch.special.chebyshev_polynomial_u,
+            torch.special.hermite_polynomial_h,
+            torch.special.hermite_polynomial_he,
+            torch.special.laguerre_polynomial_l,
+            torch.special.legendre_polynomial_p,
+        ]:
+            self.assertEqual(op(dx, dn).to_local(), op(x, n))
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)

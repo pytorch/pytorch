@@ -31,7 +31,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import ifdynstaticdefault, range_iterator, same
+from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
@@ -152,7 +152,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
-class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -491,9 +491,9 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_obj_is(a, b):
         v = a + b
-        if MyCls() is None:  # noqa: E711
+        if MyCls() is None:
             return -1
-        if MyCls() is not None:  # noqa: E711
+        if MyCls() is not None:
             v = v.sin()
         if MyCls() is MyCls():
             return -2
@@ -504,9 +504,9 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_cls_is(a, b):
         v = a + b
-        if MyCls is None:  # noqa: E711
+        if MyCls is None:
             return -1
-        if MyCls is not None:  # noqa: E711
+        if MyCls is not None:
             v = v.sin()
         if MyCls is not MyCls:
             return -2
@@ -1753,11 +1753,11 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self._test_default_dict_helper(set)
 
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())  # noqa: C408
+        self._test_default_dict_helper(lambda: dict())
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()  # noqa: C408
+            return dict()
 
         self._test_default_dict_helper(factory)
 
@@ -1784,7 +1784,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())  # noqa: C408
+            dd = collections.defaultdict(lambda: dict())
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1823,7 +1823,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1831,7 +1831,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):
@@ -3007,7 +3007,6 @@ class GraphModule(torch.nn.Module):
         else:
             return x.cos()
 
-    @unittest.expectedFailure
     def test_getattr_metaclass(self):
         class Meta(type):
             def __getattr__(cls, name):
@@ -3700,6 +3699,25 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
 
+    def test_operator_concat(self):
+        for seq_type in (list, tuple):
+            with self.subTest(seq_type=seq_type):
+
+                def fn(a, b):
+                    return operator.concat(a, b)
+
+                opt_fn = torch.compile(fn, fullgraph=True)
+                a = seq_type([1, 2, 3])
+                b = seq_type([4, 5, 6])
+                self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_operator_iconcat(self):
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -4036,6 +4054,20 @@ class GraphModule(torch.nn.Module):
         e = fn(t)
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
+
+    @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
+    def test_quantize_per_tensor(self):
+        def fn(t, scale, zero_point):
+            return torch.quantize_per_tensor(t, scale, zero_point, torch.quint8)
+
+        scale = torch.tensor(2.0)
+        zero_point = torch.tensor(10.0)
+        t = torch.rand((2, 2)) * scale + zero_point
+
+        result = fn(t, scale, zero_point)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_result = compiled_fn(t, scale, zero_point)
+        self.assertEqual(compiled_result, result)
 
     def test_map_return(self):
         def fn(a, b):
@@ -4627,7 +4659,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4711,6 +4743,38 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             x, kw_x = compiled_mod()
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
+
+    def test_guard_on_constant_func_defaults(self):
+        """
+        When a compiled function is re-invoked with a closure whose
+        __code__ is the same but __defaults__ differ (e.g. a different
+        constant default arg), Dynamo must recompile instead of reusing
+        the stale graph.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def make_adder(offset):
+            def adder(x, _offset=offset):
+                return x + _offset
+
+            return adder
+
+        @torch.compile(backend=cnts)
+        def call_adder(x, fn):
+            return fn(x)
+
+        x = torch.ones(4)
+
+        adder0 = make_adder(0)
+        result0 = call_adder(x, adder0)
+        self.assertEqual(result0, x + 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Same __code__, different __defaults__ → must recompile
+        adder5 = make_adder(5)
+        result5 = call_adder(x, adder5)
+        self.assertEqual(result5, x + 5)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_func_default_torch_args(self):
         """
@@ -4800,6 +4864,47 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_pydantic_dataclass_construction(self):
+        @torch._dynamo.disable
+        def populate(self, x, y):
+            self.x = x
+            self.y = y
+
+        @dataclass(init=False)
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+            # Pydantic uses this sentinel on decorated dataclasses.
+            __is_pydantic_dataclass__ = True
+
+            def __init__(self, x, y):
+                populate(self, x, y)
+
+        def fn(x, y):
+            p = Point(x=x, y=y)
+            return p.x + p.y
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        self.assertTrue(same(fn(x, y), compiled_fn(x, y)))
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+        # Skipping the whole frame records a second follow-on graph break, so
+        # assert on the specific pydantic entry rather than the raw count.
+        self.assertEqual(
+            [
+                count
+                for msg, count in counters["graph_break"].items()
+                if "Pydantic dataclass constructor" in msg
+            ],
+            [1],
+        )
 
     def test_listlike_of_tensors_contains_constant(self):
         for listlike in [set, list]:
@@ -5537,7 +5642,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(isinstance(res, tuple))
 
     def test_udf_list(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5571,7 +5676,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(res_lst.checked)
 
     def test_udf_list_slice(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5589,7 +5694,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(len(ref_lst), len(res_lst))
 
     def test_udf_list_reconstruction(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             # def __new__(cls, *args, **kwargs):
             #     return super().__new__(cls, *args, **kwargs)
             pass
@@ -5683,7 +5788,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             self.assertTrue(callable(compiled_func))
 
     def test_skip_function_call_very_weird_value(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__qualname__":
                     raise AttributeError("test")

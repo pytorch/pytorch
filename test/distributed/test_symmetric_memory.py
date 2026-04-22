@@ -79,6 +79,24 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_is_symm_mem_tensor(self) -> None:
+        # CPU tensor -> False (no allocator registered for CPU)
+        t_cpu = torch.empty(1024)
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cpu))
+
+        # Regular CUDA tensor -> False
+        t_cuda = torch.empty(1024, device="cuda")
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cuda))
+
+        # symm-mem tensor
+        t_symm = symm_mem.empty(1024, device="cuda")
+        self.assertTrue(symm_mem.is_symm_mem_tensor(t_symm))
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1512,6 +1530,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
+        """
+        When the input is not pre-allocated in symmetric memory, Inductor
+        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        """
         self._init_process()
 
         N = 8
@@ -1520,15 +1542,70 @@ class LoweringTest(MultiProcContinuousTest):
             return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
 
         x_input = torch.rand(N, N, device=self.device)
-
-        # Compilation should succeed here even though we do not control allocation
-        # of the input; user is responsible for passing a symmetric memory buffer.
         compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+        code = run_and_get_triton_code(compiled_input_direct, x_input)
 
-        # At runtime, this should raise an error because the input is not
-        # a symmetric memory buffer as required by the op.
-        with self.assertRaises(RuntimeError):
-            run_and_get_triton_code(compiled_input_direct, x_input)
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation for auto-inserted copy",
+        )
+
+        compiled_result = compiled_input_direct(x_input)
+        eager_result = x_input.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Auto-copy to P2P does not match eager",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_inplace_prevention(self):
+        """Verify scheduler correctly handles inplace for CommBufferLayout buffers."""
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        # mm (ExternKernelOut, regular CUDA) -> pointwise (CommBufferLayout) -> allreduce
+        # Should not in-places pointwise mul(P2P) into mm's buffer(regular).
+        def func(x, w):
+            y = torch.mm(x, w)
+            z = y * 2
+            return torch.ops.symm_mem.one_shot_all_reduce(z, "sum", "0")
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w)
+
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation in generated code",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
+        )
+
+        result = compiled(x, w)
+        eager_y = torch.mm(x, w)
+        eager_z = eager_y * 2
+        eager_result = eager_z.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager do not match",
+        )
 
 
 class SymmMemSingleProcTest(TestCase):

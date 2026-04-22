@@ -148,27 +148,16 @@ class _HeadTailLoadBalancer(_LoadBalancer):
         if seq_length % (world_size * 2) != 0:
             raise AssertionError
         chunk_size = seq_length // (world_size * 2)
-        all_indices = []
 
-        for rank in range(world_size):
-            # Generate indices for first chunk of the cp rank
-            first_chunk_start = rank * chunk_size
-            first_chunk_indices = list(
-                range(first_chunk_start, first_chunk_start + chunk_size)
-            )
+        # Split sequence into 2*world_size chunks, then pair chunk r with
+        # chunk (2*world_size - 1 - r) for each rank.
+        indices = torch.arange(seq_length, dtype=torch.int, device=self.device)
+        chunks = indices.view(world_size * 2, chunk_size)
+        head_idx = torch.arange(world_size, device=self.device)
+        tail_idx = 2 * world_size - 1 - head_idx
+        paired = torch.stack([chunks[head_idx], chunks[tail_idx]], dim=1)
+        all_indices_tensor = paired.reshape(-1)
 
-            # Second chunk: positions from the complementary chunk
-            second_chunk_idx = world_size * 2 - rank - 1
-            second_chunk_start = second_chunk_idx * chunk_size
-            second_chunk_indices = list(
-                range(second_chunk_start, second_chunk_start + chunk_size)
-            )
-            # combine the indices for this rank
-            all_indices.extend(first_chunk_indices + second_chunk_indices)
-
-        all_indices_tensor = torch.tensor(
-            all_indices, dtype=torch.int, device=self.device
-        )
         if restore:
             all_indices_tensor = torch.argsort(all_indices_tensor)
 

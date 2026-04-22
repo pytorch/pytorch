@@ -147,7 +147,9 @@ class ReduceOp:
     # stub with zero members. There is a chance this is due to a recent change
     # in the semantics of enum membership. If so, use `member = value` to mark
     # an enum member, instead of `member: type`
-    class RedOpType(Enum): ...  # type: ignore[misc]
+    class RedOpType(Enum):
+        def __call__(self, factor: float | int | Tensor) -> ReduceOp:
+            """Create a PREMUL_SUM ReduceOp with the given factor. Only PREMUL_SUM supports this."""
 
 class BroadcastOptions:
     rootRank: int
@@ -798,6 +800,8 @@ class _SymmetricMemory:
     @staticmethod
     def get_backend(device: torch.device) -> str | None: ...
     @staticmethod
+    def is_symm_mem_tensor(tensor: torch.Tensor) -> bool: ...
+    @staticmethod
     def get_mempool_allocator(device: torch.device) -> Any: ...
     signal_pad_size: int
     @property
@@ -894,3 +898,5 @@ class _Response:
 def _register_handler(
     name: str, handler: Callable[[_Request, _Response], None]
 ) -> None: ...
+def _set_comm_profiling_name(name: str) -> None: ...
+def _get_comm_profiling_name() -> str: ...

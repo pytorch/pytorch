@@ -1975,7 +1975,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         work.wait()
         torch.cuda.synchronize()
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7), "Need NCCL 2.29.7+ for backend.suspend and backend.memory_stats"
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_suspend(self):
         """Test that suspend can be called on the NCCL backend."""
@@ -1992,7 +1994,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         stats = backend.memory_stats()
         self.assertEqual(stats["suspended"], 1)
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7), "Need NCCL 2.29.7+ for backend.memory_stats / ncclCommMemStats"
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_get_memory_stats(self):
         """Test that get_memory_stats returns a dict of memory stats."""
@@ -2010,7 +2014,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertIn(key, stats)
         print(stats)
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7),
+        "Need NCCL 2.29.7+ for backend.resume, backend.suspend and backend.memory_stats",
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_resume(self):
         """Test the full suspend/resume cycle with collectives."""
@@ -4965,7 +4972,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank:d}")
-        if not sm_is_or_higher_than(device, 9, 0):  # noqa: F821
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -5413,7 +5420,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):  # noqa: F821
+        if sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -5649,6 +5656,8 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return pg
 
     def tearDown(self):
+        os.environ.pop("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", None)
+        os.environ.pop("TORCH_NCCL_DEBUG_INFO_PIPE_FILE", None)
         super().tearDown()
         try:
             os.remove(self.file_name)
