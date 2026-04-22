@@ -19,6 +19,7 @@ from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
+from torch.utils.weak import WeakTensorKeyDictionary
 from typing import NoReturn
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
+    "save_tensor",
     "GraphExecGroup",
 ]
 
@@ -1319,6 +1321,34 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+def _get_active_caching_mode() -> Optional[_CachingTorchDispatchMode]:
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    for mode in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(mode, _CachingTorchDispatchMode):
+            return mode
+    return None
+
+
+def save_tensor(tensor: torch.Tensor) -> None:
+    """Save a tensor for selective activation checkpointing, bypassing the policy.
+
+    Call this inside a checkpointed function to unconditionally save a tensor
+    so it is not recomputed during backward.  Outside of a selective activation
+    checkpoint context this is a no-op.
+    """
+    mode = _get_active_caching_mode()
+    if mode is None:
+        return
+    info = mode.tensor_tracker.get(tensor)
+    if info is None:
+        return
+    func, idx = info
+    mode.storage[func][idx] = tree_map(
+        lambda x: _VersionWrapper(_detach_helper(x)),
+        tensor,
+    )
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1330,6 +1360,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage = storage
         self.ac_graph_id = ac_graph_id
         self.func_counter: Dict[Any, int] = defaultdict(int)
+        self.tensor_tracker: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1354,6 +1385,14 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         idx = self.func_counter[func]
         self.func_counter[func] += 1
+
+        # Track outputs so save_tensor() can retroactively save them.
+        if isinstance(out, torch.Tensor):
+            self.tensor_tracker[out] = (func, idx)
+        elif isinstance(out, (tuple, list)):
+            for o in out:
+                if isinstance(o, torch.Tensor):
+                    self.tensor_tracker[o] = (func, idx)
 
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
                                 func, *args, **kwargs)

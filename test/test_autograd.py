@@ -92,6 +92,7 @@ from torch.utils.checkpoint import (
     checkpoint_sequential,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+    save_tensor,
 )
 from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -16157,6 +16158,39 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 },
             )
             self.assertEqual(my_count[0], 9)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_save_tensor(self):
+        recomputed_ops = []
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if ctx.is_recompute:
+                recomputed_ops.append(op)
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            a = torch.sin(x)
+            save_tensor(a)
+            b = torch.cos(a)
+            return b
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward()
+
+        self.assertNotIn(torch.ops.aten.sin.default, recomputed_ops)
+        self.assertIn(torch.ops.aten.cos.default, recomputed_ops)
+
+        x2 = x.detach().clone().requires_grad_(True)
+        torch.cos(torch.sin(x2)).sum().backward()
+        self.assertEqual(x.grad, x2.grad)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_save_tensor_noop_outside_context(self):
+        x = torch.randn(3, requires_grad=True)
+        a = torch.sin(x)
+        save_tensor(a)
 
 
 class TestAutogradMultipleDispatch(TestCase):
