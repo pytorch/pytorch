@@ -35,4 +35,3 @@ _glossary
 
 * {ref}`genindex`
 * {ref}`modindex`
-* {ref}`Glossary <glossary>`
