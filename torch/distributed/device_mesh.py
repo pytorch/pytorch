@@ -11,7 +11,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._opaque_base import OpaqueBase
 from torch.distributed import is_available
-from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
+from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._pycute import IntTuple, is_int, suffix_product
 from torch.types import IntLikeType
 from torch.utils._typing_utils import not_none
 
@@ -70,7 +71,7 @@ else:
             )
 
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
-    torch.serialization.add_safe_globals([_FlatLayout, _MeshLayout])
+    torch.serialization.add_safe_globals([_MeshLayout])
 
     def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
@@ -238,9 +239,7 @@ else:
                     if isinstance(mesh, torch.Tensor)
                     else torch.tensor(mesh, device="cpu", dtype=torch.int)
                 )
-                _layout = _MeshLayout.from_sizes_strides(
-                    tuple(mesh_tensor.size()), tuple(mesh_tensor.stride())
-                )
+                _layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
                 _rank_map = mesh_tensor.flatten()
             else:
                 if _layout is None or _rank_map is None:
@@ -248,7 +247,7 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            if not _layout.collapse().check_non_overlap():
+            if not _layout.check_non_overlap():
                 raise AssertionError(
                     "Please use a non-overlapping layout when creating a DeviceMesh."
                 )
@@ -279,11 +278,9 @@ else:
             self._layout = (
                 _layout
                 if _layout
-                else _MeshLayout.from_sizes_strides(
-                    tuple(self.mesh.size()), tuple(self.mesh.stride())
-                )
+                else _MeshLayout(self.mesh.size(), self.mesh.stride())
             )
-            if not self._layout.collapse().check_non_overlap():
+            if not self._layout.check_non_overlap():
                 raise AssertionError(
                     "Please use a non-overlapping layout when creating a DeviceMesh."
                 )
@@ -497,13 +494,13 @@ else:
 
         @staticmethod
         def _init_one_process_group(
-            sub_layout: _FlatLayout,
+            sub_layout: _MeshLayout,
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
         ) -> GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
-            pg_ranks_by_dim = _MeshLayout([sub_layout]).remap_to_tensor(rank_map)
+            pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
             # We need to explicitly pass in timeout when specified in option, otherwise
             # the default timeout will be used to override the timeout set in option.
@@ -645,13 +642,7 @@ else:
                 if self._mesh_dim_names
                 else f"{self._layout.top_level_sizes}"
             )
-            stride = tuple(
-                axis.stride[0] if len(axis.stride) == 1 else axis.stride
-                for axis in self._layout
-            )
-            device_mesh_repr = (
-                f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={stride}"
-            )
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={self._layout.strides}"
             # We only print the mesh tensor if the debug mode is turned on.
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
@@ -893,7 +884,9 @@ else:
                     f"Please specify another valid mesh_dim_name.",
                 )
 
-            flattened_mesh_layout = _MeshLayout([self._layout.collapse()])
+            flattened_mesh_layout = self._layout.coalesce()
+            if len(flattened_mesh_layout) > 1:
+                flattened_mesh_layout = flattened_mesh_layout.nest()
 
             # Check if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
@@ -959,9 +952,9 @@ else:
 
             # The slice mesh_dim_names should consist either the current device_mesh's mesh_dim_names
             # or its flattened mesh's mesh_dim_names if it's root_mesh.
-            flatten_name_to_root_layout: dict[str, _FlatLayout] = (
+            flatten_name_to_root_layout = (
                 {
-                    key: mesh._layout[0]  # Extract the single axis from flattened mesh
+                    key: mesh._layout
                     for key, mesh in self._get_root_mesh()._flatten_mapping.items()
                 }
                 if slice_from_root
@@ -981,7 +974,7 @@ else:
                     f"Valid mesh_dim_names are {valid_mesh_dim_names}."
                 )
 
-            layout_sliced: list[_FlatLayout] = []
+            layout_sliced = []
             for name in mesh_dim_names:
                 if name in not_none(self._mesh_dim_names):
                     layout_sliced.append(
@@ -994,29 +987,43 @@ else:
                         stacklevel=2,
                     )
                     layout_sliced.append(flatten_name_to_root_layout[name])
-            result_layout = _MeshLayout(layout_sliced)
+
+            sliced_sizes = tuple(l.sizes for l in layout_sliced)
+            sliced_strides = tuple(l.strides for l in layout_sliced)
 
             # The check below is from DeviceMesh's implementation before adopting CuTe layout for internal
             # bookkeeping and it can be removed but we need to define what is the expected behavior.
             # TODO: Remove the below check and define the expected behavior.
             # Validate the order of the slice mesh dim indices.
             # This needs to be in ascending order.
-            if not result_layout.collapse().check_sorted():
-                raise KeyError(
-                    f"Invalid mesh_dim_names {mesh_dim_names} specified. "
-                    "Mesh dim indices should be in ascending order."
-                )
+            pre_stride = -1
+            for stride in reversed(sliced_strides):
+                # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
+                # But we don't see a use case for now so we don't want to support it.
+                if not is_int(stride):
+                    raise NotImplementedError(
+                        "Currently, this only allows slicing out a contiguous flattened dim."
+                    )
+                # Note that with CuTe layout, we can support slicing non-ascending order dims with no problem.
+                # But we don't see a use case for now so we don't want to support it.
+                if stride < pre_stride:
+                    raise KeyError(
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                        "Mesh dim indices should be in ascending order."
+                    )
+                pre_stride = stride
 
             # When users sliced dim_names outside from current mesh, we will check whether
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
-            if not result_layout.collapse().check_non_overlap():
+            layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
+            if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
                     f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
-            return result_layout
+            return layout_sliced
 
         # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(self, mesh_dim_name: str) -> list["DeviceMesh"]:
@@ -1025,7 +1032,7 @@ else:
             """
             mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
-            pg_ranks_by_dim = _MeshLayout([layout]).remap_to_tensor(self._rank_map)
+            pg_ranks_by_dim = layout.remap_to_tensor(self._rank_map)
             cur_rank = self.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -1313,7 +1320,7 @@ else:
                 tuple[str | None, C10dBackend.Options | None], ...
             ] = ((None, None),),
         ) -> "DeviceMesh":
-            inner_layout = _MeshLayout.from_sizes_strides(tuple(mesh_sizes))
+            inner_layout = _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
 
             if inner_layout.numel() != self._layout[dim].numel():
                 raise ValueError(
@@ -1424,11 +1431,14 @@ else:
         @staticmethod
         def _concatenate(device_mesh_list: list["DeviceMesh"]) -> "DeviceMesh":
             concat_dim_names: list[str] = []
-            concat_axes: list[_FlatLayout] = []
+            concat_sizes: list[IntTuple] = []
+            concat_strides: list[IntTuple] = []
             concat_dim_group_name: list[GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
-                concat_axes.extend(dm._layout)
+                for i in range(len(dm._layout)):
+                    concat_sizes.append(dm._layout[i].sizes)
+                    concat_strides.append(dm._layout[i].strides)
                 concat_dim_names.extend(not_none(dm.mesh_dim_names))
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
@@ -1437,8 +1447,8 @@ else:
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
-            concat_mesh_layout = _MeshLayout(concat_axes)
-            if not concat_mesh_layout.collapse().check_non_overlap():
+            concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
+            if not concat_mesh_layout.check_non_overlap():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
                 )
@@ -1570,7 +1580,7 @@ else:
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
-        layout = _MeshLayout.from_sizes_strides(tuple(mesh_shape))
+        layout = _MeshLayout(tuple(mesh_shape), suffix_product(tuple(mesh_shape)))
         # Always initialize the (identity) rank map on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
