@@ -988,7 +988,8 @@ def inductor_fails(
     sync()
 
     try:
-        compile_mod = compile_fx_inner(fx_g, args)
+        compile_args = _get_compile_args(fx_g, args)
+        compile_mod = compile_fx_inner(fx_g, compile_args)
         assert not isinstance(compile_mod, str)
         compile_mod(args)
         sync()
@@ -1010,10 +1011,15 @@ def inductor_accuracy_fails(
 ) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
+    def _compile_with_symbolic_args(
+        gm: torch.fx.GraphModule, inputs: list[Any]
+    ) -> torch.fx.GraphModule:
+        return compile_fx_inner(gm, _get_compile_args(gm, inputs))  # type: ignore[return-value]
+
     return backend_aot_accuracy_fails(
         fx_g,
         args,  # type: ignore[arg-type]
-        compile_fx_inner,  # type: ignore[arg-type]
+        _compile_with_symbolic_args,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -1071,6 +1077,33 @@ def repro_common(
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args
+
+
+def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequence[Any]:
+    """Extract FakeTensor/SymInt args from the traced graph for compilation.
+
+    When repro_common traces with tracing_mode='symbolic', the resulting
+    GraphModule's placeholder nodes carry FakeTensor/SymInt metadata.
+    compile_fx_inner needs these (not the concrete args) so that Inductor
+    generates proper symbolic-size bindings in the output code.
+
+    For tracing_mode='real', concrete args are fine — we must NOT extract
+    FakeTensor metadata because different nodes may have FakeTensors from
+    different FakeTensorModes, causing a FakeTensorMode mismatch assertion
+    in Inductor.  We detect symbolic tracing by checking for SymInt values,
+    which only exist when tracing_mode='symbolic'.
+    """
+    placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return args
+    # Only extract metadata if the graph was traced with symbolic mode.
+    # SymInt values in placeholder metadata are the reliable indicator —
+    # FakeTensors appear in both real and symbolic modes, but only symbolic
+    # tracing creates SymInts for integer inputs.
+    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
+    if not has_symint:
+        return args
+    return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
 ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
@@ -1147,8 +1180,9 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
+    compile_args = _get_compile_args(mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, args)
+        compiled = compile_fx_inner(mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1288,7 +1322,8 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     from torch.cuda import synchronize
 
-    compiled = compile_fx_inner(mod, args)
+    compile_args = _get_compile_args(mod, args)
+    compiled = compile_fx_inner(mod, compile_args)
     assert not isinstance(compiled, str)
 
     if options.accuracy != "":
