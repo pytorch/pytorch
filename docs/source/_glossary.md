@@ -36,7 +36,6 @@ Composite Operation
 Non-Leaf Operation
    Same as {term}`Compound Operation`.
 
-   An operation that's considered a basic operation, as opposed to a {term}`Compound
    Operation`. Leaf Operation always has dispatch functions defined, usually has a
    derivative function defined as well.
 
