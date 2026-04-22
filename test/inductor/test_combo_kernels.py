@@ -1402,7 +1402,11 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(found_hints["reduction_hint_1"], "OUTER")
 
     @requires_gpu_and_triton
-    @torch._inductor.config.patch("combo_kernel_autotune_grouping", True)
+    @torch._inductor.config.patch(
+        {
+            "combo_kernel_autotune_grouping": True,
+        }
+    )
     def test_combo_autotune_grouping(self):
         def fn(a, b, c, d):
             return a.cos(), b.sin(), c.exp(), d.neg()
@@ -1432,55 +1436,110 @@ class ComboKernelTestsMaxAutotune(TestCase):
             for line in group_lines
             if re.search(r"group (\d+)", line)
         }
-        # Exact grouping count is hardware-dependent because pointwise candidate
-        # config sets can differ across environments. The stable regression for
-        # the new grouping key lives in the mocked test below.
-        self.assertGreater(
+        # 4 sub-kernels in 2 size buckets (rnumel 65536 vs 8) with identical
+        # per-sub-kernel metadata within each bucket → exactly 2 groups.
+        self.assertEqual(
             len(group_indices),
-            0,
-            f"Expected at least one autotune group, got {group_lines}",
+            2,
+            f"Expected 2 autotune groups, got {group_lines}",
         )
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch("combo_kernel_autotune_grouping", True)
-    def test_combo_autotune_grouping_uses_tiling_signature(self):
+    def test_combo_autotune_grouping_by_metadata_fingerprint(self):
+        """Sub-kernels share a group iff every per-sub-kernel heuristic input
+        is identical; any difference in the fingerprint separates them.
+        """
         import triton
 
-        inductor_meta = {
-            "combo_grid_meta": {
-                "num_kernels": 2,
-                "heuristic_0": "pointwise",
-                "heuristic_1": "pointwise",
-                "size_hints_0": {"x": 256, "y": 256},
-                "size_hints_1": {"x": 256, "y": 256},
-                "tile_hint_0": "TileHint.SQUARE",
-                "tile_hint_1": "TileHint.SQUARE",
-                "inductor_meta_0": {"tiling_scores": {"x": 8, "y": 1}},
-                "inductor_meta_1": {"tiling_scores": {"x": 1, "y": 8}},
+        def _sub_meta(
+            num_load=1,
+            num_store=1,
+            num_reduction=1,
+            autotune_hints=None,
+            atomic_add_found=False,
+            no_x_dim=False,
+            tiling_scores=None,
+        ):
+            return {
+                "num_load": num_load,
+                "num_store": num_store,
+                "num_reduction": num_reduction,
+                "autotune_hints": autotune_hints if autotune_hints is not None else [],
+                "atomic_add_found": atomic_add_found,
+                "no_x_dim": no_x_dim,
+                "tiling_scores": tiling_scores
+                if tiling_scores is not None
+                else {"x": 1, "r0_": 8},
             }
-        }
 
-        def pointwise_configs(*args, **kwargs):
+        def base_combo_meta():
+            return {
+                "num_kernels": 2,
+                # Captured config — real combo_grid_meta() always sets this.
+                "autotune_grouping": True,
+                "heuristic_0": "reduction",
+                "heuristic_1": "reduction",
+                "size_hints_0": {"x": 2048, "r0_": 1024},
+                "size_hints_1": {"x": 2048, "r0_": 1024},
+                "reduction_hint_0": "INNER",
+                "reduction_hint_1": "INNER",
+                # Per-sub-kernel inductor_meta — the single source of truth
+                # for fields fed into _subkernel_fingerprint.
+                "inductor_meta_0": _sub_meta(),
+                "inductor_meta_1": _sub_meta(),
+            }
+
+        def reduction_configs(*args, **kwargs):
             return [
-                triton.Config({"XBLOCK": 64, "YBLOCK": 32}, num_warps=4, num_stages=1),
-                triton.Config({"XBLOCK": 128, "YBLOCK": 32}, num_warps=4, num_stages=1),
+                triton.Config(
+                    {"XBLOCK": 8, "R0_BLOCK": 256}, num_warps=4, num_stages=1
+                ),
             ]
 
-        with unittest.mock.patch(
-            "torch._inductor.runtime.triton_heuristics.pointwise",
-            side_effect=pointwise_configs,
-        ):
-            torch._inductor.runtime.triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
-                {"x": 256, "y": 256},
-                inductor_meta,
-                triton_meta={},
-            )
+        # Each case mutates one field of sub-kernel 1 away from sub-kernel 0.
+        # `None` means no mutation → expect groups to merge.
+        # For per-kernel fields, mutate inside inductor_meta_1 sub-dict.
+        cases = [
+            ("all identical merge", None, None, 1),
+            ("different r0_numel", ("size_hints_1",), {"x": 2048, "r0_": 512}, 2),
+            ("different num_load", ("inductor_meta_1", "num_load"), 12, 2),
+            (
+                "different tiling_scores",
+                ("inductor_meta_1", "tiling_scores"),
+                {"x": 8, "r0_": 1},
+                2,
+            ),
+        ]
 
-        groups = inductor_meta["combo_tuning_groups"]
-        self.assertEqual(len(groups), 2)
-        self.assertEqual([[0], [1]], [g["member_indices"] for g in groups])
+        for desc, path, value, expected_groups in cases:
+            with self.subTest(desc):
+                meta = base_combo_meta()
+                if path is not None:
+                    if len(path) == 1:
+                        meta[path[0]] = value
+                    else:
+                        meta[path[0]][path[1]] = value
+                inductor_meta = {"combo_grid_meta": meta}
+
+                with unittest.mock.patch(
+                    "torch._inductor.runtime.triton_heuristics.reduction",
+                    side_effect=reduction_configs,
+                ):
+                    torch._inductor.runtime.triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
+                        {"x": 2048, "r0_": 1024},
+                        inductor_meta,
+                        triton_meta={},
+                    )
+
+                groups = inductor_meta["combo_tuning_groups"]
+                self.assertEqual(
+                    len(groups),
+                    expected_groups,
+                    f"{desc}: expected {expected_groups} group(s), got {len(groups)}",
+                )
 
     @requires_gpu_and_triton
     def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self):

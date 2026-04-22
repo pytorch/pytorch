@@ -1170,6 +1170,9 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
+            # Captured at codegen time so runtime sees the same value the
+            # source was generated with, regardless of later config changes.
+            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
         if not self.enable_autotune:
