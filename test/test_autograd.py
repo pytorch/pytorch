@@ -16244,6 +16244,42 @@ class TestSelectiveActivationCheckpoint(TestCase):
         torch.cos(torch.sin(x2)).sum().backward()
         self.assertEqual(x.grad, x2.grad)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_sac_cpu_offload(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        y = torch.randn(512, 512, device="cuda")
+
+        def fn(x, y):
+            return torch.mm(x, y).sin().sum()
+
+        def get_bw_flops(f):
+            f().backward()
+            out = f()
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
+
+        ctx = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        bw_flops = get_bw_flops(
+            lambda: checkpoint(fn, x, y, use_reentrant=False, context_fn=ctx))
+
+        # mm is offloaded and restored, not recomputed: 1 bw flop (just the mm backward)
+        self.assertEqual(bw_flops, 1.0)
+
+        # Gradient correctness
+        x2 = torch.randn_like(x, requires_grad=True)
+        out = checkpoint(fn, x2, y, use_reentrant=False, context_fn=ctx)
+        out.backward()
+        x3 = x2.detach().clone().requires_grad_(True)
+        torch.mm(x3, y).sin().sum().backward()
+        self.assertEqual(x2.grad, x3.grad)
+
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
