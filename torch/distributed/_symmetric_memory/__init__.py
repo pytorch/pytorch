@@ -143,6 +143,46 @@ def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
     return _backend_streams[priority]
 
 
+# Cached CUDA streams for low-contention collectives that need work to run
+# off the backend stream. v4 currently uses a single peer stream per device.
+_peer_streams: dict[tuple[int, int], torch.cuda.Stream] = {}
+
+
+def _get_peer_stream(device_index: int, peer: int) -> torch.cuda.Stream:
+    key = (device_index, peer)
+    stream = _peer_streams.get(key)
+    if stream is None:
+        stream = torch.cuda.Stream(device=device_index, priority=0)
+        _peer_streams[key] = stream
+    return stream
+
+
+_ag_output_cache: dict[
+    tuple[str, c10d.GroupName, int, torch.dtype, tuple[int, ...]], torch.Tensor
+] = {}
+
+
+def _get_ag_output(
+    variant: str,
+    group_name: c10d.GroupName,
+    device_index: int,
+    dtype: torch.dtype,
+    shape: tuple[int, ...],
+) -> torch.Tensor:
+    key = (variant, group_name, device_index, dtype, shape)
+    output = _ag_output_cache.get(key)
+    if output is None:
+        output = _SymmetricMemory.empty_strided_p2p(
+            size=shape,
+            stride=torch.empty(shape, dtype=dtype).stride(),
+            dtype=dtype,
+            device=torch.device("cuda", device_index),
+            group_name=group_name,
+        )
+        _ag_output_cache[key] = output
+    return output
+
+
 def _pipelined_multi_all_gather_and_consume(
     shard: list[torch.Tensor],
     shard_consumer: Callable[[list[torch.Tensor], int], None],
@@ -476,6 +516,15 @@ lib.define(
 )
 lib.define(
     "_low_contention_all_gather_v2(Tensor tensor, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_v3(Tensor tensor, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_v4(Tensor tensor, str group_name) -> Tensor"
+)
+lib.define(
+    "_low_contention_all_gather_v5(Tensor tensor, str group_name) -> Tensor"
 )
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
@@ -1823,6 +1872,236 @@ def _low_contention_all_gather_v2(
                     local_signal_pad, b2_base + peer, counter
                 )
 
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+# Signal-pad layout for direct-input all-gather experiments:
+#
+#   slots [0 .. ws)           barrier() channel 0 + multimem sync_remote_blocks
+#   slots [ws .. 3*ws)        v2 two barriers (unchanged)
+#   slots [3*ws .. 5*ws)      v3 batched ready/done barriers
+#   slots [5*ws .. 7*ws)      v4 CE->multicast barriers
+#
+# v5 reuses the existing multimem kernel synchronization slots.
+_LC_OP_WRITE = 0
+_LC_OP_WAIT = 1
+_LC_WAIT_GEQ = 0
+
+_lc_ag_counter: dict[c10d.GroupName, int] = {}
+
+
+def _next_lc_ag_counter(group_name: c10d.GroupName) -> int:
+    counter = _lc_ag_counter.get(group_name, 0) + 1
+    if counter > 0xFFFFFFFF:
+        raise RuntimeError("low_contention all-gather signal counter overflowed")
+    _lc_ag_counter[group_name] = counter
+    return counter
+
+
+def _direct_ag_input(
+    tensor: torch.Tensor, stream: torch.cuda.Stream
+) -> torch.Tensor:
+    ag_input = tensor if tensor.is_contiguous() else tensor.contiguous()
+    ag_input.record_stream(stream)
+    return ag_input
+
+
+def _require_multicast(device_index: int, op_name: str) -> None:
+    if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
+        raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
+
+
+def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
+    required_bytes = 7 * symm_mem.world_size * 4
+    actual_bytes = _SymmetricMemory.signal_pad_size
+    if actual_bytes < required_bytes:
+        raise RuntimeError(
+            f"low_contention all-gather requires signal_pad_size >= "
+            f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
+            f"the current size is {actual_bytes} bytes."
+        )
+
+
+def _batched_counter_barrier(
+    symm_mem: _SymmetricMemory,
+    rank: int,
+    world_size: int,
+    base_slot: int,
+    counter: int,
+) -> None:
+    if world_size <= 1:
+        return
+
+    pads: list[torch.Tensor] = []
+    offsets: list[int] = []
+    vals: list[int] = []
+    op_types: list[int] = []
+    flags: list[int] = []
+
+    for peer in range(world_size):
+        if peer == rank:
+            continue
+        pads.append(symm_mem.get_signal_pad(peer))
+        offsets.append(base_slot + rank)
+        vals.append(counter)
+        op_types.append(_LC_OP_WRITE)
+        flags.append(0)
+
+    local_pad = symm_mem.get_signal_pad(rank)
+    for peer in range(world_size):
+        if peer == rank:
+            continue
+        pads.append(local_pad)
+        offsets.append(base_slot + peer)
+        vals.append(counter)
+        op_types.append(_LC_OP_WAIT)
+        flags.append(_LC_WAIT_GEQ)
+
+    _SymmetricMemory.stream_batch_mem_op(pads, offsets, vals, op_types, flags)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v3", "Meta")
+def _low_contention_all_gather_v3_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v3", "CUDA")
+def _low_contention_all_gather_v3(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input P2P push all-gather using one batched memcpy call."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    output = _get_ag_output("v3", group_name, device_index, tensor.dtype, out_shape)
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError("v3 output must be allocated from symmetric memory")
+    _check_lc_signal_pad_capacity(symm_mem)
+
+    rank = symm_mem.rank
+    ready_base = 3 * world_size
+    done_base = 4 * world_size
+    counter = _next_lc_ag_counter(group_name)
+
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+    with backend_stream:
+        ag_input = _direct_ag_input(tensor, backend_stream)
+        _batched_counter_barrier(
+            symm_mem, rank, world_size, ready_base, counter
+        )
+
+        dsts = [
+            symm_mem.get_buffer(
+                dst_rank,
+                tensor.shape,
+                tensor.dtype,
+                storage_offset=rank * tensor.numel(),
+            )
+            for dst_rank in range(world_size)
+        ]
+        torch.ops.symm_mem.memcpy_batch_async(
+            dsts, [ag_input for _ in range(world_size)]
+        )
+        _batched_counter_barrier(
+            symm_mem, rank, world_size, done_base, counter
+        )
+        output.record_stream(backend_stream)
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v4", "Meta")
+def _low_contention_all_gather_v4_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v4", "CUDA")
+def _low_contention_all_gather_v4(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into cached output."""
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_v4")
+    world_size = c10d._get_group_size_by_name(group_name)
+    out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    output = _get_ag_output("v4", group_name, device_index, tensor.dtype, out_shape)
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError("v4 output must be allocated from symmetric memory")
+    _check_lc_signal_pad_capacity(symm_mem)
+
+    rank = symm_mem.rank
+    shard_bytes = tensor.numel() * tensor.element_size()
+    counter = _next_lc_ag_counter(group_name)
+    b1_slot = 5 * world_size
+    b2_slot = 6 * world_size
+
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+    with backend_stream:
+        ag_input = _direct_ag_input(tensor, backend_stream)
+        _batched_counter_barrier(symm_mem, rank, world_size, b1_slot, counter)
+        torch.ops.symm_mem.memcpy_async_to_multicast(
+            output, ag_input, rank * shard_bytes, group_name
+        )
+        _batched_counter_barrier(symm_mem, rank, world_size, b2_slot, counter)
+        output.record_stream(backend_stream)
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v5", "Meta")
+def _low_contention_all_gather_v5_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_v5", "CUDA")
+def _low_contention_all_gather_v5(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input multimem kernel all-gather into cached multicast output."""
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_v5")
+    world_size = c10d._get_group_size_by_name(group_name)
+    out_shape = (tensor.shape[0] * world_size, *tensor.shape[1:])
+    output = _get_ag_output("v5", group_name, device_index, tensor.dtype, out_shape)
+
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+    with backend_stream:
+        ag_input = _direct_ag_input(tensor, backend_stream)
+        torch.ops.symm_mem.multimem_all_gather_out(ag_input, group_name, output)
+        output.record_stream(backend_stream)
         torch._C._distributed_c10d._register_work(output, Work())
         return output
 

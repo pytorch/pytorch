@@ -1237,6 +1237,17 @@ class aten_distributed_optimizations:
     # Use v2 all-gather (stream_write/wait_value32 instead of barrier kernels).
     low_contention_all_gather_v2: bool = False
 
+    # Direct-input P2P push/put variant. No multicast requirement.
+    low_contention_all_gather_v3: bool = False
+
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_v4: bool = False
+
+    # Direct-input multimem.st variant. Single CUDA kernel launch per AG:
+    # GPU-initiated multicast writes + system-scope atomic barrier.
+    low_contention_all_gather_v5: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

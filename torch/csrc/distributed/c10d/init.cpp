@@ -1302,6 +1302,33 @@ Example:
           py::arg("val"),
           py::arg("flags") = 0)
       .def_static(
+          "stream_batch_mem_op",
+          [](const std::vector<at::Tensor>& pads,
+             const std::vector<int64_t>& offsets,
+             const std::vector<int64_t>& vals,
+             const std::vector<int64_t>& op_types,
+             const std::vector<int64_t>& flags) {
+            auto op = c10::Dispatcher::singleton()
+                          .findSchemaOrThrow("symm_mem::stream_batch_mem_op", "")
+                          .typed<void(
+                              at::TensorList,
+                              at::IntArrayRef,
+                              at::IntArrayRef,
+                              at::IntArrayRef,
+                              at::IntArrayRef)>();
+            op.call(
+                at::TensorList(pads),
+                at::IntArrayRef(offsets),
+                at::IntArrayRef(vals),
+                at::IntArrayRef(op_types),
+                at::IntArrayRef(flags));
+          },
+          py::arg("pads"),
+          py::arg("offsets"),
+          py::arg("vals"),
+          py::arg("op_types"),
+          py::arg("flags"))
+      .def_static(
           "memset32",
           [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
             // The range of `val` is checked inside the op

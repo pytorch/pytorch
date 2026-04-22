@@ -900,18 +900,65 @@ def register_symm_mem_lowerings():
             ),
         )
 
-    @register_lowering(symm_mem._nccl_ce_all_gather)
-    def _symm_mem_nccl_ce_all_gather(
+    @register_lowering(symm_mem._low_contention_all_gather_v3)
+    def _symm_mem_low_contention_all_gather_v3(
         inp: ir.TensorBox,
         group_name: str,
-        buffer_id: int = 0,
     ):
-        return _create_out_of_place(
-            symm_mem._nccl_ce_all_gather.default,
-            inp,
-            group_name,
-            buffer_id,
+        inp.realize()
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v3.default,
+                inp,
+                group_name,
+            ),
         )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v4)
+    def _symm_mem_low_contention_all_gather_v4(
+        inp: ir.TensorBox,
+        group_name: str,
+    ):
+        inp.realize()
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v4.default,
+                inp,
+                group_name,
+            ),
+        )
+
+    @register_lowering(symm_mem._low_contention_all_gather_v5)
+    def _symm_mem_low_contention_all_gather_v5(
+        inp: ir.TensorBox,
+        group_name: str,
+    ):
+        inp.realize()
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem._low_contention_all_gather_v5.default,
+                inp,
+                group_name,
+            ),
+        )
+
+    if hasattr(symm_mem, "_nccl_ce_all_gather"):
+
+        @register_lowering(symm_mem._nccl_ce_all_gather)
+        def _symm_mem_nccl_ce_all_gather(
+            inp: ir.TensorBox,
+            group_name: str,
+            buffer_id: int = 0,
+        ):
+            return _create_out_of_place(
+                symm_mem._nccl_ce_all_gather.default,
+                inp,
+                group_name,
+                buffer_id,
+            )
 
     @register_lowering(symm_mem._low_contention_reduce_scatter)
     def _symm_mem_low_contention_reduce_scatter(
@@ -932,15 +979,17 @@ def register_symm_mem_lowerings():
             ),
         )
 
-    @register_lowering(symm_mem._nccl_efficiency_reduce_scatter)
-    def _symm_mem_nccl_efficiency_reduce_scatter(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        return _create_out_of_place(
-            symm_mem._nccl_efficiency_reduce_scatter.default,
-            inp,
-            reduce_op,
-            group_name,
-        )
+    if hasattr(symm_mem, "_nccl_efficiency_reduce_scatter"):
+
+        @register_lowering(symm_mem._nccl_efficiency_reduce_scatter)
+        def _symm_mem_nccl_efficiency_reduce_scatter(
+            inp: ir.TensorBox,
+            reduce_op: str,
+            group_name: str,
+        ):
+            return _create_out_of_place(
+                symm_mem._nccl_efficiency_reduce_scatter.default,
+                inp,
+                reduce_op,
+                group_name,
+            )

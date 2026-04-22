@@ -469,6 +469,141 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
+// Copy a source tensor's bytes into a symm_mem allocation's multicast address
+// at a given byte offset, using the CUDA Copy Engine (cudaMemcpyAsync).
+//
+// Writing to the multicast pointer causes the NVSwitch to broadcast the write
+// to all peers' backing memory. Used by _low_contention_all_gather_v3: each
+// rank's shard crosses NVLink exactly once, giving bandwidth-optimal AG
+// without consuming SMs.
+//
+// Precondition: `symm_mem_out` is a tensor whose storage was allocated via
+// empty_strided_p2p() and the underlying SymmetricMemory handle has multicast
+// support. `byte_offset` is in bytes and is relative to the base of the
+// multicast region (not the tensor's storage_offset).
+at::Tensor memcpy_async_to_multicast(
+    at::Tensor& symm_mem_out,
+    const at::Tensor& src,
+    int64_t byte_offset,
+    std::string group_name) {
+  TORCH_CHECK(
+      src.is_contiguous(),
+      "symm_mem::memcpy_async_to_multicast: src must be contiguous.");
+  TORCH_CHECK(
+      src.device().is_cuda() && symm_mem_out.device().is_cuda(),
+      "symm_mem::memcpy_async_to_multicast: src and dst must be CUDA tensors.");
+  TORCH_CHECK(
+      byte_offset >= 0,
+      "symm_mem::memcpy_async_to_multicast: byte_offset must be >= 0 (got ",
+      byte_offset,
+      ").");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(symm_mem_out, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "symm_mem::memcpy_async_to_multicast: dst must be allocated with "
+      "empty_strided_p2p().");
+  TORCH_CHECK(
+      symm_mem->has_multicast_support(),
+      "symm_mem::memcpy_async_to_multicast: dst must have multicast support.");
+
+  const size_t bytes = src.numel() * src.element_size();
+  const size_t buffer_bytes = symm_mem->get_buffer_size();
+  TORCH_CHECK(
+      static_cast<size_t>(byte_offset) + bytes <= buffer_bytes,
+      "symm_mem::memcpy_async_to_multicast: byte_offset (",
+      byte_offset,
+      ") + src bytes (",
+      bytes,
+      ") exceeds dst buffer size (",
+      buffer_bytes,
+      ").");
+
+  c10::cuda::CUDAGuard guard(symm_mem_out.device());
+  auto* dst_ptr =
+      reinterpret_cast<char*>(symm_mem->get_multicast_ptr()) + byte_offset;
+  C10_CUDA_CHECK(cudaMemcpyAsync(
+      dst_ptr,
+      src.data_ptr(),
+      bytes,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+  return symm_mem_out;
+}
+
+void memcpy_batch_async(at::TensorList dsts, at::TensorList srcs) {
+  const size_t count = dsts.size();
+  TORCH_CHECK(
+      count == srcs.size(),
+      "symm_mem::memcpy_batch_async: dsts and srcs must have the same length "
+      "(got dsts=",
+      count,
+      ", srcs=",
+      srcs.size(),
+      ").");
+  if (count == 0) {
+    return;
+  }
+
+#if !defined(USE_ROCM) && CUDART_VERSION >= 12080
+  c10::Device device = dsts[0].device();
+  std::vector<void*> dst_ptrs;
+  std::vector<const void*> src_ptrs;
+  std::vector<size_t> sizes;
+  dst_ptrs.reserve(count);
+  src_ptrs.reserve(count);
+  sizes.reserve(count);
+
+  for (size_t i = 0; i < count; ++i) {
+    const auto& dst = dsts[i];
+    const auto& src = srcs[i];
+    TORCH_CHECK(
+        dst.device().is_cuda() && src.device().is_cuda(),
+        "symm_mem::memcpy_batch_async: all tensors must be CUDA tensors.");
+    TORCH_CHECK(
+        dst.device() == device && src.device() == device,
+        "symm_mem::memcpy_batch_async: all tensors must be on the same "
+        "device as dsts[0] (got dst=",
+        dst.device(),
+        ", src=",
+        src.device(),
+        ", expected=",
+        device,
+        ").");
+    TORCH_CHECK(
+        dst.is_contiguous() && src.is_contiguous(),
+        "symm_mem::memcpy_batch_async: all tensors must be contiguous.");
+    TORCH_CHECK(
+        dst.numel() == src.numel() && dst.element_size() == src.element_size(),
+        "symm_mem::memcpy_batch_async: dst and src at index ",
+        i,
+        " must have the same byte size.");
+    dst_ptrs.push_back(dst.data_ptr());
+    src_ptrs.push_back(src.data_ptr());
+    sizes.push_back(src.numel() * src.element_size());
+  }
+
+  cudaMemcpyAttributes attrs{};
+  attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+  size_t attrs_idx = 0;
+
+  c10::cuda::CUDAGuard guard(device);
+  C10_CUDA_CHECK(cudaMemcpyBatchAsync(
+      dst_ptrs.data(),
+      src_ptrs.data(),
+      sizes.data(),
+      count,
+      &attrs,
+      &attrs_idx,
+      1,
+      at::cuda::getCurrentCUDAStream()));
+#else
+  TORCH_CHECK(
+      false,
+      "memcpy_batch_async: requires CUDA 12.8+ and is not supported on ROCm.");
+#endif
+}
+
 #endif //no multi-cast support on ROCm
 
 // One-shot all-reduce is register-intensive because it stages values loaded
@@ -1112,6 +1247,19 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
+at::Tensor memcpy_async_to_multicast(
+    at::Tensor& symm_mem_out,
+    const at::Tensor& src,
+    int64_t byte_offset,
+    std::string group_name) {
+  TORCH_CHECK(false, "memcpy_async_to_multicast: requires CUDA 12.3+.");
+  return symm_mem_out;
+}
+
+void memcpy_batch_async(at::TensorList dsts, at::TensorList srcs) {
+  TORCH_CHECK(false, "memcpy_batch_async: requires CUDA 12.8+.");
+}
+
 at::Tensor one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
@@ -1358,6 +1506,149 @@ void stream_wait_value32(
 #endif
 }
 
+// Submit a batch of cuStreamWriteValue32 / cuStreamWaitValue32 operations as a
+// single driver call via cuStreamBatchMemOp.
+//
+// Each entry (i) of the parallel-array arguments describes one op:
+//   pads[i]     : uint32, flat, contiguous tensor holding the target slot
+//   offsets[i]  : element offset into pads[i]
+//   vals[i]     : value to write (for write ops) or to compare against (waits)
+//   op_types[i] : 0 = write, 1 = wait
+//   flags[i]    : write ops: 0 = default
+//                 wait  ops: 0 = GEQ, 1 = EQ, 2 = AND, 3 = NOR
+//
+// Used by the v3 and v4 low-contention all-gather variants to replace O(N)
+// sequential driver calls per barrier with a single batched call, matching the
+// nvFuser cuda_p2p.cpp reference implementation.
+//
+// Capture-safe: `cuStreamBatchMemOp` is supported under CUDA graph capture on
+// all CUDA 12.x drivers. The caller is responsible for ensuring the target
+// pads are legal symmetric-memory signal pads.
+void stream_batch_mem_op(
+    at::TensorList pads,
+    at::IntArrayRef offsets,
+    at::IntArrayRef vals,
+    at::IntArrayRef op_types,
+    at::IntArrayRef flags) {
+  const int64_t count = static_cast<int64_t>(pads.size());
+  TORCH_CHECK(
+      offsets.size() == static_cast<size_t>(count) &&
+          vals.size() == static_cast<size_t>(count) &&
+          op_types.size() == static_cast<size_t>(count) &&
+          flags.size() == static_cast<size_t>(count),
+      "symm_mem::stream_batch_mem_op: parallel-array arguments must have the "
+      "same length (got pads=",
+      count,
+      ", offsets=",
+      offsets.size(),
+      ", vals=",
+      vals.size(),
+      ", op_types=",
+      op_types.size(),
+      ", flags=",
+      flags.size(),
+      ").");
+  if (count == 0) {
+    return;
+  }
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  std::vector<CUstreamBatchMemOpParams> params(count);
+  c10::Device device = pads[0].device();
+  for (int64_t i = 0; i < count; ++i) {
+    const auto& pad = pads[i];
+    TORCH_CHECK(
+        pad.dim() == 1 && pad.is_contiguous() &&
+            pad.scalar_type() == c10::ScalarType::UInt32,
+        "symm_mem::stream_batch_mem_op: every pad must be a flat, contiguous "
+        "uint32 tensor (index ",
+        i,
+        ").");
+    TORCH_CHECK(
+        pad.device() == device,
+        "symm_mem::stream_batch_mem_op: all pads must be on the same device "
+        "(got ",
+        pad.device(),
+        " at index ",
+        i,
+        " but expected ",
+        device,
+        ").");
+    TORCH_CHECK(
+        offsets[i] >= 0 && offsets[i] < pad.numel(),
+        "symm_mem::stream_batch_mem_op: offset out of range at index ",
+        i,
+        " (got ",
+        offsets[i],
+        ", pad.numel() = ",
+        pad.numel(),
+        ").");
+    TORCH_CHECK(
+        vals[i] >= 0 &&
+            static_cast<uint64_t>(vals[i]) <=
+                std::numeric_limits<uint32_t>::max(),
+        "symm_mem::stream_batch_mem_op: val must fit in uint32 at index ",
+        i,
+        " (got ",
+        vals[i],
+        ").");
+
+    auto addr = reinterpret_cast<CUdeviceptr>(
+        reinterpret_cast<uint32_t*>(pad.data_ptr()) + offsets[i]);
+    auto& p = params[i];
+    std::memset(&p, 0, sizeof(p));
+
+    if (op_types[i] == 0) {
+      TORCH_CHECK(
+          flags[i] == 0,
+          "symm_mem::stream_batch_mem_op: write-op flags must be 0 at index ",
+          i,
+          " (got ",
+          flags[i],
+          ").");
+      p.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+      p.writeValue.address = addr;
+      p.writeValue.value = static_cast<cuuint32_t>(vals[i]);
+      p.writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+    } else if (op_types[i] == 1) {
+      TORCH_CHECK(
+          flags[i] >= 0 && flags[i] <= 3,
+          "symm_mem::stream_batch_mem_op: wait-op flags must be 0..3 (GEQ, EQ,"
+          " AND, NOR) at index ",
+          i,
+          " (got ",
+          flags[i],
+          ").");
+      p.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+      p.waitValue.address = addr;
+      p.waitValue.value = static_cast<cuuint32_t>(vals[i]);
+      p.waitValue.flags = static_cast<unsigned int>(flags[i]);
+    } else {
+      TORCH_CHECK(
+          false,
+          "symm_mem::stream_batch_mem_op: op_types[",
+          i,
+          "] must be 0 (write) or 1 (wait), got ",
+          op_types[i],
+          ".");
+    }
+  }
+
+  c10::cuda::CUDAGuard guard(device);
+  auto driver_api = c10::cuda::DriverAPI::get();
+  C10_CUDA_DRIVER_CHECK(driver_api->cuStreamBatchMemOp_(
+      at::cuda::getCurrentCUDAStream(),
+      static_cast<unsigned int>(count),
+      params.data(),
+      0));
+#else
+  TORCH_CHECK(
+      false,
+      "symm_mem::stream_batch_mem_op requires a non-ROCm build with "
+      "PYTORCH_C10_DRIVER_API_SUPPORTED.");
+#endif
+}
+
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -1388,8 +1679,11 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
+  m.impl("memcpy_async_to_multicast", ::memcpy_async_to_multicast);
+  m.impl("memcpy_batch_async", ::memcpy_batch_async);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("stream_wait_value32", ::stream_wait_value32);
+  m.impl("stream_batch_mem_op", ::stream_batch_mem_op);
   m.impl("memset32_", ::memset32_);
 }

@@ -286,6 +286,114 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         for r in range(self.world_size):
             self.assertTrue(chunks[r].eq(r).all())
 
+    def _run_lc_ag_variant_correctness(
+        self, op_name: str, symm_mem_input: bool
+    ) -> None:
+        """Shared body for v3/v4/v5 correctness tests."""
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            ).fill_(self.rank)
+        else:
+            t = torch.full(
+                (64, 64), self.rank, dtype=torch.float32, device=self.device
+            )
+
+        op = getattr(torch.ops.symm_mem, op_name)
+        res = op(t, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 * self.world_size, 64))
+
+        chunks = res.chunk(self.world_size)
+        for r in range(self.world_size):
+            self.assertTrue(chunks[r].eq(r).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather_v3(self, symm_mem_input: bool) -> None:
+        self._run_lc_ag_variant_correctness(
+            "_low_contention_all_gather_v3", symm_mem_input
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather_v4(self, symm_mem_input: bool) -> None:
+        self._run_lc_ag_variant_correctness(
+            "_low_contention_all_gather_v4", symm_mem_input
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather_v5(self, symm_mem_input: bool) -> None:
+        self._run_lc_ag_variant_correctness(
+            "_low_contention_all_gather_v5", symm_mem_input
+        )
+
+    def _run_lc_ag_variant_cuda_graph(self, op_name: str) -> None:
+        """Capture an AG into a CUDA graph and replay it multiple times.
+
+        This is only valid for AG variants whose synchronization protocol does
+        not depend on host-side counters captured as constants.
+        """
+        self._init_process()
+
+        inp = torch.full(
+            (64, 64), self.rank, dtype=torch.float32, device=self.device
+        )
+        op = getattr(torch.ops.symm_mem, op_name)
+
+        # Warmup on a side stream so capture sees steady state.
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            _ = op(inp, "0")
+            torch.cuda.synchronize()
+        torch.cuda.current_stream().wait_stream(s)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            res = op(inp, "0")
+            res = torch.ops._c10d_functional.wait_tensor(res)
+
+        for _ in range(4):
+            graph.replay()
+            torch.cuda.synchronize()
+            chunks = res.chunk(self.world_size)
+            for r in range(self.world_size):
+                self.assertTrue(
+                    chunks[r].eq(r).all(),
+                    f"CUDA graph replay mismatch for rank {r}",
+                )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip("v4 CE barriers use host-side counters; graph-safe sync is a follow-up")
+    def test_low_contention_all_gather_v4_cuda_graph(self) -> None:
+        self._run_lc_ag_variant_cuda_graph("_low_contention_all_gather_v4")
+
+    # NOTE: v3/v4/v5 use cached symmetric outputs and host-side signal
+    # counters in eager mode. A graph-safe implementation needs planned output
+    # slots plus a capture-safe synchronization protocol.
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1626,6 +1734,62 @@ class SymmMemSingleProcTest(TestCase):
 
         with self.assertRaises(RuntimeError):
             _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
+
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    def test_stream_batch_mem_op_writes(self):
+        # Exercise stream_batch_mem_op in the write-only case. A batched
+        # write to all slots should produce the same end state as the
+        # per-slot stream_write_value32 path.
+        tensor = torch.zeros(8, dtype=torch.uint32, device="cuda")
+
+        _SymmetricMemory.stream_batch_mem_op(
+            pads=[tensor] * 4,
+            offsets=[0, 2, 4, 6],
+            vals=[10, 20, 30, 40],
+            op_types=[0, 0, 0, 0],
+            flags=[0, 0, 0, 0],
+        )
+        torch.cuda.synchronize()
+        expected = torch.tensor(
+            [10, 0, 20, 0, 30, 0, 40, 0], dtype=torch.uint32, device="cuda"
+        )
+        torch.testing.assert_close(tensor, expected)
+
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    def test_stream_batch_mem_op_argchecks(self):
+        tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError, "parallel-array arguments must have the same length"
+        ):
+            _SymmetricMemory.stream_batch_mem_op(
+                pads=[tensor, tensor],
+                offsets=[0],
+                vals=[1, 2],
+                op_types=[0, 0],
+                flags=[0, 0],
+            )
+        with self.assertRaisesRegex(RuntimeError, "must be 0 .write. or 1 .wait."):
+            _SymmetricMemory.stream_batch_mem_op(
+                pads=[tensor],
+                offsets=[0],
+                vals=[1],
+                op_types=[9],
+                flags=[0],
+            )
+        with self.assertRaisesRegex(RuntimeError, "offset out of range"):
+            _SymmetricMemory.stream_batch_mem_op(
+                pads=[tensor],
+                offsets=[100],
+                vals=[1],
+                op_types=[0],
+                flags=[0],
+            )
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"

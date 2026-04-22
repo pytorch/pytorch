@@ -85,6 +85,7 @@
   _(cuMemsetD32Async, 12000)                       \
   _(cuStreamWriteValue32, 12000)                   \
   _(cuStreamWaitValue32, 12000)                    \
+  _(cuStreamBatchMemOp, 12000)                     \
   _(cuGetErrorString, 12000)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)

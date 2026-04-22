@@ -59,8 +59,30 @@ def replace_collectives_with_low_contention(
 
     from torch._inductor import config
 
-    min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
-    use_ag_v2 = config.aten_distributed_optimizations.low_contention_all_gather_v2
+    cfg = config.aten_distributed_optimizations
+    min_bytes = cfg.low_contention_min_bytes_per_rank
+    use_ag_v2 = cfg.low_contention_all_gather_v2
+    use_ag_v3 = cfg.low_contention_all_gather_v3
+    use_ag_v4 = cfg.low_contention_all_gather_v4
+    use_ag_v5 = cfg.low_contention_all_gather_v5
+
+    enabled_ag_flags = [
+        name
+        for name, val in (
+            ("v2", use_ag_v2),
+            ("v3", use_ag_v3),
+            ("v4", use_ag_v4),
+            ("v5", use_ag_v5),
+        )
+        if val
+    ]
+    if len(enabled_ag_flags) > 1:
+        log.warning(
+            "Multiple low_contention_all_gather_v{2,3,4,5} flags are enabled "
+            "(%s). Selecting the most aggressive applicable variant per op "
+            "(v5 > v4 > v3 > v2).",
+            ", ".join(enabled_ag_flags),
+        )
 
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
@@ -101,7 +123,17 @@ def replace_collectives_with_low_contention(
             )
             continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2)
+        _replace_collective(
+            node,
+            graph,
+            symm_mem,
+            is_ag,
+            group_name,
+            use_ag_v2=use_ag_v2,
+            use_ag_v3=use_ag_v3,
+            use_ag_v4=use_ag_v4,
+            use_ag_v5=use_ag_v5,
+        )
         replacements += 1
 
     log.info(
@@ -136,15 +168,90 @@ def _enable_symm_mem(group_name):
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name, use_ag_v2=False):
+_has_multicast_cached: dict[int, bool] = {}
+
+
+def _has_multicast_support(device_index: int) -> bool:
+    """Return True iff the current CUDA device supports NVLink multicast.
+
+    Cached per-device so we don't call into the driver every lowering.
+    """
+    cached = _has_multicast_cached.get(device_index)
+    if cached is not None:
+        return cached
+    try:
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+    except ImportError:
+        _has_multicast_cached[device_index] = False
+        return False
+    try:
+        result = bool(
+            _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index)
+        )
+    except Exception:
+        result = False
+    _has_multicast_cached[device_index] = result
+    return result
+
+
+def _replace_collective(
+    node,
+    graph,
+    symm_mem,
+    is_ag,
+    group_name,
+    use_ag_v2=False,
+    use_ag_v3=False,
+    use_ag_v4=False,
+    use_ag_v5=False,
+):
     input_node = node.args[0]
     if is_ag:
-        if use_ag_v2:
-            target = symm_mem._low_contention_all_gather_v2.default
-            args = (input_node, group_name)
+        # Selection order: v5 > v4 > v3 > v2 > v1. v4 and v5 require
+        # multicast support; if absent we fall through to v3/v2/v1 as
+        # appropriate. The device index is derived from the input tensor's
+        # meta val so the decision is graph-local (important for graphs
+        # that span multiple devices in the future).
+        device_index = None
+        input_val = input_node.meta.get("val")
+        if isinstance(input_val, torch.Tensor) and input_val.device.type == "cuda":
+            device_index = input_val.device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+
+        if use_ag_v5 and _has_multicast_support(device_index):
+            target = symm_mem._low_contention_all_gather_v5.default
+        elif use_ag_v5 and not _has_multicast_support(device_index):
+            log.info(
+                "low_contention_all_gather_v5 requested but multicast is not "
+                "supported on device %d; falling through.",
+                device_index,
+            )
+            target = None
         else:
+            target = None
+
+        if target is None:
+            if use_ag_v4 and _has_multicast_support(device_index):
+                target = symm_mem._low_contention_all_gather_v4.default
+            elif use_ag_v4 and not _has_multicast_support(device_index):
+                log.info(
+                    "low_contention_all_gather_v4 requested but multicast is "
+                    "not supported on device %d; falling through.",
+                    device_index,
+                )
+
+        if target is None and use_ag_v3:
+            target = symm_mem._low_contention_all_gather_v3.default
+
+        if target is None and use_ag_v2:
+            target = symm_mem._low_contention_all_gather_v2.default
+
+        if target is None:
             target = symm_mem._low_contention_all_gather.default
-            args = (input_node, group_name)
+
+        args = (input_node, group_name)
     else:
         reduce_op = node.args[1]
         target = symm_mem._low_contention_reduce_scatter.default
@@ -184,7 +291,9 @@ def _has_compute_bound_overlap(start_node, graph, node_positions):
     wait_pos = node_positions[wait_node]
 
     for node in graph.nodes:
-        pos = node_positions[node]
+        pos = node_positions.get(node)
+        if pos is None:
+            continue
         if pos <= start_pos or pos >= wait_pos:
             continue
         if is_compute_node(node):
@@ -202,7 +311,9 @@ def _has_other_group_collectives(start_node, group_name, graph, node_positions):
     wait_pos = node_positions[wait_node]
 
     for node in graph.nodes:
-        pos = node_positions[node]
+        pos = node_positions.get(node)
+        if pos is None:
+            continue
         if pos <= start_pos or pos >= wait_pos:
             continue
         info = _get_collective_info(node)
