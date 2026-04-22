@@ -53,8 +53,8 @@ void XPUPluggableAllocator::raw_delete(void* ptr) {
   free_fn_(ptr, size, device_idx, queue);
 }
 
-c10::xpu::XPUCachingAllocator::ShareableHandle
-XPUPluggableAllocator::shareIpcHandle(void* ptr) {
+c10::xpu::XPUCachingAllocator::ShareableHandle XPUPluggableAllocator::
+    shareIpcHandle(void* ptr) {
   TORCH_CHECK(
       false,
       "XPUPluggableAllocator does not yet support shareIpcHandle. "

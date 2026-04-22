@@ -2,8 +2,6 @@
 import multiprocessing
 import os
 import threading
-import io
-import warnings
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 
@@ -97,36 +95,6 @@ class SharedCache(dict):
 
 # mapping from handles to StorageWeakRef objects
 shared_cache = SharedCache()
-
-_XPU_IPC_FALLBACK_WARNING_SHOWN = False
-
-
-def _reduce_xpu_tensor_via_cpu(tensor):
-    cpu_tensor = tensor.detach().to(device="cpu")
-    cpu_buffer = io.BytesIO()
-    torch.save(cpu_tensor, cpu_buffer)
-    return (
-        rebuild_xpu_tensor_from_cpu,
-        (
-            type(tensor),
-            cpu_buffer.getvalue(),
-            tensor.device,
-            tensor.requires_grad,
-        ),
-    )
-
-
-def _warn_xpu_ipc_fallback(error: Exception) -> None:
-    global _XPU_IPC_FALLBACK_WARNING_SHOWN
-    if _XPU_IPC_FALLBACK_WARNING_SHOWN:
-        return
-    _XPU_IPC_FALLBACK_WARNING_SHOWN = True
-    warnings.warn(
-        "XPU IPC sharing failed; falling back to CPU serialization for multiprocessing tensor transfer. "
-        f"Original error: {error!r}",
-        RuntimeWarning,
-        stacklevel=3,
-    )
 
 
 def rebuild_event(device, handle):
@@ -308,22 +276,6 @@ def rebuild_xpu_tensor(
     return t
 
 
-def rebuild_xpu_tensor_from_cpu(
-    tensor_cls,
-    cpu_tensor_bytes,
-    xpu_device,
-    requires_grad,
-):
-    cpu_buffer = io.BytesIO(cpu_tensor_bytes)
-    cpu_tensor = torch.load(cpu_buffer, map_location="cpu")
-    t = cpu_tensor.to(device=xpu_device)
-    if tensor_cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
-    else:
-        t.requires_grad = requires_grad
-    return t
-
-
 def reduce_tensor(tensor):
     if tensor.requires_grad and not tensor.is_leaf:
         raise RuntimeError(
@@ -494,44 +446,45 @@ def reduce_tensor(tensor):
             ),
         )
     elif storage._untyped_storage.device.type == "xpu":
-        try:
+        (
+            device,
+            handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+        ) = storage._share_xpu_()
+        tensor_offset = tensor.storage_offset()
+        cache_handle = handle
+
+        if (
+            isinstance(handle, tuple)
+            and len(handle) == 2
+            and isinstance(handle[0], int)
+        ):
+            fd = os.dup(handle[0])
+            handle = (multiprocessing.reduction.DupFd(fd), handle[1])
+        elif handle is not None:
+            raise RuntimeError(
+                f"Unsupported XPU IPC handle type: {type(handle)!r}. Expected DMA-BUF tuple."
+            )
+
+        if cache_handle is not None:
+            shared_cache[(cache_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+        return (
+            rebuild_xpu_tensor,
             (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor_offset,
+                type(storage),
+                tensor.dtype,
                 device,
                 handle,
                 storage_size_bytes,
                 storage_offset_bytes,
-            ) = storage._share_xpu_()
-            tensor_offset = tensor.storage_offset()
-            cache_handle = handle
-
-            if isinstance(handle, tuple) and len(handle) == 2 and isinstance(handle[0], int):
-                fd = os.dup(handle[0])
-                handle = (multiprocessing.reduction.DupFd(fd), handle[1])
-            elif isinstance(handle, int):
-                fd = os.dup(handle)
-                handle = multiprocessing.reduction.DupFd(fd)
-
-            if cache_handle is not None:
-                shared_cache[(cache_handle, storage_offset_bytes)] = StorageWeakRef(storage)
-            return (
-                rebuild_xpu_tensor,
-                (
-                    type(tensor),
-                    tensor.size(),
-                    tensor.stride(),
-                    tensor_offset,
-                    type(storage),
-                    tensor.dtype,
-                    device,
-                    handle,
-                    storage_size_bytes,
-                    storage_offset_bytes,
-                    tensor.requires_grad,
-                ),
-            )
-        except Exception as error:
-            _warn_xpu_ipc_fallback(error)
-            return _reduce_xpu_tensor_via_cpu(tensor)
+                tensor.requires_grad,
+            ),
+        )
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (

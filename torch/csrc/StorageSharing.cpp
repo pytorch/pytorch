@@ -569,7 +569,8 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
   THPStorage_assertNotNull(self);
 #ifdef USE_XPU
   const auto& storage = THPStorage_Unpack(self);
-  TORCH_CHECK(storage.device_type() == at::kXPU, "_share_xpu_: only available on XPU");
+  TORCH_CHECK(
+      storage.device_type() == at::kXPU, "_share_xpu_: only available on XPU");
   at::DeviceGuard device_guard(storage.device());
 
   THPObjectPtr tuple(PyTuple_New(4));
@@ -583,27 +584,19 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
     auto shandle =
         c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
 
-    if (shandle.is_fd) {
-      if (shandle.is_dma_buf) {
-        THPObjectPtr handle_tuple(PyTuple_New(2));
-        THPObjectPtr _fd(PyLong_FromLongLong(shandle.fd));
-        THPObjectPtr _alloc_size(PyLong_FromLongLong(shandle.alloc_size));
-        if (!handle_tuple || !_fd || !_alloc_size) {
-          return nullptr;
-        }
-        PyTuple_SET_ITEM(handle_tuple.get(), 0, _fd.release());
-        PyTuple_SET_ITEM(handle_tuple.get(), 1, _alloc_size.release());
-        _handle = handle_tuple.release();
-      } else {
-        _handle = PyLong_FromLongLong(shandle.fd);
-      }
-    } else {
-      _handle = PyBytes_FromStringAndSize(
-          shandle.handle.data(),
-          static_cast<Py_ssize_t>(shandle.handle.size()));
+    TORCH_CHECK(
+        shandle.is_fd && shandle.is_dma_buf,
+        "XPU IPC requires DMA-BUF handle export");
+    THPObjectPtr handle_tuple(PyTuple_New(2));
+    THPObjectPtr _fd(PyLong_FromLongLong(shandle.fd));
+    THPObjectPtr _alloc_size(PyLong_FromLongLong(shandle.alloc_size));
+    if (!handle_tuple || !_fd || !_alloc_size) {
+      return nullptr;
     }
-    _offset_bytes = PyLong_FromSsize_t(
-        static_cast<Py_ssize_t>(shandle.offset));
+    PyTuple_SET_ITEM(handle_tuple.get(), 0, _fd.release());
+    PyTuple_SET_ITEM(handle_tuple.get(), 1, _alloc_size.release());
+    _handle = handle_tuple.release();
+    _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
   }
 
   if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes) {
@@ -628,21 +621,19 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
   PyObject* _handle = PyTuple_GET_ITEM(args, 1);
   PyObject* _size_bytes = PyTuple_GET_ITEM(args, 2);
   PyObject* _offset_bytes = PyTuple_GET_ITEM(args, 3);
-    const bool is_dma_buf_tuple =
-      PyTuple_Check(_handle) && PyTuple_GET_SIZE(_handle) == 2 &&
+  const bool is_dma_buf_tuple = PyTuple_Check(_handle) &&
+      PyTuple_GET_SIZE(_handle) == 2 &&
       THPUtils_checkLong(PyTuple_GET_ITEM(_handle, 0)) &&
       THPUtils_checkLong(PyTuple_GET_ITEM(_handle, 1));
 
-    if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
-      (PyBytes_Check(_handle) || THPUtils_checkLong(_handle) ||
-       is_dma_buf_tuple) &&
-      THPUtils_checkLong(_offset_bytes))) {
+  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
+        is_dma_buf_tuple && THPUtils_checkLong(_offset_bytes))) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "_new_shared in XPU mode",
         1,
-      "(int device, bytes|int|(int,int) handle, int storage_size_bytes, int storage_offset_bytes)");
+        "(int device, (int,int) handle, int storage_size_bytes, int storage_offset_bytes)");
     return nullptr;
   }
 
@@ -653,23 +644,10 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::DeviceGuard device_guard(at::Device(at::kXPU, device));
 
-  std::string handle;
-  if (is_dma_buf_tuple) {
-    const auto fd = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 0));
-    const auto alloc_size = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 1));
-    handle = std::string("dmabuf:") + std::to_string(fd) + ":" +
-        std::to_string(alloc_size);
-  } else if (THPUtils_checkLong(_handle)) {
-    const auto fd = THPUtils_unpackLong(_handle);
-    handle = std::string("fd:") + std::to_string(fd);
-  } else {
-    char* handle_ptr = nullptr;
-    Py_ssize_t handle_size = 0;
-    if (PyBytes_AsStringAndSize(_handle, &handle_ptr, &handle_size) == -1) {
-      return nullptr;
-    }
-    handle = std::string(handle_ptr, static_cast<size_t>(handle_size));
-  }
+  const auto fd = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 0));
+  const auto alloc_size = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 1));
+  std::string handle = std::string("dmabuf:") + std::to_string(fd) + ":" +
+      std::to_string(alloc_size);
 
   std::shared_ptr<void> base_ptr =
       c10::xpu::XPUCachingAllocator::getIpcDevPtr(std::move(handle), device);

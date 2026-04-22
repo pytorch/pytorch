@@ -35,9 +35,9 @@ struct TORCH_PYTHON_API XPUPluggableAllocator
 
   void* raw_alloc(size_t nbytes) override;
   void raw_delete(void* ptr) override;
-    c10::xpu::XPUCachingAllocator::ShareableHandle shareIpcHandle(
+  c10::xpu::XPUCachingAllocator::ShareableHandle shareIpcHandle(
       void* ptr) override;
-    std::shared_ptr<void> getIpcDevPtr(
+  std::shared_ptr<void> getIpcDevPtr(
       std::string handle,
       c10::DeviceIndex device) override;
   void init(c10::DeviceIndex device_count) override;
