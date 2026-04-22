@@ -1181,7 +1181,7 @@ class TritonStores:
 @functools.cache
 def identify_triton_stores(source_code: str) -> TritonStores:
     """
-    Parse Python source code of triton kernel and find all tl.store calls.
+    Parse Python source code of the Triton kernel and find all tl.store calls.
     Returns a TritonStores object containing information about pointer, value, and mask.
 
     tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
