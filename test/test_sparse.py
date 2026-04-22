@@ -4297,16 +4297,19 @@ class TestSparse(TestSparseBase):
         make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
 
         # Original reproducer from the issue.
+        diags = make_diags((2, 54))
         out = torch.sparse.spdiags(
-            make_diags((2, 54)),
+            diags,
             make_offsets([-65, 10]),
             (54, 63),
         )
+        # k=-65 is dropped as empty; k=10 skips the first 10 entries of
+        # diags[1] and places the remaining 44 values on the k=10 diagonal.
+        expected = torch.zeros((54, 63), dtype=dtype, device=device)
+        expected.diagonal(offset=10)[:44] = diags[1, 10:]
         self.assertEqual(out.shape, (54, 63))
-        # Only the in-range diagonal at offset 10 contributes nnz: the data
-        # matrix has 54 columns and the first 10 are skipped for a positive
-        # offset, giving 44 values.
         self.assertEqual(out._nnz(), 44)
+        self.assertEqual(out.to_dense(), expected)
 
         # Far out-of-range in both directions collapses to an empty matrix.
         out = torch.sparse.spdiags(
