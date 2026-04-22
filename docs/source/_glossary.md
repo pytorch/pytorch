@@ -22,7 +22,7 @@ Custom Operation
    details how to create Custom Operations.
 
 Kernel
-   Implementation of a PyTorch operation, specifying what should be done when an
+    Refers to the "on device" implementation of a given operation. Reffering to the part of the Operation that actually computes the result.
    operation executes.
 
 Compound Operation
