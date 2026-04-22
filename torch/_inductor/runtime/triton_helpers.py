@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from .triton_compat import (  # noqa: F401
+from .triton_compat import (
     _log2,
     builtins_use_semantic_kwarg,
     JITFunction,
@@ -281,6 +281,34 @@ def welford(mean, m2, weight, dim):
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
+
+
+@triton.jit
+def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
+    inv = 1.0 / 4294967296.0
+    half = inv * 0.5
+
+    tid_u64 = tid.to(tl.uint64)
+
+    subseq = tid_u64 // VEC
+    which4 = (tid_u64 % VEC) // 4
+    lane = tid_u64 % 4
+
+    offblk = offset_blocks.to(tl.uint64) + which4
+
+    u0, u1, u2, u3 = tl.philox(
+        seed,
+        (offblk & 0xFFFFFFFF).to(tl.uint32),
+        ((offblk >> 32) & 0xFFFFFFFF).to(tl.uint32),
+        (subseq & 0xFFFFFFFF).to(tl.uint32),
+        ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
+    )
+
+    v01 = tl.where(lane == 0, u0, u1)
+    v23 = tl.where(lane == 2, u2, u3)
+    rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
+
+    return 1.0 - (rand_int.to(tl.float32) * inv + half)
 
 
 @triton.jit

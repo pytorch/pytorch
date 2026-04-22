@@ -7848,6 +7848,137 @@ class TestQuantizedConv(TestCase):
                 qconv_x2_dtype=qconv_x2_dtype,
             )
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_no_output_aliasing(self):
+        # Verify that qconv2d_pointwise.binary mutates qaccum in-place
+        # but returns a tensor that does not alias it.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        dummy_out = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        for binary_attr, unary_attr in [("sum", "none"), ("sum", "relu")]:
+            qaccum = torch.randint(0, 8, dummy_out.size(), dtype=torch.uint8)
+            qaccum = qaccum.to(memory_format=torch.channels_last)
+            qaccum_data_before = qaccum.clone()
+            result = torch.ops.onednn.qconv2d_pointwise.binary(
+                x, 1.0, 0, packed_w, w_scale, w_zp, qaccum, None,
+                [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+                1.0, 0, binary_attr, None, unary_attr, [], None,
+            )
+            # qaccum was mutated
+            self.assertFalse(torch.equal(qaccum, qaccum_data_before))
+            # result does not alias qaccum
+            self.assertNotEqual(result.data_ptr(), qaccum.data_ptr())
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_tensor_no_output_aliasing(self):
+        # Same as above but for the .binary_tensor overload (tensor scale/zp).
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        dummy_out = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        qaccum = torch.randint(0, 8, dummy_out.size(), dtype=torch.uint8)
+        qaccum = qaccum.to(memory_format=torch.channels_last)
+        qaccum_data_before = qaccum.clone()
+        x_scale = torch.tensor([1.0])
+        x_zp = torch.tensor([0])
+        result = torch.ops.onednn.qconv2d_pointwise.binary_tensor(
+            x, x_scale, x_zp, packed_w, w_scale, w_zp, qaccum, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+            1.0, 0, "sum", None, "none", [], None,
+        )
+        self.assertFalse(torch.equal(qaccum, qaccum_data_before))
+        self.assertNotEqual(result.data_ptr(), qaccum.data_ptr())
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_empty_output_no_aliasing(self):
+        # Trigger the early return path when output has 0 elements.
+        # Use batch_size=0 so the convolution output has numel == 0.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (0, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        qaccum = torch.empty(0, out_ch, 3, 3, dtype=torch.uint8)
+        qaccum = qaccum.to(memory_format=torch.channels_last)
+        result = torch.ops.onednn.qconv2d_pointwise.binary(
+            x, 1.0, 0, packed_w, w_scale, w_zp, qaccum, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+            1.0, 0, "sum", None, "none", [], None,
+        )
+        self.assertEqual(result.numel(), 0)
+        # Empty tensors both have data_ptr()==0; the key invariant is that
+        # the early-return path doesn't crash and returns a valid tensor.
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_empty_output_no_binary(self):
+        # Exercise the early return path with has_accum_postop_sum=false.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (0, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        result = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        self.assertEqual(result.numel(), 0)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv1d_sum_exercises_1d_path(self):
+        # Exercise the is_1d squeeze path via a 1d convolution without
+        # binary postop (has_accum_postop_sum is unreachable for 1d since
+        # run_pointwise_binary enforces act.dim()==4).
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 8), dtype=torch.uint8)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1], [1], [1], groups, x.size(),
+        )
+        result = torch.ops.onednn.qconv_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1], [1], [1], groups, 1.0, 0, None, "none", [], None,
+        )
+        self.assertEqual(result.dim(), 3)
+
     # Test qconv1d with post op relu
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -8231,6 +8362,21 @@ class TestQuantizedConv(TestCase):
         pointwise_post_op = PointwisePostOp()
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
+
+    @unittest.skipIf(
+        torch.backends.quantized.engine == "none",
+        "No default quantized engine available",
+    )
+    def test_qconv1d_default_engine(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177254
+        # On aarch64, fbgemmSupportedCPU() incorrectly returned True, causing
+        # the default quantized engine to be X86 which crashed in FBGEMM with
+        # "RuntimeError: unknown architecure".  # codespell:ignore architecure
+        qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
+        x = torch.quantize_per_tensor(
+            torch.randn(1, 4, 16), scale=1.0, zero_point=0, dtype=torch.quint8
+        )
+        qconv1d(x)
 
 
 

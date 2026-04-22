@@ -50,7 +50,7 @@ def _wrap_generator(ctx_factory, func):
                         gen.close()
                     raise
 
-                except BaseException:  # noqa: B036
+                except BaseException:
                     # Propagate the exception thrown at us by the caller
                     with ctx_factory():
                         response = gen.throw(*sys.exc_info())

@@ -44,7 +44,7 @@ PyObject* THPCppFunction_call(
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
-    if (arg == Py_None) {
+    if (Py_IsNone(arg)) {
       continue;
     }
     if (!THPVariable_Check(arg)) {
@@ -124,7 +124,7 @@ int THPCppFunction_clear(PyObject* self) {
 void THPCppFunction_dealloc(PyObject* self) {
   PyObject_GC_UnTrack(self);
   THPCppFunction_clear(self);
-  ((THPCppFunction*)self)->cdata.~shared_ptr();
+  ((THPCppFunction*)self)->cdata.~intrusive_ptr();
   Py_TYPE(self)->tp_free(self);
 }
 
@@ -282,7 +282,7 @@ static PyTypeObject* get_default_type() {
   return &(default_type.type);
 }
 
-PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
+PyObject* functionToPyObject(const c10::intrusive_ptr<Node>& cdata) {
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -309,7 +309,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     if (!obj)
       return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();
-    new (&f->cdata) std::shared_ptr<Node>(cdata);
+    new (&f->cdata) c10::intrusive_ptr<Node>(cdata);
 
     // No INCREF here as we only have a weak reference
     cdata->set_pyobj(obj.release());
@@ -326,16 +326,11 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
 }
 
 bool THPCppFunction_Check(PyObject* obj) {
-  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
-  if ((PyTypeObject*)type.get() == get_default_type()) {
+  PyTypeObject* type = Py_TYPE(obj);
+  if (type == get_default_type()) {
     return true;
   }
-  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
-      cpp_function_types_set.end()) {
-    return false;
-  } else {
-    return true;
-  }
+  return cpp_function_types_set.contains(type);
 }
 
 static PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
@@ -364,7 +359,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   if (!res) {
     return nullptr;
   }
-  if (dict == Py_None) {
+  if (Py_IsNone(dict)) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     fn.add_post_hook(std::make_unique<PyFunctionPostHook>(dict));
   }
@@ -387,7 +382,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   if (!res) {
     return nullptr;
   }
-  if (dict == Py_None) {
+  if (Py_IsNone(dict)) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     fn.add_pre_hook(std::make_unique<PyFunctionPreHook>(dict));
   }

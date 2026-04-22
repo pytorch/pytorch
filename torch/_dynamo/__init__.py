@@ -24,7 +24,7 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
-    allow_in_graph,  # pyrefly: ignore [deprecated]
+    allow_in_graph,
     assume_constant_result,
     disable,
     disable_nested_graph_breaks,
@@ -40,6 +40,7 @@ from .decorators import (
     maybe_mark_dynamic,
     nonstrict_trace,
     override_cudagraphs,
+    override_optimization_hint,
     patch_dynamo_config,
     run,
     set_stance,
@@ -75,7 +76,7 @@ from .utils import (
 
 
 # Register polyfill functions
-from .polyfills import loader as _  # usort: skip # noqa: F401
+from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
@@ -100,6 +101,7 @@ __all__ = [
     "mark_static",
     "mark_static_address",
     "nonstrict_trace",
+    "override_optimization_hint",
     "optimize",
     "optimize_assert",
     "OptimizedModule",

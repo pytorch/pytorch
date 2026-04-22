@@ -41,8 +41,6 @@ class TritonKernelCompileResult:
     profile_scratch: int | None
 
 
-_pending_kernels: dict[str, Any] = {}
-
 _async_compile: Any = None
 
 
@@ -98,25 +96,31 @@ def _wrap_tma_args(args: list[Any], kernel_fn: CachingAutotuner) -> list[Any]:
     return wrapped
 
 
-def start_kernel_compile(kernel_name: str, kernel_source: str) -> None:
+def start_kernel_compile(
+    pending_kernels: dict[str, Any], kernel_name: str, kernel_source: str
+) -> None:
     """
     This function is called from C++ at model initialization time for each kernel.
     It starts the compilation in a background process but does NOT wait for it.
     The actual kernel execution happens later in run_triton_kernel_with_autotune().
+
+    The pending_kernels dict is per-module, created in C++ and passed through
+    to avoid global state collisions across compiled modules.
     """
-    if kernel_name in _pending_kernels:
+    if kernel_name in pending_kernels:
         return
 
     async_compile = _get_async_compile()  # noqa: F841 (used by eval below)
 
     # Evaluate the kernel source to get the Future or CachingAutotuner
     # The kernel_source is like: async_compile.triton('name', '''...''', ...)
-    kernel_obj = eval(kernel_source.strip())  # noqa: S307
+    kernel_obj = eval(kernel_source.strip())
 
-    _pending_kernels[kernel_name] = kernel_obj
+    pending_kernels[kernel_name] = kernel_obj
 
 
 def run_triton_kernel_with_autotune(
+    pending_kernels: dict[str, Any],
     kernel_name: str,
     stream: Any,
     args: list[Any],
@@ -127,9 +131,9 @@ def run_triton_kernel_with_autotune(
     from torch._inductor.codecache import CodeCacheFuture, CudaKernelParamCache
     from torch._inductor.runtime.triton_heuristics import config_to_dict
 
-    if kernel_name not in _pending_kernels:
-        raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels. ")
-    kernel_obj = _pending_kernels.pop(kernel_name)
+    if kernel_name not in pending_kernels:
+        raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels.")
+    kernel_obj = pending_kernels[kernel_name]
 
     if isinstance(kernel_obj, CodeCacheFuture):
         kernel_fn = kernel_obj.result()
@@ -160,15 +164,26 @@ def run_triton_kernel_with_autotune(
     from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
     cubin_path_name = get_cpp_wrapper_cubin_path_name()
-    for key in (cubin_path_name, "mangled_name", "num_warps", "shared_mem"):
-        if key not in cached_params:
-            raise RuntimeError(f"{key} not found in cached params for {kernel_name}")
+    for key_name in (cubin_path_name, "mangled_name", "num_warps", "shared_mem"):
+        if key_name not in cached_params:
+            raise RuntimeError(
+                f"{key_name} not found in cached params for {kernel_name}"
+            )
     cubin_path = cached_params[cubin_path_name]
     mangled_name = cached_params["mangled_name"]
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
 
     config = config_to_dict(launcher.config) if launcher.config else {}
+
+    # For combo/foreach kernels, the autotuned config may have empty kwargs
+    # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
+    # In that case, use the default_config from combo_grid_meta
+    combo_grid_meta = inductor_meta.get("combo_grid_meta") if inductor_meta else None
+    default_config = combo_grid_meta.get("default_config") if combo_grid_meta else None
+    if default_config:
+        config = {**default_config, **config}
+
     xblock = config.get("XBLOCK", 128)
     yblock = config.get("YBLOCK", 1)
     zblock = config.get("ZBLOCK", 1)
@@ -210,7 +225,7 @@ def run_triton_kernel_with_autotune(
         profile_scratch,
     )
 
-    return TritonKernelCompileResult(
+    result = TritonKernelCompileResult(
         cubin_path=cubin_path,
         mangled_name=mangled_name,
         num_warps=num_warps,
@@ -225,3 +240,4 @@ def run_triton_kernel_with_autotune(
         global_scratch=global_scratch,
         profile_scratch=profile_scratch,
     )
+    return result

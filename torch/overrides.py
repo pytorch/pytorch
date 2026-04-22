@@ -20,7 +20,7 @@ please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
 instructions in the ``README.md`` in that directory.
 """
 
-import __future__  # noqa: F404
+import __future__
 
 import collections
 import contextlib
@@ -316,9 +316,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
-        torch.vitals_enabled,
-        torch.set_vital,
-        torch.read_vitals,
         torch.vmap,
         torch.cond,
         torch.frombuffer,
@@ -385,6 +382,8 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
         Tensor._use_count,
+        Tensor._philox_normal_,
+        Tensor._philox_uniform_,
     }
 
     if sys.version_info >= (3, 14):
@@ -605,10 +604,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.eigvalsh: lambda input, UPLO="L", out=None: -1,
         torch.einsum: lambda equation, *operands: -1,
         torch.embedding: (
-            lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False, sparse=False: -1  # noqa: B950
+            lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False, sparse=False: -1
         ),
         torch.embedding_bag: (
-            lambda input, weight, offsets, max_norm=None, norm_type=2, scale_grad_by_freq=False, mode="mean", sparse=False, per_sample_weights=None, padding_idx=None: -1  # noqa: B950
+            lambda input, weight, offsets, max_norm=None, norm_type=2, scale_grad_by_freq=False, mode="mean", sparse=False, per_sample_weights=None, padding_idx=None: -1
         ),
         torch.empty_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.eq: lambda input, other, out=None: -1,
@@ -622,11 +621,11 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
         torch.fused_moving_avg_obs_fake_quant: (
-            lambda x, observer_on, fake_quant_on, averaging_const, running_min, running_max, scale, zero_point, quant_min, quant_max, ch_axis, per_row_fake_quant=False, symmetric_quant=False: -1  # noqa: B950
+            lambda x, observer_on, fake_quant_on, averaging_const, running_min, running_max, scale, zero_point, quant_min, quant_max, ch_axis, per_row_fake_quant=False, symmetric_quant=False: -1
         ),
         torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias, output: -1,
         torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias, output: -1,
-        torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,  # noqa: B950
+        torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,
         torch.fbgemm_linear_int8_weight_fp32_activation: (
             lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1
         ),
@@ -667,7 +666,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.fmod: lambda input, other, out=None: -1,
         torch.frac: lambda input, out=None: -1,
         torch.frexp: lambda input, out=None: -1,
-        torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,  # noqa: B950
+        torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch._functional_assert_async: lambda input, msg, dep_token: -1,
         torch.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
@@ -692,7 +691,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.hardshrink: lambda input, lambd=0.5: -1,
         torch.hash_tensor: lambda input, dim=None, keepdim=False, mode=0, out=None: -1,
         torch.heaviside: lambda input, values, out=None: -1,
-        torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
+        torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1,
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.histogram: lambda input, bins=100, min=None, max=None, weight=None, density=False, out=None: -1,
         torch.histogramdd: lambda input, bins, range=None, weight=None, density=False: -1,
@@ -735,7 +734,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.isclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.isnan: lambda input: -1,
         torch.istft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False: -1
         ),
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction="mean", log_target=False: -1,
         torch.kron: lambda input, other: -1,
@@ -750,7 +749,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.less_equal: lambda input, other, out=None: -1,
         torch.lerp: lambda input, end, weight, out=None: -1,
         torch.lgamma: lambda input, out=None: -1,
-        torch.lobpcg: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None, tracker=None, ortho_iparams=None, ortho_fparams=None, ortho_bparams=None: -1,  # noqa: B950
+        torch.lobpcg: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None, tracker=None, ortho_iparams=None, ortho_fparams=None, ortho_bparams=None: -1,
         torch.log: lambda input, out=None: -1,
         torch.log_softmax: lambda input, dim, dtype=None: -1,
         torch.log10: lambda input, out=None: -1,
@@ -772,7 +771,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
         torch.lu_solve: lambda b, LU_data, LU_pivots, out=None: -1,
-        torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1,  # type: ignore[attr-defined]  # noqa: B950
+        torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1,  # type: ignore[attr-defined]
         torch.masked_fill: lambda input, mask, value: -1,
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
@@ -808,7 +807,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.miopen_batch_norm: (
             lambda input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon: -1
         ),
-        torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,  # noqa: B950
+        torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
         torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (
@@ -818,7 +817,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1
         ),
         torch.miopen_rnn: (
-            lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state: -1  # noqa: B950
+            lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state: -1
         ),
         torch.mm: lambda input, mat2, out_dtype=None, out=None: -1,
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
@@ -856,10 +855,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.affine_grid: lambda theta, size, align_corners=None: -1,
         torch.nn.functional.alpha_dropout: lambda input, p=0.5, training=False, inplace=False: -1,
         torch.nn.functional.avg_pool2d: (
-            lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None: -1  # noqa: B950
+            lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None: -1
         ),
         torch.nn.functional.avg_pool3d: (
-            lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None: -1  # noqa: B950
+            lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None: -1
         ),
         torch.nn.functional.batch_norm: (
             lambda input, running_mean, running_var, weight=None, bias=None, training=False, momentum=0.1, eps=1e-05: -1
@@ -876,7 +875,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1
         ),
         torch.nn.functional.cross_entropy: (
-            lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1  # noqa: B950
+            lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1
         ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
@@ -887,29 +886,29 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
         torch.nn.functional.embedding: (
-            lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False, sparse=False: -1  # noqa: B950
+            lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False, sparse=False: -1
         ),
         torch.nn.functional.embedding_bag: (
-            lambda input, weight, offsets=None, max_norm=None, norm_type=2, scale_grad_by_freq=False, mode="mean", sparse=False, per_sample_weights=None, include_last_offset=False, padding_idx=None: -1  # noqa: B950
+            lambda input, weight, offsets=None, max_norm=None, norm_type=2, scale_grad_by_freq=False, mode="mean", sparse=False, per_sample_weights=None, include_last_offset=False, padding_idx=None: -1
         ),
         torch.nn.functional.feature_alpha_dropout: lambda input, p=0.5, training=False, inplace=False: -1,
         torch.nn.functional.fold: lambda input, output_size, kernel_size, dilation=1, padding=0, stride=1: -1,
         torch.nn.functional.fractional_max_pool2d: (
-            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1  # noqa: B950
+            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1
         ),
         torch.nn.functional.fractional_max_pool2d_with_indices: (
-            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1  # noqa: B950
+            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1
         ),
         torch.nn.functional.fractional_max_pool3d: (
-            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1  # noqa: B950
+            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1
         ),
         torch.nn.functional.fractional_max_pool3d_with_indices: (
-            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1  # noqa: B950
+            lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None: -1
         ),
         torch.nn.functional.gaussian_nll_loss: lambda input, target, var, full=False, eps=1e-06, reduction="mean": -1,
         torch.nn.functional.gelu: lambda input, approximate="none": -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
-        torch.nn.functional.grid_sample: lambda input, grid, mode="bilinear", padding_mode="zeros", align_corners=None: -1,  # noqa: B950
+        torch.nn.functional.grid_sample: lambda input, grid, mode="bilinear", padding_mode="zeros", align_corners=None: -1,
         torch.nn.functional.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.gumbel_softmax: lambda logits, tau=1, hard=False, eps=1e-10, dim=-1: -1,
         torch.nn.functional.hardshrink: lambda input, lambd=0.5: -1,
@@ -918,12 +917,12 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1
         ),
         torch.nn.functional.instance_norm: (
-            lambda input, running_mean=None, running_var=None, weight=None, bias=None, use_input_stats=True, momentum=0.1, eps=1e-05: -1  # noqa: B950
+            lambda input, running_mean=None, running_var=None, weight=None, bias=None, use_input_stats=True, momentum=0.1, eps=1e-05: -1
         ),
         torch.nn.functional.interpolate: (
-            lambda input, size=None, scale_factor=None, mode="nearest", align_corners=None, recompute_scale_factor=None, antialias=False: -1  # noqa: B950
+            lambda input, size=None, scale_factor=None, mode="nearest", align_corners=None, recompute_scale_factor=None, antialias=False: -1
         ),
-        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction="mean", log_target=False: -1,  # noqa: B950
+        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction="mean", log_target=False: -1,
         torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", weight=None: -1,
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
@@ -955,12 +954,12 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.max_pool3d_with_indices: (
             lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1
         ),
-        torch.nn.functional.max_unpool1d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
-        torch.nn.functional.max_unpool2d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
-        torch.nn.functional.max_unpool3d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,  # noqa: B950
+        torch.nn.functional.max_unpool1d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,
+        torch.nn.functional.max_unpool2d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,
+        torch.nn.functional.max_unpool3d: lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1,
         torch.nn.functional.mse_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", weight=None: -1,
         torch.nn.functional.multi_head_attention_forward: (
-            lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None, need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None, v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None, is_causal=False: -1  # noqa: B950
+            lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None, need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None, v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None, is_causal=False: -1
         ),
         torch.nn.functional.multi_margin_loss: (
             lambda input, target, p=1, margin=1.0, weight=None, size_average=None, reduce=None, reduction="mean": -1
@@ -979,20 +978,20 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.pad: lambda input, pad, mode="constant", value=0: -1,
         torch.nn.functional.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
         torch.nn.functional.poisson_nll_loss: (
-            lambda input, target, log_input=True, full=False, size_average=None, eps=1e-08, reduce=None, reduction="mean": -1  # noqa: B950
+            lambda input, target, log_input=True, full=False, size_average=None, eps=1e-08, reduce=None, reduction="mean": -1
         ),
         torch.nn.functional.prelu: lambda input, weight: -1,
         torch.nn.functional.relu: lambda input, inplace=False: -1,
         torch.nn.functional.relu6: lambda input, inplace=False: -1,
         torch.nn.functional.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
-        torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,  # noqa: B950
+        torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
         torch.nn.functional.mish: lambda input, inplace=False: -1,
         torch.nn.functional.scaled_dot_product_attention: lambda query, key, value, attn_mask=None, dropout_p=0.0: -1,
-        torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", beta=1.0: -1,  # noqa: B950
+        torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", beta=1.0: -1,
         torch.nn.functional.huber_loss: lambda input, target, reduction="mean", delta=1.0, weight=None: -1,
-        torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
+        torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,
         torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.softmin: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.softplus: lambda input, beta=1, threshold=20: -1,
@@ -1001,7 +1000,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.tanhshrink: lambda input: -1,
         torch.nn.functional.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.nn.functional.triplet_margin_loss: (
-            lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False, size_average=None, reduce=None, reduction="mean": -1  # noqa: B950
+            lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False, size_average=None, reduce=None, reduction="mean": -1
         ),
         torch.nn.functional.triplet_margin_with_distance_loss: (
             lambda anchor, positive, negative, *, distance_function=None, margin=1.0, swap=False, reduction="mean": -1
@@ -1010,7 +1009,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.init.uniform_: lambda tensor, a=0.0, b=1.0, generator=None: -1,
         torch.nn.init.normal_: lambda tensor, mean=0.0, std=1.0, generator=None: -1,
         torch.nn.init.constant_: lambda tensor, val: -1,
-        torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode="fan_in", nonlinearity="leaky_relu", generator=None: -1,  # noqa: B950
+        torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode="fan_in", nonlinearity="leaky_relu", generator=None: -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.nonzero_static: lambda input, *, size, fill_value=-1: -1,
         torch.argwhere: lambda input: -1,
@@ -1057,10 +1056,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.quantize_per_tensor_dynamic: lambda input, dtype, reduce_range: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
         torch.quantized_gru_cell: (
-            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
+            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1
         ),
         torch.quantized_lstm_cell: (
-            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
+            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1
         ),
         torch.quantized_max_pool1d: (
             lambda input, kernel_size, stride=(), padding=(0,), dilation=(
@@ -1081,10 +1080,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             ), ceil_mode=False: -1
         ),
         torch.quantized_rnn_relu_cell: (
-            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
+            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1
         ),
         torch.quantized_rnn_tanh_cell: (
-            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
+            lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1
         ),
         torch.rad2deg: lambda input, out=None: -1,
         torch.ravel: lambda input: -1,
@@ -1100,9 +1099,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.repeat_interleave: lambda input, dim=None: -1,
         torch.reshape: lambda input, shape: -1,
         torch.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
-        torch.rnn_relu: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,  # noqa: B950
+        torch.rnn_relu: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.rnn_relu_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
-        torch.rnn_tanh: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,  # noqa: B950
+        torch.rnn_tanh: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.rnn_tanh_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
@@ -1117,7 +1116,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,  # noqa: B950
+        torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_inverse: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -1148,7 +1147,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.std: lambda input, dim=None: -1,
         torch.std_mean: lambda input, dim=None: -1,
         torch.stft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None, align_to_window=None: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None, align_to_window=None: -1
         ),
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
@@ -1253,7 +1252,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.solve_triangular: lambda input, B, upper, left=True, unitriangular=False: -1,
         torch.tril: lambda input, diagonal=0, out=None: -1,
         torch.triplet_margin_loss: (
-            lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False, size_average=None, reduce=None, reduction="mean": -1  # noqa: B950
+            lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False, size_average=None, reduce=None, reduction="mean": -1
         ),
         torch.triu: lambda input, diagonal=0, out=None: -1,
         torch.true_divide: lambda input, other: -1,
@@ -1275,7 +1274,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.where: lambda condition, x=None, y=None: -1,
         torch._wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
         torch._wrapped_quantized_linear_prepacked: (
-            lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
+            lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1
         ),
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
@@ -1433,6 +1432,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.const_data_ptr: lambda self: -1,
         Tensor.data_ptr: lambda self: -1,
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
@@ -1588,7 +1588,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
                 dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
                 dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
-                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,  # noqa: B950
+                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,
                 dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
                 dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
                 dist.irecv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,

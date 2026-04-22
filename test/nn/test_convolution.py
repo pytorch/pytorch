@@ -3640,6 +3640,33 @@ class TestConvolutionNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=cudnn_enabled):
                 torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
 
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @dtypes(torch.half)
+    def test_Conv2d_depthwise_kernel_flag(self, device, dtype):
+        # Use shapes that qualify for the cuDNN depthwise path:
+        # FP16, depthwise (groups==channels), 4D, no dilation, >= 32 channels
+        channels = 32
+        x = torch.randn(2, channels, 16, 16, device=device, dtype=dtype)
+        conv = nn.Conv2d(
+            channels, channels, kernel_size=3, padding=1, groups=channels
+        ).to(device, dtype)
+
+        # All three modes should produce the same numerics
+        results = {}
+        for mode in ("auto", "cudnn", "native"):
+            with torch.backends.cudnn.flags(
+                enabled=True,
+                benchmark=False,
+                deterministic=True,
+                depthwise_kernel=mode,
+            ):
+                results[mode] = conv(x).detach().clone()
+
+        self.assertEqual(results["cudnn"], results["native"], atol=1e-3, rtol=1e-3)
+        self.assertEqual(results["auto"], results["native"], atol=1e-3, rtol=1e-3)
+
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):

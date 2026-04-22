@@ -230,6 +230,10 @@ activation_offload_sink_wait = False
 # activation reloading with prefetching when using separate streams (bwd graph)
 activation_reload_prefetch = False
 
+# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
+# scheduling. This is hardware-specific and should be set by the user.
+activation_offload_cpu_gpu_bw: float = 50.0
+
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
 # is to turn it off during torch.compile.
@@ -433,7 +437,7 @@ selective_decompose: bool = False
 
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 # adds patch, save_config, invalid config checks, etc

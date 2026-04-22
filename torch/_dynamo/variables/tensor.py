@@ -32,6 +32,7 @@ import sympy
 import torch._numpy as tnp
 import torch.fx
 import torch.random
+from torch import sym_float, sym_int
 from torch._dynamo import compiled_autograd
 from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
@@ -73,7 +74,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
+from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
@@ -271,6 +272,19 @@ class TensorVariable(VariableTracker):
     def is_tensor(self) -> bool:
         return True
 
+    def bool_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # THPVariable_bool calls at::Tensor::is_nonzero(), i.e. .item() != 0.
+        from .constant import ConstantVariable
+
+        item = self.call_method(tx, "item", [], {})
+        if isinstance(item, SymNodeVariable) and isinstance(
+            item.sym_num, torch.SymBool
+        ):
+            return item
+        if isinstance(item, ConstantVariable):
+            return VariableTracker.build(tx, bool(item.value))
+        return SymNodeVariable.create(tx, item.as_proxy() != 0)
+
     @staticmethod
     def specialize(value: torch.Tensor) -> dict[str, Any]:
         props: dict[str, Any] = {
@@ -386,14 +400,12 @@ class TensorVariable(VariableTracker):
         try:
             real_value = getattr(_input_associated_real_value, name)
         except AttributeError:
-            error_message = VariableTracker.build(
-                tx,
-                f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'",
-            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[error_message],
+                args=[
+                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
+                ],
             )
 
         attr_source = AttrSource(self.source, name)
@@ -508,7 +520,7 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
     def method_attr__version(self, tx: "InstructionTranslator") -> VariableTracker:
         from ..tensor_version_op import _tensor_version
@@ -527,14 +539,14 @@ class TensorVariable(VariableTracker):
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
-            return CONSTANT_VARIABLE_TRUE
+            return ConstantVariable.create(True)
 
         try:
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
             # in the event that TensorVariable returns NotImplemented
-            # BuiltinVariable.call_getattr returns GetAttrVariable
+            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
         except (AttributeError, ObservedAttributeError):
             ret_val = False
@@ -562,7 +574,7 @@ class TensorVariable(VariableTracker):
                 )
             elif name in self._strict_mode_conditional_banned_ops():
                 raise UnknownPropertiesDuringBackwardTrace(
-                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
         if name == "__class__":
@@ -764,6 +776,41 @@ class TensorVariable(VariableTracker):
             torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Tensor.__getitem__ is a custom C slot, not CPython's mp_subscript.
+        # TODO(follow-up): add tests for negative index, bool index, invalid key type
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if self.is_strict_mode(tx) and "__getitem__" in self._strict_mode_banned_ops():
+            unimplemented(
+                gb_type="Illegal __getitem__ invocation in strict mode",
+                context=f"mp_subscript_impl {self} {key}",
+                explanation="Dynamo currently does not support __getitem__ "
+                "invocation in strict mode.",
+                hints=[],
+            )
+
+        empty_kwargs: dict[str, VariableTracker] = {}
+        static_attr = all_tensor_attrs.get("__getitem__", None)
+        if static_attr is not None and can_dispatch_torch_function(
+            tx, (self, key), empty_kwargs
+        ):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx,
+                    AttrSource(AttrSource(self.source, "__class__"), "__getitem__"),
+                )(static_attr)
+            else:
+                func_var = SourcelessBuilder.create(tx, torch.Tensor.__getitem__)
+            return dispatch_torch_function(tx, func_var, (self, key), empty_kwargs)
+
+        return self.method___getitem__(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -822,7 +869,7 @@ class TensorVariable(VariableTracker):
 
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
-            return variables.CONSTANT_VARIABLE_FALSE
+            return variables.ConstantVariable.create(False)
 
         if name == "wait":
             if args or kwargs:
@@ -885,6 +932,23 @@ class TensorVariable(VariableTracker):
                     hints=[],
                     from_exc=e,
                 )
+
+        # Guard against unknown methods reaching the generic proxy path.
+        # For traceable wrapper subclasses (DTensor, NestedTensor), class_type
+        # is torch.Tensor, so check the example_value's actual type instead.
+        example_value = self.proxy.node.meta.get("example_value")
+        check_type = (
+            type(example_value) if example_value is not None else self.class_type
+        )
+        if not hasattr(check_type, name):
+            unimplemented(
+                gb_type="Unhandled tensor method",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation=f"Tensor method `{name}` is not defined on "
+                f"{check_type.__name__} and does not have an explicit "
+                "handler in TensorVariable.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         from .builder import wrap_fx_proxy
 
@@ -1314,7 +1378,7 @@ class TensorVariable(VariableTracker):
                 # No leaf tensors found - nothing to accumulate gradients into.
                 # This matches eager behavior where backward() is a no-op if there
                 # are no leaves requiring grad.
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
         else:
             provided_vars = (
                 inputs.items
@@ -1370,7 +1434,7 @@ class TensorVariable(VariableTracker):
 
         grad_mode_var.exit(tx)
 
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def method_data_ptr(
         self,
@@ -1379,6 +1443,33 @@ class TensorVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
+
+    def method_const_data_ptr(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(self, method_name="const_data_ptr")
+
+    def method_record_stream(
+        self,
+        tx: "InstructionTranslator",
+        stream: VariableTracker,
+    ) -> VariableTracker:
+        from .streams import StreamVariable
+
+        if not isinstance(stream, StreamVariable):
+            raise RuntimeError(
+                f"record_stream() expects a Stream argument, got {stream.python_type().__name__}"
+            )
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_stream,
+            (self.as_proxy(), stream.user_object_index),
+            {},
+        )
+        return ConstantVariable.create(None)
 
     def method_item(
         self,
@@ -1401,6 +1492,95 @@ class TensorVariable(VariableTracker):
                 ],
             )
         return None
+
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: only integer tensors of a single element can be converted
+        # to an index. Mirrors THPVariable_index_scalar in
+        # https://github.com/pytorch/pytorch/blob/7cfd054075b/tools/autograd/templates/python_variable_methods.cpp#L372-L385
+        if self.dtype is not None and (
+            not self.dtype.is_floating_point and not self.dtype.is_complex
+        ):
+            item = self.call_method(tx, "item", [], {})
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    sym_int,
+                    (item.as_proxy(),),
+                    {},
+                ),
+            )
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                "only integer tensors of a single element can be converted to an index"
+            ],
+        )
+
+    def nb_int_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: THPVariable_integral_scalar handles both integer and float
+        # tensors (floats are truncated to int). Complex tensors raise
+        # RuntimeError at runtime.
+        if self.dtype is not None and self.dtype.is_complex:
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=["value cannot be converted to type int64_t without overflow"],
+            )
+        # For known non-complex dtypes and unknown dtype (None), emit the
+        # proxy and let it fail at runtime if the dtype is unsupported.
+        item = self.call_method(tx, "item", [], {})
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_int,
+                (item.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___int__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_int_impl(tx)
+
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: THPVariable_float_scalar dispatches to double.
+        # Complex tensors raise RuntimeError at runtime.
+        if self.dtype is not None and self.dtype.is_complex:
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=["value cannot be converted to type double without overflow"],
+            )
+        item = self.call_method(tx, "item", [], {})
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_float,
+                (item.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___float__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_float_impl(tx)
 
     def method___getitem__(
         self,
@@ -1454,6 +1634,10 @@ class TensorVariable(VariableTracker):
         )
 
     def method___len__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.sq_length(tx)
+
+    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        """Sequence length for tensors (size along first dimension)."""
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def method___iter__(self, tx: "InstructionTranslator") -> ListIteratorVariable:
@@ -1510,7 +1694,7 @@ class TensorVariable(VariableTracker):
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def method_resize_(
         self,
@@ -1880,7 +2064,7 @@ class TensorVariable(VariableTracker):
                     self
                 ):
                     tx.output.side_effects.store_attr(
-                        self, "grad", variables.CONSTANT_VARIABLE_NONE
+                        self, "grad", variables.ConstantVariable.create(None)
                     )
         return self
 
@@ -2040,6 +2224,18 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return self.proxy
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # long_bool / float_bool: non-zero check. SymBool is already boolean.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/longobject.c#L5200
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/floatobject.c#L853
+        if isinstance(self.sym_num, torch.SymBool):
+            return self
+        assert isinstance(self.sym_num, (torch.SymInt, torch.SymFloat))
+        return SymNodeVariable.create(tx, self.as_proxy() != 0)
+
     def as_tensor(self, tx: "InstructionTranslatorBase", dtype: Any) -> TensorVariable:
         if self._tensor_var is None:
             self._tensor_var = VariableTracker.build(
@@ -2079,6 +2275,52 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def nb_int_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymInt.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L462
+        # SymFloat.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L682
+        # SymBool.__int__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L784
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_int,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___int__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_int_impl(tx)
+
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymFloat.__float__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L679
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_float,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___float__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_float_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
@@ -2138,7 +2380,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 ),
             )
 
-        if name in ["T", "real", "imag"]:
+        if name in ["T", "real", "imag", "flat"]:
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_attr_wrapper,
@@ -2386,6 +2628,9 @@ class UntypedStorageVariable(VariableTracker):
         # Example_value will always have device="meta"
         self.example_value = example_value
 
+    def python_type(self) -> type:
+        return torch.UntypedStorage
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2441,12 +2686,17 @@ class DataPtrVariable(VariableTracker):
     def __init__(
         self,
         from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+        self.method_name = method_name
+
+    def python_type(self) -> type:
+        return int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
-        codegen.load_method("data_ptr")
+        codegen.load_method(self.method_name)
         codegen.call_method(0)

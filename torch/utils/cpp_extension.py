@@ -71,8 +71,8 @@ CUDA_GCC_VERSIONS: VersionMap = {
     '12.5': ((6, 0, 0), (14, 0)),
     '12.6': ((6, 0, 0), (14, 0)),
     '12.7': ((6, 0, 0), (14, 0)),
-    '12.8': ((6, 0, 0), (14, 0)),
-    '12.9': ((6, 0, 0), (14, 0)),
+    '12.8': ((6, 0, 0), (15, 0)),
+    '12.9': ((6, 0, 0), (15, 0)),
     '13.0': ((6, 0, 0), (16, 0)),
 }
 
@@ -2261,8 +2261,11 @@ def _jit_compile(name,
                         hipified_sources = set()
                         for source in sources:
                             s_abs = os.path.abspath(source)
-                            hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
-
+                            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                                hipified_s_abs = hipify_result[s_abs].hipified_path
+                            else:
+                                hipified_s_abs = s_abs
+                            hipified_sources.add(hipified_s_abs)
                         sources = list(hipified_sources)
 
                     _write_ninja_file_and_build_library(

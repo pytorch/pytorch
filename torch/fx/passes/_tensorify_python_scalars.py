@@ -256,7 +256,7 @@ def tensorify_python_scalars(
 
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
-            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32
 
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
@@ -347,7 +347,7 @@ def tensorify_python_scalars(
                     ):
                         failed_tensorify_ops.update(str(node.target))
 
-                        log.info("Failed to tensorify %s", str(node.target))
+                        log.info("Failed to tensorify %s", node.target)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.

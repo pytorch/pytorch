@@ -195,7 +195,7 @@ class Vectorized16 {
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized16() {}
+  Vectorized16() = default;
   Vectorized16(__m256i v) : values(v) {}
   Vectorized16(T val) {
     value_type uw = val.x;

@@ -488,7 +488,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (callback == Py_None) {
+  if (Py_IsNone(callback)) {
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -587,7 +587,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
   // None. Skip messing with threading, thread-local storage, and
   // reference counts.
   if (old_callback != new_callback) {
-    if (new_callback == Py_None) {
+    if (Py_IsNone(new_callback)) {
       decrement_working_threads(PyThreadState_GET(), module);
     } else {
       increment_working_threads(PyThreadState_GET(), module);
@@ -612,7 +612,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
 }
 
 static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
-  if (callback != Py_None && callback != Py_False &&
+  if (!Py_IsNone(callback) && !Py_IsFalse(callback) &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
@@ -620,21 +620,21 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   }
   DEBUG_TRACE(
       "python enabled=%d and is run_only=%d",
-      callback != Py_None,
-      callback == Py_False);
+      !Py_IsNone(callback),
+      Py_IsFalse(callback));
   return set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
     PyObject* skip_guard_unsafe_flag) {
-  if (skip_guard_unsafe_flag != Py_False && skip_guard_unsafe_flag != Py_True) {
+  if (!Py_IsFalse(skip_guard_unsafe_flag) && !Py_IsTrue(skip_guard_unsafe_flag)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
   bool old_skip_guard_eval_unsafe = is_skip_guard_eval_unsafe;
-  is_skip_guard_eval_unsafe = skip_guard_unsafe_flag == Py_True;
+  is_skip_guard_eval_unsafe = Py_IsTrue(skip_guard_unsafe_flag);
   if (old_skip_guard_eval_unsafe) {
     Py_RETURN_TRUE;
   }
@@ -672,7 +672,7 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
 }
 
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = NULL;
   }
   Py_XSETREF(guard_error_hook, Py_XNewRef(obj));
@@ -682,7 +682,7 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
 static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
   PyObject* old_hook = guard_complete_hook;
 
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = NULL;
   }
 
@@ -727,6 +727,48 @@ static int clear_state(PyObject* module) {
 
 bool is_skip_guard_eval_unsafe = false;
 
+// -1 means inactive, >= 0 means active with that many compiled frames.
+int fullgraph_compiled_frame_count = -1;
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+bool fullgraph_error_on_nested_compile = false;
+
+// Set the fullgraph compiled frame counter and return the old value.
+// If setting to >= 0 (activating) and already active, no-op.
+static PyObject* set_fullgraph_compiled_frame_count_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  long val = PyLong_AsLong(arg);
+  if (val == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int old = fullgraph_compiled_frame_count;
+  if (val >= 0 && old >= 0) {
+    // Already active, no-op.
+  } else {
+    fullgraph_compiled_frame_count = (int)val;
+  }
+  return PyLong_FromLong(old);
+}
+
+// Set fullgraph_error_on_nested_compile and return the old value.
+static PyObject* set_fullgraph_error_on_nested_compile_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  if (!Py_IsFalse(arg) && !Py_IsTrue(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected True/False");
+    return NULL;
+  }
+  bool old = fullgraph_error_on_nested_compile;
+  fullgraph_error_on_nested_compile = Py_IsTrue(arg);
+  if (old) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
@@ -740,6 +782,14 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
+    {"set_fullgraph_compiled_frame_count",
+     set_fullgraph_compiled_frame_count_py,
+     METH_O,
+     NULL},
+    {"set_fullgraph_error_on_nested_compile",
+     set_fullgraph_error_on_nested_compile_py,
+     METH_O,
+     NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

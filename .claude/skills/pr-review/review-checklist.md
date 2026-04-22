@@ -7,7 +7,10 @@ This checklist covers areas that CI cannot check. Skip items related to linting,
 ### Abstractions and Design
 
 - [ ] **Clear abstractions** - State management is explicit; no dynamic attribute setting/getting
-- [ ] **Match existing patterns** - Code follows architectural patterns already in the codebase
+- [ ] **No side-channel communication** - If behavior changes based on a hidden flag or dynamically-set attribute, the interface itself should change instead (different function signature, different class, different code path). Side-channel patterns (set a private flag in one place, check it in another via `getattr`) create undocumented behavioral modes
+- [ ] **Proper interface, not on/off flags** - A private boolean that switches between two fundamentally different behaviors should be two separate code paths or a proper interface change, not a flag
+- [ ] **Interface documentation** - New internal calling conventions, protocols, or contracts between components must have concrete documentation: what the caller provides, what the callee receives, what invariants hold, and cleanup responsibilities. Motivational comments ("this allows X") are not interface documentation
+- [ ] **Match existing patterns in the same file** - Before accepting new code in a file, read how similar features are already implemented in that same file. If the file uses class attributes for boolean flags, new boolean flags must use class attributes. If the file uses a specific setter pattern, new setters must use the same pattern
 - [ ] **No over-engineering** - Only requested changes are made; no speculative features
 - [ ] **No premature abstraction** - Helpers and utilities are only created when reused; three similar lines is better than a one-use helper
 - [ ] **No trivial helpers** - Avoid 1-2 LOC helper functions used only once (unless significantly improves readability)
@@ -36,17 +39,9 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **No fragile init ordering** - If multiple imports/calls must happen in a specific undocumented order, flag the design. Dependencies should be explicit or combined into a single entry point
 - [ ] **Idempotent global state** - Registries and global lists that accumulate entries must handle multiple calls safely (no duplicate registration, clear cleanup story)
 
-### Common Issues to Flag
-
-- Dynamic `setattr`/`getattr` for state management (prefer explicit class members)
-- Unused imports, variables, or dead code paths
-- Copy-pasted code that could be a shared helper
-- Magic numbers without explanation
-- Overly defensive error handling for impossible cases
-
 ## PyTorch Infrastructure
 
-When a PR touches code in the scope of any item below, **stop and investigate** whether the established infrastructure should be used. Spawn a sub-agent to read the relevant infrastructure code and determine if the PR should be using it instead of rolling its own solution.
+When a PR touches code in the scope of any item below, **stop and investigate** whether the established infrastructure should be used.
 
 ### C++ Kernel Infrastructure
 
@@ -55,8 +50,9 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **Structured Kernels** — PR adds a new ATen operator with separate hand-written functional, inplace, and out= variants instead of using `structured: True` + `structured_delegate` in `native_functions.yaml` to generate boilerplate
 - [ ] **TORCH_CHECK variants** — PR uses generic `TORCH_CHECK` for conditions that have a more specific variant: `ValueError` → `TORCH_CHECK_VALUE`, `IndexError` → `TORCH_CHECK_INDEX`, `TypeError` → `TORCH_CHECK_TYPE`, `NotImplementedError` → `TORCH_CHECK_NOT_IMPLEMENTED`
 - [ ] **AT_DISPATCH macros** — PR manually switches on `dtype` with `if (dtype == kFloat) ... else if (dtype == kDouble)` instead of using `AT_DISPATCH_FLOATING_TYPES`, `AT_DISPATCH_ALL_TYPES_AND`, or the `AT_DISPATCH_SWITCH` / `AT_DISPATCH_CASE` pattern from `aten/src/ATen/Dispatch.h`
-- [ ] **Device guards (RAII)** — PR manually saves/restores device context (`cudaSetDevice` + try/catch) instead of using `DeviceGuard` or `OptionalDeviceGuard` from `c10/core/DeviceGuard.h`
+- [ ] **Device guards (RAII)** — PR manually saves/restores device context (`cudaSetDevice` + try/catch) instead of using `DeviceGuard` or `OptionalDeviceGuard` from `c10/core/DeviceGuard.h`. **Note:** Operators registered in `native_functions.yaml` get automatic `DeviceGuard` insertion from codegen (controlled by `device_guard: True`, the default) — do NOT flag missing device guards for these ops unless they explicitly set `device_guard: False`
 - [ ] **Memory format propagation** — PR allocates output tensors with `at::empty(shape, options)` (defaulting to contiguous) without calling `input.suggest_memory_format()` to preserve ChannelsLast or other input formats
+- [ ] **Subclass-safe tensor allocation** — PR uses `at::empty(shape, input.options())` instead of `input.new_empty(shape)` or `at::empty_like(input)`, which don't propagate tensor subclass metadata
 - [ ] **TORCH_LIBRARY operator registration** — PR registers operators using manual dispatcher calls instead of `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` macros from `torch/library.h`
 - [ ] **TORCH_WARN_DEPRECATION** — PR uses `TORCH_WARN` for deprecation notices instead of `TORCH_WARN_DEPRECATION` which issues a proper `DeprecationWarning`
 
@@ -164,6 +160,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 ### Test Existence
 
 - [ ] **Tests exist** - New functionality has corresponding tests
+- [ ] **Regression tests for bug fixes** - Bug fixes must include a test that reproduces the bug before the fix
 - [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
 - [ ] **New test file is rare** - New test file should only be added when new major features are added
 
@@ -189,32 +186,9 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 ### Test Quality
 
 - [ ] **Edge cases covered** - Tests include boundary conditions, empty inputs, error cases
-- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaises` or `assertRaisesRegex`
-- [ ] **No duplicated test logic** - Similar tests share a private helper method (e.g., `_test_foo(config)`) called from individual tests with different configs
-
-**Example of good test structure:**
-```python
-def _test_feature_with_config(self, flag, expected_shape):
-    """Shared test logic called by device-specific tests."""
-    x = torch.randn(10)
-    result = my_feature(x, flag)
-    self.assertEqual(result.shape, expected_shape)
-
-def test_feature_enabled(self):
-    self._test_feature_with_config(True, (10, 10))
-
-def test_feature_disabled(self):
-    self._test_feature_with_config(False, (10, 5))
-```
-
-### Common Testing Issues
-
-- Tests that only check the happy path without error cases
-- Duplicated test code that should be a parameterized helper
-- Manual operator tests that duplicate existing OpInfo coverage — the fix should update the OpInfo's dtype list instead
-- Tests that don't clean up resources (files, CUDA memory)
-- Flaky tests (timing-dependent, order-dependent, golden value)
-- Tests that skip without clear justification
+- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason. Bare `assertRaises` should be flagged — always require a message pattern match
+- [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
+- [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile
 
 ## Security
 
@@ -258,7 +232,7 @@ This is particularly important for PyTorch's autograd, which has multi-threaded 
 
 - [ ] **GIL held for Python object access** - Any code that touches `PyObject*` (incref, decref, attribute access, container mutation) must hold the GIL. When releasing the GIL for long-running C++ work (`Py_BEGIN_ALLOW_THREADS`), verify no Python objects are accessed in that region
 - [ ] **Borrowed references across GIL release** - Borrowed references (`PyTuple_GET_ITEM`, `PyList_GET_ITEM`) become unsafe if the GIL is released and reacquired, since another thread may have mutated the container
-- [ ] **Decref-before-update hazard** - When replacing an item in a container (tuple, list, dict), update the container slot first, then `Py_DECREF` the old value. Decref can trigger `__del__` finalizers that re-enter and observe the container in an inconsistent state. Without the GIL (free-threaded builds), this is also a data race.
+- [ ] **Decref-before-update hazard** - When replacing an item in a container (tuple, list, dict), update the container slot first, then `Py_DECREF` the old value. Decref can trigger `__del__` finalizers that re-enter and observe the container in an inconsistent state. Without the GIL (free-threaded builds), this is also a data race. This is **always** a must-fix — even if "safe in practice" because of refcount guarantees, the pattern is wrong and breaks under NoGIL. The correct pattern costs nothing extra
 
 ### Free-Threaded Python (NoGIL, PEP 703)
 
@@ -298,10 +272,3 @@ CPython 3.13t+ can run without the GIL. Code that was previously safe under the 
 
 - [ ] **Use torch.profiler** - PR adds manual `time.time()` instrumentation instead of using `torch.profiler.profile()` context manager with `schedule()` and `tensorboard_trace_handler()`
 - [ ] **Use torch.utils.benchmark.Timer** - PR benchmarks with `time.time()` loops instead of `torch.utils.benchmark.Timer` which handles warmup, statistics, and proper CUDA synchronization
-
-### Common Performance Issues
-
-- Creating new tensors inside training loops instead of pre-allocating
-- Synchronous CUDA operations where async would work
-- Keeping computation graph alive longer than needed
-- Redundant clones or copies

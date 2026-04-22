@@ -157,7 +157,7 @@ void lookup(
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
-    bool valid = backend == Py_False ||
+    bool valid = Py_IsFalse(backend) ||
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {
@@ -229,9 +229,9 @@ CacheEntry* create_cache_entry(
 }
 
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
-  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
-    throw py::type_error("expected a code object!");
-  }
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -252,9 +252,9 @@ PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
 }
 
 void _reset_precompile_entries(const py::handle& code_obj) {
-  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
-    throw py::type_error("expected a code object!");
-  }
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -267,9 +267,9 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code) {
-  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
-    throw py::type_error("expected a code object!");
-  }
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -290,9 +290,9 @@ void _set_lru_cache(py::object boolean) {
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
-  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
-    throw py::type_error("expected a code object!");
-  }
+  TORCH_CHECK_TYPE(
+      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
+      "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
