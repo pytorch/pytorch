@@ -80,8 +80,11 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
     return size_;
   }
 
-  size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
-      const override {
+  size_t read(
+      uint64_t pos,
+      void* buf,
+      size_t n,
+      [[maybe_unused]] const char* what = "") const override {
     memcpy(buf, (int8_t*)(data_) + pos, n);
     return n;
   }
