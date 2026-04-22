@@ -21,6 +21,8 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_default_backend",
+    "get_default_backend",
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
@@ -258,6 +260,39 @@ def disable(fn=None, recursive=True, *, reason=None):
     return torch._dynamo.disable(fn, recursive, reason=reason)
 
 
+def set_default_backend(backend: str | Callable[..., Any] | None) -> None:
+    """Set the default backend for ``torch.compile`` when no ``backend`` argument is specified.
+
+    Passing ``None`` resets the default back to ``"inductor"``.
+
+    Args:
+        backend: A backend name (string), a callable backend, or ``None``.
+
+    Example::
+
+        >>> torch.compiler.set_default_backend("eager")
+        >>> torch.compiler.get_default_backend()
+        'eager'
+        >>> torch.compiler.set_default_backend(None)  # reset
+        >>> torch.compiler.get_default_backend()
+        'inductor'
+    """
+    from torch._dynamo.backends.registry import set_default_backend
+
+    set_default_backend(backend)
+
+
+def get_default_backend() -> str | Callable[..., Any]:
+    """Return the current default backend for ``torch.compile``.
+
+    Returns:
+        The current default backend (string or callable). Initially ``"inductor"``.
+    """
+    from torch._dynamo.backends.registry import get_default_backend
+
+    return get_default_backend()
+
+
 def set_stance(
     stance: str = "default",
     *,
@@ -489,9 +524,16 @@ def _patch_autograd_grad():
     import functools
 
     import torch.autograd
+    from torch._dynamo.utils import warn_once
     from torch._functorch._aot_autograd.logging_utils import (
         setup_stacktrace_preservation_hooks_from_tensors,
     )
+
+    warn_once(
+        "torch.compiler._patch_autograd_grad() is deprecated; "
+        "use torch.compiler._patch_engine_backward() instead."
+    )
+    # TODO: Remove this helper once Titan no longer depends on it.
 
     _orig_grad = torch.autograd.grad
 
@@ -511,6 +553,44 @@ def _patch_autograd_grad():
         yield
     finally:
         torch.autograd.grad = _orig_grad
+
+
+@contextlib.contextmanager
+def _patch_engine_backward():
+    """Patch _engine_run_backward for non-strict make_fx tracing.
+
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real autograd engine entrypoint used by backward().
+    """
+    import functools
+
+    import torch.autograd
+    import torch.autograd.graph
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
+
+    _orig_engine_run_backward = torch.autograd.graph._engine_run_backward
+
+    @functools.wraps(_orig_engine_run_backward)
+    def _patched_engine_backward(outputs, *args, **kwargs):
+        if not _is_non_strict_tracing():
+            raise AssertionError(
+                "_patch_engine_backward() must be used under "
+                "_non_strict_tracing_context()"
+            )
+
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_engine_run_backward(outputs, *args, **kwargs)
+
+    torch.autograd.graph._engine_run_backward = _patched_engine_backward
+    torch.autograd._engine_run_backward = _patched_engine_backward
+    try:
+        yield
+    finally:
+        torch.autograd.graph._engine_run_backward = _orig_engine_run_backward
+        torch.autograd._engine_run_backward = _orig_engine_run_backward
 
 
 def is_dynamo_compiling() -> bool:

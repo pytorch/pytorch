@@ -1191,11 +1191,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             out = x.redistribute(mesh, [placement])
             return out
 
-        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        # Temporarily ignore setUp(), and use rank1 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
-        mesh = DeviceMesh(self.device_type, [1, 3])
+        dist.init_process_group("fake", store=fake_store, rank=1, world_size=2)
+        mesh = DeviceMesh(self.device_type, [0, 1])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
         x_dt = DTensor.from_local(
@@ -1232,11 +1232,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             out = x.redistribute(mesh, [placement])
             return out
 
-        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        # Temporarily ignore setUp(), and use rank1 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
-        mesh = DeviceMesh(self.device_type, [1, 3])
+        dist.init_process_group("fake", store=fake_store, rank=1, world_size=2)
+        mesh = DeviceMesh(self.device_type, [0, 1])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
         x_dt = DTensor.from_local(
@@ -2405,6 +2405,62 @@ class outer_fn(torch.nn.Module):
         opt = torch.optim.Adam([param], lr=1e-3)
         compiled_step = torch.compile(opt.step, backend="aot_eager")
         compiled_step()
+
+    def test_pad_tensor_no_guard_on_symbolic_pad_size(self):
+        """pad_tensor must not create a guard that concretizes symbolic pad sizes.
+
+        When tracing with make_fx in symbolic mode, pad_size may be a SymInt
+        (e.g., for uneven DTensor sharding where local shard sizes vary by
+        rank). guard_or_false(pad_size == 0) must not be evaluated during
+        tracing, otherwise it creates a guard that collapses the SymInt to its
+        hint value, making the graph rank-specific instead of rank-independent.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
+        from torch.distributed.tensor._collective_utils import pad_tensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env, static_shapes=False)
+
+        with unset_fake_temporarily():
+            real = torch.empty(400, 15, device="meta")
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC, DimDynamic.DYNAMIC]
+        )
+        x = fake_mode.from_tensor(real, symbolic_context=sym_ctx)
+        with fake_mode:
+            x = x.to("cpu")
+
+        # Verify the symbol is alive before tracing
+        self.assertTrue(isinstance(x.shape[1], torch.SymInt))
+        self.assertFalse(x.shape[1].node.expr.is_number)
+
+        def fn(t):
+            pad_size = 15 - t.size(1)
+            return pad_tensor(t, 1, pad_size)
+
+        with fake_mode:
+            gm = make_fx(fn, tracing_mode="symbolic")(x)
+
+        # The symbol must survive — not be guarded to a concrete value
+        self.assertFalse(
+            x.shape[1].node.expr.is_number,
+            f"pad_tensor created a guard that concretized the symbolic dim: "
+            f"expr={x.shape[1].node.expr}",
+        )
+
+        # The traced graph should have a symbolic pad size, not concrete 0
+        placeholder = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        val = placeholder.meta["val"]
+        self.assertTrue(
+            isinstance(val.shape[1], torch.SymInt),
+            "Placeholder dim should be symbolic",
+        )
 
 
 @instantiate_parametrized_tests

@@ -1643,6 +1643,7 @@ def linalg_cross_strategy(
 
 @register_single_dim_strategy(
     [
+        # Forward ops
         aten.upsample_nearest1d.default,
         aten.upsample_nearest2d.default,
         aten.upsample_nearest3d.default,
@@ -1654,6 +1655,18 @@ def linalg_cross_strategy(
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
         aten.upsample_trilinear3d.default,
+        # Backward ops
+        aten.upsample_nearest1d_backward.default,
+        aten.upsample_nearest2d_backward.default,
+        aten.upsample_nearest3d_backward.default,
+        aten._upsample_nearest_exact1d_backward.default,
+        aten._upsample_nearest_exact2d_backward.default,
+        aten._upsample_nearest_exact3d_backward.default,
+        aten._upsample_bilinear2d_aa_backward.default,
+        aten.upsample_bicubic2d_backward.default,
+        aten.upsample_bilinear2d_backward.default,
+        aten.upsample_linear1d_backward.default,
+        aten.upsample_trilinear3d_backward.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )

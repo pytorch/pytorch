@@ -252,10 +252,11 @@ AOTITorchError aoti_torch_strlist_to_ivalue(
     C10IValueHandle* ivalue) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::string> vec;
+    vec.reserve(len);
     for (int64_t i = 0; i < len; i++) {
-      vec.push_back(std::string(val[i]));
+      vec.emplace_back(val[i]);
     }
-    c10::IValue* t = new c10::IValue(vec);
+    c10::IValue* t = new c10::IValue(std::move(vec));
     *ivalue = reinterpret_cast<C10IValueHandle>(t);
   });
 }

@@ -149,7 +149,7 @@ struct CaptureList {
     return capture_types_.size();
   }
 
-  void unpack(Stack& stack, const std::shared_ptr<autograd::Node>& saved_for) {
+  void unpack(Stack& stack, const c10::intrusive_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -261,7 +261,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     stack.reserve(captures_.size() + inputs.size());
 
     input_instructions_.unpack(std::move(inputs), stack);
-    captures_.unpack(stack, shared_from_this());
+    captures_.unpack(stack, getptr());
     GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
     unpackReturnTuple(stack);
@@ -348,7 +348,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // generally a hard error in autograd.
     if (at::isFloatingType(output.scalar_type()) ||
         at::isComplexType(output.scalar_type())) {
-      autograd::create_gradient_edge(output, shared_from_this());
+      autograd::create_gradient_edge(output, getptr());
       output.set_requires_grad(true);
     } else {
       add_input_metadata(autograd::Node::undefined_input{});
@@ -422,7 +422,7 @@ struct DifferentiableGraphOp {
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   void operator()(Stack& stack) const {
-    auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
+    auto grad_fn = c10::make_intrusive<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +

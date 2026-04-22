@@ -11,6 +11,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -42,23 +43,20 @@ using torch::dynamo::autograd::CompiledNodeArgs;
 using torch::dynamo::autograd::PackedArgs;
 using torch::dynamo::autograd::SwapSavedVariables;
 
-// Custom deleter to prevent stack overflows.
-TORCH_API void deleteNode(Node* function);
-
 // Guard that sets and restores the evaluating node
 class NodeGuard {
  public:
-  explicit NodeGuard(std::shared_ptr<Node> node);
+  explicit NodeGuard(c10::intrusive_ptr<Node> node);
   ~NodeGuard();
 
  private:
-  std::shared_ptr<Node> last_evaluating_node_;
+  c10::intrusive_ptr<Node> last_evaluating_node_;
 };
 
 // Return the Node currently being evaluated (if any)
 // This is only set during the backward pass while a Node is being
 // executed.
-TORCH_API std::shared_ptr<Node> get_current_node();
+TORCH_API c10::intrusive_ptr<Node> get_current_node();
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
@@ -110,7 +108,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // See NOTE [ Sequence Number] for more details on the usages of sequence
 // number.
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-struct TORCH_API Node : std::enable_shared_from_this<Node> {
+struct TORCH_API Node : c10::intrusive_ptr_target {
  public:
   /// Construct a new `Node` with the given `next_edges`
   explicit Node(uint64_t sequence_nr, edge_list&& next_edges = edge_list())
@@ -144,10 +142,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   Node(Node&& other) = delete;
   Node& operator=(const Node& other) = delete;
   Node& operator=(Node&& other) = delete;
-  virtual ~Node() = default;
+  ~Node() override;
+  void release_resources() override;
 
-  std::shared_ptr<Node> getptr() {
-    return shared_from_this();
+  c10::intrusive_ptr<Node> getptr() {
+    return c10::intrusive_ptr<Node>::unsafe_reclaim_from_nonowning(this);
   }
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.

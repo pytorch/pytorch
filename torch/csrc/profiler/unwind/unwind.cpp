@@ -526,20 +526,49 @@ Stats stats() {
 // No cache_mutex_ needed: frame-pointer walking reads only the stack,
 // unlike the x86 path which queries the DWARF FDE cache.
 
+// Stack bounds are essentially immutable over a thread's lifetime (base and
+// size are fixed at pthread_create for spawned threads).  On glibc aarch64
+// the main thread is the pathological case: pthread_getattr_np() parses
+// /proc/self/maps on every call because the main-thread stack isn't recorded
+// in TLS at pthread_create.  Cache once per thread to avoid that parse on
+// every unwind.  This mirrors the process-global caches the x86 unwinder
+// uses for /proc-derived data (library list, exe path); here the data is
+// per-thread, so thread_local is the right scope.
+//
+// Edge case: main thread's stack can grow up to RLIMIT_STACK, and this cache
+// freezes the bounds at first observation.  If the stack later grows past
+// cached lo, unwind_c will terminate early on those frames rather than
+// follow them - truncated backtrace, not incorrect.  In practice main-thread
+// stack reaches steady-state depth during init, long before heavy unwinding.
+namespace {
+struct StackBounds {
+  uintptr_t lo = 0;
+  uintptr_t hi = 0;
+  bool initialized = false;
+};
+thread_local StackBounds tls_stack_bounds;
+} // namespace
+
 static bool get_stack_bounds(uintptr_t& lo, uintptr_t& hi) {
-  pthread_attr_t attr;
-  if (pthread_getattr_np(pthread_self(), &attr) != 0) {
-    return false;
+  auto& b = tls_stack_bounds;
+  if (!b.initialized) {
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+      return false;
+    }
+    void* base = nullptr;
+    size_t size = 0;
+    int rc = pthread_attr_getstack(&attr, &base, &size);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+      return false;
+    }
+    b.lo = reinterpret_cast<uintptr_t>(base);
+    b.hi = b.lo + size;
+    b.initialized = true;
   }
-  void* base = nullptr;
-  size_t size = 0;
-  int rc = pthread_attr_getstack(&attr, &base, &size);
-  pthread_attr_destroy(&attr);
-  if (rc != 0) {
-    return false;
-  }
-  lo = reinterpret_cast<uintptr_t>(base);
-  hi = lo + size;
+  lo = b.lo;
+  hi = b.hi;
   return true;
 }
 

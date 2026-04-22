@@ -9354,6 +9354,25 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    def test_channels_last_channel_slice(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180984
+        # A channel-slice view of a channels_last tensor has channels-last-like
+        # strides but is not packed NHWC in memory. MPSGraph ops that support NHWC
+        # are only work with packed NHWC buffer, giving wrong results.
+        shared = torch.randn(2, 4, 8, 8, device="mps").contiguous(memory_format=torch.channels_last)
+        mps_slice = shared[:, :2]
+
+        weight = torch.randn(3, 2, 3, 3, device="mps")
+        self.assertEqual(F.conv2d(mps_slice.cpu(), weight.cpu()), F.conv2d(mps_slice, weight).cpu())
+
+        self.assertEqual(F.avg_pool2d(mps_slice.cpu(), 2), F.avg_pool2d(mps_slice, 2).cpu())
+        self.assertEqual(F.adaptive_avg_pool2d(mps_slice.cpu(), 2), F.adaptive_avg_pool2d(mps_slice, 2).cpu())
+
+        bn = nn.BatchNorm2d(2).eval()
+        bn_mps = nn.BatchNorm2d(2).to("mps").eval()
+        bn_mps.load_state_dict(bn.state_dict())
+        self.assertEqual(bn(mps_slice.cpu()), bn_mps(mps_slice).cpu())
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
@@ -12667,6 +12686,27 @@ class TestRNNMPS(TestCaseMPS):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+
+    def test_lstm_eval_after_train_same_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180744
+        # The MPS LSTM graph cache key did not include the `train` flag, so a
+        # graph built with dropout during train() was reused in eval() at the
+        # same input shape, silently applying dropout during inference
+        torch.manual_seed(0)
+        lstm = nn.LSTM(
+            input_size=2, hidden_size=4, num_layers=2,
+            dropout=0.1, batch_first=True,
+        ).to("mps")
+        opt = torch.optim.SGD(lstm.parameters(), lr=1e-2)
+        lstm(torch.randn(3, 5, 2, device="mps"))[0].mean().backward()
+        opt.step()
+
+        lstm.eval()
+        probe = torch.randn(10, 5, 2, device="mps")
+        with torch.no_grad():
+            full = lstm(probe)[0]
+            part = lstm(probe[:3])[0]
+        self.assertEqual(full[:3], part)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):

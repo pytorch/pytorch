@@ -679,6 +679,14 @@ def foreach_reduce(
                         group=all_reduce_group,
                         op=all_reduce_op,
                     )
+                # Keep refs to the reduce-dtype AR buffer + completion
+                # event so FSDPParamGroup._all_reduce_state can hold them
+                # across layers. This keeps the buffer off the caching
+                # allocator's free list; otherwise the next layer's
+                # reduce-scatter can reuse the same physical block while
+                # this layer's AR is still in flight, causing cross-layer
+                # gradient aliasing under slow AR. See PR #140044,
+                # regression test PR #180900.
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -695,6 +703,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
+        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
+        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
+        # the old reduce-dtype buffer's lifetime: the rebind orders the
+        # cast before the free-event on AR stream, but the freed block
+        # lands on the caching allocator's free list and the next layer's
+        # RS on RS stream can reuse it without waiting for this layer's
+        # AR to finish. The reduce-dtype buffer is held across layers by
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent
+        # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -711,10 +728,28 @@ def foreach_reduce(
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
-                # Only overlap the D2H copy (copying to pinned memory) if not
-                # accumulating gradients since the CPU add kernel depends on
-                # the copy result and we cannot run the add as a callback
-                non_blocking = fsdp_param.pin_memory and not to_accumulate_grad
+                # Only overlap the D2H copy (copying to pinned memory) when no
+                # in-backward CPU consumer of the grad exists. Two such
+                # consumers suppress the overlap:
+                #   - Accumulating grads: the CPU add kernel depends on the
+                #     copy result and we cannot run the add as a callback.
+                #   - Post-accumulate-grad hooks: user code (e.g.
+                #     optimizer-in-backward) reads ``param.grad`` on CPU
+                #     synchronously. With ``non_blocking=True`` the hook would
+                #     observe in-flight pinned memory — silently wrong
+                #     optimizer updates.
+                has_post_acc_grad_hook = bool(
+                    getattr(
+                        fsdp_param.sharded_param,
+                        "_post_accumulate_grad_hooks",
+                        None,
+                    )
+                )
+                non_blocking = (
+                    fsdp_param.pin_memory
+                    and not to_accumulate_grad
+                    and not has_post_acc_grad_hook
+                )
                 # Since the GPU sharded gradient is allocated in the RS stream,
                 # we can free it here by not keeping a ref without waiting for
                 # the D2H copy since future RS-stream ops run after the copy
