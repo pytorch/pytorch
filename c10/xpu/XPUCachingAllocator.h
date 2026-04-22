@@ -12,6 +12,10 @@ namespace c10::xpu::XPUCachingAllocator {
 struct ShareableHandle {
   std::string handle;
   ptrdiff_t offset;
+  bool is_fd{false};
+  int64_t fd{-1};
+  bool is_dma_buf{false};
+  int64_t alloc_size{-1};
 };
 
 class XPUAllocator : public DeviceAllocator {

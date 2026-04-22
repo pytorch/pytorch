@@ -29,57 +29,54 @@ constexpr size_t kDeviceAlignment = 512;
 
 namespace {
 struct ZeIpcApi {
-  using GetIpcHandleFn = ze_result_t (*)(
-      ze_context_handle_t,
-      const void*,
-      ze_ipc_mem_handle_t*);
-  using OpenIpcHandleFn = ze_result_t (*)(
-      ze_context_handle_t,
-      ze_device_handle_t,
-      ze_ipc_mem_handle_t,
-      ze_ipc_memory_flags_t,
-      void**);
+  using GetIpcHandleFn = ze_result_t (*)(ze_context_handle_t, const void*, ze_ipc_mem_handle_t*);
+  using GetFdFromIpcHandleExpFn = ze_result_t (*)(ze_context_handle_t, ze_ipc_mem_handle_t, uint64_t*);
+  using OpenIpcHandleFn = ze_result_t (*)(ze_context_handle_t, ze_device_handle_t, ze_ipc_mem_handle_t, ze_ipc_memory_flags_t, void**);
   using CloseIpcHandleFn = ze_result_t (*)(ze_context_handle_t, void*);
+  using GetAllocPropertiesFn = ze_result_t (*)(ze_context_handle_t, const void*, ze_memory_allocation_properties_t*, ze_device_handle_t*);
+  using AllocDeviceFn = ze_result_t (*)(ze_context_handle_t, const ze_device_mem_alloc_desc_t*, size_t, size_t, ze_device_handle_t, void**);
+  using FreeDeviceFn = ze_result_t (*)(ze_context_handle_t, void*);
 
   GetIpcHandleFn get_ipc_handle{nullptr};
+  GetFdFromIpcHandleExpFn get_fd_from_ipc_handle_exp{nullptr};
   OpenIpcHandleFn open_ipc_handle{nullptr};
   CloseIpcHandleFn close_ipc_handle{nullptr};
+  GetAllocPropertiesFn get_alloc_properties{nullptr};
+  AllocDeviceFn alloc_device{nullptr};
+  FreeDeviceFn free_device{nullptr};
   void* lib_handle{nullptr};
   std::once_flag init_once;
 
-  void init() {
-    get_ipc_handle = reinterpret_cast<GetIpcHandleFn>(
-        dlsym(RTLD_DEFAULT, "zeMemGetIpcHandle"));
-    open_ipc_handle = reinterpret_cast<OpenIpcHandleFn>(
-        dlsym(RTLD_DEFAULT, "zeMemOpenIpcHandle"));
-    close_ipc_handle = reinterpret_cast<CloseIpcHandleFn>(
-        dlsym(RTLD_DEFAULT, "zeMemCloseIpcHandle"));
-
-    if (get_ipc_handle && open_ipc_handle && close_ipc_handle) {
-      return;
+  template <typename FnPtr>
+  void resolve(FnPtr& fn, const char* name) {
+    fn = reinterpret_cast<FnPtr>(dlsym(RTLD_DEFAULT, name));
+    if (!fn && lib_handle) {
+      fn = reinterpret_cast<FnPtr>(dlsym(lib_handle, name));
     }
+  }
 
+  void init() {
     lib_handle = dlopen("libze_loader.so.1", RTLD_LAZY | RTLD_LOCAL);
     if (!lib_handle) {
       lib_handle = dlopen("libze_loader.so", RTLD_LAZY | RTLD_LOCAL);
     }
-    if (!lib_handle) {
-      return;
-    }
-
-    get_ipc_handle = reinterpret_cast<GetIpcHandleFn>(
-        dlsym(lib_handle, "zeMemGetIpcHandle"));
-    open_ipc_handle = reinterpret_cast<OpenIpcHandleFn>(
-        dlsym(lib_handle, "zeMemOpenIpcHandle"));
-    close_ipc_handle = reinterpret_cast<CloseIpcHandleFn>(
-        dlsym(lib_handle, "zeMemCloseIpcHandle"));
+    resolve(get_ipc_handle, "zeMemGetIpcHandle");
+    resolve(get_fd_from_ipc_handle_exp, "zeMemGetFileDescriptorFromIpcHandleExp");
+    resolve(open_ipc_handle, "zeMemOpenIpcHandle");
+    resolve(close_ipc_handle, "zeMemCloseIpcHandle");
+    resolve(get_alloc_properties, "zeMemGetAllocProperties");
+    resolve(alloc_device, "zeMemAllocDevice");
+    resolve(free_device, "zeMemFree");
   }
 
   bool available() {
-    std::call_once(init_once, [this]() {
-      init();
-    });
+    std::call_once(init_once, [this]() { init(); });
     return get_ipc_handle && open_ipc_handle && close_ipc_handle;
+  }
+
+  bool dma_buf_available() {
+    std::call_once(init_once, [this]() { init(); });
+    return get_alloc_properties && alloc_device && free_device;
   }
 };
 
@@ -482,6 +479,36 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
+    auto& ze_ipc_api = get_ze_ipc_api();
+    if (ze_ipc_api.dma_buf_available()) {
+      auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_device_context());
+      auto ze_device = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_raw_device(p.device()));
+
+      ze_external_memory_export_desc_t export_desc = {};
+      export_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+      export_desc.pNext = nullptr;
+      export_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+
+      ze_device_mem_alloc_desc_t alloc_desc = {};
+      alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+      alloc_desc.pNext = &export_desc;
+      alloc_desc.flags = 0;
+      alloc_desc.ordinal = 0;
+
+      const auto alloc_result = ze_ipc_api.alloc_device(
+          ze_context,
+          &alloc_desc,
+          size,
+          kDeviceAlignment,
+          ze_device,
+          ptr);
+      if (alloc_result == ZE_RESULT_SUCCESS) {
+        return;
+      }
+    }
+
     *ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
@@ -494,6 +521,23 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
+    auto& ze_ipc_api = get_ze_ipc_api();
+    if (ze_ipc_api.free_device && ze_ipc_api.get_alloc_properties) {
+      auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+          xpu::get_device_context());
+      ze_memory_allocation_properties_t alloc_props = {};
+      alloc_props.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+      alloc_props.pNext = nullptr;
+      const auto props_result = ze_ipc_api.get_alloc_properties(
+          ze_context, ptr, &alloc_props, nullptr);
+      if (props_result == ZE_RESULT_SUCCESS) {
+        const auto free_result = ze_ipc_api.free_device(ze_context, ptr);
+        if (free_result == ZE_RESULT_SUCCESS) {
+          return;
+        }
+      }
+    }
+
     sycl::free(ptr, xpu::get_device_context());
   }
 }
@@ -1854,29 +1898,113 @@ class NativeCachingAllocator : public XPUAllocator {
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   struct MemHandleCacheEntry {
     MemHandleCacheEntry(c10::DeviceIndex device, const std::string& handle)
-        : device_(device) {
+        : device_(
+              device),
+          initialized_(false),
+          from_fd_(false),
+          from_dma_buf_(false),
+          fd_(-1),
+          alloc_size_(0) {
       auto& ze_ipc_api = get_ze_ipc_api();
-      TORCH_CHECK(
-          handle.size() >= sizeof(ze_ipc_mem_handle_t),
-          "invalid XPU IPC handle size");
 
-      std::memcpy(&ipc_handle_, handle.data(), sizeof(ipc_handle_));
+      if (handle.rfind("dmabuf:", 0) == 0) {
+        const auto fd_end = handle.find(':', 7);
+        TORCH_CHECK(
+            fd_end != std::string::npos,
+            "invalid dmabuf handle format for XPU IPC");
+        from_dma_buf_ = true;
+        fd_ = std::stoll(handle.substr(7, fd_end - 7));
+        alloc_size_ = static_cast<size_t>(
+            std::stoull(handle.substr(fd_end + 1)));
+        TORCH_CHECK(
+            alloc_size_ > 0,
+            "invalid dmabuf allocation size for XPU IPC");
+      } else if (handle.rfind("fd:", 0) == 0) {
+        from_fd_ = true;
+        fd_ = std::stoll(handle.substr(3));
+      } else {
+        TORCH_CHECK(
+            handle.size() >= sizeof(ze_ipc_mem_handle_t),
+            "invalid XPU IPC handle size");
+        std::memcpy(&ipc_handle_, handle.data(), sizeof(ipc_handle_));
+      }
 
       TORCH_CHECK(
           ze_ipc_api.available(), "Level Zero IPC APIs are not available");
+    }
 
+    // Initialize the IPC handle (called outside the cache lock)
+    void init() {
+      if (initialized_) {
+        return;
+      }
+
+      // Ensure device pool is properly initialized in this process
+      // This is critical for multiprocessing scenarios (spawn/forkserver)
+      // where child processes need to perform device initialization again.
       at::DeviceGuard guard(at::Device(at::kXPU, device_));
+      c10::xpu::device_count_ensure_non_zero();  // Ensure device pool is initialized
+      
       ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
           xpu::get_device_context());
       auto ze_device = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
           xpu::get_raw_device(device_));
 
+      auto& ze_ipc_api = get_ze_ipc_api();
+
+      if (from_dma_buf_) {
+        TORCH_CHECK(
+            ze_ipc_api.dma_buf_available(),
+            "Level Zero DMA-BUF IPC APIs are unavailable");
+
+        ze_external_memory_import_fd_t import_desc = {};
+        import_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+        import_desc.pNext = nullptr;
+        import_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+        import_desc.fd = static_cast<int>(fd_);
+
+        ze_device_mem_alloc_desc_t alloc_desc = {};
+        alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+        alloc_desc.pNext = &import_desc;
+        alloc_desc.flags = 0;
+        alloc_desc.ordinal = 0;
+
+        const auto alloc_result = ze_ipc_api.alloc_device(
+            ze_context_,
+            &alloc_desc,
+            alloc_size_,
+            kDeviceAlignment,
+            ze_device,
+            &xpu_ipc_ptr_);
+        TORCH_CHECK(
+            alloc_result == ZE_RESULT_SUCCESS,
+            "zeMemAllocDevice (DMA-BUF import) failed with code ",
+            static_cast<int>(alloc_result));
+        initialized_ = true;
+        return;
+      }
+
+      if (from_fd_) {
+        TORCH_CHECK(
+            false,
+            "legacy fd-based XPU IPC handle is unsupported; expected dmabuf or raw IPC handle");
+      }
+
       const auto result = ze_ipc_api.open_ipc_handle(
-          ze_context_, ze_device, ipc_handle_, ZE_IPC_MEMORY_FLAG_BIAS_CACHED, &xpu_ipc_ptr_);
-      TORCH_CHECK(
-          result == ZE_RESULT_SUCCESS,
-          "zeMemOpenIpcHandle failed with code ",
-          static_cast<int>(result));
+          ze_context_, ze_device, ipc_handle_, static_cast<ze_ipc_memory_flags_t>(0), &xpu_ipc_ptr_);
+      
+      if (result != ZE_RESULT_SUCCESS) {
+        TORCH_WARN(
+            "zeMemOpenIpcHandle failed with code 0x",
+            std::hex, static_cast<uint32_t>(result), std::dec,
+            " on device ", device_);
+        TORCH_CHECK(
+            false,
+            "zeMemOpenIpcHandle failed with code ",
+            static_cast<int>(result));
+      }
+
+      initialized_ = true;
     }
 
     void clear() {
@@ -1886,6 +2014,17 @@ class NativeCachingAllocator : public XPUAllocator {
 
       auto& ze_ipc_api = get_ze_ipc_api();
       if (!ze_ipc_api.available()) {
+        return;
+      }
+
+      if (from_dma_buf_) {
+        const auto free_result = ze_ipc_api.free_device(ze_context_, xpu_ipc_ptr_);
+        if (free_result != ZE_RESULT_SUCCESS) {
+          TORCH_WARN(
+              "zeMemFree (DMA-BUF import) failed with code ",
+              static_cast<int>(free_result));
+        }
+        xpu_ipc_ptr_ = nullptr;
         return;
       }
 
@@ -1899,6 +2038,7 @@ class NativeCachingAllocator : public XPUAllocator {
     }
 
     void* ptr() const {
+      TORCH_CHECK(initialized_, "MemHandleCacheEntry not initialized");
       return xpu_ipc_ptr_;
     }
 
@@ -1907,6 +2047,11 @@ class NativeCachingAllocator : public XPUAllocator {
     ze_ipc_mem_handle_t ipc_handle_{};
     void* xpu_ipc_ptr_{nullptr};
     std::weak_ptr<void> wp_;
+    bool initialized_;
+    bool from_fd_;
+    bool from_dma_buf_;
+    int64_t fd_;
+    size_t alloc_size_;
   };
   ska::flat_hash_map<std::string, MemHandleCacheEntry> ipcMemHandle_to_devptr;
   c10::ApproximateClockToUnixTimeConverter clock_converter;
@@ -2067,6 +2212,31 @@ class NativeCachingAllocator : public XPUAllocator {
     auto& ze_ipc_api = get_ze_ipc_api();
     TORCH_CHECK(
         ze_ipc_api.available(), "Level Zero IPC APIs are not available");
+
+    if (ze_ipc_api.get_alloc_properties) {
+      ze_external_memory_export_fd_t export_fd = {};
+      export_fd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_FD;
+      export_fd.pNext = nullptr;
+      export_fd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+      export_fd.fd = -1;
+
+      ze_memory_allocation_properties_t alloc_props = {};
+      alloc_props.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+      alloc_props.pNext = &export_fd;
+
+      const auto alloc_props_result = ze_ipc_api.get_alloc_properties(
+        ze_context, base_block->ptr, &alloc_props, nullptr);
+      if (alloc_props_result == ZE_RESULT_SUCCESS && export_fd.fd >= 0) {
+      return {
+        std::string(),
+        storage_offset_bytes,
+        true,
+        static_cast<int64_t>(export_fd.fd),
+        true,
+        static_cast<int64_t>(base_block->size)};
+      }
+    }
+
     ze_ipc_mem_handle_t ipc_handle = {};
     auto result = ze_ipc_api.get_ipc_handle(
         ze_context, base_block->ptr, &ipc_handle);
@@ -2078,14 +2248,35 @@ class NativeCachingAllocator : public XPUAllocator {
     return {
         std::string(
             reinterpret_cast<const char*>(&ipc_handle), sizeof(ipc_handle)),
-        storage_offset_bytes};
+      storage_offset_bytes,
+      false,
+      -1,
+      false,
+      -1};
   }
 
   std::shared_ptr<void> getIpcDevPtr(
       std::string handle,
       c10::DeviceIndex device) override {
-    std::lock_guard<std::mutex> lock(IpcMutex);
+    // Fast path: check if already in cache
+    {
+      std::lock_guard<std::mutex> lock(IpcMutex);
+      auto iter = ipcMemHandle_to_devptr.find(handle);
+      if (iter != ipcMemHandle_to_devptr.end()) {
+        auto devptr = iter->second.wp_.lock();
+        TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
+        return devptr;
+      }
+    }
 
+    // Create and initialize entry without holding lock
+    MemHandleCacheEntry entry(device, handle);
+    entry.init();
+
+    // Slow path: insert into cache
+    std::lock_guard<std::mutex> lock(IpcMutex);
+    
+    // Check again in case another thread inserted while we were initializing
     auto iter = ipcMemHandle_to_devptr.find(handle);
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
@@ -2093,11 +2284,13 @@ class NativeCachingAllocator : public XPUAllocator {
       return devptr;
     }
 
-    auto inserted = ipcMemHandle_to_devptr.insert(
-        iter, {handle, MemHandleCacheEntry(device, handle)});
-    auto shared_handle = inserted->first;
+    // Insert the already-initialized entry
+    auto inserted = ipcMemHandle_to_devptr.emplace(handle, std::move(entry));
+    auto& inserted_entry = inserted.first->second;
+    auto shared_handle = inserted.first->first;
+
     auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [shared_handle, this](void* p) {
+        inserted_entry.ptr(), [shared_handle, this](void* p) {
           (void)p;
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
 
@@ -2110,7 +2303,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
           entry.clear();
         });
-    inserted->second.wp_ = sp;
+    inserted_entry.wp_ = sp;
     return sp;
   }
 
