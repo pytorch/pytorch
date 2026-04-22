@@ -105,7 +105,7 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
             try:
                 os.chmod(f.name, 0o755)
                 os.rename(f.name, flamegraph_script)
-            except OSError:  # noqa: B001,E722
+            except OSError:
                 # Ok to skip, the file will be removed by tempfile
                 pass
     args = [flamegraph_script, "--countname", "bytes"]

@@ -752,7 +752,7 @@ def apply_in_graph_mutations(
     if input_info.mutates_storage_metadata:
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
-                # pyrefly: ignore[no-matching-overload]
+                # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 inpt_old.set_(inpt_new)
 
     # Note [Ordering of resize_() and set_()]
@@ -1090,6 +1090,7 @@ def create_functionalized_fn(
                         ):
                             apply_in_graph_mutations(
                                 inpt_info,
+                                # pyrefly: ignore [bad-argument-type]
                                 before,
                                 after,
                                 f_inpt,

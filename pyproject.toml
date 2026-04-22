@@ -138,21 +138,29 @@ quote-style = "double"
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8
 external = [
-    "B001",
-    "B902",
-    "B950",
-    "E121",
-    "E122",
-    "E128",
-    "E131",
-    "E704",
-    "E723",
-    "F723",
-    "F812",
+    # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",
     "T484",
     "TOR901",
+    # Codes that are preview-only in ruff, so flake8 is still the enforcer.
+    # As ruff promotes these out of preview, move them to flake8's ignore list.
+    "B901",
+    "B909",
+    "E115",
+    "E201",
+    "E221",
+    "E225",
+    "E226",
+    "E227",
+    "E231",
+    "E241",
+    "E261",
+    "E262",
+    "E265",
+    "E266",
+    "E272",
+    "E306",
 ]
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
@@ -255,6 +263,7 @@ select = [
     "RUF033", # default values __post_init__ dataclass
     "RUF041", # simplify nested Literal
     "RUF048", # properly parse `__version__`
+    "RUF100", # unused noqa
     "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",

@@ -11,6 +11,28 @@ constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
 constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 } // anonymous namespace
 
+std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
+  static std::unordered_set<std::string> keys{
+      "large_segment_size_mb",
+      "max_split_size_mb",
+      "max_non_split_rounding_mb",
+      "garbage_collection_threshold",
+      "roundup_power2_divisions",
+      "expandable_segments",
+      "pinned_use_background_threads"};
+  return keys;
+}
+
+const std::unordered_set<std::string>& AcceleratorAllocatorConfig::getKeys() {
+  return getMutableKeys();
+}
+
+std::function<void(const std::string&)>& AcceleratorAllocatorConfig::
+    getConfigParserHook() {
+  static std::function<void(const std::string&)> hook{nullptr};
+  return hook;
+}
+
 AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
   static AcceleratorAllocatorConfig instance;
   static bool env_flag [[maybe_unused]] = []() {

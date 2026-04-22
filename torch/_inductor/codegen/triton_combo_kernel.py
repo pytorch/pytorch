@@ -40,6 +40,11 @@ from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
+# Default block sizes used when combo kernel autotuning is disabled.
+DEFAULT_COMBO_BLOCK_SIZE_1D = 1024
+DEFAULT_COMBO_BLOCK_SIZE_2D = 32
+
+
 log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 LARGE_NUMELS = 512e5
@@ -454,9 +459,9 @@ class ComboKernel(Kernel):
             | None
         ) = None
         self.block_args: list[str] = []
-        # there following are used when autotuning is disabled
-        self.block_size_1d = 1024  # Try tuning this value
-        self.block_size_2d = 32
+        # the following are used when autotuning is disabled
+        self.block_size_1d = DEFAULT_COMBO_BLOCK_SIZE_1D
+        self.block_size_2d = DEFAULT_COMBO_BLOCK_SIZE_2D
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
@@ -715,27 +720,21 @@ class ComboKernel(Kernel):
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
-        triton_meta = {
+        triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
             ),
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
+            # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
+            # compile with the same Triton options as standalone kernels.
+            **TritonKernel.triton_meta_common(),
         }
-        triton_meta["enable_fp_fusion"] = (
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            not config.emulate_precision_casts
-        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
-
-        if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
@@ -762,6 +761,10 @@ class ComboKernel(Kernel):
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
+            # Matches triton.py:codegen_kernel(): inference/backward graphs skip
+            # CPU-copy of mutated args during autotune retries; training-forward
+            # graphs must keep it to preserve benchmark inputs across retries.
+            "optimize_mem": V.graph.is_inference or V.graph.is_backward,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
         if max_persistent_rblock > 0:
@@ -1007,7 +1010,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(buf.get_size())
                     stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
@@ -1015,7 +1018,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(const_tensor.size())
                     stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)
@@ -1201,6 +1204,15 @@ class ComboKernel(Kernel):
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
+                    if sub_kernel.tiling_scores:
+                        meta[f"tiling_scores_{num}"] = {
+                            dim: V.graph.sizevars.optimization_hint(score, fallback=1)
+                            for dim, score in sub_kernel.tiling_scores.items()
+                        }
+                else:
+                    meta[f"reduction_hint_{num}"] = (
+                        sub_kernel.features.get_reduction_hint().name
+                    )
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:

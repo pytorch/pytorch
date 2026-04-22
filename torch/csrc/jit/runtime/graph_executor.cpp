@@ -149,7 +149,7 @@ struct CaptureList {
     return capture_types_.size();
   }
 
-  void unpack(Stack& stack, const std::shared_ptr<autograd::Node>& saved_for) {
+  void unpack(Stack& stack, const c10::intrusive_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -261,7 +261,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     stack.reserve(captures_.size() + inputs.size());
 
     input_instructions_.unpack(std::move(inputs), stack);
-    captures_.unpack(stack, shared_from_this());
+    captures_.unpack(stack, getptr());
     GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
     unpackReturnTuple(stack);
@@ -348,7 +348,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // generally a hard error in autograd.
     if (at::isFloatingType(output.scalar_type()) ||
         at::isComplexType(output.scalar_type())) {
-      autograd::create_gradient_edge(output, shared_from_this());
+      autograd::create_gradient_edge(output, getptr());
       output.set_requires_grad(true);
     } else {
       add_input_metadata(autograd::Node::undefined_input{});
@@ -422,7 +422,7 @@ struct DifferentiableGraphOp {
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   void operator()(Stack& stack) const {
-    auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
+    auto grad_fn = c10::make_intrusive<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
@@ -635,6 +635,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   const ExecutionPlan& getPlanFor(
       Stack& stack,
       std::optional<size_t> remaining_bailout_depth) override {
+    if (FLAGS_torch_jit_input_independent_optimization) {
+      return getInputIndependentPlan();
+    }
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -778,6 +781,38 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     return ExecutionPlan(opt_graph, function_name_);
   }
 
+  const ExecutionPlan& getInputIndependentPlan() override {
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    if (!input_independent_plan_) {
+      auto opt_graph = graph->copy();
+      Inline(*opt_graph);
+      LowerGradOf(*opt_graph);
+      specializeAutogradZero(opt_graph);
+      LowerSimpleTuples(opt_graph);
+      ConstantPooling(opt_graph);
+      runRequiredPasses(opt_graph);
+      ConstantPropagation(opt_graph);
+      // Skip PropagateInputShapes and PropagateRequiresGrad since they need
+      // actual input data.
+      runOptimization(opt_graph);
+
+      // Input-independent passes from runNondiffOptimization. Skipped:
+      // FuseTensorExprs/FuseGraph (need specialized tensor types).
+      for (const auto& passPair : getCustomPrePasses()) {
+        passPair.first(opt_graph);
+      }
+      DecomposeOps(opt_graph);
+      BatchMM(opt_graph);
+      for (const auto& passPair : getCustomPostPasses()) {
+        passPair.first(opt_graph);
+      }
+
+      EliminateDeadCode(opt_graph);
+      input_independent_plan_ = ExecutionPlan(opt_graph, function_name_);
+    }
+    return *input_independent_plan_;
+  }
+
   ~GraphExecutorImpl() override = default;
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -786,6 +821,10 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   // be unused). The compiled version of graph.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ExecutionPlan fallback;
+
+  // Cached plan from getOptimizedPlan() -- uses only input-independent passes.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::optional<ExecutionPlan> input_independent_plan_;
 
   // Mapping from argument configurations to optimized versions of the graph
   // that are specialized to the spec.
@@ -840,6 +879,10 @@ const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
     std::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
+}
+
+const ExecutionPlan& GraphExecutor::getInputIndependentPlan() {
+  return pImpl->getInputIndependentPlan();
 }
 
 GraphExecutorState GraphExecutor::getDebugState() {

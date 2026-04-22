@@ -56,6 +56,10 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 import torch.fx
 from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
+    set_external_object_by_index,
+)
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
@@ -84,6 +88,8 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -631,6 +637,19 @@ def _use_cuda_memory_pool_manager(
     torch.cuda.current_stream().wait_stream(stream)
 
 
+@contextlib.contextmanager
+def _update_current_stream_external_object() -> Generator[None, None, None]:
+    """Update the external object registry so custom ops see the capture stream.
+
+    During cudagraph recording/warmup the current stream differs from the
+    trace-time default stream.  The external object at CURRENT_STREAM_INDEX
+    must reflect the actual current stream so that custom ops (e.g. event
+    record/wait) executed during capture use the right stream.
+    """
+    set_external_object_by_index(CURRENT_STREAM_INDEX, torch.cuda.current_stream())
+    yield
+
+
 def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     if not isinstance(t, torch.Tensor):
         assert t is None
@@ -723,6 +742,8 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            # NB: must go after _use_cuda_memory_pool_manager which switches the stream
+            _update_current_stream_external_object(),
             ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
@@ -932,9 +953,26 @@ class CUDAGraphNode:
         # and also aliases an output of the current CUDAGraphNode
         self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
+        # Opaque values (e.g. DeviceMesh, ProcessGroup) are non-tensor
+        # inputs that cannot be copied like tensors. We include them in
+        # static_input_idxs to keep them out of non_static_input_idx
+        # (which drives the tensor-copy path during replay). "Static"
+        # here just means "don't try to copy this as a tensor" — it
+        # does NOT mean the object is semantically immutable.
+        #
+        # Opaque indices must also be excluded from any list passed to
+        # _tensors_data_ptrs_at_indices_equal (the C++ data-pointer
+        # stability check), because opaque objects have no data_ptr.
+        # That is why tensor_static_input_idxs and
+        # non_managed_static_input_idxs filter them out below.
+        opaque_input_idxs = OrderedSet(
+            i for i, inp in enumerate(inputs) if is_opaque_value(inp)
+        )
+        static_input_idxs = OrderedSet(wrapped_function.static_input_idxs)
+        cudagraph_managed_idxs = OrderedSet(self.cudagraph_managed_idxs)
+
         self.static_input_idxs: list[int] = list(
-            OrderedSet(wrapped_function.static_input_idxs)
-            | OrderedSet(self.cudagraph_managed_idxs)
+            static_input_idxs | cudagraph_managed_idxs | opaque_input_idxs
         )
 
         self.non_static_input_idx: LevelList[int] = [
@@ -945,11 +983,13 @@ class CUDAGraphNode:
             self.non_static_input_idx
         )
 
-        self.non_managed_static_input_idxs: LevelList[int] = [
-            i
-            for i in wrapped_function.static_input_idxs
-            if i not in self.cudagraph_managed_idxs
-        ]
+        self.non_managed_static_input_idxs: LevelList[int] = LevelList(
+            static_input_idxs - cudagraph_managed_idxs - opaque_input_idxs
+        )
+
+        self.tensor_static_input_idxs: list[int] = list(
+            static_input_idxs | cudagraph_managed_idxs
+        )
 
         def maybe_get_static_data_ptr(
             idx: int,
@@ -1313,6 +1353,8 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            # NB: must go after torch.cuda.graph which switches the stream
+            _update_current_stream_external_object(),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
@@ -1556,7 +1598,7 @@ class CUDAGraphNode:
         return True
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
-        "Adds node as a a child of self"
+        "Adds node as a child of self"
         self.children[function_id].append(node)
 
     @staticmethod
@@ -1729,7 +1771,7 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.Generator))
+                    assert isinstance(inp, (int, torch.Generator, OpaqueBase))
 
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
@@ -1788,13 +1830,13 @@ class CUDAGraphNode:
             and not torch._C._tensors_data_ptrs_at_indices_equal(
                 inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
             )
         ):
             status = CheckInvariantStatus.StaticInputIdxMismatch
             _logger = functools.partial(
                 _logger,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
                 status,
             )
             return status, _logger
@@ -1859,7 +1901,7 @@ def check_memory_pool(
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
     """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
-    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after

@@ -106,9 +106,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void incref_pyobject() const noexcept final;
-
   void decref_pyobject() const noexcept final;
-
   bool try_incref_pyobject() const noexcept final;
 
   size_t nbytes() const {

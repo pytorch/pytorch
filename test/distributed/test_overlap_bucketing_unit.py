@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import json
+import os
+import tempfile
 import unittest
 
 import torch
@@ -11,6 +14,10 @@ import torch.fx as fx
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 from torch._C import FileCheck
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.profile_guided_estimation import (
+    ProfileData,
+    ProfileGuidedEstimator,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -19,12 +26,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 
 
-# flake8: noqa: B950
 # Owner(s): ["module: inductor"]
 
 
@@ -538,6 +545,163 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
         )
         self.assertEqual(len(rs_nodes), 1)
+
+    def test_reduce_scatter_coalesced_mode(self):
+        """
+        Test that 'coalesced' bucket mode uses reduce_scatter_tensor_coalesced
+        instead of cat + single reduce_scatter.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        rs1, rs2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+
+        hiding_annotations = {}
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_mode="coalesced",
+        )
+        bucketer.bucket_collectives()
+
+        graph_str = str(traced.graph)
+        self.assertIn("reduce_scatter_tensor_coalesced", graph_str)
+        self.assertNotIn("cat.default", graph_str)
+
+    def test_all_gather_coalesced_mode_falls_back(self):
+        """
+        Test that 'coalesced' bucket mode falls back to default bucketing
+        for all_gather (coalesced is only supported for reduce_scatter).
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return ag1_out.sum() + ag2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+
+        hiding_annotations = {}
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_mode="coalesced",
+        )
+        bucketer.bucket_collectives()
+
+        # Should use default bucketing (cat + single all_gather), not coalesced
+        graph_str = str(traced.graph)
+        self.assertIn("cat.default", graph_str)
+        self.assertNotIn("all_gather_into_tensor_coalesced", graph_str)
+
+    def test_reduce_scatter_coalesced_mode_single_rs(self):
+        """
+        Test that 'coalesced' bucket mode correctly identifies the collective
+        start node even when there is only a single reduce_scatter (so only
+        one wait node is produced).  This exercises the unified
+        _get_collective_node_from_wait path instead of the .args[0] shortcut.
+        """
+
+        def func(a):
+            group_name = "0"
+            group_size = 2
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+
+            return rs1_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a)
+
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
+
+        hiding_annotations = {}
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_mode="coalesced",
+        )
+        # Single RS should not crash — bucket_collectives groups by key,
+        # and a single-element group is a no-op (no merge needed).
+        bucketer.bucket_collectives()
+
+        # Graph should still contain the original reduce_scatter (no merge happened)
+        graph_str = str(traced.graph)
+        self.assertIn("reduce_scatter_tensor", graph_str)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -1539,6 +1703,495 @@ class TestForeachGroupsUnit(InductorTestCase):
             ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
+
+
+def _make_pge_trace(
+    collectives=None,
+    matmuls=None,
+    sdpa_ops=None,
+    pg_config=None,
+):
+    """Build a minimal Chrome Trace JSON dict for PGE testing."""
+    events = []
+    eid = 1000
+
+    for coll in collectives or []:
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": coll["dur"],
+                "name": "nccl_kernel",
+                "args": {
+                    "Collective name": coll["name"],
+                    "Process Group Name": coll.get("pg_name", "0"),
+                    "Process Group Ranks": coll.get("ranks", "[0, 1]"),
+                    "Group size": coll.get("group_size", 2),
+                    "In msg nelems": coll.get("nelems", 1024),
+                    "Out msg nelems": coll.get("out_nelems", coll.get("nelems", 1024)),
+                    "dtype": coll.get("dtype", "Float"),
+                },
+            }
+        )
+
+    for mm in matmuls or []:
+        eid += 1
+        events.append(
+            {
+                "cat": "cpu_op",
+                "name": "aten::mm",
+                "dur": 0,
+                "args": {
+                    "External id": eid,
+                    "Input Dims": mm["shapes"],
+                    "Input Strides": mm.get(
+                        "strides", [[s[-1], 1] for s in mm["shapes"]]
+                    ),
+                    "Input type": mm.get("dtypes", ["float", "float"]),
+                },
+            }
+        )
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": mm["dur"],
+                "name": "sm80_xmma_gemm",
+                "args": {"External id": eid},
+            }
+        )
+
+    for sdpa in sdpa_ops or []:
+        eid += 1
+        op_name = sdpa.get("op_name", "aten::_scaled_dot_product_flash_attention")
+        events.append(
+            {
+                "cat": "cpu_op",
+                "name": op_name,
+                "dur": 0,
+                "args": {
+                    "External id": eid,
+                    "Input Dims": sdpa["input_dims"],
+                    "Input Strides": sdpa.get(
+                        "input_strides", [[1] * len(d) for d in sdpa["input_dims"]]
+                    ),
+                    "Input type": sdpa.get("dtypes", ["c10::BFloat16"]),
+                },
+            }
+        )
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": sdpa["dur"],
+                "name": "flash_fwd_kernel",
+                "args": {"External id": eid},
+            }
+        )
+
+    dist_info = {}
+    if pg_config is not None:
+        dist_info["pg_config"] = pg_config
+    else:
+        dist_info["pg_config"] = {"0": {"ranks": [0, 1]}}
+
+    return {"traceEvents": events, "distributedInfo": dist_info}
+
+
+def _load_pge_profile(data):
+    """Write trace dict to a temp file and load via ProfileData."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(data, f)
+        f.flush()
+        path = f.name
+    try:
+        profile = ProfileData()
+        profile.load(path)
+        return profile
+    finally:
+        os.unlink(path)
+
+
+class TestProfileGuidedEstimation(TestCase):
+    def test_profile_loading_and_lookup(self):
+        """Load a trace with collectives, aten ops, and a custom op; verify lookups."""
+        lib = torch.library.Library("test_pge", "DEF")
+        lib.define("my_op(Tensor x, Tensor w) -> Tensor")
+        lib.impl("my_op", lambda x, w: x @ w, "CPU")
+        lib.impl("my_op", lambda x, w: x @ w, "Meta")
+        try:
+            trace = _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": 100.0,
+                        "nelems": 1000,
+                        "dtype": "Float",
+                        "ranks": "[0,2,4,6]",
+                        "group_size": 4,
+                    },
+                    {
+                        "name": "allreduce",
+                        "dur": 800.0,
+                        "nelems": 8000,
+                        "dtype": "Float",
+                        "ranks": "[0,2,4,6]",
+                        "group_size": 4,
+                    },
+                ],
+                matmuls=[
+                    {
+                        "shapes": [[128, 256], [256, 512]],
+                        "dur": 50.0,
+                        "dtypes": ["float", "float"],
+                    }
+                ],
+                pg_config={"0": {"ranks": [0, 2, 4, 6]}},
+            )
+            # Inject a custom op event
+            eid = 9000
+            trace["traceEvents"].extend(
+                [
+                    {
+                        "cat": "cpu_op",
+                        "name": "test_pge::my_op",
+                        "dur": 0,
+                        "args": {
+                            "External id": eid,
+                            "Input Dims": [[32, 64], [64, 128]],
+                            "Input Strides": [[64, 1], [128, 1]],
+                            "Input type": ["c10::BFloat16", "c10::BFloat16"],
+                        },
+                    },
+                    {
+                        "cat": "kernel",
+                        "dur": 42.0,
+                        "name": "custom_kernel",
+                        "args": {"External id": eid},
+                    },
+                ]
+            )
+            profile = _load_pge_profile(trace)
+
+            # Collectives
+            self.assertAlmostEqual(
+                profile.lookup_collective("all_reduce", (0, 2, 4, 6), 1000, "Float")[0],
+                0.1,
+                places=4,
+            )
+            self.assertGreater(
+                profile.lookup_collective("all_reduce", (0, 2, 4, 6), 4000, "Float")[0],
+                0.1,
+            )
+            self.assertIsNotNone(
+                profile.lookup_collective("all_reduce", (1, 3, 5, 7), 1000, "Float")
+            )
+            self.assertIsNone(
+                profile.lookup_collective("all_to_all", (0, 2, 4, 6), 1000, "Float")
+            )
+
+            # Aten op
+            self.assertAlmostEqual(
+                profile.lookup_op(
+                    "aten::mm",
+                    ((128, 256), (256, 512)),
+                    ((256, 1), (512, 1)),
+                    torch.float32,
+                ),
+                0.05,
+                places=4,
+            )
+            self.assertIsNone(
+                profile.lookup_op(
+                    "aten::mm", ((999,), (999,)), ((1,), (1,)), torch.float32
+                )
+            )
+
+            # Custom op
+            self.assertAlmostEqual(
+                profile.lookup_op(
+                    "test_pge::my_op",
+                    ((32, 64), (64, 128)),
+                    ((64, 1), (128, 1)),
+                    torch.bfloat16,
+                ),
+                0.042,
+                places=4,
+            )
+
+            # End-to-end: FX graph with custom op -> estimator match
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as f:
+                json.dump(trace, f)
+                f.flush()
+                trace_path = f.name
+            try:
+                estimator = ProfileGuidedEstimator(trace_path)
+                with FakeTensorMode():
+                    x = torch.randn(32, 64, dtype=torch.bfloat16, device="cpu")
+                    w = torch.randn(64, 128, dtype=torch.bfloat16, device="cpu")
+                    gm = make_fx(torch.ops.test_pge.my_op)(x, w)
+                self.assertTrue(
+                    any(estimator(n) is not None for n in gm.graph.nodes),
+                    "Estimator should match custom op",
+                )
+            finally:
+                os.unlink(trace_path)
+        finally:
+            del lib
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestCoalescedCollectiveOverlap(InductorTestCase):
+    """
+    Tests for coalesced collective support in overlap scheduling.
+
+    Coalesced collectives (e.g., reduce_scatter_tensor_coalesced) return
+    Tensor[] instead of Tensor. Wait nodes follow the pattern:
+      wait_tensor(getitem(coalesced_collective, idx))
+    Multiple waits share the same collective start node.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=8, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def _make_coalesced_rs_graph(self, num_tensors=3):
+        """Create an FX graph with a coalesced reduce_scatter and surrounding compute."""
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(*inputs):
+            # Compute before collective
+            mm1 = torch.mm(inputs[0], inputs[0])
+
+            # Coalesced reduce_scatter
+            flat_inputs = [x.view(-1) for x in inputs]
+            rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+                flat_inputs, "sum", 8, group_name
+            )
+
+            # Wait on each output
+            waited = [torch.ops._c10d_functional.wait_tensor(o) for o in rs_outs]
+
+            # Compute after collective
+            mm2 = torch.mm(inputs[0], inputs[0])
+
+            return mm1.sum() + mm2.sum() + sum(w.sum() for w in waited)
+
+        with FakeTensorMode():
+            inputs = [torch.ones(8, 8, device=self.device) for _ in range(num_tensors)]
+            traced = make_fx(func)(*inputs)
+
+        return traced
+
+    def test_identify_collectives_coalesced(self):
+        """
+        _identify_collectives should register one CollectiveInfo per coalesced
+        collective, not overwrite for each wait.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        traced = self._make_coalesced_rs_graph(num_tensors=3)
+
+        def custom_runtime(node, override_size):
+            if "reduce_scatter" in str(node.target):
+                return 5.0
+            return 0.1
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+
+        # Should have exactly 1 collective (the coalesced RS), not 3
+        self.assertEqual(len(scheduler.collective_info), 1)
+        # All 3 waits should map to the same start
+        self.assertEqual(len(scheduler.wait_to_start), 3)
+        starts = set(scheduler.wait_to_start.values())
+        self.assertEqual(len(starts), 1)
+
+    def test_overlap_scheduler_coalesced_runs(self):
+        """
+        Full overlap scheduler run with coalesced collectives should not crash.
+        Previously crashed with assertion errors in _handle_wait and
+        normalize_function failures in comm_analysis.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        traced = self._make_coalesced_rs_graph(num_tensors=4)
+
+        def custom_runtime(node, override_size):
+            if "reduce_scatter" in str(node.target):
+                return 5.0
+            return 0.1
+
+        result = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        ).run()
+
+        # Graph should still contain the coalesced collective and waits
+        graph_str = str(result.graph)
+        self.assertIn("reduce_scatter_tensor_coalesced", graph_str)
+        self.assertIn("wait_tensor", graph_str)
+
+    def test_gather_node_runtime_estimations_coalesced(self):
+        """
+        gather_node_runtime_estimations should estimate coalesced collectives
+        exactly once (not once per wait).
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            gather_node_runtime_estimations,
+        )
+
+        traced = self._make_coalesced_rs_graph(num_tensors=3)
+
+        def custom_runtime(node, override_size):
+            if "reduce_scatter" in str(node.target):
+                return 5.0
+            return None
+
+        estimations, _ = gather_node_runtime_estimations(
+            traced,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+
+        # The coalesced RS node should appear exactly once in estimations
+        rs_estimations = {
+            k: v for k, v in estimations.items() if "reduce_scatter" in str(k.target)
+        }
+        self.assertEqual(len(rs_estimations), 1)
+
+    def test_estimate_fx_collective_size_coalesced(self):
+        """
+        estimate_fx_collective_size should handle coalesced collectives
+        whose output meta is a list of tensors, not a single tensor.
+        """
+        from torch._inductor.comm_analysis import estimate_fx_collective_size
+
+        traced = self._make_coalesced_rs_graph(num_tensors=2)
+
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
+        size = estimate_fx_collective_size(rs_nodes[0])
+        # Should return non-zero for coalesced collectives
+        self.assertGreater(size, 0)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestProfileGuidedEstimatorIntegration(InductorTestCase):
+    """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_estimator_call_on_fx_graph(self):
+        """ProfileGuidedEstimator returns estimates for collective and mm nodes in a traced graph."""
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        pg_ranks = tuple(sorted(dist.get_process_group_ranks(dist.group.WORLD)))
+
+        # Build a trace with matching collective and matmul data
+        trace = _make_pge_trace(
+            collectives=[
+                {
+                    "name": "allreduce",
+                    "dur": 200.0,
+                    "nelems": 256,
+                    "out_nelems": 256,
+                    "dtype": "Float",
+                    "ranks": json.dumps(list(pg_ranks)),
+                    "group_size": len(pg_ranks),
+                },
+            ],
+            matmuls=[
+                {
+                    "shapes": [[16, 16], [16, 16]],
+                    "dur": 50.0,
+                    "dtypes": ["float", "float"],
+                },
+            ],
+            pg_config={"0": {"ranks": list(pg_ranks)}},
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(trace, f)
+            f.flush()
+            trace_path = f.name
+
+        try:
+            estimator = ProfileGuidedEstimator(trace_path)
+
+            def func(a, b):
+                ar = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+                ar_out = torch.ops._c10d_functional.wait_tensor(ar)
+                mm = torch.mm(b, b)
+                return ar_out + mm
+
+            with FakeTensorMode():
+                a = torch.randn(16, 16, device=self.device)
+                b = torch.randn(16, 16, device=self.device)
+                gm = make_fx(func)(a, b)
+
+            # Call estimator on each node
+            collective_hit = False
+            mm_hit = False
+            for node in gm.graph.nodes:
+                est = estimator(node)
+                if "all_reduce" in str(node.target) and "wait" not in str(node.target):
+                    if est is not None:
+                        collective_hit = True
+                        self.assertGreater(est, 0)
+                if node.target == torch.ops.aten.mm.default:
+                    if est is not None:
+                        mm_hit = True
+                        self.assertAlmostEqual(est, 0.05, places=4)
+
+            self.assertTrue(
+                collective_hit, "Estimator should match the collective node"
+            )
+            self.assertTrue(mm_hit, "Estimator should match the mm node")
+        finally:
+            os.unlink(trace_path)
 
 
 if __name__ == "__main__":

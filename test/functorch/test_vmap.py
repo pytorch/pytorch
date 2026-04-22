@@ -684,8 +684,6 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
-        # noqa: F841
-
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -3286,6 +3284,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(2, 0),
         )
 
+    def test_view_dtype(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        op = torch.ops.aten.view.dtype
+
+        test(op, (torch.rand(2, 3, 4), torch.uint8), in_dims=(1, None), out_dims=1)
+        test(op, (torch.rand(5), torch.int32), in_dims=(0, None), out_dims=0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"dim\(\) cannot be 0 to view Float as Byte"
+        ):
+            vmap(op, in_dims=(0, None))(torch.rand(6), torch.uint8)
+
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
@@ -4424,9 +4433,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
@@ -4509,9 +4515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(
@@ -4827,6 +4830,60 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
 
         check_vmap_fallback(self, test, Tensor.fill_)
+
+    @parametrize(
+        "op,msg,extra_positional_args,extra_kwargs",
+        [
+            subtest(
+                (
+                    Tensor.scatter_add_,
+                    "out-of-place operators instead of scatter_add_",
+                    (),
+                    {},
+                ),
+                name="scatter_add",
+            ),
+            subtest(
+                (
+                    Tensor.scatter_reduce_,
+                    "out-of-place operators instead of scatter_reduce_",
+                    ("sum",),
+                    {"include_self": True},
+                ),
+                name="scatter_reduce",
+            ),
+        ],
+    )
+    def test_scatter_inplace_self_not_batched(
+        self, device, op, msg, extra_positional_args, extra_kwargs
+    ):
+        x = torch.zeros(5, device=device)
+
+        def call_op(self, dim, index, src):
+            return op(
+                self,
+                dim,
+                index,
+                src,
+                *extra_positional_args,
+                **extra_kwargs,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, None, 0))(
+                x,
+                0,
+                torch.tensor([0, 1], device=device),
+                torch.randn(2, 2, device=device),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, 0, None))(
+                x,
+                0,
+                torch.tensor([[0, 1], [2, 3]], device=device),
+                torch.randn(2, device=device),
+            )
 
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):

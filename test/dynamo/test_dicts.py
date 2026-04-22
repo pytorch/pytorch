@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-# ruff: noqa: TRY002
 
 import enum
 import itertools
@@ -1219,7 +1218,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_newly_constructed_default_dict_with_dict(self):
         def f(x):
-            d = dict([("a", 1), ("b", 2)], c=3)  # noqa: C406
+            d = dict([("a", 1), ("b", 2)], c=3)
             dd = defaultdict(list, d, d=4, e=5)
             dd["x"].append(42)
             return x + 1, d, dd
@@ -1242,6 +1241,85 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ref = f(x)
         res = torch.compile(f, backend="eager", fullgraph=True)(x)
 
+        self.assertEqual(ref, res)
+
+    def test_dict_new_ignores_extra_args(self):
+        """dict.__new__ ignores extra args (CPython behavior).
+
+        This matters for instantiate_user_defined_class_object which calls
+        cls.__new__(cls, *args, **kwargs) — dict.__new__ should not fail
+        on the extra args.
+        """
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            return x + od["a"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_ordered_dict_repr(self):
+        """repr() on OrderedDictVariable should not graph break."""
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            r = repr(od)
+            # Just verify repr doesn't graph break and returns a string
+            return x + (1 if isinstance(r, str) else 0)
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_c_new_init_args_ignored_for_dict(self):
+        """C-level __new__ for dict/set passes init_args=[] since they
+        ignore extra args. This ensures generators passed to OrderedDict()
+        don't end up in reconstruction."""
+
+        def whoo(t):
+            yield 1, t + 1
+            yield 2, t + 2
+
+        def f(t):
+            return OrderedDict(whoo(t))
+
+        t = torch.randn(2)
+        ref = f(t)
+        res = torch.compile(f, backend="eager", fullgraph=True)(t)
+        self.assertEqual(ref, res)
+
+    def test_ordered_dict_as_python_constant_preserves_type(self):
+        """as_python_constant should return OrderedDict, not plain dict."""
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            # Enum functional API calls as_python_constant on the OrderedDict
+            import enum
+
+            E = enum.Enum("E", od)
+            return x + E.a.value
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_default_dict_as_python_constant_preserves_type(self):
+        """as_python_constant should return defaultdict, not plain dict."""
+
+        def f(x):
+            dd = defaultdict(int, a=1, b=2)
+            # isinstance triggers as_python_constant internally for
+            # constant folding the type check
+            assert isinstance(dd, defaultdict)  # noqa: S101
+            return x + dd["a"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
 
     @parametrize("op", ["or_", "and_", "xor", "sub"])
@@ -2418,6 +2496,9 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
+
+    def test_binop_or(self):
+        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):

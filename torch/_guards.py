@@ -1317,7 +1317,7 @@ def dataclass_with_cached_hash(
             # The _hash is a cached value that can be nondeterministically computed
             # (e.g., based on id() of objects), so it should not affect pickling.
             fields = dataclasses.fields(self)
-            field_values = tuple(getattr(self, f.name) for f in fields)
+            field_values = tuple(getattr(self, f.name) for f in fields if f.init)
             return (self.__class__, field_values)
 
         new_cls.__hash__ = __hash__

@@ -149,6 +149,18 @@ for input, target in dataset:
     Optimizer.zero_grad
 ```
 
+## Module-level hooks
+
+```{eval-rst}
+.. currentmodule:: torch.optim.optimizer
+
+.. autofunction:: register_optimizer_step_post_hook
+
+.. autofunction:: register_optimizer_step_pre_hook
+
+.. currentmodule:: torch.optim
+```
+
 ## Algorithms
 
 ```{eval-rst}
@@ -685,9 +697,6 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 
     swa_utils.AveragedModel
     swa_utils.SWALR
-    swa_utils.get_ema_avg_fn
-    swa_utils.get_swa_avg_fn
-    swa_utils.get_swa_multi_avg_fn
 
 
 .. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn

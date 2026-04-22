@@ -583,7 +583,7 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that that C++ side points to the updated diff guard manager.
+        # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
         # cache_entry attribute, so it relies on the CacheEntry constructor to
         # set the diff_guard_root in C++.  But once it is saved in the Dynamo
@@ -1097,6 +1097,16 @@ def check_closure(value: Any, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
+
+
+def _constant_subclass_base_value(value: Any) -> Any:
+    """Extract the base constant value from a constant subclass instance."""
+    from .variables.user_defined import _CONSTANT_BASE_TYPES
+
+    for t in _CONSTANT_BASE_TYPES:
+        if isinstance(value, t):
+            return t(value)  # pyrefly: ignore[bad-argument-type]
+    raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
 def register_guard_check_spec(
@@ -2639,6 +2649,42 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _constant_subclass_base_value(value),
+        eval_fn=lambda value, metadata: _constant_subclass_base_value(value)
+        == metadata,
+    )
+    def CONSTANT_SUBCLASS_MATCH(self, guard: Guard) -> None:
+        """Guard for subclasses of constant types (int, float, str, etc.).
+
+        Extracts the base value using the base type's converter (e.g.,
+        int.__int__) to avoid calling user-overridden __eq__.
+        """
+        from .variables.user_defined import _CONSTANT_BASE_TYPES
+
+        val = self.get(guard)
+        ref = self.arg_ref(guard)
+
+        # Find the constant base type
+        base_type = None
+        for t in _CONSTANT_BASE_TYPES:
+            if isinstance(val, t):
+                base_type = t
+                break
+        assert base_type is not None
+
+        base_value = base_type(val)
+        code = [f"{base_type.__name__}({ref}) == {base_value!r}"]
+
+        def check_fn(x: Any) -> bool:
+            return base_type(x) == base_value
+
+        self.get_guard_manager(guard).add_lambda_guard(
+            check_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
@@ -3442,7 +3488,7 @@ class GuardBuilder(GuardBuilderBase):
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     dynamic_indices = value._dynamo_dynamic_indices
-                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
                         dynamic_indices,
@@ -3469,7 +3515,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     shape_ids = getattr(value, "_dynamo_shape_ids", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=shape_ids: (
@@ -3488,7 +3534,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     unbacked_bounds = getattr(value, "_dynamo_unbacked_bounds", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=unbacked_bounds: (
@@ -4105,7 +4151,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             # doesn't exist.
             value = builder.get(guard)
             has_value = True
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             value = MISSING
             has_value = False
     is_global = get_global_source_name(guard.originating_source) is not None
@@ -4137,7 +4183,7 @@ def pickle_guards_state(
                 try:
                     type(base).__new__(type(base))
                     empty_values[id(base)] = base
-                except:  # noqa: E722, B001
+                except:  # noqa: E722
                     pass
         elif id(leaf) not in guard_tree_values:
             # TODO See if we have lift this branch as the first one.
@@ -5201,7 +5247,7 @@ def guard_error_hook(
     for guard in guard_manager.code_parts:
         try:
             eval(guard, guard_manager.global_scope, local_scope)
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             print(f"Malformed guard:\n{guard}")
 
 

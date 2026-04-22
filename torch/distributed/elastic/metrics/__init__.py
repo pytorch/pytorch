@@ -142,7 +142,7 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 from typing import Optional
 
-from .api import (  # noqa: F401
+from .api import (
     configure,
     ConsoleMetricHandler,
     get_elapsed_time_ms,
@@ -163,6 +163,6 @@ def initialize_metrics(cfg: MetricsConfig | None = None):
 
 
 try:
-    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F401 F403
+    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F403
 except ModuleNotFoundError:
     pass

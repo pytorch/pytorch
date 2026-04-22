@@ -47,7 +47,6 @@ This module contains Eager mode quantization APIs.
     :nosignatures:
     :template: classtemplate.rst
 
-    ObserverOrFakeQuantize
     swap_module
     propagate_qconfig_
     default_eval_fn
@@ -67,18 +66,9 @@ This module contains Eager mode quantization APIs.
     activation_is_int8_quantized
     activation_is_statically_quantized
 
-    calculate_qmin_qmax
-    check_min_max_valid
     determine_qparams
-    get_combined_dict
-    get_fqn_to_example_inputs
-    get_qconfig_dtypes
-    get_qparam_dict
-    get_quant_type
-    get_swapped_custom_module_class
-    getattr_from_fqn
-    NodePattern
-    Pattern
+    check_min_max_valid
+    calculate_qmin_qmax
     validate_qmin_qmax
 ```
 
@@ -156,15 +146,6 @@ Quantization to work with this as well.
     :template: classtemplate.rst
 
     entry_to_pretty_str
-    get_fused_module_classes
-    get_fuser_method_mapping
-    get_fusion_pattern_to_extra_inputs_getter
-    get_fusion_pattern_to_root_node_getter
-    get_module_to_qat_module
-    get_pattern_to_dtype_configs
-    get_pattern_to_input_type_to_index
-    get_qat_module_classes
-    get_root_module_to_quantized_reference_module
     pattern_to_human_readable
     remove_boolean_dispatch_from_name
 
@@ -190,21 +171,6 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     StandaloneModuleConfigEntry
 ```
 
-## torch.ao.quantization.fx.graph_module
-
-```{eval-rst}
-.. currentmodule:: torch.ao.quantization.fx.graph_module
-```
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    QuantizedGraphModule
-```
-
 ## torch.ao.quantization.fx.utils
 
 ```{eval-rst}
@@ -219,21 +185,13 @@ This module contains a few CustomConfig classes that's used in both eager mode a
 
     all_node_args_except_first
     all_node_args_have_no_tensors
-    assert_and_get_unique_device
     collect_producer_nodes
     create_getattr_from_value
     create_node_from_old_node_preserve_meta
-    get_custom_module_class_keys
-    get_linear_prepack_op_for_dtype
-    get_new_attr_name_with_prefix
-    get_non_observable_arg_indexes_and_types
-    get_qconv_prepack_op
-    get_skipped_module_name_and_classes
     graph_module_from_producer_nodes
     maybe_get_next_module
     node_arg_is_bias
     node_arg_is_weight
-    NodeInfo
     return_arg_list
 ```
 
@@ -325,7 +283,6 @@ the values observed during calibration (PTQ) or training (QAT).
     NoopObserver
     get_observer_state_dict
     load_observer_state_dict
-    default_affine_fixed_qparams_observer
     default_observer
     default_placeholder_observer
     default_debug_observer
@@ -333,13 +290,7 @@ the values observed during calibration (PTQ) or training (QAT).
     default_histogram_observer
     default_per_channel_weight_observer
     default_dynamic_quant_observer
-    default_fixed_qparams_range_0to1_observer
-    default_fixed_qparams_range_neg1to1_observer
     default_float_qparams_observer
-    default_float_qparams_observer_4bit
-    default_symmetric_fixed_qparams_observer
-    per_channel_weight_observer_range_neg_127_to_127
-    weight_observer_range_neg_127_to_127
     AffineQuantizedObserverBase
     Granularity
     MappingType
@@ -373,26 +324,17 @@ during QAT.
     FakeQuantize
     FixedQParamsFakeQuantize
     FusedMovingAvgObsFakeQuantize
-    default_affine_fixed_qparams_fake_quant
-    default_dynamic_fake_quant
-    default_embedding_fake_quant
-    default_embedding_fake_quant_4bit
     default_fake_quant
-    default_fixed_qparams_range_0to1_fake_quant
-    default_fixed_qparams_range_neg1to1_fake_quant
-    default_fused_act_fake_quant
-    default_fused_per_channel_wt_fake_quant
-    default_fused_wt_fake_quant
-    default_histogram_fake_quant
-    default_per_channel_weight_fake_quant
-    default_symmetric_fixed_qparams_fake_quant
     default_weight_fake_quant
+    default_per_channel_weight_fake_quant
+    default_histogram_fake_quant
+    default_fused_act_fake_quant
+    default_fused_wt_fake_quant
+    default_fused_per_channel_wt_fake_quant
     disable_fake_quant
-    disable_observer
     enable_fake_quant
+    disable_observer
     enable_observer
-    fused_per_channel_wt_fake_quant_range_neg_127_to_127
-    fused_wt_fake_quant_range_neg_127_to_127
 ```
 
 ## torch.ao.quantization.qconfig
@@ -411,7 +353,6 @@ to configure quantization settings for individual ops.
     :template: classtemplate.rst
 
     QConfig
-    QConfigAny
     default_qconfig
     default_debug_qconfig
     default_per_channel_qconfig
@@ -442,20 +383,6 @@ to configure quantization settings for individual ops.
     :nosignatures:
     :template: classtemplate.rst
 
-    get_default_compare_output_module_list
-    get_default_dynamic_quant_module_mappings
-    get_default_dynamic_sparse_quant_module_mappings
-    get_default_float_to_quantized_operator_mappings
-    get_default_qat_module_mappings
-    get_default_qconfig_propagation_list
-    get_default_static_quant_module_mappings
-    get_default_static_quant_reference_module_mappings
-    get_default_static_sparse_quant_module_mappings
-    get_dynamic_quant_module_class
-    get_embedding_qat_module_mappings
-    get_embedding_static_quant_module_mappings
-    get_quantized_operator
-    get_static_quant_module_class
     no_observer_set
 ```
 
@@ -866,6 +793,10 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
+
+.. currentmodule:: torch.quantization
+.. autofunction:: default_eval_fn
+
 .. automodule:: torch.nn.intrinsic.modules
 ```
 

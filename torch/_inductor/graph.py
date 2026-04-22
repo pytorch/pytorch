@@ -329,7 +329,15 @@ def mark_nodes_dislike_padding(
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in extended_user_visible_nodes:
-            cur.meta["dislike_padding"] = True
+            # Reductions (ops_like_padding) produce new output buffers with
+            # fresh strides, so their output stride constraint is already
+            # enforced by allow_padding=False in as_exact_strides. Setting
+            # dislike_padding here would suppress input padding during
+            # freeze, causing a stride mismatch when an earlier lowering
+            # step (e.g. is_contiguous_storage_and_layout) already mutated
+            # the input layout to padded strides.
+            if op not in ops_like_padding:
+                cur.meta["dislike_padding"] = True
 
 
 def is_mkldnn_conv(node: Node) -> bool:
@@ -395,6 +403,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.const_kernel_code = const_kernel_code
         self.const_module = const_module
         self.inputs_to_check = inputs_to_check
+        self._defers_input_alignment = False
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -1332,7 +1341,12 @@ class GraphLowering(torch.fx.Interpreter):
             )
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target, warn=False, get_decomp_fn=self.get_decomp_fn)
+                make_fallback(
+                    target,
+                    warn=False,
+                    get_decomp_fn=self.get_decomp_fn,
+                    override_decomp=True,
+                )
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp
@@ -1612,7 +1626,7 @@ class GraphLowering(torch.fx.Interpreter):
                 value,
                 (
                     TorchBindObject,
-                    sympy.Expr,
+                    sympy.Basic,
                     torch._inductor.ir.GeneratorState,
                     torch._inductor.ir.OpaqueObjectState,
                 ),
@@ -1812,6 +1826,7 @@ class GraphLowering(torch.fx.Interpreter):
             self._realize_inputs_at_stream_boundaries(n)
         with (
             ir.IRNode.current_origins(origins),
+            ir.IRNode.current_stream_idx(self._get_node_stream(n)),
             self.set_current_node(n),
             V.set_current_node(n),
         ):

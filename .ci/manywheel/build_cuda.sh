@@ -4,15 +4,21 @@ set -ex
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
+if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
+    echo "ERROR: PYTORCH_EXTRA_INSTALL_REQUIREMENTS is not set."
+    echo "CUDA wheels rely on nvidia pypi packages; this variable must define the runtime dependencies."
+    exit 1
+fi
+
 export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
-export USE_STATIC_CUDNN=1
-export USE_STATIC_NCCL=1
-export ATEN_STATIC_CUDA=1
-export USE_CUDA_STATIC_LINK=1
+export USE_STATIC_CUDNN=0
+export USE_STATIC_NCCL=0
+export ATEN_STATIC_CUDA=0
+export USE_CUDA_STATIC_LINK=0
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export USE_CUPTI_SO=0
+export USE_CUPTI_SO=1
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
 export USE_CUFILE=${USE_CUFILE:-1}
 export USE_SYSTEM_NCCL=1
@@ -68,7 +74,7 @@ if [[ -n "$DESIRED_CUDA" ]]; then
     if [[ ${DESIRED_CUDA} =~ ^[0-9]+\.[0-9]+$ ]]; then
         CUDA_VERSION=${DESIRED_CUDA}
     else
-        # cu126, cu128 etc...
+        # cu126, cu130 etc...
         if [[ ${#DESIRED_CUDA} -eq 5 ]]; then
             CUDA_VERSION="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4:1}"
         fi
@@ -108,12 +114,6 @@ TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0"
 
 case ${CUDA_VERSION} in
     12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;${TORCH_CUDA_ARCH_LIST//10.0/}" ;;  # Only 12.6 includes legacy Maxwell/Pascal/Volta, -Hopper support
-    12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0" ;;  # +Blackwell support
-    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0+PTX" # +Blackwell support + PTX for forward compatibility
-        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
-        fi
-        ;;
     13.0|13.2)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
         export TORCH_NVCC_FLAGS="-compress-mode=size"
@@ -169,130 +169,41 @@ DEPS_SONAME=(
 
 # CUDA_VERSION 12.*, 13.*
 if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
-    export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
     # Compress the fatbin with -compress-mode=size for CUDA 13
     if [[ $CUDA_VERSION == 13* ]]; then
         export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS -compress-mode=size"
     fi
-    if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
-        echo "Bundling with cudnn and cublas."
-
-        DEPS_LIST+=(
-            "/usr/local/cuda/lib64/libcudnn_adv.so.9"
-            "/usr/local/cuda/lib64/libcudnn_cnn.so.9"
-            "/usr/local/cuda/lib64/libcudnn_graph.so.9"
-            "/usr/local/cuda/lib64/libcudnn_ops.so.9"
-            "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9"
-            "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9"
-            "/usr/local/cuda/lib64/libcudnn_heuristic.so.9"
-            "/usr/local/cuda/lib64/libcudnn.so.9"
-            "/usr/local/cuda/lib64/libcusparseLt.so.0"
-            "/usr/local/cuda/lib64/libnvrtc-builtins.so"
-            "/usr/local/cuda/lib64/libcufile.so.0"
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1"
-            "/usr/local/cuda/lib64/libnvshmem_host.so.3"
-            "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
-        )
-        DEPS_SONAME+=(
-            "libcudnn_adv.so.9"
-            "libcudnn_cnn.so.9"
-            "libcudnn_graph.so.9"
-            "libcudnn_ops.so.9"
-            "libcudnn_engines_runtime_compiled.so.9"
-            "libcudnn_engines_precompiled.so.9"
-            "libcudnn_heuristic.so.9"
-            "libcudnn.so.9"
-            "libcusparseLt.so.0"
-            "libnvrtc-builtins.so"
-            "libnvshmem_host.so.3"
-            "libcufile.so.0"
-            "libcufile_rdma.so.1"
-            "libnvperf_host.so"
-        )
-        # Add libnvToolsExt only if CUDA version is not 12.9
-        if [[ $CUDA_VERSION == 13* ]]; then
-            DEPS_LIST+=(
-                "/usr/local/cuda/lib64/libcublas.so.13"
-                "/usr/local/cuda/lib64/libcublasLt.so.13"
-                "/usr/local/cuda/lib64/libcudart.so.13"
-                "/usr/local/cuda/lib64/libnvrtc.so.13"
-                "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13"
-                "/usr/local/cuda/lib64/libibverbs.so.1"
-                "/usr/local/cuda/lib64/librdmacm.so.1"
-                "/usr/local/cuda/lib64/libmlx5.so.1"
-                "/usr/local/cuda/lib64/libnl-3.so.200"
-                "/usr/local/cuda/lib64/libnl-route-3.so.200")
-            DEPS_SONAME+=(
-                "libcublas.so.13"
-                "libcublasLt.so.13"
-                "libcudart.so.13"
-                "libnvrtc.so.13"
-                "libcupti.so.13"
-                "libibverbs.so.1"
-                "librdmacm.so.1"
-                "libmlx5.so.1"
-                "libnl-3.so.200"
-                "libnl-route-3.so.200")
-            export USE_CUPTI_SO=1
-            export ATEN_STATIC_CUDA=0
-            export USE_CUDA_STATIC_LINK=0
-            export USE_CUFILE=0
-        else
-            DEPS_LIST+=(
-                "/usr/local/cuda/lib64/libcublas.so.12"
-                "/usr/local/cuda/lib64/libcublasLt.so.12"
-                "/usr/local/cuda/lib64/libcudart.so.12"
-                "/usr/local/cuda/lib64/libnvrtc.so.12"
-                "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12")
-            DEPS_SONAME+=(
-                "libcublas.so.12"
-                "libcublasLt.so.12"
-                "libcudart.so.12"
-                "libnvrtc.so.12"
-                "libcupti.so.12")
-
-            if [[ $CUDA_VERSION != 12.9* ]]; then
-                DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
-                DEPS_SONAME+=("libnvToolsExt.so.1")
-            fi
-        fi
+    echo "Using nvidia libs from pypi."
+    CUDA_RPATHS=(
+        '$ORIGIN/../../nvidia/cudnn/lib'
+        '$ORIGIN/../../nvidia/nvshmem/lib'
+        '$ORIGIN/../../nvidia/nccl/lib'
+        '$ORIGIN/../../nvidia/cusparselt/lib'
+    )
+    if [[ $CUDA_VERSION == 13* ]]; then
+        CUDA_RPATHS+=('$ORIGIN/../../nvidia/cu13/lib')
     else
-        echo "Using nvidia libs from pypi."
-        CUDA_RPATHS=(
-            '$ORIGIN/../../nvidia/cudnn/lib'
-            '$ORIGIN/../../nvidia/nvshmem/lib'
-            '$ORIGIN/../../nvidia/nccl/lib'
-            '$ORIGIN/../../nvidia/cusparselt/lib'
+        CUDA_RPATHS+=(
+            '$ORIGIN/../../nvidia/cublas/lib'
+            '$ORIGIN/../../nvidia/cuda_cupti/lib'
+            '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
+            '$ORIGIN/../../nvidia/cuda_runtime/lib'
+            '$ORIGIN/../../nvidia/cufft/lib'
+            '$ORIGIN/../../nvidia/curand/lib'
+            '$ORIGIN/../../nvidia/cusolver/lib'
+            '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../cusparselt/lib'
+            '$ORIGIN/../../nvidia/nvtx/lib'
+            '$ORIGIN/../../nvidia/cufile/lib'
         )
-        if [[ $CUDA_VERSION == 13* ]]; then
-            CUDA_RPATHS+=('$ORIGIN/../../nvidia/cu13/lib')
-        else
-            CUDA_RPATHS+=(
-                '$ORIGIN/../../nvidia/cublas/lib'
-                '$ORIGIN/../../nvidia/cuda_cupti/lib'
-                '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
-                '$ORIGIN/../../nvidia/cuda_runtime/lib'
-                '$ORIGIN/../../nvidia/cufft/lib'
-                '$ORIGIN/../../nvidia/curand/lib'
-                '$ORIGIN/../../nvidia/cusolver/lib'
-                '$ORIGIN/../../nvidia/cusparse/lib'
-                '$ORIGIN/../../cusparselt/lib'
-                '$ORIGIN/../../nvidia/nvtx/lib'
-                '$ORIGIN/../../nvidia/cufile/lib'
-            )
-        fi
-
-        CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
-        export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
-        export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
-        export FORCE_RPATH="--force-rpath"
-        export USE_STATIC_NCCL=0
-        export ATEN_STATIC_CUDA=0
-        export USE_CUDA_STATIC_LINK=0
-        export USE_CUPTI_SO=1
     fi
+
+    CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
+    export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
+    export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
+    export FORCE_RPATH="--force-rpath"
 else
     echo "Unknown cuda version $CUDA_VERSION"
     exit 1

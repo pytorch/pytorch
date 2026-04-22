@@ -264,7 +264,6 @@ these features.
 
 ```{eval-rst}
 .. autofunction:: register_sharding
-
 ```
 
 ```{eval-rst}

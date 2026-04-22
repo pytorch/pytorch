@@ -289,11 +289,16 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
-        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
+        compiler_fn = functools.partial(
+            unconfigured_compiler_fn,
+            compile_region_name=compile_region_name,
+            **kwargs,
+        )
 
         from torch._functorch.aot_autograd import get_aot_graph_name
 
@@ -582,11 +587,8 @@ if "__compile_source__" in globals():
     )
 
     def get_fn_name(kernel: Any) -> str:
-        fn_name = (
-            # pyrefly: ignore [missing-attribute]
-            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
-        )
-        return fn_name.split(".")[-1]
+        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        return fn.__name__.split(".")[-1]
 
     def write_kernel_dependencies(
         kernel: Any,
@@ -689,6 +691,8 @@ if "__compile_source__" in globals():
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
             writer.opaque(placeholder, arg.script_class_name)
+        elif isinstance(arg, torch._C.Generator):
+            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
@@ -984,7 +988,8 @@ def inductor_fails(
     sync()
 
     try:
-        compile_mod = compile_fx_inner(fx_g, args)
+        compile_args = _get_compile_args(fx_g, args)
+        compile_mod = compile_fx_inner(fx_g, compile_args)
         assert not isinstance(compile_mod, str)
         compile_mod(args)
         sync()
@@ -1006,10 +1011,15 @@ def inductor_accuracy_fails(
 ) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
+    def _compile_with_symbolic_args(
+        gm: torch.fx.GraphModule, inputs: list[Any]
+    ) -> torch.fx.GraphModule:
+        return compile_fx_inner(gm, _get_compile_args(gm, inputs))  # type: ignore[return-value]
+
     return backend_aot_accuracy_fails(
         fx_g,
         args,  # type: ignore[arg-type]
-        compile_fx_inner,  # type: ignore[arg-type]
+        _compile_with_symbolic_args,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -1025,7 +1035,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
-) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
+) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
@@ -1067,6 +1077,33 @@ def repro_common(
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args
+
+
+def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequence[Any]:
+    """Extract FakeTensor/SymInt args from the traced graph for compilation.
+
+    When repro_common traces with tracing_mode='symbolic', the resulting
+    GraphModule's placeholder nodes carry FakeTensor/SymInt metadata.
+    compile_fx_inner needs these (not the concrete args) so that Inductor
+    generates proper symbolic-size bindings in the output code.
+
+    For tracing_mode='real', concrete args are fine — we must NOT extract
+    FakeTensor metadata because different nodes may have FakeTensors from
+    different FakeTensorModes, causing a FakeTensorMode mismatch assertion
+    in Inductor.  We detect symbolic tracing by checking for SymInt values,
+    which only exist when tracing_mode='symbolic'.
+    """
+    placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return args
+    # Only extract metadata if the graph was traced with symbolic mode.
+    # SymInt values in placeholder metadata are the reliable indicator —
+    # FakeTensors appear in both real and symbolic modes, but only symbolic
+    # tracing creates SymInts for integer inputs.
+    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
+    if not has_symint:
+        return args
+    return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
 ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
@@ -1143,8 +1180,9 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
+    compile_args = _get_compile_args(mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, args)
+        compiled = compile_fx_inner(mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1274,7 +1312,7 @@ def repro_get_args(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args  # type: ignore[return-value]
+    return mod, args
 
 
 def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
@@ -1284,7 +1322,8 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     from torch.cuda import synchronize
 
-    compiled = compile_fx_inner(mod, args)
+    compile_args = _get_compile_args(mod, args)
+    compiled = compile_fx_inner(mod, compile_args)
     assert not isinstance(compiled, str)
 
     if options.accuracy != "":

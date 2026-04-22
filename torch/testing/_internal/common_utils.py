@@ -1067,7 +1067,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
         raise
-    except:  # noqa: B001,E722, copied from python core library
+    except:
         p.kill()
         raise
     finally:
@@ -1613,6 +1613,7 @@ TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
 TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
+    implied_by_fn=lambda: torch.version.hip is not None,
 )
 TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
     "TEST_WITH_MTIA",
@@ -2064,7 +2065,7 @@ torch_to_numpy_dtype_dict.update({
 
 def skipIfNNModuleInlined(
     msg="test doesn't currently work with nn module inlining",
-    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+    condition=True,
 ):
     def decorator(fn):
         if not isinstance(fn, type):
@@ -2170,12 +2171,31 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     return dec_fn
 
 def skipIfMPS(fn):
+    sig = inspect.signature(fn)
+    has_device_arg = "device" in sig.parameters
+
+    if not has_device_arg:
+        warnings.warn(
+            f"skipIfMPS applied to {fn.__qualname__} which has no 'device' parameter. "
+            "Consider using device-generic tests with instantiate_device_type_tests instead.",
+            stacklevel=2,
+        )
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if TEST_MPS:
+        if has_device_arg:
+            # For device-generic tests, only skip when actually running on MPS
+            slf = args[0] if args else None
+            if slf is not None:
+                device_type = getattr(slf, "device_type", None) or getattr(
+                    slf, "device", None
+                )
+                if isinstance(device_type, str) and device_type == "mps":
+                    raise unittest.SkipTest("test doesn't currently work with MPS")
+        elif TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
-        else:
-            fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+
     return wrapper
 
 
@@ -2222,7 +2242,7 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if IS_WINDOWS:  # noqa: F821
+            if IS_WINDOWS:
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -2237,7 +2257,7 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
+            if IS_WINDOWS and torch.xpu.is_available():
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -2289,6 +2309,10 @@ def setBlasBackendsToDefaultFinally(fn):
             fn(*args, **kwargs)
         finally:
             torch.backends.cuda.preferred_blas_library(_preferred_backend)
+            if torch.backends.cuda.is_built():
+                torch._C._cuda_resetCublasWorkspaceSize()
+                torch._C._cuda_resetCublasLtWorkspaceSize()
+                torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
 
@@ -3525,7 +3549,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:  # noqa: B036
+                        except BaseException as e:
                             self.skipTest(e)
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
@@ -3547,7 +3571,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:  # noqa: B036
+                        except BaseException as e:
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
                         if getattr(method, "__unittest_expecting_failure__", False):
@@ -5941,6 +5965,9 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
+    # Normalize caret-only lines by stripping leading whitespace, since
+    # col_offset in bytecode positions can vary across Python point releases
+    s = re.sub(r"^[ ]+(\^+)$", r"\1", s, flags=re.MULTILINE)
     return s
 
 
@@ -6120,3 +6147,48 @@ def get_gcc_major_version():
         return int(out.split(".")[0])
     except Exception:
         return None
+
+
+def run_concurrently(worker_func, num_threads=None, args=(), kwargs=None):
+    # Adapted from CPython test suite. Runs worker_func in multiple threads
+    # concurrently to help expose thread-safety issues. Works best in
+    # combination with ThreadSanitizer (TSan).
+    from collections.abc import Iterable
+
+    if kwargs is None:
+        kwargs = {}
+    if num_threads is None:
+        num_threads = len(worker_func)
+    if not isinstance(worker_func, Iterable):
+        worker_func = [worker_func] * num_threads
+
+    barrier = threading.Barrier(num_threads)
+
+    results = [None] * num_threads
+    exc_value = None
+
+    def wrapper_func(idx, func, *args, **kwargs):
+        # Wait for all threads to reach this point before proceeding.
+        try:
+            barrier.wait()
+            res = func(*args, **kwargs)
+            results[idx] = res
+        except Exception as e:
+            nonlocal exc_value
+            exc_value = e
+
+    workers = [
+        threading.Thread(target=wrapper_func, args=(i, func, *args),
+                         kwargs=kwargs, daemon=True)
+        for i, func in enumerate(worker_func)
+    ]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+
+    # If a worker thread raises an exception, re-raise it.
+    if exc_value is not None:
+        raise exc_value
+
+    return results

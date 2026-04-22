@@ -307,6 +307,14 @@ else()
 endif()
 
 # nvrtc
+# cuDNN frontend needs libnvrtc symbols, but linking through CUDA::nvrtc pulls
+# CUDA::cuda_driver transitively. Keep a driver-free target for cuDNN users and
+# reserve caffe2::nvrtc for the stub library that actually needs the driver API.
+add_library(caffe2::nvrtc_runtime INTERFACE IMPORTED)
+set_property(
+    TARGET caffe2::nvrtc_runtime PROPERTY INTERFACE_LINK_LIBRARIES
+    "${CUDA_NVRTC_LIB}")
+
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
@@ -328,7 +336,7 @@ endif()
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 # CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
-if(DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT TORCH_CUDA_ARCH_LIST)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES)
   message(WARNING
           "pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore its value. "
           "Please configure `TORCH_CUDA_ARCH_LIST` instead.")

@@ -271,7 +271,7 @@ class GraphRegionTracker:
                 duplicates.append(node)
                 self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
-            log.debug("Unable to hash node %s with exception %s", node, e)  # noqa: G200
+            log.debug("Unable to hash node %s with exception %s", node, e)
 
     def track_node_mutations(
         self,

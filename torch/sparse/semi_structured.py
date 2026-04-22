@@ -77,7 +77,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     __slots__ = ["packed", "meta", "packed_t", "meta_t", "compressed_swizzled_bitmask"]
 
     @staticmethod
-    def __new__(  # noqa: PYI034
+    def __new__(
         cls,
         shape: torch.Size,
         packed: torch.Tensor | None,
@@ -446,46 +446,44 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         pruned dense tensor.
         Since we cannot transpose the compressed representations, we store both for the fw/bw pass respectively.
 
-        Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern.
+        Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern
         This can be used in the backward pass to mask the gradients.
 
-        ::
+        [9 1 7 4]                       [9 0 7 0]
+        [1 2 3 0]                       [0 2 0 0]
+        [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to CUTLASS semi-structured -> packed
+        [1 2 6 2]                       [0 0 6 2]                                    -> metadata
 
-            [9 1 7 4]                       [9 0 7 0]
-            [1 2 3 0]                       [0 2 0 0]
-            [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to CUTLASS semi-structured -> packed
-            [1 2 6 2]                       [0 0 6 2]                                    -> metadata
+                                                  -> pack to transposed CUTLASS      -> packed_t
+                                                     semi-structured representation  -> metadata_t
 
-                                                      -> pack to transposed CUTLASS      -> packed_t
-                                                         semi-structured representation  -> metadata_t
+                                                  -> compute swizzled bitmask        -> compressed_swizzled_bitmask
 
-                                                      -> compute swizzled bitmask        -> compressed_swizzled_bitmask
 
-        The equivalent PyTorch code to create the same five outputs from the dense tensor can be found below::
+        The equivalent PyTorch code to create the same five outputs from the dense tensor can be found below:
+        ```
+        from torch.sparse import SparseSemiStructuredTensorCUTLASS
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
-            from torch.sparse import SparseSemiStructuredTensorCUTLASS
-            from torch.sparse._semi_structured_conversions import (
-                _sparse_semi_structured_tile,
-                _compute_compressed_swizzled_bitmask,
-            )
+        pruned = _sparse_semi_structured_tile(dense)
+        packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
+        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(
+            pruned.t().contiguous()
+        )
+        bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-            pruned = _sparse_semi_structured_tile(dense)
-            packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(
-                pruned
-            )
-            packed_t_cutlass, meta_t_cutlass = (
-                sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
-            )
-            bitmask = _compute_compressed_swizzled_bitmask(pruned)
-
-            SparseSemiStructuredTensorCUTLASS(
-                dense.shape,
-                packed_cutlass,
-                meta_cutlass,
-                packed_t_cutlass,
-                meta_t_cutlass,
-                bitmask,
-            )
+        SparseSemiStructuredTensorCUTLASS(
+            dense.shape,
+            packed_cutlass,
+            meta_cutlass,
+            packed_t_cutlass,
+            meta_t_cutlass,
+            bitmask,
+        )
+        ```
         """
         # We can either pack to the CUTLASS or cuSPARSELt representation, depending on the use_cutlass flag.
         (
@@ -595,34 +593,34 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
         The only functional difference is that cuSPARSELt stores `metadata` and `packed` together into a single tensor.
 
-        ::
+        [9 1 7 4]                       [9 0 7 0]
+        [1 2 3 0]                       [0 2 0 0]
+        [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to cuSPARSELT semi-structured -> packed
+        [1 2 6 2]                       [0 0 6 2]
 
-            [9 1 7 4]                       [9 0 7 0]
-            [1 2 3 0]                       [0 2 0 0]
-            [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to cuSPARSELT semi-structured -> packed
-            [1 2 6 2]                       [0 0 6 2]
+                                                  -> pack to transposed cuSPARSELt      -> packed_t
+                                                     semi-structured representation
 
-                                                      -> pack to transposed cuSPARSELt      -> packed_t
-                                                         semi-structured representation
+                                                  -> compute swizzled bitmask           -> compressed_swizzled_bitmask
 
-                                                      -> compute swizzled bitmask           -> compressed_swizzled_bitmask
 
-        The equivalent PyTorch code to create the same three outputs from the dense tensor can be found below::
+        The equivalent PyTorch code to create the same three outputs from the dense tensor can be found below:
+        ```
+        from torch.sparse import SparseSemiStructuredTensorCUSPARSELT
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
-            from torch.sparse import SparseSemiStructuredTensorCUSPARSELT
-            from torch.sparse._semi_structured_conversions import (
-                _sparse_semi_structured_tile,
-                _compute_compressed_swizzled_bitmask,
-            )
+        pruned = _sparse_semi_structured_tile(dense)
+        packed_cusparselt = torch._cslt_compress(pruned)
+        packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
+        bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-            pruned = _sparse_semi_structured_tile(dense)
-            packed_cusparselt = torch._cslt_compress(pruned)
-            packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
-            bitmask = _compute_compressed_swizzled_bitmask(pruned)
-
-            SparseSemiStructuredTensorCUSPARSELT(
-                dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask
-            )
+        SparseSemiStructuredTensorCUSPARSELT(
+            dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask
+        )
+        ```
         """
         (
             packed,
@@ -730,23 +728,28 @@ def _ensure_cutlass_mm_registered():
         out_features: int,
         min_rows: int,
         min_cols: int,
-        transpose_dense: bool,
+        should_transpose_dense: bool,
     ) -> torch.Tensor:
         m, n = dense.shape
         to_pad_m = (-m) % min_rows
         to_pad_n = (-n) % min_cols
-        dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
-        mm_input = dense_padded.t() if transpose_dense else dense_padded
+        need_pad = to_pad_m != 0 or to_pad_n != 0
+        dense_padded = dense
+        if need_pad:
+            dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
+        mm_input = dense_padded.t() if should_transpose_dense else dense_padded
         if bias is None:
             res = torch._sparse_semi_structured_mm(packed, meta, mm_input)
         else:
             res = torch._sparse_semi_structured_addmm(bias, packed, meta, mm_input)
-        out_cols = m if transpose_dense else n
-        return (
-            res[:out_features]
-            .narrow(1, 0, out_cols)
-            .clone(memory_format=torch.contiguous_format)
-        )
+        if need_pad:
+            out_cols = m if should_transpose_dense else n
+            return (
+                res[:out_features]
+                .narrow(1, 0, out_cols)
+                .clone(memory_format=torch.contiguous_format)
+            )
+        return res.contiguous()
 
     @cutlass_mm.register_fake
     def _cutlass_mm_fake(
@@ -795,7 +798,10 @@ def _ensure_cusparselt_mm_registered():
         m, n = dense.shape
         to_pad_m = (-m) % min_rows
         to_pad_n = (-n) % min_cols
-        dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
+        need_pad = to_pad_m != 0 or to_pad_n != 0
+        dense_padded = dense
+        if need_pad:
+            dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
         mm_input = dense_padded.t() if should_transpose_dense else dense_padded
         res = torch._cslt_sparse_mm(
             packed,
@@ -806,8 +812,12 @@ def _ensure_cusparselt_mm_registered():
         )
         if fuse_transpose:
             res = res.t()
-        out_cols = m if should_transpose_dense else n
-        return res.narrow(1, 0, out_cols).clone(memory_format=torch.contiguous_format)
+        if need_pad:
+            out_cols = m if should_transpose_dense else n
+            return res.narrow(1, 0, out_cols).clone(
+                memory_format=torch.contiguous_format
+            )
+        return res.contiguous()
 
     @cusparselt_mm.register_fake
     def _cusparselt_mm_fake(

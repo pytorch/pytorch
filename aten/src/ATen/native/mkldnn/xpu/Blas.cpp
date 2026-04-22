@@ -328,12 +328,6 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   return result;
 }
 
-Tensor bmm(const Tensor& self, const Tensor& batch2) {
-  auto result = at::empty({0}, self.options());
-  at::native::xpu::bmm_out(self, batch2, result);
-  return result;
-}
-
 Tensor& addmv_out(
     const Tensor& self,
     const Tensor& mat,

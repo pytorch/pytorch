@@ -343,27 +343,11 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
-.. autofunction:: get_backend_config
-```
-
-```{eval-rst}
 .. autofunction:: get_rank
 ```
 
 ```{eval-rst}
 .. autofunction:: get_world_size
-```
-
-```{eval-rst}
-.. autofunction:: get_debug_level
-```
-
-```{eval-rst}
-.. autofunction:: get_node_local_rank
-```
-
-```{eval-rst}
-.. autofunction:: get_pg_count
 ```
 
 ## Shutdown
@@ -425,14 +409,6 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```{eval-rst}
 .. autofunction:: get_process_group_ranks
 
-```
-
-```{eval-rst}
-.. autofunction:: split_group
-```
-
-```{eval-rst}
-.. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
 ## DeviceMesh
@@ -557,10 +533,6 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: all_reduce_coalesced
-```
-
-```{eval-rst}
 .. autofunction:: reduce
 ```
 
@@ -574,10 +546,6 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: all_gather_object
-```
-
-```{eval-rst}
-.. autofunction:: all_gather_coalesced
 ```
 
 ```{eval-rst}
@@ -694,6 +662,10 @@ with torch.profiler():
 ```
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
 
 ## Optimization with Symmetric Memory
 
@@ -1287,8 +1259,6 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.collective_utils
-
-.. autofunction:: torch.distributed.collective_utils.all_gather_object_enforce_type
 ```
 
 ```{eval-rst}

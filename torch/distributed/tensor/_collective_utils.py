@@ -217,10 +217,11 @@ def pad_tensor(
 ) -> torch.Tensor:
     # During tracing, always emit the pad op even when pad_size=0 so all
     # ranks produce identical FX graph structure (SPMD).
-    # guard_or_false returns False for symbolic sizes, so the pad is always
-    # emitted during tracing. In eager with concrete pad_size=0, it returns
-    # True and we skip the no-op pad.
-    if guard_or_false(pad_size == 0) and not _are_we_tracing():
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op pad. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
@@ -233,7 +234,11 @@ def unpad_tensor(
 ) -> torch.Tensor:
     # During tracing, always emit the narrow op even when pad_size=0 so all
     # ranks produce identical FX graph structure (SPMD).
-    if guard_or_false(pad_size == 0) and not _are_we_tracing():
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op narrow. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,
@@ -392,6 +397,8 @@ def _compute_placement_transition_cost(
 
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
+    # Safe today: redistribute_cost bails with inf when shard_order is None.
     if current_placement.is_shard() and target_placement.is_replicate():
         # allgather gives larger comm bytes
         comm_bytes_gb *= num_devices_on_mesh_dim

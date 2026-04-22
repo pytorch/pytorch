@@ -1076,7 +1076,7 @@ class TestForeach(TestCase):
         import math
 
         if op.name == "_foreach_norm":
-            ords = [1, 2]
+            ords = [0, 1, 2]
             if not intersperse_empty_tensors:
                 # inf norm over an empty tensor is not defined by vector norm as it expects an identity
                 ords.append(math.inf)
@@ -1169,6 +1169,25 @@ class TestForeach(TestCase):
             result_l2 = torch._foreach_norm([empty_tensor], ord=2)
             self.assertEqual(result_l1[0].item(), 0.0)
             self.assertEqual(result_l2[0].item(), 0.0)
+
+    @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_max"],
+    )
+    def test_foreach_max_empty_tensor_error(self, device, dtype, op):
+        """Test that _foreach_max errors on empty tensors"""
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        err_re = (
+            "_foreach_max cannot compute the maximum of an empty tensor; "
+            "max over zero elements is undefined\\."
+        )
+        with self.assertRaisesRegex(RuntimeError, err_re):
+            torch._foreach_max([empty_tensor])
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, err_re):
+            torch._foreach_max([empty_tensor, non_empty_tensor])
 
     @onlyCUDA
     @ops(

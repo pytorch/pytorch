@@ -14,11 +14,7 @@ Tensors
     is_complex
     is_conj
     is_floating_point
-    is_inference
-    is_neg
     is_nonzero
-    is_same_size
-    is_signed
     set_default_dtype
     get_default_dtype
     set_default_device
@@ -75,18 +71,14 @@ Creation Ops
     eye
     empty
     empty_like
-    empty_permuted
-    empty_quantized
     empty_strided
     full
     full_like
     quantize_per_tensor
-    quantize_per_tensor_dynamic
     quantize_per_channel
     dequantize
     complex
     polar
-    scalar_tensor
     heaviside
 
 .. _indexing-slicing-joining:
@@ -98,86 +90,53 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     adjoint
-    alias_copy
     argwhere
-    as_strided_copy
-    as_strided_scatter
     cat
-    ccol_indices_copy
-    col_indices_copy
     concat
     concatenate
     conj
     chunk
-    crow_indices_copy
-    detach
-    detach_copy
-    diagonal_copy
     dsplit
     column_stack
     dstack
-    expand_copy
-    fill
     gather
     hsplit
     hstack
     index_add
     index_copy
-    index_put_
     index_reduce
     index_select
-    indices_copy
-    masked_fill
     masked_select
     movedim
     moveaxis
     narrow
     narrow_copy
     nonzero
-    nonzero_static
     permute
-    permute_copy
-    put
     reshape
-    row_indices_copy
     row_stack
     select
-    select_copy
     scatter
     diagonal_scatter
     select_scatter
-    slice_copy
-    slice_inverse
     slice_scatter
     scatter_add
     scatter_reduce
     segment_reduce
     split
-    split_copy
-    split_with_sizes_copy
     squeeze
-    squeeze_copy
     stack
     swapaxes
     swapdims
     t
-    t_copy
     take
     take_along_dim
     tensor_split
     tile
     transpose
-    transpose_copy
     unbind
-    unbind_copy
-    unfold_copy
     unravel_index
     unsqueeze
-    unsqueeze_copy
-    values_copy
-    view_as_complex_copy
-    view_as_real_copy
-    view_copy
     vsplit
     vstack
     where
@@ -298,19 +257,24 @@ Serialization
     save
     load
 
+.. currentmodule:: torch.serialization
+
+.. autofunction:: check_module_version_greater_or_equal
+
+.. autofunction:: default_restore_location
+
+.. currentmodule:: torch
+
 Parallelism
 ----------------------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    fork
     get_num_threads
-    init_num_threads
     set_num_threads
     get_num_interop_threads
     set_num_interop_threads
-    wait
 
 .. _torch-rst-local-disable-grad:
 
@@ -378,36 +342,23 @@ Pointwise Ops
     :nosignatures:
 
     abs
-    abs_
     absolute
     acos
-    acos_
     arccos
-    arccos_
     acosh
-    acosh_
     arccosh
-    arccosh_
     add
     addcdiv
     addcmul
     angle
     asin
-    asin_
     arcsin
-    arcsin_
     asinh
-    asinh_
     arcsinh
-    arcsinh_
     atan
-    atan_
     arctan
-    arctan_
     atanh
-    atanh_
     arctanh
-    arctanh_
     atan2
     arctan2
     bitwise_not
@@ -417,63 +368,40 @@ Pointwise Ops
     bitwise_left_shift
     bitwise_right_shift
     ceil
-    ceil_
     clamp
-    clamp_
-    clamp_max_
-    clamp_min_
     clip
-    clip_
     conj_physical
-    conj_physical_
     copysign
     cos
-    cos_
     cosh
-    cosh_
     deg2rad
-    deg2rad_
     div
     divide
     digamma
     erf
-    erf_
     erfc
-    erfc_
     erfinv
     exp
-    exp_
     exp2
-    exp2_
     expm1
-    expm1_
     fake_quantize_per_channel_affine
     fake_quantize_per_tensor_affine
-    fill_
     fix
-    fix_
     float_power
     floor
-    floor_
     floor_divide
     fmod
     frac
-    frac_
     frexp
     gradient
     imag
     ldexp
-    ldexp_
     lerp
     lgamma
     log
-    log_
     log10
-    log10_
     log1p
-    log1p_
     log2
-    log2_
     logaddexp
     logaddexp2
     logical_and
@@ -481,21 +409,16 @@ Pointwise Ops
     logical_or
     logical_xor
     logit
-    logit_
     hypot
     i0
-    i0_
     igamma
     igammac
     mul
     multiply
     mvlgamma
     nan_to_num
-    nan_to_num_
     neg
-    neg_
     negative
-    negative_
     nextafter
     polygamma
     positive
@@ -504,43 +427,28 @@ Pointwise Ops
     quantized_max_pool1d
     quantized_max_pool2d
     rad2deg
-    rad2deg_
     real
     reciprocal
-    reciprocal_
     remainder
     round
-    round_
     rsqrt
-    rsqrt_
     sigmoid
-    sigmoid_
     sign
     sgn
     signbit
     sin
-    sin_
     sinc
-    sinc_
     sinh
-    sinh_
     softmax
     sqrt
-    sqrt_
     square
-    square_
     sub
     subtract
     tan
-    tan_
     tanh
-    tanh_
     true_divide
     trunc
-    trunc_
     xlogy
-    xlogy_
-    zero_
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -565,8 +473,6 @@ Reduction Ops
     nanmedian
     mode
     norm
-    norm_except_dim
-    nuclear_norm
     nansum
     prod
     quantile
@@ -641,26 +547,10 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
-    adaptive_avg_pool1d
-    adaptive_max_pool1d
-    affine_grid_generator
-    alpha_dropout
-    alpha_dropout_
-    as_strided_
     atleast_1d
     atleast_2d
     atleast_3d
-    avg_pool1d
-    batch_norm_backward_elemt
-    batch_norm_backward_reduce
-    batch_norm_elemt
-    batch_norm_gather_stats
-    batch_norm_gather_stats_with_counts
-    batch_norm_stats
-    batch_norm_update_stats
-    bilinear
     bincount
-    binomial
     block_diag
     broadcast_tensors
     broadcast_to
@@ -668,149 +558,45 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
-    celu_
-    channel_shuffle
-    choose_qparams_optimized
     clone
     combinations
-    conv1d
-    conv3d
-    conv_tbc
-    conv_transpose1d
-    conv_transpose2d
-    conv_transpose3d
-    convolution
     corrcoef
-    cosine_embedding_loss
-    cosine_similarity
     cov
     cross
-    ctc_loss
-    cudnn_affine_grid_generator
-    cudnn_batch_norm
-    cudnn_convolution
-    cudnn_convolution_add_relu
-    cudnn_convolution_relu
-    cudnn_convolution_transpose
-    cudnn_grid_sampler
-    cudnn_is_acceptable
     cummax
     cummin
     cumprod
     cumsum
-    detach_
     diag
     diag_embed
     diagflat
     diagonal
     diff
-    dropout_
     einsum
-    embedding
-    embedding_renorm_
-    fbgemm_linear_fp16_weight
-    fbgemm_linear_fp16_weight_fp32_activation
-    fbgemm_linear_int8_weight
-    fbgemm_linear_int8_weight_fp32_activation
-    fbgemm_linear_quantize_weight
-    fbgemm_pack_gemm_matrix_fp16
-    fbgemm_pack_quantized_matrix
-    feature_alpha_dropout
-    feature_alpha_dropout_
-    feature_dropout
-    feature_dropout_
     flatten
     flip
     fliplr
     flipud
-    fused_moving_avg_obs_fake_quant
+    kron
+    rot90
     gcd
-    gcd_
-    grid_sampler_2d
-    grid_sampler_3d
-    group_norm
-    gru
-    gru_cell
-    hardshrink
-    hinge_embedding_loss
     histc
     histogram
     histogramdd
-    instance_norm
-    int_repr
-    kl_div
-    kron
-    lcm
-    lcm_
-    logcumsumexp
-    lstm
-    lstm_cell
-    margin_ranking_loss
-    max_pool1d
-    max_pool3d
     meshgrid
-    miopen_batch_norm
-    miopen_convolution
-    miopen_convolution_add_relu
-    miopen_convolution_relu
-    miopen_convolution_transpose
-    miopen_ctc_loss
-    miopen_depthwise_convolution
-    miopen_rnn
-    mkldnn_adaptive_avg_pool2d
-    mkldnn_convolution
-    mkldnn_linear_backward_weights
-    mkldnn_max_pool2d
-    mkldnn_max_pool3d
-    mkldnn_rnn_layer
-    native_batch_norm
-    native_channel_shuffle
-    native_group_norm
-    native_layer_norm
-    native_norm
-    pairwise_distance
-    pdist
-    pixel_unshuffle
-    poisson_nll_loss
-    prelu
-    q_per_channel_axis
-    q_per_channel_scales
-    q_per_channel_zero_points
-    q_scale
-    q_zero_point
-    quantized_gru_cell
-    quantized_lstm_cell
-    quantized_max_pool3d
-    quantized_rnn_relu_cell
-    quantized_rnn_tanh_cell
+    lcm
+    logcumsumexp
     ravel
-    relu_
     renorm
     repeat_interleave
-    resize_as_
-    resize_as_sparse_
-    rms_norm
-    rnn_relu
-    rnn_relu_cell
-    rnn_tanh
-    rnn_tanh_cell
     roll
-    rot90
-    rrelu
-    rrelu_
-    rsub
     searchsorted
-    selu
-    selu_
     tensordot
-    threshold
-    threshold_
     trace
     tril
     tril_indices
     triu
     triu_indices
-    triplet_margin_loss
     unflatten
     vander
     view_as_real
@@ -828,7 +614,6 @@ BLAS and LAPACK Operations
     addbmm
     addmm
     addmv
-    addmv_
     addr
     baddbmm
     bmm
@@ -837,10 +622,8 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    dsmm
     geqrf
     ger
-    hsmm
     inner
     inverse
     det
@@ -858,8 +641,6 @@ BLAS and LAPACK Operations
     ormqr
     outer
     pinverse
-    saddmm
-    spmm
     qr
     svd
     svd_lowrank
@@ -945,48 +726,10 @@ Utilities
     :toctree: generated
     :nosignatures:
 
-    autocast_decrement_nesting
-    autocast_increment_nesting
-    clear_autocast_cache
     compiled_with_cxx11_abi
-    get_autocast_cpu_dtype
-    get_autocast_dtype
-    get_autocast_gpu_dtype
-    get_autocast_ipu_dtype
-    get_autocast_xla_dtype
-    get_device
-    get_device_module
-    import_ir_module
-    import_ir_module_from_buffer
-    is_anomaly_check_nan_enabled
-    is_anomaly_enabled
-    is_autocast_cache_enabled
-    is_autocast_cpu_enabled
-    is_autocast_enabled
-    is_autocast_ipu_enabled
-    is_autocast_xla_enabled
-    is_distributed
-    is_vulkan_available
-    merge_type_from_type_comment
-    parse_ir
-    parse_schema
-    parse_type_comment
     result_type
     can_cast
     promote_types
-    read_vitals
-    set_anomaly_enabled
-    set_autocast_cache_enabled
-    set_autocast_cpu_dtype
-    set_autocast_cpu_enabled
-    set_autocast_dtype
-    set_autocast_enabled
-    set_autocast_gpu_dtype
-    set_autocast_ipu_dtype
-    set_autocast_ipu_enabled
-    set_autocast_xla_dtype
-    set_autocast_xla_enabled
-    set_vital
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
     is_deterministic_algorithms_warn_only_enabled
@@ -995,16 +738,11 @@ Utilities
     set_float32_matmul_precision
     get_float32_matmul_precision
     set_warn_always
+    get_device_module
     is_warn_always_enabled
-    vitals_enabled
     vmap
     _assert
     typename
-
-Type Information
-----------------
-.. autoclass:: TensorType
-    :no-members:
 
 Symbolic Numbers
 ----------------
@@ -1021,8 +759,6 @@ Symbolic Numbers
     :toctree: generated
     :nosignatures:
 
-    sym_constrain_range
-    sym_constrain_range_for_size
     sym_float
     sym_fresh_size
     sym_int
@@ -1082,21 +818,13 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. currentmodule:: torch.utils.model_dump
+
 .. py:module:: torch.utils.viz
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
-.. automodule:: torch.serialization
-
-.. currentmodule:: torch.serialization
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    StorageType
-
 .. py:module:: torch.serialization
-   :noindex:
 .. py:module:: torch.signal.windows.windows
 .. py:module:: torch.sparse.semi_structured
 .. py:module:: torch.storage

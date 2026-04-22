@@ -11,6 +11,7 @@ import itertools
 import operator
 import unittest
 import warnings
+import weakref
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
@@ -1017,7 +1018,7 @@ def forward(self, primals_1):
             """
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+""",
         ):
             new_out.sum().backward()
 
@@ -3246,7 +3247,7 @@ def forward(self, primals_1):
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return (as_strided_scatter, add_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
@@ -3279,7 +3280,7 @@ def forward(self, primals_1):
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return (as_strided_scatter, add_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
@@ -3310,7 +3311,7 @@ def forward(self, primals_1):
     as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_1 = torch.ops.aten.view.default(as_strided_9, [4]);  as_strided_9 = None
     return (as_strided_scatter, view_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
@@ -3347,7 +3348,7 @@ def forward(self, primals_1, primals_2):
     as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
     return (as_strided_scatter, add, view_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -3419,7 +3420,7 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return (as_strided_scatter, add, add_1)""",
-        )  # noqa: B950
+        )
 
     @skipIfDynamoInput("Fails with dynamo")
     def test_input_mutation_aliases_bases_out_of_order(self):
@@ -3478,7 +3479,7 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
     return (as_strided_scatter, add_2, view_2, unsqueeze)""",
-        )  # noqa: B950
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
@@ -3552,7 +3553,7 @@ def forward(self, primals_1, primals_2):
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
     return (as_strided_scatter, t, view_1, t_1, unsqueeze, add)""",
-        )  # noqa: B950
+        )
 
     def test_dynamic_shape_output_not_in_bw_graph(self):
         def f(x):
@@ -3792,7 +3793,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxx(x, y),
-            """At compilation time, graph 2 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 2 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
@@ -3848,7 +3849,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxx(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
@@ -3897,7 +3898,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxz(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     def test_custom_autograd(self):
@@ -4216,7 +4217,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = copy__1 = None
     copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = copy__2 = None
-    return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
+    return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",
         )
 
         self.assertEqual(out_ref, out_test)
@@ -4236,7 +4237,7 @@ def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem
     getitem_5 = native_batch_norm_backward[0]
     getitem_6 = native_batch_norm_backward[1]
     getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
-    return (getitem_6, getitem_7, None, None, None, getitem_5)""",  # noqa: B950
+    return (getitem_6, getitem_7, None, None, None, getitem_5)""",
         )
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
@@ -4278,7 +4279,7 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     add = torch.ops.aten.add.Tensor(clone, primals_2);  clone = primals_2 = None
     return (add, add)""",
-        )  # noqa: B950
+        )
 
         self.assertEqual(out_ref, out_test)
 
@@ -4290,7 +4291,7 @@ def forward(self, primals_1, primals_2):
             """\
 def forward(self, tangents_1):
     return (None, tangents_1)""",
-        )  # noqa: B950
+        )
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
@@ -4733,6 +4734,135 @@ def forward(self, tangents_1):
         out = f(inp)
         self.assertEqual(out.stride(), inp.stride())
 
+    def _make_model_and_input(self, hidden=1024, vocab=4096, seq_len=128):
+        """Build a small model that produces non-scalar output (like an LM head)."""
+        model = nn.Sequential(
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, vocab, bias=False),
+        ).cuda()
+        x = torch.randn(seq_len, hidden, device="cuda", requires_grad=True)
+        labels = torch.randint(0, vocab, (seq_len,), device="cuda")
+        return model, x, labels
+
+    def _make_refcount_probe(self):
+        """Create a boxed-grads probe that checks the framework holds no extra refs.
+
+        The probe uses boxed_grads_call=True so PyNode::apply moves grads
+        into a mutable list (same mechanism as CompiledFunction). After
+        removing the grad from the list, a weakref must become dead — proving
+        the framework released all its refs.
+
+        Returns (ProbeClass, result_box). After backward,
+        result_box["ref_dead"] is True if no extra refs were held."""
+        result_box = {}
+
+        class RefcountProbe(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, pred):
+                return pred.clone()
+
+            @staticmethod
+            def backward(ctx, grads):
+                grad = grads.pop(0)
+                grad_for_return = grad.clone()
+                ref = weakref.ref(grad)
+                del grad
+                result_box["ref_dead"] = ref() is None
+                return grad_for_return
+
+        return RefcountProbe, result_box
+
+    def _assert_no_extra_refs(self, result_box):
+        """Assert the framework holds no extra refs to the grad tensor."""
+        self.assertIn("ref_dead", result_box)
+        self.assertTrue(
+            result_box["ref_dead"],
+            "Framework holds extra refs to tangent: weakref still alive after "
+            "removing all user-visible references",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_and_loss(self):
+        """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
+
+        Mirrors torchtitan's simple_fsdp training loop:
+          pred = compiled_model(input)   # torch.compile(model)
+          loss = compiled_loss(pred, labels)  # torch.compile(loss_fn)
+          loss.backward()
+
+        The tangent for model backward is created internally by loss backward.
+        No user variable holds it — only the C++ pyInputs tuple on the stack.
+        The boxed calling convention alone frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_eager_loss(self):
+        """Scenario: compiled model + eager loss (common training pattern).
+
+        Similar to torchtitan but loss is not compiled. The tangent is
+        created by eager cross_entropy backward. Boxed convention frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = torch.nn.functional.cross_entropy(pred.float(), labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_user_provided_via_pop(self):
+        """Scenario: user creates tangent but releases it before backward runs.
+
+        The user wraps the tangent in a list and calls out.backward(l.pop()).
+        After pop(), no Python variable holds the tangent — same as torchtitan.
+        The boxed calling convention should free it."""
+        model, x, _labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+        _, _, labels = self._make_model_and_input()
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+
+        # Wrap loss in a list and use pop() — no user variable holds loss
+        # after this. The tangent created by loss backward has no user ref.
+        loss_list = [loss]
+        del loss
+        loss_list.pop().backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -5088,7 +5218,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
 
         self.assertExpectedInline(
@@ -5105,7 +5235,7 @@ def forward(self, arg0_1):
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (cos_1,));  gt = true_graph_0 = false_graph_0 = cos_1 = None
     getitem = cond[0];  cond = None
-    return (getitem,)""",  # noqa: B950
+    return (getitem,)""",
         )
 
         self.assertExpectedInline(
@@ -5227,7 +5357,7 @@ class <lambda>(torch.nn.Module):
 
                 add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
                 return (add_1,)
-""",  # noqa: B950
+""",
         )
 
     def test_aot_export_predispatch_map_2(self):
@@ -5317,7 +5447,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
         self.assertExpectedInline(
             str(gm.true_graph_0.code).strip(),
@@ -5358,7 +5488,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     getitem = _native_batch_norm_legit_functional[0]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    return (getitem_3, getitem_4, add, getitem)""",  # noqa: B950
+    return (getitem_3, getitem_4, add, getitem)""",
         )
 
     def test_aot_export_predispatch_reshape(self):
@@ -5378,7 +5508,7 @@ def forward(self, arg0_1):
     view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(view);  view = None
     return (sum_1,)""",
-        )  # noqa: B950
+        )
 
     def test_aot_export_predispatch_contiguous(self):
         class Cont(torch.nn.Module):
@@ -5396,7 +5526,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     return (sum_1,)""",
-        )  # noqa: B950
+        )
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
@@ -5466,7 +5596,7 @@ class <lambda>(torch.nn.Module):
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -5481,19 +5611,19 @@ class <lambda>(torch.nn.Module):
         self.assertExpectedInline(
             str(signature.inputs_to_parameters),
             """{'arg0_1': 'conv.weight', 'arg1_1': 'conv.bias', 'arg2_1': 'bn.weight', 'arg3_1': 'bn.bias'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.inputs_to_buffers),
             """{'arg4_1': 'bn.running_mean', 'arg5_1': 'bn.running_var', 'arg6_1': 'bn.num_batches_tracked'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.buffers_to_mutate),
             """{'getitem_3': 'bn.running_mean', 'getitem_4': 'bn.running_var', 'add': 'bn.num_batches_tracked'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.backward_signature.gradients_to_parameters),
             """{'getitem_9': 'conv.weight', 'getitem_10': 'conv.bias', 'getitem_6': 'bn.weight', 'getitem_7': 'bn.bias'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.backward_signature.gradients_to_user_inputs), """{}"""
         )
@@ -5540,7 +5670,7 @@ class <lambda>(torch.nn.Module):
             sum_1,  # PlainAOTOutput(idx=0)
             detach,  # PlainAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
@@ -5620,7 +5750,7 @@ def forward(self, arg0_1, arg1_1):
     sum_2 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add, add_1)""",
-        )  # noqa: B950
+        )
         self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg1_1"})
 
     def test_aot_export_forward_mutation_multiple_mut(self):
@@ -5653,7 +5783,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     sum_3 = torch.ops.aten.sum.default(add_1)
     return (add_1, add, add_2, sum_3)""",
-        )  # noqa: B950
+        )
         self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg2_1"})
         self.assertEqual(sig.buffers_to_mutate, {"add_1": "buffer1"})
 
@@ -5784,7 +5914,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
 
         self.assertExpectedInline(
@@ -5851,7 +5981,7 @@ def forward(self):
     full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
     full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (full_1,)""",  # noqa: B950
+    return (full_1,)""",
         )
 
     def test_aot_export_input_mutation(self):
@@ -7240,7 +7370,7 @@ def forward(self, tangents_1, tangents_2):
             """
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+""",
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
@@ -8973,9 +9103,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.batch_norm", ""
     ),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail(
-        "nn.functional.binary_cross_entropy", ""
-    ),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail(
         "nn.functional.cross_entropy", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
@@ -9188,8 +9315,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
-    # RuntimeError: expected int at position 0, but got: SymInt
 }
 
 

@@ -15,6 +15,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     _StridedShardNotDecodableError,
@@ -26,6 +27,7 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -166,11 +168,11 @@ class _TransformInfo:
         src, dst = self.src_dst_placements
         if src.is_partial() and dst.is_replicate():
             return "all_reduce"
-        elif src.is_partial() and dst.is_shard():
+        elif src.is_partial() and _is_shard_like(dst):
             return "reduce_scatter"
-        elif src.is_shard() and dst.is_replicate():
+        elif _is_shard_like(src) and dst.is_replicate():
             return "all_gather"
-        elif src.is_shard() and dst.is_shard():
+        elif _is_shard_like(src) and _is_shard_like(dst):
             return "all_to_all"
         else:
             # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
@@ -274,9 +276,7 @@ def _get_flattened_mesh_by_layout_impl(
     # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
     # _get_slice_mesh_layout does pure layout math, no tensor operations
     sliced_layout = mesh._get_slice_mesh_layout(dim_names)
-    expected_layout = sliced_layout.coalesce()
-    if len(expected_layout) > 1:
-        expected_layout = expected_layout.nest()
+    expected_layout = _MeshLayout([sliced_layout.collapse()])
 
     # Search existing flattened meshes by comparing layouts
     for flattened_mesh in root_mesh._flatten_mapping.values():
@@ -1372,6 +1372,11 @@ class DTensorRedistributePlanner:
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
                 # are traversing from inner to outer placements here
+                # TODO: extend nested sharding detection to _StridedShard
+                # (isinstance check and is_shard() below miss it).
+                # Safe today: strategies convert _StridedShard to Replicate
+                # on ALL mesh dims for a given reduction dim, so misaligned
+                # nested _StridedShard targets can't arise.
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
@@ -1442,7 +1447,7 @@ def _gen_transform_infos_non_cached(
     )
 
     # Determine which transform strategy to use:
-    # 1. Non-standard device order or _StridedShard → graph-based
+    # 1. Non-standard device order or contains _StridedShard → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
     # 3. Otherwise → use greedy
     if has_non_default_order or has_strided_shard:
@@ -1458,12 +1463,16 @@ def _gen_transform_infos_non_cached(
         src_spec.tensor_meta,
     )
     if use_graph_based_transform:
-        # The graph-based planner requires decoding _StridedShard split_factor into a
-        # shard order via _maybe_convert_StridedShard_to_shard_order. This fails when
-        # split_factor doesn't correspond to any valid product of mesh dimension sizes
-        # (e.g. sf=2 on a 1D mesh, or sf=3 on a (4,2) mesh). In those cases, fall back
-        # to greedy which treats _StridedShard as an opaque placement and delegates
-        # directly to _StridedShard._to_replicate_tensor().
+        # TODO(zpcore): Temporary workaround for the case where _StridedShard
+        # cannot be decoded into shard order. This happens when
+        # use_strided_shard_as_shard_order defaults to True (e.g. in
+        # Redistribute.forward where the target DTensorSpec is constructed from
+        # raw placements without the flag), but the split_factor doesn't
+        # correspond to any valid product of mesh dimension sizes (e.g. sf=2
+        # on a 1D mesh). A proper fix is to either pass
+        # use_strided_shard_as_shard_order through the Redistribute API, or
+        # migrate to explicit shard_order so _StridedShard is no longer
+        # overloaded for two purposes.
         try:
             transform_infos = drp.generate_graph_based_transform_infos(
                 src_spec, dst_spec, src_spec.shape
@@ -1670,7 +1679,7 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._partition_value(
                         local_tensor, mesh_to_use, i
                     )
-                elif current.is_shard() or isinstance(current, _StridedShard):
+                elif _is_shard_like(current):
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
@@ -1762,11 +1771,13 @@ def _redistribute_backward(
                 # pyrefly: ignore [bad-argument-type]
                 dtype=backward_dtype,
             ),
+            use_strided_shard_as_shard_order=grad_output._spec.use_strided_shard_as_shard_order,
         )
         previous_spec = DTensorSpec(
             mesh=previous_spec.device_mesh,
             placements=previous_spec.placements,
             tensor_meta=current_spec.tensor_meta,
+            use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
         )
     else:
         local_tensor = grad_output._local_tensor
@@ -1780,9 +1791,11 @@ def _redistribute_backward(
 
     # for backward shard -> partial, we just do shard -> replicate
     # for backward replicate -> partial, we skip the transformation
+    # NOTE: _is_shard_like covers _StridedShard defensively; currently
+    # unreachable because Partial -> _StridedShard is not implemented.
     normalized_placements: list[Placement] = []
     for current, target in zip(current_spec.placements, previous_spec.placements):
-        if (current.is_shard() or current.is_replicate()) and target.is_partial():
+        if (_is_shard_like(current) or current.is_replicate()) and target.is_partial():
             normalized_placements.append(Replicate())
         else:
             normalized_placements.append(target)
@@ -1791,6 +1804,7 @@ def _redistribute_backward(
         previous_spec.device_mesh,
         placements=tuple(normalized_placements),
         tensor_meta=previous_spec.tensor_meta,
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
 
     output = redistribute_local_tensor(
@@ -1811,6 +1825,7 @@ def _redistribute_backward(
             stride=grad_output.stride(),
             dtype=output.dtype,
         ),
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
     return output, spec
 
@@ -1841,6 +1856,7 @@ class Redistribute(torch.autograd.Function):
                     stride=input.stride(),
                     dtype=forward_dtype,
                 ),
+                use_strided_shard_as_shard_order=input._spec.use_strided_shard_as_shard_order,
             )
         else:
             local_tensor = input._local_tensor
@@ -1916,11 +1932,15 @@ class NestedRedistribute(torch.autograd.Function):
         backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
-        ctx.backward_dtype = backward_dtype or ctx.original_dtype
         ctx.original_dtype = grad_output._local_tensor.dtype
+        ctx.backward_dtype = backward_dtype or ctx.original_dtype
 
         output, spec = _redistribute_backward(
-            grad_output, previous_spec, ctx.original_dtype, backward_dtype, async_op
+            grad_output,
+            previous_spec,
+            ctx.backward_dtype,
+            backward_dtype,
+            async_op,
         )
 
         ctx.current_spec = spec

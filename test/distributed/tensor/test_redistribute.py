@@ -1790,7 +1790,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",  # noqa: B950
+                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
@@ -1805,7 +1805,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)[0]S(0)[1]_S(1, 5)->S(0)R_S(1, 5)->S(0)RR->S(0)_S(1, 5)R->S(0)_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)R->R_S(1, 5)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(),
@@ -1975,6 +1975,23 @@ class TransformInfoTest(TestCase):
         for placements in local_cases:
             info = _TransformInfo(0, placements, [8, 8])
             self.assertIsNone(info._comm_type_key())
+
+    def test_comm_type_key_strided_shard(self):
+        """_StridedShard must produce the same comm type keys as Shard."""
+        ss = _StridedShard(0, split_factor=2)
+        test_cases = [
+            ((Partial("sum"), ss), "reduce_scatter"),
+            ((ss, Replicate()), "all_gather"),
+            ((ss, Shard(1)), "all_to_all"),
+            ((ss, _StridedShard(1, split_factor=2)), "all_to_all"),
+        ]
+        for placements, expected_key in test_cases:
+            info = _TransformInfo(0, placements, [8, 8])
+            self.assertEqual(
+                info._comm_type_key(),
+                expected_key,
+                f"_StridedShard transform {placements} should map to '{expected_key}'",
+            )
 
 
 class OptimizeFlattenedReductionsTest(TestCase):

@@ -13,7 +13,7 @@ def _split_to_graph_and_name_node_map(
     from torch.fx.graph import _PyTreeInfo
     from torch.utils._pytree import tree_flatten, tree_unflatten
 
-    name_node_map = {}
+    name_node_map: dict[str, Node] = {}
     for n in gm.graph.nodes:
         if n.op == "output":
             if gm._out_spec is None:
@@ -50,7 +50,6 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     initialization since we need to modify the graph (which requires `recompile` the GraphModule)
 
     Example::
-
         def pattern(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
@@ -94,20 +93,21 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """The returned InternalMatch will have name_node_map populated with a map
         from node name (str) to the target node, e.g.
-        ``{"conv": target_conv_ndoe, "relu": target_relu_node}``
+        {"conv": target_conv_ndoe, "relu": target_relu_node}
 
-        This requires the pattern graph returns an additional
-        output of node name to node, e.g. instead of::
-
-            def pattern(...):
-                ...
-                return relu
-
-        we should do::
-
-            def pattern(...):
-                ...
-                return relu, {"conv": conv, "relu": relu}
+        this requires the pattern graph returns an additional
+        output of node name to node, e.g. instead of:
+        ```
+        def pattern(...):
+            ...
+            return relu
+        ```
+        we should do:
+        ```
+        def pattern(...):
+            ...
+            return relu, {"conv": conv, "relu": relu}
+        ``` instead
         """
         internal_matches = super().match(graph, node_name_match)
         for internal_match in internal_matches:

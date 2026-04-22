@@ -13129,7 +13129,7 @@ Examples::
 add_docstr(
     torch.trapz,
     r"""
-trapz(y, x, *, dim=-1) -> Tensor
+trapz(y, x=None, *, dim=-1) -> Tensor
 
 Alias for :func:`torch.trapezoid`.
 """,
@@ -13637,6 +13637,24 @@ Example::
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> s_cuda = torch.Stream(device='cuda')
     >>> s_cuda.synchronize()
+""",
+)
+
+add_docstr(
+    torch.Stream.is_capturing,
+    r"""
+Stream.is_capturing() -> bool
+
+Return true if this stream is currently recording work for graph capture.
+
+Returns:
+    bool: A boolean indicating if the stream is capturing.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.is_capturing()
 """,
 )
 

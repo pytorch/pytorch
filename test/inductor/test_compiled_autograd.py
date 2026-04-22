@@ -1082,8 +1082,20 @@ main()
                 call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
+            # Find the CALL that invokes the compiled graph function
+            # (not an earlier CALL from e.g. store_user_object_weakrefs).
+            # The compiled fn is loaded via LOAD_GLOBAL __compiled_fn_*.
+            load_graph_idx = next(
+                i
+                for i, inst in enumerate(insts)
+                if inst.opname == "LOAD_GLOBAL"
+                and isinstance(inst.argval, str)
+                and inst.argval.startswith("__compiled_fn")
+            )
             call_graph_idx = next(
-                i for i, inst in enumerate(insts) if inst.opname == call_op
+                i
+                for i, inst in enumerate(insts)
+                if i > load_graph_idx and inst.opname == call_op
             )
             # pre-graph should alias: inputs_ref_0 = inputs[0]
             matches = [
@@ -1155,8 +1167,19 @@ main()
                     call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
+                # Find the CALL that invokes the compiled graph function
+                # (not an earlier CALL from e.g. store_user_object_weakrefs).
+                load_graph_idx = next(
+                    i
+                    for i, inst in enumerate(insts)
+                    if inst.opname == "LOAD_GLOBAL"
+                    and isinstance(inst.argval, str)
+                    and inst.argval.startswith("__compiled_fn")
+                )
                 call_graph_idx = next(
-                    i for i, inst in enumerate(insts) if inst.opname == call_op
+                    i
+                    for i, inst in enumerate(insts)
+                    if i > load_graph_idx and inst.opname == call_op
                 )
                 # pre-graph should alias: inputs_ref_0 = inputs[0]
                 matches = [
@@ -1958,7 +1981,7 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
     def test_custom_fn_compiled_fw_graph_break(self):
@@ -2012,9 +2035,9 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
         )
-        self.assertEqual(counters["stats"]["unique_graphs"], 6)  # 3 fw, 3 bw
+        self.assertEqual(counters["stats"]["unique_graphs"], 5)
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
@@ -3653,7 +3676,7 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], getitem_27);  getitem_1 = getitem_2 = getitem_27 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
@@ -3681,7 +3704,7 @@ class CompiledAutograd0(torch.nn.Module):
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
             )
 
     # https://github.com/pytorch/pytorch/issues/138920
@@ -3946,7 +3969,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
                 )
 
             self.check_output_and_recompiles(
@@ -4026,7 +4049,7 @@ class CompiledAutograd1(torch.nn.Module):
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
             )
 
         self.check_output_and_recompiles(
@@ -4106,7 +4129,7 @@ class CompiledAutograd1(torch.nn.Module):
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
                 )
 
             # 1 graph break on torch.load -> 2 dynamo graphs
@@ -4615,7 +4638,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 2],
+            count=[1, 1],
         )
 
     # Case 1.5.1: Dense variable gradient layout contract
@@ -4884,7 +4907,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 2],
+            count=[1, 1],
         )
 
     # Case 3.1: Sparse variable_grad + Dense new_grad (reorder into Dense + Sparse)
@@ -4981,7 +5004,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 3],
+            count=[1, 2],
         )
 
     def test_torch_function_mode(self):
@@ -5030,7 +5053,7 @@ Backward
 _set_multithreading_enabled
 backward
 _set_multithreading_enabled""",
-        )  # noqa: B950
+        )
 
     def test_torch_dispatch_mode(self):
         called_funcs = []
@@ -5088,7 +5111,7 @@ mul.Tensor
 mul.Tensor
 new_empty_strided.default
 copy_.default""",
-        )  # noqa: B950
+        )
 
 
 def load_test_module(name):
@@ -5269,6 +5292,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
+    "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode causes frame skip
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
@@ -5415,6 +5439,17 @@ skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
+
+# boxed_grads_call relies on eager C++ PyNode::apply, incompatible with compiled autograd
+skipped_tests.add("test_custom_function_boxed_grads")
+skipped_tests.add("test_custom_function_boxed_grads_multi_output")
+skipped_tests.add("test_custom_function_boxed_grads_no_extra_refs")
+skipped_tests.add("test_custom_function_boxed_grads_cleanup_on_error")
+skipped_tests.add("test_custom_function_boxed_grads_chain")
+skipped_tests.add("test_custom_function_boxed_grads_none_grads")
+skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
+skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
+skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
