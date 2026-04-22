@@ -36,7 +36,6 @@ Composite Operation
 Non-Leaf Operation
    Same as {term}`Compound Operation`.
 
-   Operation`. Leaf Operation always has dispatch functions defined, usually has a
    derivative function defined as well.
 
 Device Kernel
