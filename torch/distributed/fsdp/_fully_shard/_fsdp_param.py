@@ -261,6 +261,7 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        self._orig_spmd_local_type = getattr(param, "_orig_spmd_local_type", None)
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
@@ -611,13 +612,20 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        if self._unsharded_dtensor_spec is not None:
+        if self._orig_spmd_local_type is not None:
+            pass  # keep as plain tensor; annotate after Parameter creation
+        elif self._unsharded_dtensor_spec is not None:
             unsharded_param = _from_local_no_grad(
                 unsharded_param, self._unsharded_dtensor_spec
             )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        if self._orig_spmd_local_type is not None:
+            from spmd_types._type_attr import set_local_type  # pyrefly: ignore
+
+            set_local_type(self._unsharded_param, self._orig_spmd_local_type)
+            set_local_type(self._unsharded_param.data, self._orig_spmd_local_type)
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
@@ -854,6 +862,10 @@ class FSDPParam:
         return self._get_grad_inner_tensor(grad)
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self._orig_spmd_local_type is not None:
+            # Compute was in spmd_types (plain tensors), grad is already a
+            # plain local tensor ready for reduce-scatter.
+            return grad
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()

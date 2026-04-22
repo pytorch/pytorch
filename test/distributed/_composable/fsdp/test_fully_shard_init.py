@@ -496,6 +496,7 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
             tp_mesh,
             {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
         )
+        torch.distributed.breakpoint()
         fully_shard(model, mesh=dp_mesh)
         sharded_params = list(model.parameters())
         self.assertEqual(len(orig_params), len(sharded_params))

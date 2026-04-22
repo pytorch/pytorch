@@ -430,6 +430,81 @@ def _apply_to_module(
         module.__class__ = new_cls
 
 
+def _maybe_convert_spmd_types_params(
+    params: list[nn.Parameter],
+    modules: tuple[nn.Module, ...],
+    mesh_info: DataParallelMeshInfo,
+) -> list[nn.Parameter]:
+    """Convert spmd_types-annotated params to DTensors on the SPMD mesh.
+
+    Modifies the module parameters in-place and returns the updated param list.
+    Each converted parameter stores the original spmd_types annotation as
+    ``_orig_spmd_local_type`` so it can be restored at unshard time.
+    """
+    if not mesh_info.is_spmd_mesh:
+        return params
+    try:
+        from spmd_types._dtensor import (  # pyrefly: ignore
+            spmd_type_to_dtensor_placement,
+        )
+        from spmd_types._mesh_axis import MeshAxis  # pyrefly: ignore
+        from spmd_types._type_attr import get_local_type  # pyrefly: ignore
+        from spmd_types.runtime import has_local_type  # pyrefly: ignore
+    except ImportError:
+        return params
+
+    from torch._prims_common import make_contiguous_strides_for
+    from torch.distributed.tensor import Replicate, Shard as DtShard
+    from torch.distributed.tensor.placement_types import Placement  # noqa: TC001
+
+    spmd_mesh = mesh_info.spmd_mesh
+    if spmd_mesh is None or spmd_mesh.mesh_dim_names is None:
+        return params
+
+    param_to_dtensor: dict[nn.Parameter, nn.Parameter] = {}
+    for param in params:
+        if isinstance(param, DTensor) or not has_local_type(param):
+            continue
+        local_type = get_local_type(param)
+        if not local_type:
+            continue
+        placements: list[Placement] = []
+        for name in spmd_mesh.mesh_dim_names:
+            axis = MeshAxis.of(spmd_mesh.get_group(name))
+            if axis in local_type:
+                placements.append(spmd_type_to_dtensor_placement(local_type[axis]))
+            else:
+                placements.append(Replicate())
+        global_shape = list(param.shape)
+        for i, placement in enumerate(placements):
+            if isinstance(placement, DtShard):
+                global_shape[placement.dim] *= spmd_mesh.size(i)
+        global_size = torch.Size(global_shape)
+        dtensor_param = DTensor.from_local(
+            param.data,
+            spmd_mesh,
+            placements,
+            run_check=False,
+            shape=global_size,
+            stride=make_contiguous_strides_for(global_size),
+        )
+        new_param = nn.Parameter(dtensor_param, requires_grad=param.requires_grad)
+        new_param._orig_spmd_local_type = local_type  # type: ignore[attr-defined]
+        param_to_dtensor[param] = new_param
+
+    if not param_to_dtensor:
+        return params
+
+    # Update module parameters in-place (walk all submodules)
+    for module in modules:
+        for submodule in module.modules():
+            for param_name, param in list(submodule.named_parameters(recurse=False)):
+                if param in param_to_dtensor:
+                    submodule.register_parameter(param_name, param_to_dtensor[param])
+
+    return [param_to_dtensor.get(p, p) for p in params]
+
+
 def _init_param_group(
     state: "FSDPState",
     params: list[nn.Parameter],
@@ -456,6 +531,8 @@ def _init_param_group(
 
     if not params:
         return
+
+    params = _maybe_convert_spmd_types_params(params, modules, mesh_info)
 
     if shard_placement_fn is None:
         # No shard_placement_fn means all params use the same mesh_info,
