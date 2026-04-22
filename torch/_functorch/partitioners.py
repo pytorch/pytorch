@@ -3129,7 +3129,8 @@ def choose_saved_values_set(
     more_aggressive_saved_values, _ = solve_min_cut(
         joint_graph, node_info, more_aggressive_options
     )
-    if get_mem_ratio(more_aggressive_saved_values) < memory_budget:
+    more_aggressive_saved_values_mem_ratio = get_mem_ratio(more_aggressive_saved_values)
+    if more_aggressive_saved_values_mem_ratio < memory_budget:
         return more_aggressive_saved_values
 
     aggressive_options = replace(
@@ -3140,7 +3141,8 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    if get_mem_ratio(aggressive_recomputation_saved_values) < memory_budget:
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 
     from torch._inductor.fx_utils import get_node_storage
@@ -3238,6 +3240,12 @@ def choose_saved_values_set(
                 normalized_memories_banned_nodes=memories_banned_nodes,
                 runtimes_banned_nodes=runtimes_banned_nodes,
                 min_cut_saved_values=saved_values,
+                memory_budget=memory_budget,
+                min_act_size=min_act_size,
+                max_act_size=max_act_size,
+                saved_values_act_size=estimate_activations_size(saved_values),
+                more_aggressive_saved_values_mem_ratio=more_aggressive_saved_values_mem_ratio,
+                aggressive_recomputation_saved_values_mem_ratio=aggressive_recomputation_saved_values_mem_ratio,
             )
         return saved_values, expected_runtime
 
