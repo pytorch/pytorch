@@ -147,27 +147,29 @@ Promotion Examples::
     torch.float32
 
 When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
+  * A non-complex output tensor cannot accept a complex tensor
   * An integral output tensor cannot accept a floating point tensor.
   * A boolean output tensor cannot accept a non-boolean tensor.
-  * A non-complex output tensor cannot accept a complex tensor
+
+In short, casting from a higher category to a lower one in the hierarchy complex > floating > integral > boolean is not allowed.
 
 Casting Examples::
 
     # allowed:
+    >>> float_tensor *= double_tensor
     >>> float_tensor *= float_tensor
     >>> float_tensor *= int_tensor
     >>> float_tensor *= uint_tensor
     >>> float_tensor *= bool_tensor
-    >>> float_tensor *= double_tensor
     >>> int_tensor *= long_tensor
     >>> int_tensor *= uint_tensor
     >>> uint_tensor *= int_tensor
 
     # disallowed (RuntimeError: result type can't be cast to the desired output type):
+    >>> float_tensor *= complex_float_tensor
     >>> int_tensor *= float_tensor
     >>> bool_tensor *= int_tensor
     >>> bool_tensor *= uint_tensor
-    >>> float_tensor *= complex_float_tensor
 
 
 .. _device-doc:
