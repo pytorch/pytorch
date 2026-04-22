@@ -366,7 +366,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       w_zero_points.data(),
       /* for dynamic should really be called dequant scale */
       requantization_scales.data(),
-      (uint8_t*)q_input.const_data_ptr<c10::quint8>(),
+      reinterpret_cast<const uint8_t*>(q_input.const_data_ptr<c10::quint8>()),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       bias_ptr,

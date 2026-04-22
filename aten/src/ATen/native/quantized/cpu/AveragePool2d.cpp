@@ -329,7 +329,7 @@ Tensor qnnpack_avg_pool2d(
           batch_size,
           inH,
           inW,
-          (uint8_t*)input_contig.const_data_ptr<c10::quint8>() /* input data */,
+          reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
           (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
           outC,

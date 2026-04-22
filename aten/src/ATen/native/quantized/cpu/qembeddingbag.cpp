@@ -323,7 +323,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
 
     int i = 0;
     while (i + 15 < lengths_data[m]) {
-      uint8_t* wei_ptr[16];
+      const uint8_t* wei_ptr[16];
       float bias = 0.0f;
       float scale[16];
       float32x4_t scale_vec[16];
@@ -384,7 +384,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 7 < lengths_data[m]) {
-      uint8_t* wei_ptr[8];
+      const uint8_t* wei_ptr[8];
       float bias = 0.0f;
       float scale[8];
       float32x4_t scale_vec[8];
@@ -445,7 +445,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 3 < lengths_data[m]) {
-      uint8_t* wei_ptr[4];
+      const uint8_t* wei_ptr[4];
       float bias = 0.0f;
       float scale[4];
       float32x4_t scale_vec[4];
@@ -506,7 +506,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 1 < lengths_data[m]) {
-      uint8_t* wei_ptr[2];
+      const uint8_t* wei_ptr[2];
       float bias = 0.0f;
       float scale[2];
       float32x4_t scale_vec[2];
