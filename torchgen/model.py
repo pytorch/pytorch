@@ -755,6 +755,10 @@ class NativeFunction:
         if namespace == "aten" and "pt2_compliant_tag" in valid_tags:
             tags_inp.append("pt2_compliant_tag")
 
+        # All out= ops receive the "out" tag.
+        if func.is_out_fn() and "out" in valid_tags:
+            tags_inp.append("out")
+
         tags: set[str] = set()
         for t in tags_inp:
             if len(valid_tags) == 0:
