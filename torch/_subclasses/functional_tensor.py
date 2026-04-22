@@ -485,6 +485,33 @@ class FunctionalTensorMode(TorchDispatchMode):
         if _has_unrecognized_tensor_types(types):
             return NotImplemented
 
+        # C++ functionalization cannot operate on inference tensors because
+        # they lack a version counter.  Temporarily exit inference mode for
+        # the whole dispatch so that tensors created by decomposition and by
+        # the C++ Functionalize kernel are normal tensors.  This is safe
+        # because functionalization only runs during compilation, where
+        # inference_mode semantics (version-counter elision, inference-tensor
+        # tagging) are not needed — the real inference_mode is applied at
+        # runtime by the graph nodes emitted by Dynamo.
+        _inference_mode_ctx = None
+        if torch.is_inference_mode_enabled():
+            _inference_mode_ctx = torch.autograd.grad_mode._enter_inference_mode(
+                False
+            )
+        try:
+            return self._torch_dispatch_impl(func, types, args, kwargs)
+        finally:
+            if _inference_mode_ctx is not None:
+                torch.autograd.grad_mode._exit_inference_mode(_inference_mode_ctx)
+
+    def _torch_dispatch_impl(
+        self,
+        func: OpOverload,
+        types: Sequence[type],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+
         if (
             func not in FunctionalTensor.metadata_fns
             and self._can_decompose(func, args, kwargs)

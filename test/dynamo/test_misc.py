@@ -8113,6 +8113,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    def test_inference_mode_inside_forward_with_view(self):
+        # Regression test: inference_mode() inside a compiled forward with
+        # view ops used to fail because C++ functionalization cannot handle
+        # inference tensors (no version counter), and graph inputs created
+        # outside inference_mode had their storage missing from
+        # _storage_to_base.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                k = x.view(2, 20, 8, 64).transpose(1, 2)
+                with torch.inference_mode():
+                    return k.transpose(-2, -1)
+
+        m = M().eval()
+        x = torch.randn(2, 20, 512)
+        compiled = torch.compile(m, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled(x), m(x))
+
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
