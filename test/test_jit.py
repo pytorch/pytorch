@@ -103,11 +103,11 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
-from torch.testing._internal.common_utils import run_tests, IS_ARM64, IS_WINDOWS, \
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
     GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef, skipIfTorchDynamo, xfailIf
+    skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -15796,8 +15796,11 @@ dedent """
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
 
-    @xfailIf(IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177255
+    @unittest.skipIf(
+        os.environ.get("TORCH_SHOW_CPP_STACKTRACES") == "1",
+        "C++ stack traces are expected in the error message when "
+        "TORCH_SHOW_CPP_STACKTRACES=1, so the 'frame' assertion doesn't apply.",
+    )
     def test_conv_error(self):
         @torch.jit.script
         def fn(x, y):
