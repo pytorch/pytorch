@@ -197,9 +197,10 @@ static void update_tensor_hooks_on_new_gradfn(
   TORCH_INTERNAL_ASSERT(meta);
   TORCH_INTERNAL_ASSERT(new_fn);
   meta->cpp_hooks_list_ = nullptr;
-  if (self.unsafeGetTensorImpl()->pyobj_slot()->load_pyobj()) {
-    (*c10::impl::getGlobalPyInterpreter())
-        ->reset_backward_hooks(self.unsafeGetTensorImpl());
+  const c10::impl::PyInterpreter* interp =
+      self.unsafeGetTensorImpl()->pyobj_slot()->pyobj_interpreter();
+  if (interp) {
+    (*interp)->reset_backward_hooks(self.unsafeGetTensorImpl());
   }
   if (self.retains_grad()) {
     TORCH_INTERNAL_ASSERT(old_fn);
