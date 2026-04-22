@@ -4,6 +4,7 @@ import functools
 import inspect
 import re
 import sys
+import warnings
 import weakref
 from collections.abc import Callable, Sequence
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
@@ -417,6 +418,19 @@ class Library:
             dispatcher_op_name = name
             if "::" not in dispatcher_op_name:
                 dispatcher_op_name = f"{self.ns}::{dispatcher_op_name}"
+
+            op = torch._library.utils.lookup_op(dispatcher_op_name)
+            if torch._library.utils.is_out(op) and not torch._library.utils.is_builtin(
+                op
+            ):
+                warnings.warn(
+                    f"Registering a Meta kernel for operator '{dispatcher_op_name}' "
+                    f"which has torch.Tag.out. Operators with Tag.out automatically "
+                    f"get a fake kernel that returns the out= arguments. We "
+                    f"recommend not registering a fake/meta kernel manually "
+                    f"because it is easy to get wrong.",
+                    stacklevel=2,
+                )
 
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
