@@ -368,6 +368,26 @@ class StarDep(Dep):
         return False
 
 
+@dataclasses.dataclass(frozen=True)
+class UserTritonDep(StarDep):
+    # pyrefly: ignore [bad-override]
+    access_count: int = 1
+
+    # depends on the entire buffer
+    @property
+    # pyrefly: ignore [bad-override]
+    def index(self) -> sympy.Expr:
+        raise NotImplementedError("UserTritonDep does not have an index")
+
+    def get_numel(self) -> sympy.Expr:
+        return V.graph.get_numel(self.name)  # type: ignore[return-value]
+
+    def rename(self, renames: dict[str, str]) -> "UserTritonDep":
+        if self.name in renames:
+            return UserTritonDep(renames[self.name], self.mode, self.access_count)
+        return self
+
+
 # Used for tracking mutation ordering
 # if A reads a buffer and B mutates it
 # B must be ordered after A
