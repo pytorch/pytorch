@@ -2202,7 +2202,7 @@ class TritonKernelOverrides(TritonOverrides):
                     for fx_node in last_uses:
                         val = fx_node.meta.get("val")
                         if val is not None:
-                            if val.dtype == torch.int64:
+                            if hasattr(val, "dtype") and val.dtype == torch.int64:
                                 original_dtype = torch.int64
                                 break
                     if original_dtype == torch.int64:
