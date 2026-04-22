@@ -39,6 +39,7 @@ from torch._logging import getArtifactLogger
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
@@ -124,9 +125,22 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
                 payload_fn=lambda: json.dumps(cache_info),
             )
             result = graph  # type: ignore[assignment]
+            result.compile_region_name = (  # pyrefly: ignore[missing-attribute]
+                fx_config.get("compile_region_name")
+            )
 
         # Run normal post compile
         result.post_compile(self.example_inputs, constants, fx_config)
+
+        # Let the CUDAGraph policy do outer-level wrapping (e.g. wrapping
+        # an entire RegionalOutputCode as a single CUDA graph instead of
+        # per-inner-region).
+        import torch._inductor.config as _inductor_config
+
+        policy = _inductor_config.cudagraph_policy
+        if policy is not None:
+            result = policy.wrap_output(result)
+
         return result
 
 
@@ -218,7 +232,17 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         """
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
+        result.compile_region_name = fx_config.get(  # pyrefly: ignore[bad-assignment]
+            "compile_region_name"
+        )
         result.post_compile(self.example_inputs, self.constants, fx_config)
+
+        import torch._inductor.config as _inductor_config
+
+        policy = _inductor_config.cudagraph_policy
+        if policy is not None:
+            result = policy.wrap_output(result)
+
         return result
 
 
@@ -238,26 +262,27 @@ class GenericCompiledBackward(InductorOutput[TOut]):
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
-
-@dataclass
-class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
-    """
-    Cacheable entry for a forward function
-    """
-
-    def _is_backward(self) -> bool:
-        return True
-
-    def post_compile(
-        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
-    ) -> CompiledFxGraph:
-        compiled_bw = super().post_compile(result, fx_config)
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
+        # The concrete post_compile comes from the loadable mixin in each subclass MRO.
+        compiled_bw = super().post_compile(  # pyrefly: ignore[missing-attribute]
+            result, fx_config
+        )
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
         return torch._dynamo.disable(  # type: ignore[return-value]
             compiled_bw, reason="do not trace generated backwards pass"
         )
+
+
+@dataclass
+class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
+    """
+    Cacheable entry for a backward function
+    """
+
+    def _is_backward(self) -> bool:
+        return True
 
 
 # Generic bundled forward/backward classes that work with any OutputCode type
@@ -281,17 +306,6 @@ class BundledCompiledBackward(
     Generic backward function for bundled compilation.
     Works with any OutputCode type (CompiledFxGraph, RegionalOutputCode, etc.)
     """
-
-    def post_compile(
-        self, result: TOutputCode, fx_config: _CompileFxKwargs
-    ) -> TOutputCode:
-        compiled_bw = super().post_compile(result, fx_config)
-        # See note [Wrapping bw_compiler in disable]
-        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
-        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(  # type: ignore[return-value]
-            compiled_bw, reason="do not trace generated backwards pass"
-        )
 
 
 @dataclass
@@ -382,123 +396,115 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
 
-    # Turn result into the original callable
-    def wrap_post_compile(
-        self,
-        args: list[torch.Tensor],
-        aot_config: AOTConfig,
-        fx_config: _CompileFxKwargs,
-        # pyrefly: ignore [implicit-any]
-    ) -> Callable:
-        """
-        This function takes a result and carefully reconstructs the original callable
-        that AOTAutograd returned the first time it was run. It does this by running the various
-        post compile steps that AOTAutograd runs on its compiled artifact after running the fw/bw compilers.
+    def _log_cached_graphs(self, aot_config: AOTConfig) -> None:
+        if not aot_config.enable_log:
+            return
 
-        In the inference path, this consists of the Subclass, FunctionalzedRngRuntime, and RuntimeWrappers.
-        In the autograd path, this consists of AOTAutogradDispatch.post_compile.
+        if self.aot_joint_graph_str is not None:
+            torch._logging.trace_structured(
+                "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+            )
+            aot_graphs_log.info(
+                "Joint graph (from cache)\n\n%s", self.aot_joint_graph_str
+            )
 
-        The steps here should match exactly the steps that are run in aot_dispatch_base and aot_dispatch_autograd.
+        if self.aot_forward_graph_str is not None:
+            from torchgen.utils import dataclass_repr
 
-        Notably absent from the cached path are:
-        - DebugAssertWrapper
-        - FakifiedOutWrapper
-
-        Which we'll handle separately later on, if necessary.
-        """
-        from torch._dynamo.utils import CompileEventLogger, dynamo_timed
-
-        # Log the output of AOTAutogradCache
-        if aot_config.enable_log:
-            if self.aot_joint_graph_str is not None:
-                torch._logging.trace_structured(
-                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
-                )
-                aot_graphs_log.info(
-                    "Joint graph (from cache)\n\n%s", self.aot_joint_graph_str
-                )
-
-            if self.aot_forward_graph_str is not None:
-                from torchgen.utils import dataclass_repr
-
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_forward_graph_fw_metadata",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dataclass_repr(self.runtime_metadata),
+            )
+            if self.maybe_subclass_meta is not None:
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": "aot_forward_graph_fw_metadata",
+                        "name": "aot_forward_graph_fw_subclass_metadata",
                         "encoding": "string",
                     },
-                    payload_fn=lambda: dataclass_repr(self.runtime_metadata),
-                )
-                if self.maybe_subclass_meta is not None:
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "aot_forward_graph_fw_subclass_metadata",
-                            "encoding": "string",
-                        },
-                        payload_fn=lambda: dataclass_repr(self.maybe_subclass_meta),
-                    )
-
-                # It's called an inference graph if not running with autograd
-                has_backward = self.aot_backward_graph_str is not None
-                torch._logging.trace_structured(
-                    "aot_forward_graph" if has_backward else "aot_inference_graph",
-                    payload_fn=lambda: self.aot_forward_graph_str,
-                )
-                aot_graphs_log.info(
-                    "Forward graph (from cache)\n\n%s",
-                    self.aot_forward_graph_str,
+                    payload_fn=lambda: dataclass_repr(self.maybe_subclass_meta),
                 )
 
-            if self.aot_backward_graph_str is not None:
-                torch._logging.trace_structured(
-                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
-                )
-                aot_graphs_log.info(
-                    "Backward graph (from cache)\n\n%s",
-                    self.aot_backward_graph_str,
-                )
-        with dynamo_timed("AOTAutogradCache.inductor_load"):
-            compiled_fw_func = self.compiled_fw.load(args)
-            compiled_bw_func = None
-            if self.compiled_bw is not None:
-                compiled_bw_func = self.compiled_bw.load(args)
-                needs_autograd = True
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", dispatch_mode="autograd"
-                )
-                # Now that we've loaded forward and backward, call post compile on both
-                # This avoids setting things like BoxedBools in fx_config until
-                # after both forward and backward cache hit
-                fw_fx_config: _CompileFxKwargs = {
-                    **fx_config,
-                    "is_backward": False,
-                }
-                bw_fx_config: _CompileFxKwargs = {
-                    **fx_config,
-                    "is_backward": True,
-                }
-                compiled_fw_func = self.compiled_fw.post_compile(
-                    compiled_fw_func, fw_fx_config
-                )
-                compiled_bw_func = self.compiled_bw.post_compile(
-                    compiled_bw_func, bw_fx_config
-                )
-            else:
-                inference_fx_config: _CompileFxKwargs = {
-                    **fx_config,
-                    "is_backward": False,
-                }
+            # It's called an inference graph if not running with autograd
+            has_backward = self.aot_backward_graph_str is not None
+            torch._logging.trace_structured(
+                "aot_forward_graph" if has_backward else "aot_inference_graph",
+                payload_fn=lambda: self.aot_forward_graph_str,
+            )
+            aot_graphs_log.info(
+                "Forward graph (from cache)\n\n%s",
+                self.aot_forward_graph_str,
+            )
 
-                needs_autograd = False
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", dispatch_mode="inference"
-                )
-                compiled_fw_func = self.compiled_fw.post_compile(
-                    compiled_fw_func, inference_fx_config
-                )
+        if self.aot_backward_graph_str is not None:
+            torch._logging.trace_structured(
+                "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+            )
+            aot_graphs_log.info(
+                "Backward graph (from cache)\n\n%s",
+                self.aot_backward_graph_str,
+            )
 
-        # Wrap the forward function in post compile wrappers
+    def _load_and_post_compile(
+        self,
+        args: list[torch.Tensor],
+        fx_config: _CompileFxKwargs,
+    ) -> tuple[Callable[..., Any], Callable[..., Any] | None, bool]:
+        from torch._dynamo.utils import CompileEventLogger
+
+        compiled_fw_func = self.compiled_fw.load(args)
+        if self.compiled_bw is not None:
+            compiled_bw_func = self.compiled_bw.load(args)
+            needs_autograd = True
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", dispatch_mode="autograd"
+            )
+            # Now that we've loaded forward and backward, call post compile on both
+            # This avoids setting things like BoxedBools in fx_config until
+            # after both forward and backward cache hit
+            fw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": False,
+            }
+            bw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": True,
+            }
+            compiled_fw_func = self.compiled_fw.post_compile(
+                compiled_fw_func, fw_fx_config
+            )
+            compiled_bw_func = self.compiled_bw.post_compile(
+                compiled_bw_func, bw_fx_config
+            )
+            return compiled_fw_func, compiled_bw_func, needs_autograd
+
+        inference_fx_config: _CompileFxKwargs = {
+            **fx_config,
+            "is_backward": False,
+        }
+
+        needs_autograd = False
+        CompileEventLogger.try_add_pt2_compile(
+            "backend_compile", dispatch_mode="inference"
+        )
+        compiled_fw_func = self.compiled_fw.post_compile(
+            compiled_fw_func, inference_fx_config
+        )
+        return compiled_fw_func, None, needs_autograd
+
+    def _apply_runtime_wrappers(
+        self,
+        compiled_fw_func: Callable[..., Any],
+        compiled_bw_func: Callable[..., Any] | None,
+        needs_autograd: bool,
+        aot_config: AOTConfig,
+    ) -> Callable[..., Any]:
+        from torch._dynamo.utils import CompileEventLogger
+
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
             fw_only=None,
@@ -538,19 +544,20 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             # 1. the bw is already compiled
             # 2. we don't need to save to the cache again
             # so those corresponding arguments are set to None.
-            compiled_function = AOTDispatchAutograd.post_compile(
-                compiled_fw_func,
-                compiled_bw_func,
-                self.maybe_subclass_meta,
-                self.compiled_bw.num_symints_saved_for_bw_,
-                self.compiled_bw.backward_state_indices,
-                disable_amp,
-                self.indices_of_inps_to_detach,
-                cached_lazy_backward,
-                aot_config,
+            compile_spec = AOTDispatchAutogradCompileSpec(
+                compiled_fw_func=compiled_fw_func,
+                compiled_bw_func=compiled_bw_func,
+                maybe_subclass_meta=self.maybe_subclass_meta,
+                num_symints_saved_for_bw=self.compiled_bw.num_symints_saved_for_bw_,
+                backward_state_indices=self.compiled_bw.backward_state_indices,
+                disable_amp=disable_amp,
+                indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+                lazy_backward_info=cached_lazy_backward,
+                aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+            compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 
         else:
             compiled_function = RuntimeWrapper(
@@ -568,9 +575,9 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             aot_config,
             runtime_metadata=self.runtime_metadata,
         )
+        return compiled_function
 
-        # Now that we're pretty sure it's a successful load, add guards
-        # to the existing shape environment from the cache
+    def _check_guards(self, args: list[torch.Tensor]) -> None:
         if self.guards_expr:
             from .autograd_cache import AOTAutogradCache
 
@@ -579,6 +586,43 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             if check is not True:
                 raise AssertionError(f"guards check failed: {check}")
 
+    # Turn result into the original callable
+    def wrap_post_compile(
+        self,
+        args: list[torch.Tensor],
+        aot_config: AOTConfig,
+        fx_config: _CompileFxKwargs,
+    ) -> Callable[..., Any]:
+        """
+        This function takes a result and carefully reconstructs the original callable
+        that AOTAutograd returned the first time it was run. It does this by running the various
+        post compile steps that AOTAutograd runs on its compiled artifact after running the fw/bw compilers.
+
+        In the inference path, this consists of the Subclass, FunctionalzedRngRuntime, and RuntimeWrappers.
+        In the autograd path, this consists of AOTAutogradDispatch.post_compile.
+
+        The steps here should match exactly the steps that are run in aot_dispatch_base and aot_dispatch_autograd.
+
+        Notably absent from the cached path are:
+        - DebugAssertWrapper
+        - FakifiedOutWrapper
+
+        Which we'll handle separately later on, if necessary.
+        """
+        from torch._dynamo.utils import dynamo_timed
+
+        self._log_cached_graphs(aot_config)
+        with dynamo_timed("AOTAutogradCache.inductor_load"):
+            compiled_fw_func, compiled_bw_func, needs_autograd = (
+                self._load_and_post_compile(args, fx_config)
+            )
+
+        compiled_function = self._apply_runtime_wrappers(
+            compiled_fw_func, compiled_bw_func, needs_autograd, aot_config
+        )
+        # Now that we're pretty sure it's a successful load, add guards
+        # to the existing shape environment from the cache.
+        self._check_guards(args)
         return compiled_function
 
 

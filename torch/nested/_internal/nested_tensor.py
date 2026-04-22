@@ -152,9 +152,19 @@ class NestedTensor(torch.Tensor):
         # holds properties that are computed lazily
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
-        # collapsed ragged dim must always be dynamic
-        torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
+        # Collapsed ragged dim must always be dynamic.
+        # Use _dynamo_propagated_dynamic_indices (unguarded) rather than
+        # maybe_mark_dynamic (which sets _dynamo_weak_dynamic_indices, a guarded
+        # attribute) to avoid spurious guard failures when the same tensor is
+        # reused across multiple compile calls. The builder reads both attributes,
+        # so dynamism propagation still works.
+        # See [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            mark_dynamo_propagated_dynamic_indices,
+        )
+
+        mark_dynamo_propagated_dynamic_indices(self, {self._ragged_idx})
+        mark_dynamo_propagated_dynamic_indices(self._values, {self._ragged_idx - 1})
 
         # min / max sequence length should be dynamic if present
         max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)

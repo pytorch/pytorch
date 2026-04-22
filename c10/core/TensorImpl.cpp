@@ -4,6 +4,7 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -195,6 +196,44 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
   key_set_ = key_set | DispatchKeySet(new_backend);
 }
 
+void TensorImpl::set_fake_device(c10::Device fake_device) {
+  TORCH_CHECK(
+      fake_device.type() != c10::DeviceType::Meta,
+      "FakeTensor does not support meta device");
+
+  // in python FakeTensor, it checks whether or not
+  // we are in in_kernel_invocation manager to determine
+  // which device we return
+
+  // but since we have an extra field for fake_device_,
+  // we can just set it upon FakeTensor creation
+  // and determine in device_custom() which device to return
+  // (based on if DispatchKey::Fake is excluded or not)
+  get_extra_meta().fake_device_ = fake_device;
+  key_set_ = key_set_.add(DispatchKey::Fake);
+
+  // we need this so that device() calls device_custom()
+  // where the fake device logic is instead of just calling device_default()
+  set_custom_device(true);
+
+  // change backend key from Meta to the fake device
+  _change_backend_component_keys(fake_device);
+}
+
+void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
+  // normalize device index for indexed device types (not CPU)
+  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU) {
+    const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
+    if (guard_impl) {
+      fake_device = guard_impl->getDevice();
+    }
+    if (fake_device.index() == -1) {
+      fake_device = c10::Device(fake_device.type(), 0);
+    }
+  }
+  set_fake_device(fake_device);
+}
+
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
@@ -270,6 +309,18 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   return _compute_non_overlapping_and_dense<int64_t>(
       sizes_and_strides_.sizes_arrayref(),
       sizes_and_strides_.strides_arrayref());
+}
+
+void TensorImpl::incref_pyobject() const noexcept {
+  pyobj_slot_.incref();
+}
+
+void TensorImpl::decref_pyobject() const noexcept {
+  pyobj_slot_.decref();
+}
+
+bool TensorImpl::try_incref_pyobject() const noexcept {
+  return pyobj_slot_.try_incref();
 }
 
 void TensorImpl::release_resources() {
@@ -374,6 +425,12 @@ c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
 c10::Device TensorImpl::device_custom() const {
   if (C10_UNLIKELY(python_custom_device_)) {
     return pyobj_slot_.load_pyobj_interpreter()->device(this);
+  }
+  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
+    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+      return device_default();
+    }
+    return *extra_meta_->fake_device_;
   }
   return device_default();
 }
@@ -986,30 +1043,6 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     default:
       break;
   }
-}
-
-void TensorImpl::incref_pyobject() const noexcept {
-  // Because intrusive_ptr incref uses relaxed memory order, we need to
-  // do an acquire fence to ensure that the kHasPyObject bit was
-  // observed before the load of the PyObject* below.
-  // NB: This is a no-op on x86/x86-64
-  std::atomic_thread_fence(std::memory_order_acquire);
-
-  PyObject* obj = pyobj_slot_.load_pyobj();
-  (*pyobj_slot_.pyobj_interpreter())->incref(obj);
-}
-
-void TensorImpl::decref_pyobject() const noexcept {
-  PyObject* obj = pyobj_slot_.load_pyobj();
-  (*pyobj_slot_.pyobj_interpreter())->decref(obj);
-}
-
-bool TensorImpl::try_incref_pyobject() const noexcept {
-  c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
-  if (C10_UNLIKELY(!interp)) {
-    return false;
-  }
-  return (*interp)->try_incref(pyobj_slot_);
 }
 
 namespace impl {

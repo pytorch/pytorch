@@ -53,6 +53,9 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+  if(USE_MTIA)
+    list(APPEND Caffe2_CPU_SRCS ${ATen_MTIA_SRCS})
+  endif()
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
   list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
@@ -587,6 +590,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -597,7 +601,7 @@ if(USE_CUDA)
     if(CMAKE_COMPILER_IS_GNUCXX)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
     endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
+    if(CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
@@ -838,6 +842,10 @@ if(USE_MPS)
   if(CAN_COMPILE_METAL)
     add_dependencies(torch_cpu metallibs)
     target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+    if(CAN_COMPILE_METAL_40)
+      target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_40,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_40.metallib)
+      target_compile_definitions(torch_cpu PRIVATE CAN_BUILD_METAL_4)
+    endif()
   else()
     target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
   endif()
@@ -1460,44 +1468,78 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
-  message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
+  message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")
   if(USE_NVSHMEM)
-    if(rocshmem_FOUND)
-      message(STATUS "rocSHMEM found, building with rocSHMEM support")
-      message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
-      set(TORCH_ROCSHMEM_SRCS
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
-      )
-      set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
+    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.3.0")
+      # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
+      set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201)
+      set(_torch_rocshmem_build_arches)
+      foreach(_arch ${PYTORCH_ROCM_ARCH})
+        list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
+        if(NOT _rocsmem_supported_idx EQUAL -1)
+          # rocSHMEM device archives are commonly built for gfx90a xnack variants,
+          # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
+          # symbols during HIP RDC link.
+          if(_arch STREQUAL "gfx90a")
+            list(APPEND _torch_rocshmem_build_arches "gfx90a:xnack-" "gfx90a:xnack+")
+          else()
+            list(APPEND _torch_rocshmem_build_arches "${_arch}")
+          endif()
+        endif()
+      endforeach()
+      if(_torch_rocshmem_build_arches)
+        message(STATUS "rocSHMEM found, building with rocSHMEM support for arches: ${_torch_rocshmem_build_arches}")
+        message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
+        set(TORCH_ROCSHMEM_SRCS
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
+        )
+        set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
 
-      # FindHIP's generated compile script bakes in global HIP_CLANG_FLAGS. Override
-      # -fno-gpu-rdc with -fgpu-rdc so device linker can pull in rocSHMEM device APIs.
-      set(HIP_CLANG_FLAGS_SAVED ${HIP_CLANG_FLAGS})
-      set(HIP_CLANG_FLAGS_FOR_ROCSHMEM ${HIP_CLANG_FLAGS})
-      list(FILTER HIP_CLANG_FLAGS_FOR_ROCSHMEM EXCLUDE REGEX "^-fno-gpu-rdc$")
-      list(APPEND HIP_CLANG_FLAGS_FOR_ROCSHMEM -fgpu-rdc)
-      set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_FOR_ROCSHMEM})
+        # FindHIP's generated compile script bakes in global HIP_CLANG_FLAGS. Override
+        # -fno-gpu-rdc with -fgpu-rdc so device linker can pull in rocSHMEM device APIs.
+        set(HIP_CLANG_FLAGS_SAVED ${HIP_CLANG_FLAGS})
+        set(HIP_CLANG_FLAGS_FOR_ROCSHMEM ${HIP_CLANG_FLAGS})
+        list(FILTER HIP_CLANG_FLAGS_FOR_ROCSHMEM EXCLUDE REGEX "^-fno-gpu-rdc$")
+        list(APPEND HIP_CLANG_FLAGS_FOR_ROCSHMEM -fgpu-rdc)
+        set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_FOR_ROCSHMEM})
 
-      hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
+        hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
 
-      set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_SAVED})
+        set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_SAVED})
 
-      set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
+        set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
 
-      target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
-      target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
 
-      target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
-      target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+        # torch_rocshmem is built with -fgpu-rdc, so its HIP link step performs
+        # device linking and must carry the full arch list explicitly.
+        set_target_properties(
+            torch_rocshmem PROPERTIES HIP_ARCHITECTURES "${_torch_rocshmem_build_arches}")
 
-      install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
-        "${TORCH_INSTALL_LIB_DIR}")
+
+        target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
+        target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
+
+        target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
+        target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+
+        install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
+          "${TORCH_INSTALL_LIB_DIR}")
+      else()
+        message(STATUS
+          "rocSHMEM found but skipped: PYTORCH_ROCM_ARCH has no entry in "
+          "ROCSHMEM_SUPPORTED_ARCH (${ROCSHMEM_SUPPORTED_ARCH}). "
+          "Building without rocSHMEM support.")
+      endif()
+    elseif(rocshmem_FOUND)
+      message(STATUS
+        "rocSHMEM found but skipped: requires rocSHMEM >= 3.3.0 "
+        "(found '${rocshmem_VERSION}'). Building without rocSHMEM support.")
     else()
       message(WARNING "rocSHMEM not found (USE_NVSHMEM=ON). Building without rocSHMEM support.")
-    endif() #rocshmem_FOUND
+    endif()
   endif() #USE_NVSHMEM
 endif()
 

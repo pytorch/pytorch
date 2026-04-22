@@ -13,22 +13,13 @@ import dataclasses
 import itertools
 import logging
 import operator
+import threading
 import time
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
-from contextlib import nullcontext
-from typing import Any, TYPE_CHECKING
-
-from torch._library.fake_class_registry import FakeScriptObject
-from torch._opaque_base import OpaqueBase
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -41,8 +32,10 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger, trace_structured
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -68,6 +61,7 @@ from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
@@ -120,6 +114,12 @@ def is_opaque_node(node: Any) -> bool:
 
 
 _thread_local = threading.local()
+
+
+def _should_save_cache(*compiled_fns: Callable[..., Any]) -> bool:
+    if should_bundle_autograd_cache():
+        return True
+    return all(hasattr(fn, "_fx_graph_cache_key") for fn in compiled_fns)
 
 
 @contextmanager
@@ -499,14 +499,8 @@ def _cache_inference_info(
 
     cache_info = aot_config.cache_info
 
-    def should_save_cache() -> bool:
-        if should_bundle_autograd_cache():
-            return True
-        else:
-            return hasattr(compiled_fw, "_fx_graph_cache_key")
-
     entry: GenericAOTAutogradResult[Any, Any] | None = None
-    if cache_info is not None and should_save_cache():
+    if cache_info is not None and _should_save_cache(compiled_fw):
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
         entry = AOTAutogradCache.make_entry(
@@ -1666,9 +1660,9 @@ def _log_fw_bw_graphs(
         )
         aot_graphs_log.info(
             "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
-            str(aot_config.aot_id),
-            str(fw_metadata),
-            str(_get_inner_meta(maybe_subclass_meta, fw_metadata)),
+            aot_config.aot_id,
+            fw_metadata,
+            _get_inner_meta(maybe_subclass_meta, fw_metadata),
         )
 
         aot_graphs_log.info(
@@ -1735,6 +1729,265 @@ def _log_fw_bw_graphs(
     return fw_module_str, bw_module_str
 
 
+def _partition_joint_graph_into_fw_bw(
+    fx_g: torch.fx.GraphModule,
+    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    inner_meta: ViewAndMutationMeta,
+    fw_metadata: ViewAndMutationMeta,
+    aot_config: AOTConfig,
+) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule, int]:
+    # See Note: [Partitioner handling for Subclasses, Part 1]
+    # See Note: [Recomputing subclass mutation handling]
+    mutated_inp_runtime_indices = compute_inner_mutated_inp_indices_from_subclass_meta(
+        fw_metadata, inner_meta
+    )
+    num_tokens = len(fw_metadata.tokens)
+    num_inner_fwd_outputs = (
+        len(mutated_inp_runtime_indices)
+        + inner_meta.num_outputs
+        + inner_meta.num_intermediate_bases
+        + inner_meta.num_outputs_rng_offset
+        + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
+    )
+
+    fx_g = run_joint_graph_passes_on_hops(fx_g, joint_inputs, aot_config)
+
+    # apply joint_gm callback here
+    if callable(torch._functorch.config.joint_custom_pass):
+        # pyrefly: ignore [bad-assignment]
+        fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
+    if aot_config.partition_fn is None:
+        raise AssertionError("aot_config.partition_fn must not be None")
+    fw_module, bw_module = aot_config.partition_fn(
+        fx_g,
+        joint_inputs,
+        num_fwd_outputs=num_inner_fwd_outputs,
+        static_lifetime_input_indices=fw_metadata.static_input_indices,
+    )
+
+    rng_states = [
+        n
+        for n in fw_module.graph.find_nodes(op="placeholder")
+        if "fwd_rng_state" in n.name
+    ]
+    fw_metadata.num_graphsafe_rng_states = len(rng_states)
+    if rng_states:
+        fw_metadata.graphsafe_rng_state_index = rng_states[0].meta["val"].device.index
+
+    return fw_module, bw_module, num_inner_fwd_outputs
+
+
+def _joint_inputs_for_forward(
+    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+) -> list[Any]:
+    return joint_inputs[0] if isinstance(joint_inputs, tuple) else joint_inputs
+
+
+def _maybe_unlift_partitioned_effect_tokens(
+    fw_module: torch.fx.GraphModule,
+    bw_module: torch.fx.GraphModule,
+    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    fw_metadata: ViewAndMutationMeta,
+    aot_config: AOTConfig,
+    num_inner_fwd_outputs: int,
+) -> tuple[int, list[Any] | tuple[list[Any], list[Any]]]:
+    num_tokens = len(fw_metadata.tokens)
+
+    # See Note [Side-Effectful Tokens in AOTAutograd]
+    if config.unlift_effect_tokens and (
+        num_tokens > 0 or fw_metadata.num_backward_tokens > 0
+    ):
+        unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+        num_inner_fwd_outputs -= num_tokens
+        if isinstance(joint_inputs, tuple):
+            joint_inputs = (
+                _joint_inputs_for_forward(joint_inputs)[num_tokens:],
+                joint_inputs[1],
+            )
+        else:
+            joint_inputs = joint_inputs[num_tokens:]
+
+    return num_inner_fwd_outputs, joint_inputs
+
+
+def _categorize_saved_tensors_for_backward(
+    fw_module: torch.fx.GraphModule,
+    bw_module: torch.fx.GraphModule,
+    inner_meta: ViewAndMutationMeta,
+    fw_metadata: ViewAndMutationMeta,
+    num_inner_fwd_outputs: int,
+) -> tuple[int, int]:
+    fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
+    # we only need to bookkeep the symints that are saved for bw, not any symints
+    # the user forward might have returned in its own output
+    fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
+    num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
+
+    num_symints_saved_for_bw = 0
+    num_opaque_objects_saved_for_bw = 0
+    for idx, node in enumerate(fw_outs_saved_for_bw):
+        if is_sym_node(node):
+            num_symints_saved_for_bw += 1
+        elif is_opaque_node(node):
+            num_opaque_objects_saved_for_bw += 1
+        elif isinstance(node, torch.fx.Node) and "val" in getattr(node, "meta", {}):
+            if isinstance(node.meta["val"], FakeTensor):
+                # record dynamic tensor activations
+                dynamic_dims: set[int] = {
+                    dim
+                    for dim, size in enumerate(node.meta["val"].shape)
+                    if not isinstance(size, int)
+                }
+                if dynamic_dims:
+                    fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+            elif isinstance(node.meta["val"], (FakeScriptObject, OpaqueBase)):
+                num_opaque_objects_saved_for_bw += 1
+
+    fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+    fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+    inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
+    inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+
+    # See Note [Activations with no version counter checks in eager]
+    # Count tensors saved with no version counter check.
+    # These are tensors that were stashed on ctx (e.g., ctx.x = x) rather than
+    # via save_for_backward in an autograd.Function.
+    # The partitioner sorts these to be at the end of saved_values.
+    num_tensors_saved_with_no_vc_check = sum(
+        1
+        for node in fw_outs_saved_for_bw
+        if isinstance(node, torch.fx.Node)
+        and node.meta.get("saved_tensor_with_no_vc_check", False)
+    )
+    fw_metadata.num_tensors_saved_with_no_vc_check = num_tensors_saved_with_no_vc_check
+    inner_meta.num_tensors_saved_with_no_vc_check = num_tensors_saved_with_no_vc_check
+
+    if torch._functorch.config.donated_buffer:
+        fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
+            fw_module,
+            bw_module,
+            inner_meta,
+        )
+        inner_meta.bw_donated_idxs = fw_metadata.bw_donated_idxs
+
+    return num_fw_outs_saved_for_bw, num_symints_saved_for_bw
+
+
+# Note [Detaching inputs that never need gradients]
+# See https://github.com/pytorch/pytorch/issues/97745
+# Suppose we have a function like this that we want to compile:
+#
+# def f(x, y):
+#     return torch.mul(x, y.detach())
+#
+# What gradients should we compute for x and y?
+# By default, AOTAutograd will compute a gradient for **every** input that requires gradients,
+# and so we'll compute:
+#    x_grad_input = y
+#    y_grad_input = None
+# Does this preserve the semantics of eager mode?
+# Unfortunately, no.
+# Doing the above will cause autograd to **continue** to backprop the autograd tape
+# that was generated from constructing y.
+#
+# This is **different** from what would have happened in eager mode.
+# In eager mode, if we backprop through the output of this function, autograd will only traverse
+# the bit of the autograd tape corresponding to "x".
+# In particular, if a user had previously backpropped through y's autograd tape,
+# And then they try to backprop through the output of the above function,
+# then we'll hit the dreaded "Trying to backward through the graph a second time" error.
+#
+# You might think: If autograd sees that a gradient is None, shouldn't it stop early,
+# instead of continuing the backprop through the ancestors of that node in the graph?
+#
+# Autograd has two passes:
+# (1) a first pass that traverses the autograd graph and figures out which nodes need to be executed
+# (2) a second pass that actually goes ahead and executes each node when it becomes ready,
+#     propagating gradients
+# By the time we're executing a node and we see that it produces a None, the set of nodes to execute
+# is already locked-in.
+#
+# The fix: instead, we can recognize statically that the graph we're compiling will never contribute
+# gradients to y, and prevent autograd from trying to traverse y's autograd tape at all.
+# We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
+#
+# Note that this solution is not bulletproof.
+# It's possible to construct a case where eager may or may not have have tried to autograd through y,
+# depending on the actual grad_outputs that were passed in during the backward.
+# There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
+# allowing autograd to reuse the graph.
+#
+# An example of this case is:
+# def f(x):
+#     return x.detach() * 2, x * 3
+# If we were to only backprop through outs[0], in eager, we would stop
+# If we backward only on the first output, we shouldn't send a grad through x.
+# But the custom autograd function doesn't know that: it will materialize zero grads for x * 3
+# and we will end up with a zero grad at x.
+# If we later backprop through the second output, this will also require backprop'ing through x.
+# Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
+def _compute_indices_of_inps_to_detach(
+    bw_module: torch.fx.GraphModule,
+    maybe_subclass_meta: SubclassMeta | None,
+    inner_meta: ViewAndMutationMeta,
+    fw_metadata: ViewAndMutationMeta,
+) -> list[int]:
+    # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
+    # optimization even if we have subclass inputs/outputs (we do not handle this today).
+    # Computing which our our inputs get None gradients is a bit more complicated,
+    # if any of our inputs are subclasses. Why?
+    # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
+    # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
+    #     so we need to figure out which subclass fw inputs they map to.
+    if maybe_subclass_meta is not None:
+        return []
+
+    indices_of_inps_to_detach: list[int] = []
+
+    # reversed() since we expect output at end of graph
+    bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
+    bw_outs = bw_output.args[0]
+
+    num_backward_tokens = inner_meta.num_backward_tokens
+    expected_bw_outs = (
+        len(fw_metadata.input_info)
+        + inner_meta.num_outputs_rng_offset
+        + num_backward_tokens
+    )
+    if len(bw_outs) != expected_bw_outs:
+        raise AssertionError(
+            f"expected len(bw_outs) == {expected_bw_outs}, got {len(bw_outs)}"
+        )
+
+    bw_outs_no_rng_no_tokens = bw_outs
+    if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
+        bw_outs_no_rng_no_tokens = bw_outs[
+            : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
+        ]
+    if len(bw_outs_no_rng_no_tokens) != len(fw_metadata.input_info):
+        raise AssertionError(
+            f"expected len(bw_outs_no_rng_no_tokens) == {len(fw_metadata.input_info)}, "
+            f"got {len(bw_outs_no_rng_no_tokens)}"
+        )
+
+    for i, bw_out in enumerate(bw_outs_no_rng_no_tokens):
+        # If our input experiences a metadata mutation inside the graph (e.g. set_()),
+        # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+        metadata_mutation_in_graph = (
+            fw_metadata.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH
+            and fw_metadata.input_info[i].mutates_storage_metadata
+        )
+        is_non_leaf = (
+            fw_metadata.input_info[i].requires_grad
+            and not fw_metadata.input_info[i].is_leaf
+        )
+        if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
+            indices_of_inps_to_detach.append(i)
+
+    return indices_of_inps_to_detach
+
+
 def _aot_stage2a_partition(
     fx_g: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
@@ -1755,60 +2008,25 @@ def _aot_stage2a_partition(
     with torch.no_grad():
         context = torch._C._DisableAutocast if disable_amp else nullcontext
         with context(), track_graph_compiling(aot_config, "joint"):
-            # See Note: [Partitioner handling for Subclasses, Part 1]
-            # See Note: [Recomputing subclass mutation handling]
-            mutated_inp_runtime_indices = (
-                compute_inner_mutated_inp_indices_from_subclass_meta(
-                    fw_metadata, inner_meta
+            fw_module, bw_module, num_inner_fwd_outputs = (
+                _partition_joint_graph_into_fw_bw(
+                    fx_g,
+                    joint_inputs,
+                    inner_meta,
+                    fw_metadata,
+                    aot_config,
                 )
             )
-            num_tokens = len(fw_metadata.tokens)
-            num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
-            num_inner_fwd_outputs = (
-                num_mutated_inp_runtime_indices
-                + inner_meta.num_outputs
-                + inner_meta.num_intermediate_bases
-                + inner_meta.num_outputs_rng_offset
-                + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
-            )
-            fx_g = run_joint_graph_passes_on_hops(fx_g, joint_inputs, aot_config)
-
-            # apply joint_gm callback here
-            if callable(torch._functorch.config.joint_custom_pass):
-                # pyrefly: ignore [bad-assignment]
-                fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
-
-            static_lifetime_input_indices = fw_metadata.static_input_indices
-            if aot_config.partition_fn is None:
-                raise AssertionError("aot_config.partition_fn must not be None")
-            fw_module, bw_module = aot_config.partition_fn(
-                fx_g,
-                joint_inputs,
-                num_fwd_outputs=num_inner_fwd_outputs,
-                static_lifetime_input_indices=static_lifetime_input_indices,
-            )
-            rng_states = [
-                n
-                for n in fw_module.graph.find_nodes(op="placeholder")
-                if "fwd_rng_state" in n.name
-            ]
-            fw_metadata.num_graphsafe_rng_states = len(rng_states)
-            if rng_states:
-                fw_metadata.graphsafe_rng_state_index = (
-                    rng_states[0].meta["val"].device.index
+            num_inner_fwd_outputs, joint_inputs = (
+                _maybe_unlift_partitioned_effect_tokens(
+                    fw_module,
+                    bw_module,
+                    joint_inputs,
+                    fw_metadata,
+                    aot_config,
+                    num_inner_fwd_outputs,
                 )
-
-            # See Note [Side-Effectful Tokens in AOTAutograd]
-            if config.unlift_effect_tokens and (
-                num_tokens > 0 or fw_metadata.num_backward_tokens > 0
-            ):
-                unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
-
-                num_inner_fwd_outputs -= num_tokens
-                joint_inputs = (
-                    joint_inputs[0][num_tokens:],
-                    joint_inputs[1],
-                )
+            )
 
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
@@ -1818,172 +2036,22 @@ def _aot_stage2a_partition(
                 aot_config,
                 fw_metadata.static_input_indices,
             )
-            static_lifetime_input_indices = fw_metadata.static_input_indices
-
-            fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
-            # we only need to bookkeep the symints that are saved for bw, not any symints
-            # the user forward might have returned in its own output
-            fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-            num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
-            symint_outs_saved_for_bw = []
-            opaque_outs_saved_for_bw = []
-            for idx, node in enumerate(fw_outs_saved_for_bw):
-                if is_sym_node(node):
-                    symint_outs_saved_for_bw.append(node)
-                elif is_opaque_node(node):
-                    opaque_outs_saved_for_bw.append(node)
-                elif isinstance(node, torch.fx.Node) and "val" in getattr(
-                    node, "meta", {}
-                ):
-                    if isinstance(node.meta["val"], FakeTensor):
-                        # record dynamic tensor activations
-                        dynamic_dims: set[int] = {
-                            dim
-                            for dim, size in enumerate(node.meta["val"].shape)
-                            if not isinstance(size, int)
-                        }
-                        if dynamic_dims:
-                            fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
-                    elif isinstance(node.meta["val"], (FakeScriptObject, OpaqueBase)):
-                        opaque_outs_saved_for_bw.append(node)
-
-            num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
-            fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
-            fw_metadata.num_opaque_objects_saved_for_bw = (
-                num_opaque_objects_saved_for_bw
-            )
-            inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
-            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
-
-            # See Note [Activations with no version counter checks in eager]
-            # Count tensors saved with no version counter check.
-            # These are tensors that were stashed on ctx (e.g., ctx.x = x) rather than
-            # via save_for_backward in an autograd.Function.
-            # The partitioner sorts these to be at the end of saved_values.
-            num_tensors_saved_with_no_vc_check = 0
-            for node in fw_outs_saved_for_bw:
-                if isinstance(node, torch.fx.Node) and node.meta.get(
-                    "saved_tensor_with_no_vc_check", False
-                ):
-                    num_tensors_saved_with_no_vc_check += 1
-            fw_metadata.num_tensors_saved_with_no_vc_check = (
-                num_tensors_saved_with_no_vc_check
-            )
-            inner_meta.num_tensors_saved_with_no_vc_check = (
-                num_tensors_saved_with_no_vc_check
-            )
-
-            if torch._functorch.config.donated_buffer:
-                fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
+            num_fw_outs_saved_for_bw, num_symints_saved_for_bw = (
+                _categorize_saved_tensors_for_backward(
                     fw_module,
                     bw_module,
                     inner_meta,
+                    fw_metadata,
+                    num_inner_fwd_outputs,
                 )
-                inner_meta.bw_donated_idxs = fw_metadata.bw_donated_idxs
-
-        # Note [Detaching inputs that never need gradients]
-        # See https://github.com/pytorch/pytorch/issues/97745
-        # Suppose we have a function like this that we want to compile:
-        #
-        # def f(x, y):
-        #     return torch.mul(x, y.detach())
-        #
-        # What gradients should we compute for x and y?
-        # By default, AOTAutograd will compute a gradient for **every** input that requires gradients,
-        # and so we'll compute:
-        #    x_grad_input = y
-        #    y_grad_input = None
-        # Does this preserve the semantics of eager mode?
-        # Unfortunately, no.
-        # Doing the above will cause autograd to **continue** to backprop the autograd tape
-        # that was generated from constructing y.
-        #
-        # This is **different** from what would have happened in eager mode.
-        # In eager mode, if we backprop through the output of this function, autograd will only traverse
-        # the bit of the autograd tape corresponding to "x".
-        # In particular, if a user had previously backpropped through y's autograd tape,
-        # And then they try to backprop through the output of the above function,
-        # then we'll hit the dreaded "Trying to backward through the graph a second time" error.
-        #
-        # You might think: If autograd sees that a gradient is None, shouldn't it stop early,
-        # instead of continuing the backprop through the ancestors of that node in the graph?
-        #
-        # Autograd has two passes:
-        # (1) a first pass that traverses the autograd graph and figures out which nodes need to be executed
-        # (2) a second pass that actually goes ahead and executes each node when it becomes ready,
-        #     propagating gradients
-        # By the time we're executing a node and we see that it produces a None, the set of nodes to execute
-        # is already locked-in.
-        #
-        # The fix: instead, we can recognize statically that the graph we're compiling will never contribute
-        # gradients to y, and prevent autograd from trying to traverse y's autograd tape at all.
-        # We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
-        #
-        # Note that this solution is not bulletproof.
-        # It's possible to construct a case where eager may or may not have have tried to autograd through y,
-        # depending on the actual grad_outputs that were passed in during the backward.
-        # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
-        # allowing autograd to reuse the graph.
-        #
-        # An example of this case is:
-        # def f(x):
-        #     return x.detach() * 2, x * 3
-        # If we were to only backprop through outs[0], in eager, we would stop
-        # If we backward only on the first output, we shouldn't send a grad through x.
-        # But the custom autograd function doesn't know that: it will materialize zero grads for x * 3
-        # and we will end up with a zero grad at x.
-        # If we later backprop through the second output, this will also require backprop'ing through x.
-        # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach: list[int] = []
-
-        # reversed() since we expect output at end of graph
-        bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
-        bw_outs: Sequence[torch.fx.Node] = bw_output.args[0]  # type: ignore[assignment]
-
-        # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
-        # optimization even if we have subclass inputs/outputs (we do not handle this today).
-        # Computing which our our inputs get None gradients is a bit more complicated,
-        # if any of our inputs are subclasses. Why?
-        # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
-        # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
-        #     so we need to figure out which subclass fw inputs they map to.
-        if maybe_subclass_meta is None:
-            num_backward_tokens: int = inner_meta.num_backward_tokens
-            expected_bw_outs = (
-                len(fw_metadata.input_info)
-                + inner_meta.num_outputs_rng_offset
-                + num_backward_tokens
             )
-            if len(bw_outs) != expected_bw_outs:
-                raise AssertionError(
-                    f"expected len(bw_outs) == {expected_bw_outs}, got {len(bw_outs)}"
-                )
-            bw_outs_no_rng_no_tokens = bw_outs
-            if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
-                bw_outs_no_rng_no_tokens = bw_outs[
-                    : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
-                ]
-            if len(bw_outs_no_rng_no_tokens) != len(fw_metadata.input_info):
-                raise AssertionError(
-                    f"expected len(bw_outs_no_rng_no_tokens) == {len(fw_metadata.input_info)}, "
-                    f"got {len(bw_outs_no_rng_no_tokens)}"
-                )
 
-            for i, (bw_out) in enumerate(bw_outs_no_rng_no_tokens):
-                # If our input experiences a metadata mutation inside the graph (e.g. set_()),
-                # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
-                metadata_mutation_in_graph = (
-                    fw_metadata.input_info[i].mutation_type
-                    == MutationType.MUTATED_IN_GRAPH
-                    and fw_metadata.input_info[i].mutates_storage_metadata
-                )
-                is_non_leaf = (
-                    fw_metadata.input_info[i].requires_grad
-                    and not fw_metadata.input_info[i].is_leaf
-                )
-                if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
-                    _indices_of_inps_to_detach.append(i)
+        _indices_of_inps_to_detach = _compute_indices_of_inps_to_detach(
+            bw_module,
+            maybe_subclass_meta,
+            inner_meta,
+            fw_metadata,
+        )
 
     return (
         fw_module,
@@ -1991,7 +2059,7 @@ def _aot_stage2a_partition(
         num_fw_outs_saved_for_bw,
         num_symints_saved_for_bw,
         _indices_of_inps_to_detach,
-        joint_inputs[0],
+        _joint_inputs_for_forward(joint_inputs),
     )
 
 
@@ -2289,19 +2357,20 @@ def _aot_stage2c_make_autograd_function(
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
-    compiled_fn = AOTDispatchAutograd.post_compile(
-        compiled_fw_func,
-        compiled_bw_func,
-        maybe_subclass_meta,
-        num_symints_saved_for_bw,
-        backward_state_indices,
-        disable_amp,
-        _indices_of_inps_to_detach,
-        lazy_backward_info,
-        aot_config,
+    compile_spec = AOTDispatchAutogradCompileSpec(
+        compiled_fw_func=compiled_fw_func,
+        compiled_bw_func=compiled_bw_func,
+        maybe_subclass_meta=maybe_subclass_meta,
+        num_symints_saved_for_bw=num_symints_saved_for_bw,
+        backward_state_indices=backward_state_indices,
+        disable_amp=disable_amp,
+        indices_of_inps_to_detach=_indices_of_inps_to_detach,
+        lazy_backward_info=lazy_backward_info,
+        aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
     )
+    compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 
     if entry is not None:
         compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
@@ -2361,7 +2430,7 @@ def _cache_autograd_info(
         # NB: aot_config here is technically not needed as an argument: we could just
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
-        def try_save_cache_entry(  # noqa: F811
+        def try_save_cache_entry(
             compiled_bw_func: Callable[..., Any],
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
@@ -2369,15 +2438,9 @@ def _cache_autograd_info(
         ) -> GenericAOTAutogradResult[Any, Any] | None:
             cache_info = aot_config.cache_info
 
-            def should_save_cache() -> bool:
-                if should_bundle_autograd_cache():
-                    return True
-                else:
-                    return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(
-                        compiled_bw_func, "_fx_graph_cache_key"
-                    )
-
-            if cache_info is not None and should_save_cache():
+            if cache_info is not None and _should_save_cache(
+                compiled_fw_func, compiled_bw_func
+            ):
                 if forward_time_taken_ns is None:
                     raise AssertionError("forward_time_taken_ns must not be None")
                 # TODO: technically, AOTAutograd does a *little* bit of post processing work

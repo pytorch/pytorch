@@ -12,6 +12,7 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -26,8 +27,8 @@ from torch.testing._internal.common_utils import (
 # Decorator
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nvshmem_available(),
-        "test_nvshmem requires NVSHMEM, skipping tests",
+        not PLATFORM_SUPPORTS_SYMM_MEM or not symm_mem.is_nvshmem_available(),
+        "test_nvshmem requires NVSHMEM with SymmMem platform support, skipping tests",
     )
 
 

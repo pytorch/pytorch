@@ -188,7 +188,6 @@ from .utils import (
     normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
-    tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
     verify_guard_fn_signature,
@@ -583,7 +582,7 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that that C++ side points to the updated diff guard manager.
+        # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
         # cache_entry attribute, so it relies on the CacheEntry constructor to
         # set the diff_guard_root in C++.  But once it is saved in the Dynamo
@@ -1097,6 +1096,16 @@ def check_closure(value: Any, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
+
+
+def _constant_subclass_base_value(value: Any) -> Any:
+    """Extract the base constant value from a constant subclass instance."""
+    from .variables.user_defined import _CONSTANT_BASE_TYPES
+
+    for t in _CONSTANT_BASE_TYPES:
+        if isinstance(value, t):
+            return t(value)  # pyrefly: ignore[bad-argument-type]
+    raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
 def register_guard_check_spec(
@@ -2639,6 +2648,42 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _constant_subclass_base_value(value),
+        eval_fn=lambda value, metadata: _constant_subclass_base_value(value)
+        == metadata,
+    )
+    def CONSTANT_SUBCLASS_MATCH(self, guard: Guard) -> None:
+        """Guard for subclasses of constant types (int, float, str, etc.).
+
+        Extracts the base value using the base type's converter (e.g.,
+        int.__int__) to avoid calling user-overridden __eq__.
+        """
+        from .variables.user_defined import _CONSTANT_BASE_TYPES
+
+        val = self.get(guard)
+        ref = self.arg_ref(guard)
+
+        # Find the constant base type
+        base_type = None
+        for t in _CONSTANT_BASE_TYPES:
+            if isinstance(val, t):
+                base_type = t
+                break
+        assert base_type is not None
+
+        base_value = base_type(val)
+        code = [f"{base_type.__name__}({ref}) == {base_value!r}"]
+
+        def check_fn(x: Any) -> bool:
+            return base_type(x) == base_value
+
+        self.get_guard_manager(guard).add_lambda_guard(
+            check_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
@@ -3406,101 +3451,84 @@ class GuardBuilder(GuardBuilderBase):
                 if not isinstance(value, torch.nn.Parameter):
                     self.guard_manager.diff_guard_sources.add(guard.name)
 
-            # A frame is valid for reuse with dynamic dimensions if the new
-            # (user-requested) dynamic dimensions are a subset of the old
-            # (already compiled) dynamic dimensions.
-            #
-            # It's a little non-obvious why you'd want this: in particular,
-            # if an already compiled frame matches all of the guards, why
-            # not just use it, why force a recompile?
-            #
-            # We force it for two reasons:
-            #
-            #   - The user *required* us to compile with a new dynamic dimension,
-            #     we should not ignore that and serve up the old, specialized
-            #     frame.  Listen to the user!
-            #
-            #   - In fact, we are obligated to *raise an error* if we fail to
-            #     make the requested dimension dynamic.  If we don't
-            #     recompile, we can't tell if that dimension can actually be
-            #     made dynamic.
-            #
-            # If the new dynamic dims are a subset of the old, we already know
-            # we can make them dynamic (since we made them dynamic in old).
-            # This is slightly unsound, because maybe your input size is
-            # [s0, s0, s1] and so you can do it dynamic if you say dynamic
-            # dims {0, 1, 2} but you can't if you only do {0, 2} (because now
-            # the second s0 is specialized).  But we're not entirely sure if
-            # this is a good idea anyway lol... (if you want to try removing
-            # this logic, be my guest!  -- ezyang 2024)
-            #
             assert guard.source is not None
-            static, _reason = tensor_always_has_static_shape(
-                value, is_tensor=True, tensor_source=guard.originating_source
+
+            # [Note: Dimension Marking Guards]
+            # Guards for user explicit dynamism (mark_dynamic, mark_unbacked, mark_static..).
+            #
+            # Marking APIs express additive constraints: mark_dynamic(x, [0]) means
+            # "ensure dim 0 is dynamic" — it says nothing about other dims. If you
+            # want a dim to NOT be dynamic, explicitly mark it static (or unbacked).
+            #
+            # Guard semantics (subset matching):
+            #   - Compiled WITH attribute, runtime HAS attribute → runtime markings
+            #     must be a SUBSET of compiled markings. This means the compiled graph
+            #     can satisfy the requested marking.
+            #   - Compiled WITH attribute, runtime NO attribute → pass (unspecified = don't care)
+            #   - Compiled WITHOUT attribute, runtime HAS attribute → recompile (new marking)
+            #
+            # Passing an empty list [] to any marking API is a no-op (same as not calling
+            # the function at all). Calls are additive.
+            #
+            # Examples:
+            #   1. Compile with mark_dynamic(x, [0,1]), call with mark_dynamic(x, [0]) → no recompile (subset)
+            #   2. Compile with mark_dynamic(x, [0]), call with mark_dynamic(x, [0,1]) → recompile (not a subset)
+            #   3. Compile with mark_dynamic(x, [0]), call with plain tensor → no recompile (unspecified = don't care)
+            #   4. Compile with plain tensor, call with mark_dynamic(x, [0]) → recompile (new marking added)
+            #
+            # _dynamo_weak_dynamic_indices vs _dynamo_propagated_dynamic_indices:
+            #   _dynamo_weak_dynamic_indices is the user-facing attribute, set via
+            #   maybe_mark_dynamic(), and guarded on like the other dimension marking
+            #   attributes above.
+            #   _dynamo_propagated_dynamic_indices is a compiler-internal attribute set by
+            #   AOTAutograd's mark_dynamo_propagated_dynamic_indices() to propagate dynamism across
+            #   graph breaks. It is NOT guarded on. When AOTAutograd discovers that an
+            #   output dimension is symbolic, it stamps this attribute on the output tensor
+            #   so that Dynamo treats those dims as weakly dynamic when the tensor appears
+            #   as input to a subsequent graph. Using a separate unguarded attribute avoids
+            #   spurious guard failures when the compiler mutates an input tensor's
+            #   attributes through an input-aliased output.
+            #
+            # Collect dimension marking guard info for a single C++ guard.
+            dim_marking_attrs = (
+                "_dynamo_dynamic_indices",
+                "_dynamo_weak_dynamic_indices",
+                "_dynamo_unbacked_indices",
+                "_dynamo_static_indices",
             )
 
-            if not static:
-                if hasattr(value, "_dynamo_dynamic_indices"):
-                    dynamic_indices = value._dynamo_dynamic_indices
-                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+            expected_attrs: dict[str, Any] = {}
+            absent_attrs: list[str] = []
+            for attr_name in dim_marking_attrs:
+                if hasattr(value, attr_name):
+                    expected_attrs[attr_name] = getattr(value, attr_name)
+                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
-                    self.get_guard_manager(guard).add_dynamic_indices_guard(
-                        dynamic_indices,
-                        get_verbose_code_parts(code_part, guard),
-                        guard.user_stack,
-                    )
-                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
-                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
-                    code_part = (
-                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-                    )
+                    absent_attrs.append(attr_name)
+                    code_part = f"hasattr({tensor_name}, '{attr_name}') == False"
                     code.append(code_part)
-                    self.get_guard_manager(guard).add_no_hasattr_guard(
-                        "_dynamo_dynamic_indices",
-                        get_verbose_code_parts(code_part, guard),
-                        guard.user_stack,
-                    )
 
-                # Guard on shape_ids for tensors marked with mark_unbacked().
-                # - If the runtime tensor has _dynamo_unbacked_indices → check shape_ids match
-                # - If the runtime tensor doesn't have _dynamo_unbacked_indices → pass
-                # We must install guards even when shape_ids is None to detect runtime
-                # tensors that have the attribute when compile-time didn't.
-                if hasattr(value, "_dynamo_unbacked_indices"):
-                    shape_ids = getattr(value, "_dynamo_shape_ids", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+            # Dependent attributes: checked only when _dynamo_unbacked_indices is present.
+            dependent_attrs: dict[str, tuple[Any, str]] = {}
+            dep_attr_names = ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")
+            gate_attr = "_dynamo_unbacked_indices"
+            if hasattr(value, gate_attr):
+                for attr_name in dep_attr_names:
+                    attr_value = getattr(value, attr_name, None)
+                    dependent_attrs[attr_name] = (attr_value, gate_attr)
+                    code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
-                    self.get_guard_manager(guard).add_lambda_guard(
-                        lambda x, expected=shape_ids: (
-                            getattr(x, "_dynamo_shape_ids", None) == expected
-                            if hasattr(x, "_dynamo_unbacked_indices")
-                            else True
-                        ),
-                        get_verbose_code_parts(code_part, guard),
-                        guard.user_stack,
-                    )
 
-                # Guard on unbacked_bounds for tensors marked with mark_unbacked().
-                # - If the runtime tensor has _dynamo_unbacked_indices → check bounds match
-                # - If the runtime tensor doesn't have _dynamo_unbacked_indices → pass
-                # We must install guards even when unbacked_bounds is None to detect runtime
-                # tensors that have the attribute when compile-time didn't.
-                if hasattr(value, "_dynamo_unbacked_indices"):
-                    unbacked_bounds = getattr(value, "_dynamo_unbacked_bounds", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
-                    code.append(code_part)
-                    self.get_guard_manager(guard).add_lambda_guard(
-                        lambda x, expected=unbacked_bounds: (
-                            getattr(x, "_dynamo_unbacked_bounds", None) == expected
-                            if hasattr(x, "_dynamo_unbacked_indices")
-                            else True
-                        ),
-                        get_verbose_code_parts(code_part, guard),
-                        guard.user_stack,
-                    )
-
-                # TODO we dont have guards on _dynamo_unbacked_indices like those of _dynamo_dynamic_indices this seems wrong!!
+            # Install a single C++ guard for all dimension marking attributes.
+            if expected_attrs or absent_attrs or dependent_attrs:
+                self.get_guard_manager(guard).add_dimension_marking_guard(
+                    expected_attrs,
+                    absent_attrs,
+                    dependent_attrs,
+                    get_verbose_code_parts(code, guard),
+                    guard.user_stack,
+                )
 
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
@@ -4105,7 +4133,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             # doesn't exist.
             value = builder.get(guard)
             has_value = True
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             value = MISSING
             has_value = False
     is_global = get_global_source_name(guard.originating_source) is not None
@@ -4137,7 +4165,7 @@ def pickle_guards_state(
                 try:
                     type(base).__new__(type(base))
                     empty_values[id(base)] = base
-                except:  # noqa: E722, B001
+                except:  # noqa: E722
                     pass
         elif id(leaf) not in guard_tree_values:
             # TODO See if we have lift this branch as the first one.
@@ -5201,7 +5229,7 @@ def guard_error_hook(
     for guard in guard_manager.code_parts:
         try:
             eval(guard, guard_manager.global_scope, local_scope)
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             print(f"Malformed guard:\n{guard}")
 
 

@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import contextlib
 import itertools
 import random
 import unittest
@@ -190,7 +191,9 @@ class RingAttentionTest(DTensorTestBase):
         for target in [cp_q, cp_k, cp_v]:
             target.requires_grad = True
 
-        with CommDebugMode() as comm_mode:
+        check_comm_counts = not compiled and rotater == _RotateMethod.ALL_TO_ALL
+        comm_mode = CommDebugMode() if check_comm_counts else contextlib.nullcontext()
+        with comm_mode:
             with sdpa_kernel(backend):
                 cp_out = fn_eval(
                     attention,
@@ -200,8 +203,7 @@ class RingAttentionTest(DTensorTestBase):
                     is_causal=is_causal,
                 )
 
-            if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
-                # Compiler and CommDebugMode do not work well together.
+            if check_comm_counts:
                 expect_all2all_count = (
                     self.world_size - 1
                     if test_forward_only
@@ -242,6 +244,14 @@ class RingAttentionTest(DTensorTestBase):
                 return out
 
         if load_balance and not is_causal:
+            return
+
+        # Compilation with context_parallel doesn't work yet — both paths
+        # (use_context=True monkey-patch and use_context=False parallelize_module)
+        # fail during tracing because DTensor dispatch interferes with sdpa.
+        # Previously CommDebugMode was active for all subtests, which caused
+        # the frame to be silently skipped, masking this limitation.
+        if compiled:
             return
 
         set_rotate_method(rotater_enum_to_str[rotater])
@@ -688,7 +698,6 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_cp_flex_attention_document_mask(self) -> None:
         random.seed(10)
 

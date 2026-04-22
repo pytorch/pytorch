@@ -12,7 +12,11 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -718,10 +722,14 @@ class TestDTensorOptimizer(DTensorTestBase):
             self._assert_optimizer(None, mod, opt, mod_copy, dist_opt, inp)
 
     @with_comms
-    def test_adamw_sharding_cache_no_leak(self):
-        """Foreach optimizer ops with step-varying ScalarList args (like
-        AdamW's bias corrections) must not cause unbounded growth of the
-        DTensor sharding propagation cache."""
+    @parametrize("foreach", [True, False])
+    def test_adamw_sharding_cache_no_leak(self, foreach):
+        """Step-varying scalar args (like AdamW's bias corrections) must not
+        cause unbounded growth of the DTensor sharding propagation cache.
+
+        foreach=True exercises the ScalarList-in-list path (_foreach_addcdiv_),
+        foreach=False exercises the scalar-kwarg path (addcdiv_ value=...).
+        """
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         model = MLPModule(self.device_type)
         for name, param in model.named_parameters():
@@ -736,7 +744,7 @@ class TestDTensorOptimizer(DTensorTestBase):
                 mod = getattr(mod, part)
             mod.register_parameter(parts[-1], dist_param)
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=foreach)
 
         def run_step():
             inp = distribute_tensor(
@@ -767,6 +775,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             "after warmup)",
         )
 
+
+instantiate_parametrized_tests(TestDTensorOptimizer)
 
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
     TestDTensorOptimizer,

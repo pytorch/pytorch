@@ -76,6 +76,12 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in {"aten", "prim", "prims"}
 
 
+def is_out(op: OpOverload) -> bool:
+    """Returns True if the operator has "out" semantics: its mutable arguments
+    are write-only output buffers that are not read from."""
+    return torch.Tag.out in op.tags
+
+
 def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
@@ -286,6 +292,9 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
         # do input metadata mutation (which we have banned on custom ops)
         return False
     schema = op._schema
+    if is_out(op):
+        # Tag.out ops have a trivial fake impl: return the out= args in order.
+        return True
     # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
     if not schema.is_mutable:
         return False
@@ -293,6 +302,22 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
         return False
     # If the op returns nothing, then it has a trivial fake impl.
     return True
+
+
+def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
+    """Generate the result of a trivial fake impl for the given op.
+
+    For ops with no returns: returns None.
+    For Tag.out ops: returns the out= kwargs in declaration order.
+    """
+    if is_out(op):
+        schema = op._schema
+        _, out_kwarg_names = mutated_args_kwargs(schema)
+        out_args = tuple(kwargs[name] for name in out_kwarg_names)
+        if len(out_args) == 1:
+            return out_args[0]
+        return out_args
+    return None
 
 
 def requires_set_python_module() -> bool:

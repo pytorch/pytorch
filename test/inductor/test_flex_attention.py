@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-# flake8: noqa: B950
 
 import functools
 import json
@@ -4866,7 +4865,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
-""",  # noqa: B950
+""",
         )
         # Save the AOT graphs
         aot_graphs = []
@@ -4914,9 +4913,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
-""".replace(  # noqa: B950
-                "GPU_TYPE", torch.device(device).type
-            ),
+""".replace("GPU_TYPE", torch.device(device).type),
         )
 
     @supported_platform
@@ -8162,8 +8159,6 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @skip_on_cpu
-    # Fails with triton 3.7
-    @skip_on_rocm
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
@@ -8173,7 +8168,6 @@ class TestLearnableBiases(InductorTestCase):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
     @skip_on_cpu
-    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_flex_attention_logging(self, device):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "flex_attention_configs")

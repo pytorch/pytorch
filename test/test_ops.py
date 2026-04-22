@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     set_default_dtype,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
@@ -482,7 +481,7 @@ class TestCommon(TestCase):
             and dtype == torch.float64
             and ("cuda" in device or "xpu" in device)
             or "cpu" in device
-        ):  # noqa: E121
+        ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double
@@ -496,7 +495,6 @@ class TestCommon(TestCase):
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
     @skipCUDAIfNotRocm
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
@@ -841,7 +839,6 @@ class TestCommon(TestCase):
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     @skipXPU
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -1611,7 +1608,6 @@ class TestCommon(TestCase):
     #   correctly for CPU and CUDA devices
     @skipXPU
     @skipMeta
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):

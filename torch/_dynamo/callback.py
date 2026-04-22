@@ -29,7 +29,7 @@ import enum
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field  # noqa: F811
+from dataclasses import dataclass, field
 from typing import Any
 
 

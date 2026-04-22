@@ -1,14 +1,18 @@
 import functools
 import logging
+import sys
+from typing import cast
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
+from ..backends import cuda as _cuda
 from .common_utils import (
     _available_version,
     _unavailable_reason,
     check_native_jit_disabled,
     check_native_version_skip,
 )
+from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
@@ -31,6 +35,9 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
     NOTE: must not import at this point
     """
+    # Skip all checks if running on CPU-only binary
+    if not _cuda.is_built():
+        return (False, None)
 
     deps = [
         ("triton", "triton"),
@@ -117,3 +124,8 @@ def register_op_override(
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )
+
+
+# Register this DSL module with the registry
+# Note: Import-time registration ensures DSL is available when module is loaded
+dsl_registry.register_dsl("triton", cast(DSLModuleProtocol, sys.modules[__name__]))

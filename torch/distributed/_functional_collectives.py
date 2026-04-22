@@ -101,7 +101,7 @@ RANK_TYPES = (
 )
 
 
-from torch._utils import _chunk_or_narrow_cat  # noqa: F401
+from torch._utils import _chunk_or_narrow_cat
 
 
 """
@@ -1212,6 +1212,8 @@ def _resolve_group(
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
+        if dist.config.compile_on_one_rank:
+            return torch.ops._dtensor.mesh_get_process_group(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
@@ -1221,6 +1223,8 @@ def _resolve_group(
         ):
             dmesh = group[0]
             dim = group[1]
+            if dist.config.compile_on_one_rank:
+                return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
             raise ValueError(
@@ -1590,7 +1594,7 @@ ops_defs = [
     "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
     "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
     "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",
 ]
 
 my_module = sys.modules[__name__]
@@ -1829,6 +1833,8 @@ def _group_or_group_name(
     group: dist.ProcessGroup | c10d.GroupName,
 ) -> dist.ProcessGroup | c10d.GroupName:
     if isinstance(group, str):
+        return group
+    elif dist.config.compile_on_one_rank:
         return group
     else:
         return group.group_name

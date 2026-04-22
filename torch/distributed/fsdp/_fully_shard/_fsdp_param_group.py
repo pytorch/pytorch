@@ -124,6 +124,11 @@ class ReduceScatterState(NamedTuple):
 
 
 class AllReduceState(NamedTuple):
+    # Holding all_reduce_input (the reduce-dtype AR buffer) keeps the
+    # caching allocator from reusing the block across layers. This is a
+    # structural invariant, not bookkeeping: without it, the next layer's
+    # RS can reuse the same physical block before this layer's AR finishes
+    # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
     all_reduce_input: torch.Tensor
     event: torch.Event | None  # all-reduce event
 
@@ -230,10 +235,13 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
-        # Holds the all-reduce input and all-reduce event to keep it alive
-        # until the end of backward (critical when doing bf16 reduction with
-        # fp32 parameters since the all-reduce input is allocated in the RS
-        # stream and will have no refs to it after being upcast to fp32)
+        # Holds the reduce-dtype AR buffer + completion event across
+        # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
+        # reduce + fp32 params). Structural invariant: the live Python
+        # ref keeps the buffer off the caching allocator's free list,
+        # preventing the next layer's RS from reusing the same physical
+        # block while this layer's AR is still in flight. See
+        # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
 
     # Initialization #
@@ -376,6 +384,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._label_suffix,
             )
 
     def wait_for_unshard(self):
@@ -612,6 +621,7 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+                self._label_suffix,
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
@@ -837,11 +847,17 @@ class FSDPParamGroup:
             )
         return self.mesh_info.replicate_process_group
 
-    def _with_fqn(self, label: str) -> str:
-        if self._module_fqn:
-            label = f"{label} ({self._module_fqn})"
+    @property
+    def _label_suffix(self) -> str:
+        suffix = f"({self._module_fqn})" if self._module_fqn else ""
         if self._num_param_groups > 1 and isinstance(self.mesh_info, FSDPMeshInfo):
-            label = f"{label} [pg={self.mesh_info.shard_mesh_size}]"
+            suffix = f"{suffix} [pg={self.mesh_info.shard_mesh_size}]".lstrip()
+        return suffix
+
+    def _with_fqn(self, label: str) -> str:
+        suffix = self._label_suffix
+        if suffix:
+            return f"{label} {suffix}"
         return label
 
     def __repr__(self):

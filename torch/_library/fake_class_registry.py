@@ -30,13 +30,13 @@ class FakeScriptObject:
                 with _disable_current_modes():
                     real_obj = copy.deepcopy(x)
             except (RuntimeError, TypeError) as e:
-                log.warning(  # noqa: G200
+                log.warning(
                     "Unable to deepcopy the custom object %s due to %s. "
                     "Defaulting to the user given object. This might be "
                     "dangerous as side effects may be directly applied "
                     "to the object.",
                     script_class_name,
-                    str(e),
+                    e,
                 )
 
         object.__setattr__(self, "real_obj", real_obj)

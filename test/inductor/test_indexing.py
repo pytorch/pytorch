@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -116,10 +117,62 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
+        # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
+        # ModularIndexing(b, d1*d2, m//d2) when d2 | m
+        expected = ModularIndexing(i2, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+    def test_floordiv_modularindexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+
+        # FloorDiv(ModularIndexing(b, d1, m), d2) -> ModularIndexing(b, d1*d2, m//d2)
+        # when d2 divides m
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                FloorDiv(ModularIndexing(i0, 1, 8192), 128), {}
+            ),
+            ModularIndexing(i0, 128, 64),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 2, 120), 6), {}),
+            ModularIndexing(i0, 12, 20),
+        )
+        # Does NOT simplify when d2 does not divide m
+        expr = FloorDiv(ModularIndexing(i0, 1, 28), 5)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+
+        # FloorDiv(base, divisor) -> 0 when 0 <= base < divisor
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
+            sympy.S.Zero,
+        )
+
+    def test_remove_zero_terms_generalized(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+
+        # FloorDiv(v + 128*i1, 8192): gcd(128*i1, 8192) = 128
+        # Old rule fails (128 != 8192), new rule: v < 128 => drop v
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128}),
+            FloorDiv(128 * i1, 8192),
+        )
+        # v range equals gcd exactly — still safe since v < gcd (strict)
+        # v=127 max, 127 < 128
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 6 * i1, 18), {i0: 6}),
+            FloorDiv(6 * i1, 18),
+        )
+        # v range exceeds gcd — cannot simplify
+        expr = FloorDiv(i0 + 128 * i1, 8192)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, {i0: 129}),
+            expr,
+        )
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
@@ -368,6 +421,29 @@ class ExprPrinterTests(InductorTestCase):
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
+    def test_print_nan(self):
+        expr = sympy.nan
+        self.assertExpectedInline(pexpr(expr), """math.nan""")
+        self.assertExpectedInline(
+            cexpr(expr), """std::numeric_limits<double>::quiet_NaN()"""
+        )
+
+    def test_print_infinity(self):
+        expr = sympy.oo
+        self.assertExpectedInline(pexpr(expr), """math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """std::numeric_limits<double>::infinity()""",
+        )
+
+    def test_print_negative_infinity(self):
+        expr = -sympy.oo
+        self.assertExpectedInline(pexpr(expr), """-math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """-std::numeric_limits<double>::infinity()""",
+        )
+
     def test_print_integer(self):
         expr = sympy.S((-1) << 63)
         self.assertExpectedInline(cexpr(expr), f"""(-1{LONG_SUFFIX} << 63)""")
@@ -482,7 +558,7 @@ class ExprPrinterTests(InductorTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",
             )
             self.assertEqual(
                 cexpr(expr),
@@ -653,6 +729,25 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintIdentityExpansion(InductorTestCase):
+    """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
+
+    def test_identity_wrapped_expr_resolves_to_int(self):
+        """An expression containing Identity-wrapped constants and an unbacked
+        symbol should resolve to a concrete int after substitution."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
+        # simplifies to -u0 * (0 - 1) = u0.
+        # Without expand(identity=True) after _sub_unbacked_exprs,
+        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
+        # causing RuntimeError("Failed to realize expression to int").
+        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        hint = sizevars.optimization_hint(expr, fallback=42)
+        self.assertEqual(hint, 42)
 
 
 if __name__ == "__main__":
