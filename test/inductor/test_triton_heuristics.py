@@ -47,6 +47,8 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
+    CachingAutotunerPlugin,
+    DEFER,
     template,
     triton_config,
 )
@@ -302,6 +304,100 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+
+_PLUGIN_FACTORY_PATH = (
+    "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
+)
+
+
+class TestCachingAutotunerPlugin(TestCase):
+    device_type = GPU_TYPE
+
+    @staticmethod
+    def _make_kernel_inputs():
+        in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        return (in_ptr, out_ptr, 16)
+
+    def _make_autotuner(self, plugins, configs=None):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        if configs is not None:
+            args["configs"] = configs
+        with patch(_PLUGIN_FACTORY_PATH, return_value=list(plugins)):
+            return CachingAutotuner(**args)
+
+    def test_pre_dispatch_runs_before_precompile_and_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with (
+            patch.object(autotuner, "precompile") as mock_precompile,
+            patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
+        ):
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_precompile.assert_not_called()
+        mock_autotune.assert_not_called()
+
+    def test_pre_autotune_runs_before_default_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_autotune(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_autotune.assert_not_called()
+
+    def test_hooks_fire_in_registration_order(self):
+        sentinel = object()
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def __init__(self, name, return_value=DEFER):
+                self.name = name
+                self.return_value = return_value
+
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append(self.name)
+                return self.return_value
+
+        autotuner = self._make_autotuner(
+            [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
+        )
+        result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(seen, ["a", "b", "c"])
+
+    def test_defer_falls_through_to_default(self):
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append("pre_dispatch")
+                return DEFER
+
+        # Single config so precompile produces one launcher and the kernel
+        # runs to completion without the autotune branch firing.
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+
+        autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertEqual(seen, ["pre_dispatch"])
+        self.assertEqual(len(autotuner.launchers), 1)
 
 
 class TestArgumentCloneAndRestore(TestCase):
