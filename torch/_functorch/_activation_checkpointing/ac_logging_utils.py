@@ -182,10 +182,13 @@ def create_structured_trace_for_min_cut_info(
     )
 
     # Create structured trace
+    payload_str = json.dumps(activation_checkpointing_logging_structure_payload)
+
+    # Store on graph for AOTAutograd cache replay
+    joint_graph._min_cut_info_str = payload_str  # type: ignore[attr-defined]
+
     trace_structured(
         "artifact",
         metadata_fn=lambda: {"name": "min_cut_information", "encoding": "json"},
-        payload_fn=lambda: json.dumps(
-            activation_checkpointing_logging_structure_payload
-        ),
+        payload_fn=lambda: payload_str,
     )
