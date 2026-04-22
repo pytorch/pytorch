@@ -502,7 +502,7 @@ def _xfail_cuda_on_windows_wrapper(test_fn):
         except Exception as e:
             pytest.xfail(f"Expected failure for {test_fn.__name__}: {e}")
 
-        assert False, f"Test {test_fn.__name__} was expected to fail but succeeded."
+        raise AssertionError(f"Test {test_fn.__name__} was expected to fail but succeeded.")
     return wrapper
 
 
