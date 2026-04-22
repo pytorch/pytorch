@@ -720,27 +720,21 @@ class ComboKernel(Kernel):
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
-        triton_meta = {
+        triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
             ),
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
+            # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
+            # compile with the same Triton options as standalone kernels.
+            **TritonKernel.triton_meta_common(),
         }
-        triton_meta["enable_fp_fusion"] = (
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            not config.emulate_precision_casts
-        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
-
-        if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
