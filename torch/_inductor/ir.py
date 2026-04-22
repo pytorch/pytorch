@@ -2819,8 +2819,28 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            layout.pad_strides()
+            assert isinstance(layout, FlexibleLayout), type(layout)
+            layout = FixedLayout(
+                layout.device,
+                layout.dtype,
+                layout.size,
+                layout._pad_strides(layout.stride, layout.size, layout.dtype),
+                layout.offset,
+                layout.is_pinned,
+            )
         return layout.is_contiguous()
+    except NotImplementedError:
+        return False
+
+
+def is_dense_contiguous_storage_and_layout(x: IRNode) -> bool:
+    try:
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
+        if not layout.is_contiguous():
+            return False
+        return V.graph.sizevars.statically_known_equals(
+            layout.storage_size(), layout.offset + sympy_product(layout.size)
+        )
     except NotImplementedError:
         return False
 
@@ -3291,12 +3311,15 @@ class View(GenericView):
             len(free_unbacked_symbols(old_size)) > 0
             or len(free_unbacked_symbols(new_size)) > 0
         )
-        is_contiguous = is_contiguous_storage_and_layout(x)
+        is_contiguous = is_dense_contiguous_storage_and_layout(x)
 
         def create_reinterpret_view(
             inp: IRNode, new_size: Sequence[Expr], new_stride: Sequence[Expr]
         ) -> ReinterpretView:
-            storage, old_layout = as_storage_and_layout(inp, want_contiguous=True)
+            inp = ExternKernel.require_exact_strides(
+                inp, FlexibleLayout.contiguous_strides(inp.get_size())
+            )
+            storage, old_layout = as_storage_and_layout(inp)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -6706,6 +6729,7 @@ class ExternKernel(InputsKernel):
         exact_strides: Sequence[_IntLike] | None = None,
         allow_padding: bool = False,
     ) -> IRNode:
+        """Ensure x has the requested stride order or exact strides, inserting a copy if needed."""
         assert order is not None or exact_strides is not None
         # Layout generally doesn't matter, but some consuming external ops might have requirements
         if x.get_numel() in (0, 1) and not exact_strides:
@@ -6754,7 +6778,17 @@ class ExternKernel(InputsKernel):
                         exact_strides=exact_strides,
                     )
                     return x
-            elif isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
+
+            # When padding is allowed, check if the buffer's existing strides
+            # match padded versions of the requested strides (e.g. concat graph
+            # outputs that were already padded by ConcatKernel).
+            padded_exact_strides = None
+            if allow_padding and exact_strides:
+                padded_exact_strides = list(
+                    Layout._pad_strides(exact_strides, x.get_size(), x.get_dtype())
+                )
+
+            if isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
@@ -6768,6 +6802,15 @@ class ExternKernel(InputsKernel):
                     if exact_strides is not None
                     else x
                 )
+            # Accept already-padded buffers when padding is allowed
+            elif (
+                padded_exact_strides is not None
+                and isinstance(x.get_layout(), (FixedLayout, NonOwningLayout))
+                and significant_strides_equal(
+                    padded_exact_strides, x.get_layout().stride, x.get_size()
+                )
+            ):
+                return try_match_insignificant_strides(x, padded_exact_strides)
             elif isinstance(
                 (mutation_layout := x.get_layout()), MutationLayoutSHOULDREMOVE
             ):

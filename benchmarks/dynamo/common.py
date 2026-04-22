@@ -3430,7 +3430,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--distributed-master-port",
         default="6789",
-        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
+        help="Port to bind for torch.distributed.  Use the default unless it's conflicting with another user",
     )
     parser.add_argument(
         "--dynamic-shapes",

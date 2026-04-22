@@ -96,6 +96,24 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& output,
                                                          Tensor& save_mean,
                                                          Tensor& save_var) {
+  // Flatten 5D to 4D: MPSGraph normalization is significantly slower for rank-5 tensors.
+  // Merging spatial dims is safe since BatchNorm reduces over all dims except channel.
+  if (self.dim() == 5) {
+    auto input_4d = self.contiguous().reshape({self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)});
+    auto output_4d = output.reshape(input_4d.sizes());
+    return batch_norm_mps_out(input_4d,
+                              weight_opt,
+                              bias_opt,
+                              running_mean_opt,
+                              running_var_opt,
+                              train,
+                              momentum,
+                              epsilon,
+                              output_4d,
+                              save_mean,
+                              save_var);
+  }
+
   TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
                               "Batch norm for complex is not supported for MPS");
@@ -545,6 +563,26 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                            bool train,
                                                            double epsilon,
                                                            std::array<bool, 3> grad_input_mask) {
+  // Flatten 5D to 4D (see batch_norm_mps_out for rationale).
+  if (input.dim() == 5) {
+    auto input_4d =
+        input.contiguous().reshape({input.size(0), input.size(1), input.size(2) * input.size(3), input.size(4)});
+    auto grad_out_4d = grad_out.contiguous().reshape(input_4d.sizes());
+    auto [gi, gw, gb] = batch_norm_backward_mps(grad_out_4d,
+                                                input_4d,
+                                                weight_opt,
+                                                running_mean_opt,
+                                                running_var_opt,
+                                                save_mean_opt,
+                                                save_var_opt,
+                                                train,
+                                                epsilon,
+                                                grad_input_mask);
+    if (gi.defined())
+      gi = gi.reshape(input.sizes());
+    return std::make_tuple(std::move(gi), std::move(gw), std::move(gb));
+  }
+
   Tensor grad_input;
   Tensor grad_weight;
   Tensor grad_bias;
