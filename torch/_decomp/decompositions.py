@@ -5246,47 +5246,6 @@ def multilabel_margin_loss_forward(
 # the same way as before, i.e., going through
 # _scaled_dot_product_attention_math. Notice that this decomp rule should be
 # excluded by inductor.
-
-
-# This decomposition ensures that the output tensor from SDPA is in a format
-# that is compatible with the permute->view pattern in MultiheadAttention.
-# Without this, exporting MultiheadAttention with need_weights=False and then
-# running on CUDA would fail with "view size not compatible with input tensor's
-# size and stride" because the permute creates a non-contiguous tensor.
-# See: https://github.com/pytorch/pytorch/issues/179287
-@register_decomposition(aten.scaled_dot_product_attention)
-@out_wrapper()
-def scaled_dot_product_attention(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    attn_mask: Tensor | None = None,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    scale: float | None = None,
-    enable_gqa: bool = False,
-) -> Tensor:
-    output, _ = aten._scaled_dot_product_attention_math.default(
-        query,
-        key,
-        value,
-        attn_mask=attn_mask,
-        dropout_p=dropout_p,
-        is_causal=is_causal,
-        dropout_mask=None,
-        scale=scale,
-        enable_gqa=enable_gqa,
-    )
-    # Match the flash-attention output layout so the downstream permute->view
-    # in MultiheadAttention remains valid after decomposition.
-    output = (
-        output.permute(2, 0, 1, 3)
-        .contiguous(memory_format=torch.contiguous_format)
-        .permute(1, 2, 0, 3)
-    )
-    return output
-
-
 @register_decomposition(aten._scaled_dot_product_flash_attention_for_cpu.default)
 def scaled_dot_product_flash_attention_for_cpu(
     query: Tensor,
