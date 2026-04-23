@@ -47,6 +47,10 @@ TEST(AllocatorTraceTracker, TrackMallocFree) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
-  c10::xpu::XPUCachingAllocator::init(1);
+  auto device = c10::xpu::device_count();
+  if (device <= 0) {
+    return 0;
+  }
+  c10::xpu::XPUCachingAllocator::init(device);
   return RUN_ALL_TESTS();
 }
