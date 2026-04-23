@@ -205,10 +205,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   const auto& weight = weight_opt.value();
   const auto& bias = bias_opt.value();
   const auto& sizes = nt_impl_input->get_nested_sizes();
-  auto M_N = _check_nested_layer_norm_inputs(
+  auto [M, N] = _check_nested_layer_norm_inputs(
       *nt_impl_input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
 
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();

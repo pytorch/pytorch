@@ -160,9 +160,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
   const auto& input_buffer = nt_input->get_buffer();
-  auto M_N = _check_nested_layer_norm_inputs(*nt_input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
+  auto [M, N] = _check_nested_layer_norm_inputs(*nt_input, normalized_shape, weight, bias);
   const auto weight_contig = weight.expect_contiguous();
   const auto bias_contig = bias.expect_contiguous();
   auto output_buffer = at::native::empty_like(

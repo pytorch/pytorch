@@ -388,9 +388,7 @@ std::string format_invalid_args(
   }
 
   if (options.size() == 1) {
-    auto pair = _parseOption(options[0], kwargs);
-    auto& option = pair.first;
-    auto& option_str = pair.second;
+    const auto& [option, option_str] = _parseOption(options[0], kwargs);
     std::vector<std::string> unmatched_kwargs;
     if (has_kwargs)
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
@@ -414,9 +412,8 @@ std::string format_invalid_args(
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
     for (auto& option_str : options) {
-      auto pair = _parseOption(option_str, kwargs);
-      auto& option = pair.first;
-      auto& printable_option_str = pair.second;
+      const auto& [option, printable_option_str] =
+          _parseOption(option_str, kwargs);
       error_msg += " * ";
       error_msg += printable_option_str;
       error_msg += "\n";

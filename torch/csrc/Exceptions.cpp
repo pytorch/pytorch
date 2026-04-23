@@ -215,8 +215,8 @@ static void processErrorMsgInplace(std::string& str) {
   if (str.find("Type") == str.npos) {
     return;
   }
-  for (const auto& it : changes) {
-    c10::ReplaceAll(str, it.first, it.second);
+  for (const auto& [from, to] : changes) {
+    c10::ReplaceAll(str, from, to);
   }
 }
 

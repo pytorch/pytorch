@@ -246,10 +246,10 @@ const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap() {
 #undef DEFINE_SCALAR_TYPE
 
   for (auto scalar_type : all_scalar_types) {
-    auto names = getDtypeNames(scalar_type);
-    result[std::get<0>(names)] = scalar_type;
-    if (!std::get<1>(names).empty()) {
-      result[std::get<1>(names)] = scalar_type;
+    const auto& [primary_name, alias_name] = getDtypeNames(scalar_type);
+    result[primary_name] = scalar_type;
+    if (!alias_name.empty()) {
+      result[alias_name] = scalar_type;
     }
   }
   return result;

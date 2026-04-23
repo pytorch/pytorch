@@ -178,13 +178,13 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
 inline void handle_pointwise_ops(std::vector<std::pair<Tensor, std::optional<int64_t>>> &tensor_inputs) {
   int64_t out_logical_rank = 0;
-  for (auto& tensor_input : tensor_inputs) {
-    int64_t cur_logical_rank = rankWithoutBatchDim(tensor_input.first, tensor_input.second);
+  for (auto& [tensor, bdim] : tensor_inputs) {
+    int64_t cur_logical_rank = rankWithoutBatchDim(tensor, bdim);
     out_logical_rank = std::max(out_logical_rank, cur_logical_rank);
   }
-  for (auto& tensor_input: tensor_inputs) {
-    tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);
-    tensor_input.first = maybePadToLogicalRank(tensor_input.first, tensor_input.second, out_logical_rank);
+  for (auto& [tensor, bdim] : tensor_inputs) {
+    tensor = moveBatchDimToFront(tensor, bdim);
+    tensor = maybePadToLogicalRank(tensor, bdim, out_logical_rank);
   }
 }
 

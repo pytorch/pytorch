@@ -1265,9 +1265,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         self.dim(),
         ")");
 
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
         ScalarType::Half,
         ScalarType::Bool,
@@ -1275,7 +1272,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         ScalarType::ComplexHalf,
         result.scalar_type(),
         "index_add_",
-        [&result, &source, &dim, &index_contig, &numel, &alpha] {
+        [&] {
           auto alpha_value = alpha.to<scalar_t>();
           auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
           auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
@@ -1283,16 +1280,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
           auto* result_ptr = result.data_ptr<scalar_t>();
           auto* source_ptr = source.const_data_ptr<scalar_t>();
           AT_DISPATCH_INDEX_TYPES(
-              index_contig.scalar_type(),
-              "index_add_cpu_",
-              [&index_contig,
-               &numel,
-               &result,
-               &result_ptr,
-               &result_stride,
-               &source_ptr,
-               &source_stride,
-               &alpha_value] {
+              index_contig.scalar_type(), "index_add_cpu_", [&] {
                 auto index_data = index_contig.const_data_ptr<index_t>();
                 for (const auto i : c10::irange(numel)) {
                   auto self_i = index_data[i];
@@ -1427,15 +1415,13 @@ static void index_reduce_func_impl(
         self.dim(),
         ")");
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
+
     AT_DISPATCH_ALL_TYPES_AND2(
         ScalarType::Half,
         ScalarType::BFloat16,
         result.scalar_type(),
         "index_func_",
-        [&result, &source, &dim, &index_contig, &numel, &op, &counts] {
+        [&] {
           auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
           auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
           auto counts_stride = counts.dim() == 0 ? 1 : counts.stride(dim);
@@ -1444,18 +1430,7 @@ static void index_reduce_func_impl(
           auto* source_ptr = source.const_data_ptr<scalar_t>();
           auto counts_ptr = counts.data_ptr<scalar_t>();
           AT_DISPATCH_INDEX_TYPES(
-              index_contig.scalar_type(),
-              "index_func_cpu_",
-              [&index_contig,
-               &numel,
-               &result,
-               &result_ptr,
-               &result_stride,
-               &source_ptr,
-               &source_stride,
-               &op,
-               &counts_ptr,
-               &counts_stride] {
+              index_contig.scalar_type(), "index_func_cpu_", [&] {
                 auto index_data = index_contig.const_data_ptr<index_t>();
                 for (const auto i : c10::irange(numel)) {
                   auto self_i = index_data[i];
@@ -1673,48 +1648,27 @@ Tensor& index_select_out_cpu_(
                     .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
-    auto outer_loop =
-        // explicitly capture all required variables to work around windows
-        // build
-        // TODO: fix this when windows can correctly capture variables in nested
-        // lambda
-        [&index_contig,
-         &iter,
-         &self_dim_size,
-         &selfSlice_data,
-         &self_stride_bytes,
-         &resultSlice_data,
-         &result_stride_bytes](int64_t start, int64_t end) {
-          auto sub_iter = TensorIterator(iter);
-          AT_DISPATCH_INDEX_TYPES(
-              index_contig.scalar_type(),
-              "index_select_out_cpu_",
-              [&index_contig,
-               &start,
-               &end,
-               &sub_iter,
-               &self_dim_size,
-               &selfSlice_data,
-               &self_stride_bytes,
-               &resultSlice_data,
-               &result_stride_bytes]() {
-                auto index_data = index_contig.const_data_ptr<index_t>();
-                for (const auto i : c10::irange(start, end)) {
-                  auto self_i = index_data[i];
-                  TORCH_CHECK_INDEX(
-                      (self_i >= 0) && (self_i < self_dim_size),
-                      "index out of range in self");
-                  auto self_data = const_cast<char*>(static_cast<const char*>(
-                                       selfSlice_data)) +
-                      self_i * self_stride_bytes;
-                  auto result_data = static_cast<char*>(resultSlice_data) +
-                      i * result_stride_bytes;
-                  sub_iter.unsafe_replace_operand(0, result_data);
-                  sub_iter.unsafe_replace_operand(1, self_data);
-                  copy_stub(sub_iter.device_type(), sub_iter, false);
-                };
-              });
-        };
+    auto outer_loop = [&](int64_t start, int64_t end) {
+      auto sub_iter = TensorIterator(iter);
+      AT_DISPATCH_INDEX_TYPES(
+          index_contig.scalar_type(), "index_select_out_cpu_", [&]() {
+            auto index_data = index_contig.const_data_ptr<index_t>();
+            for (const auto i : c10::irange(start, end)) {
+              auto self_i = index_data[i];
+              TORCH_CHECK_INDEX(
+                  (self_i >= 0) && (self_i < self_dim_size),
+                  "index out of range in self");
+              auto self_data =
+                  const_cast<char*>(static_cast<const char*>(selfSlice_data)) +
+                  self_i * self_stride_bytes;
+              auto result_data = static_cast<char*>(resultSlice_data) +
+                  i * result_stride_bytes;
+              sub_iter.unsafe_replace_operand(0, result_data);
+              sub_iter.unsafe_replace_operand(1, self_data);
+              copy_stub(sub_iter.device_type(), sub_iter, false);
+            };
+          });
+    };
 
     // parallel on inner loop in case the slice is large enough;
     // otherwise parallel on outer loop
@@ -1725,33 +1679,10 @@ Tensor& index_select_out_cpu_(
       // data type
       if (iter.is_contiguous() && self.scalar_type() == result.scalar_type()) {
         auto slice_size_bytes = slice_size * elementSize(self.scalar_type());
-        // explicitly capture all required variables to work around windows
-        // build
-        // TODO: fix this when windows can correctly capture variables in nested
-        // lambda
         at::parallel_for(
-            0,
-            numel,
-            grain_size / slice_size,
-            [&index_contig,
-             &slice_size_bytes,
-             &self_dim_size,
-             &selfSlice_data,
-             &self_stride_bytes,
-             &resultSlice_data,
-             &result_stride_bytes](int64_t start, int64_t end) {
+            0, numel, grain_size / slice_size, [&](int64_t start, int64_t end) {
               AT_DISPATCH_INDEX_TYPES(
-                  index_contig.scalar_type(),
-                  "index_select_out_cpu_",
-                  [&index_contig,
-                   &slice_size_bytes,
-                   &self_dim_size,
-                   &selfSlice_data,
-                   &self_stride_bytes,
-                   &resultSlice_data,
-                   &result_stride_bytes,
-                   &start,
-                   &end]() {
+                  index_contig.scalar_type(), "index_select_out_cpu_", [&]() {
                     auto index_data = index_contig.const_data_ptr<index_t>();
                     for (const auto i : c10::irange(start, end)) {
                       auto self_i = index_data[i];
@@ -1779,46 +1710,32 @@ Tensor& index_select_out_cpu_(
         ") must one or zero for given self.dim() (",
         self.dim(),
         ")");
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
+
     if (self.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(
-          self.scalar_type(),
-          "index_select_quant",
-          [&index_contig, &self, &result, &dim, &numel] {
-            auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
-            auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
-            auto self_data_ptr = self.const_data_ptr<scalar_t>();
-            auto result_data_ptr = result.data_ptr<scalar_t>();
-            auto self_numel = self.numel();
-            AT_DISPATCH_INDEX_TYPES(
-                index_contig.scalar_type(),
-                "index_select_out_cpu_quant_",
-                [&index_contig,
-                 &numel,
-                 &self_numel,
-                 &self_data_ptr,
-                 &self_stride,
-                 &result_data_ptr,
-                 &result_stride] {
-                  auto index_data = index_contig.const_data_ptr<index_t>();
-                  for (const auto i : c10::irange(numel)) {
-                    auto self_i = index_data[i];
-                    TORCH_CHECK_INDEX(
-                        (self_i >= 0) && (self_i < self_numel),
-                        "index out of range in self");
-                    const scalar_t* self_ip =
-                        self_data_ptr + self_i * self_stride;
-                    *(result_data_ptr + i * result_stride) = *self_ip;
-                  }
-                });
-          });
+      AT_DISPATCH_QINT_TYPES(self.scalar_type(), "index_select_quant", [&] {
+        auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+        auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+        auto self_data_ptr = self.const_data_ptr<scalar_t>();
+        auto result_data_ptr = result.data_ptr<scalar_t>();
+        auto self_numel = self.numel();
+        AT_DISPATCH_INDEX_TYPES(
+            index_contig.scalar_type(), "index_select_out_cpu_quant_", [&] {
+              auto index_data = index_contig.const_data_ptr<index_t>();
+              for (const auto i : c10::irange(numel)) {
+                auto self_i = index_data[i];
+                TORCH_CHECK_INDEX(
+                    (self_i >= 0) && (self_i < self_numel),
+                    "index out of range in self");
+                const scalar_t* self_ip = self_data_ptr + self_i * self_stride;
+                *(result_data_ptr + i * result_stride) = *self_ip;
+              }
+            });
+      });
     } else {
       AT_DISPATCH_V2(
           self.scalar_type(),
           "index_select",
-          AT_WRAP([&index_contig, &self, &result, &dim, &numel] {
+          AT_WRAP([&] {
             auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
             auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
@@ -1826,15 +1743,7 @@ Tensor& index_select_out_cpu_(
             auto result_data_ptr = result.data_ptr<scalar_t>();
             auto self_numel = self.numel();
             AT_DISPATCH_INDEX_TYPES(
-                index_contig.scalar_type(),
-                "index_select_out_cpu_",
-                [&index_contig,
-                 &numel,
-                 &self_numel,
-                 &self_data_ptr,
-                 &self_stride,
-                 &result_data_ptr,
-                 &result_stride] {
+                index_contig.scalar_type(), "index_select_out_cpu_", [&] {
                   auto index_data = index_contig.const_data_ptr<index_t>();
                   for (const auto i : c10::irange(numel)) {
                     auto self_i = index_data[i];

@@ -1535,12 +1535,8 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
 
   int64_t numel = indices.numel();
 
-  // explicitly capture all required variables to work around windows build
-  // TODO: fix this when windows can correctly capture variables in nested lambda
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_dense_backward_cpu_sum_mean",
-    [&indices, &offset2bag, &bag_size_, &num_weights, &numel, &per_sample_weights,
-      &per_sample_weights_data, &per_sample_weights_stride, &mode, &scale_grad_by_freq,
-      &grad, &index_grad_weight, &padding_idx] {
+    [&] {
     auto* indices_data = indices.const_data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.const_data_ptr<index_t>();
     auto* bag_size_data = bag_size_.const_data_ptr<index_t>();
@@ -1550,10 +1546,7 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
         compute_counts_uniq(num_weights, indices_data, numel, counts);
 
     auto loop =
-      [&next_unique_index_idx, &indices_data, &offset2bag_data, &bag_size_data, &per_sample_weights,
-        &mode, &per_sample_weights_data, &per_sample_weights_stride, &scale_grad_by_freq,
-        &counts, &grad, &index_grad_weight, &padding_idx
-      ](index_t start, index_t end) {
+      [&](index_t start, index_t end) {
       for (index_t i = start; i < end; i++) {
         index_t indices_start = i == 0 ? 0 : next_unique_index_idx[i - 1];
         index_t index = indices_data[indices_start];
@@ -1697,12 +1690,8 @@ static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   auto weight_stride0 = weight.strides()[0];
   auto weight_stride1 = weight.strides()[1];
 
-  // explicitly capture all required variables to work around windows build
-  // TODO: fix this when windows can correctly capture variables in nested lambda
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cpu_template",
-    [&indices, &output, &offset2bag_, &num_samples, &embedding_features,
-      &grad_data, &grad_stride0, &grad_stride1, &weight_data, &weight_stride0, &weight_stride1,
-      &padding_idx] () {
+    [&]() {
     auto* indices_data = indices.const_data_ptr<index_t>();
 
     // The following are contiguous
@@ -1711,8 +1700,7 @@ static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
     // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.
     parallel_for(0, num_samples, 64,
-      [&embedding_features, &grad_data, &grad_stride0, &grad_stride1, &weight_data, &weight_stride0,
-        &weight_stride1, &offset2bag_data, &indices_data, &output_data, &padding_idx](index_t begin, index_t end) {
+      [&](index_t begin, index_t end) {
       for (index_t sample_idx = begin; sample_idx < end; sample_idx++) {
         auto bag_idx = offset2bag_data[sample_idx];
         auto embedding_idx = indices_data[sample_idx];
