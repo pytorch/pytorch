@@ -404,6 +404,8 @@ Tensor& _fft_r2c_cufft_out(const Tensor& self, IntArrayRef dim,
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
   TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(!dim.empty(), "_fft_c2r: dim must not be empty");
+  check_fft_c2r_input(lastdim, self.size(dim.back()));
   auto in_sizes = self.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;

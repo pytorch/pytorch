@@ -249,6 +249,22 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(RuntimeError, match):
                 f(t)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/141448:
+    # _fft_c2r used to crash (heap-buffer-overflow under ASAN, or trip an
+    # INTERNAL ASSERT on the MKL path) when last_dim_size was inconsistent
+    # with the input's last transformed dimension.
+    @onlyNativeDeviceTypes
+    def test_fft_c2r_invalid_last_dim_size(self, device):
+        t = torch.full((3, 1, 3, 1), 0.372049, dtype=torch.cfloat, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected size of last transformed dimension of input to be"):
+            torch._fft_c2r(t, [2], 2, 536870912)
+
+        with self.assertRaisesRegex(
+                RuntimeError, r"Invalid number of data points"):
+            torch._fft_c2r(t, [2], 2, 0)
+
     @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
