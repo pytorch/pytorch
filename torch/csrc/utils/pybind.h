@@ -361,7 +361,7 @@ struct type_caster<c10::complex<T>> {
 };
 
 template <>
-struct TORCH_PYTHON_API type_caster<c10::Layout> {
+struct type_caster<c10::Layout> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(c10::Layout, _("torch.layout"));
