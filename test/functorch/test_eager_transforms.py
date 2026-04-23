@@ -3888,6 +3888,7 @@ class TestComposability(TestCase):
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.FuncTorchBatched))
 
+    @skipIfTorchDynamo("test for eager functorch, flaky under dynamo")
     def test_can_use_grad_when_key_is_excluded(self, device):
         def f(x):
             return x.sin()
