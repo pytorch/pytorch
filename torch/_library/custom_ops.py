@@ -753,19 +753,9 @@ class CustomOpDef:
                 result = fn(*args)  # pyrefly: ignore[not-callable]
 
             utils._c_check_aliasing_constraint(op_name, args, {}, result)
-
-            if opdef._setup_context_fn:
-                filled_args, filled_kwargs = utils.fill_defaults(op._schema, args, {})
-                if has_kwarg_only_args:
-                    opdef._setup_context_fn(
-                        ctx=ctx,
-                        inputs=filled_args,
-                        keyword_only_inputs=filled_kwargs,
-                        output=result,
-                    )
-                else:
-                    opdef._setup_context_fn(ctx=ctx, inputs=filled_args, output=result)
-
+            autograd._invoke_setup_context(
+                opdef, op._schema, has_kwarg_only_args, ctx, args, {}, result
+            )
             return result
 
         def backward(ctx, *grads):
