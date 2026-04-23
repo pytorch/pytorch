@@ -486,15 +486,50 @@ class FSDPParamGroup:
                 return
         self._to_sharded()
 
+    def _reset_iter_state(self) -> None:
+        # See FSDPState._reset_iter_state for semantics. Waits on any
+        # in-flight collective events owned by this group, discards
+        # accumulated grad-reduction state, and restores sharded params.
+        current_stream = self.device_handle.current_stream()
+        if self._all_gather_result is not None:
+            if (event := self._all_gather_result.all_gather_event) is not None:
+                current_stream.wait_event(event)
+            work = self._all_gather_result.all_gather_work
+            if isinstance(work, dist.distributed_c10d.Work):
+                work.wait()
+            self._all_gather_result = None
+        if self._post_reduce_event is not None:
+            current_stream.wait_event(self._post_reduce_event)
+            self._post_reduce_event = None
+        if (
+            self._all_reduce_state is not None
+            and self._all_reduce_state.event is not None
+        ):
+            current_stream.wait_event(self._all_reduce_state.event)
+        self._all_reduce_state = None
+        if self._reshard_after_forward_event is not None:
+            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self._reshard_after_forward_event = None
+        self._partial_reduce_output = None
+        self._post_forward_indices.clear()
+        self._training_state = TrainingState.IDLE
+        self._to_sharded()
+
     def pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
+            # FORWARD at entry means another module in the grouped
+            # ``fully_shard([a, b])`` already registered post_backward this
+            # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
+            # autograd nodes.
+            entering_forward_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
             self.unshard(self.unshard_async_op)
             self.wait_for_unshard()
-            args, kwargs = self._register_post_backward_hook(args, kwargs)
+            if entering_forward_pass:
+                args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
@@ -532,6 +567,16 @@ class FSDPParamGroup:
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)
         logger.debug("%s", self._with_fqn("FSDP::post_backward"))
+        # Partial-group-forward detection: grouped ``fully_shard([a, b, ...])``
+        # where the forward ran only a subset of the group's modules (chunked
+        # loss, 1F1B, etc.). The wrapped post-hook took its partial path, so
+        # ``state._post_forward`` never ran and no ``_pre_backward`` hook was
+        # registered — ``pre_backward`` therefore never fired and state stays
+        # at FORWARD instead of transitioning IDLE → PRE_BACKWARD.
+        is_partial_group_backward = (
+            len(self.modules) > 1  # grouped (structural)
+            and self._training_state == TrainingState.FORWARD  # partial path taken
+        )
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
@@ -638,6 +683,39 @@ class FSDPParamGroup:
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
+            if is_partial_group_backward:
+                # Serialize the default stream on this invocation's
+                # post-accumulate event before returning to autograd.
+                # Otherwise the next partial-group invocation's autograd
+                # kernels queue on the default stream concurrently with
+                # this one's accumulate on the RS stream; the caching
+                # allocator then hands an autograd kernel a block that is
+                # a live input/output of this accumulate, corrupting grads
+                # on non-zero ranks. The post-accumulate event is load-
+                # bearing (pre-accumulate reduce_scatter_event is NOT, per
+                # MI350X); waiting at the next post_backward's entry is
+                # too late because autograd runs between post_backwards.
+                # No CPU sync.
+                #
+                # TODO(#181218): open questions on scope.
+                #   1. Conditional vs unconditional. The same cross-stream
+                #      hazard exists structurally in regular FSDP but has
+                #      not been observed to fire, plausibly because
+                #      ``reduce_scatter_states.append(...)`` ref-holds
+                #      ``reduce_scatter_input`` and cross-layer allocator
+                #      pressure is looser than within a group. Dropping
+                #      the gate needs a real-model overlap-loss measurement.
+                #   2. ROCm-specific vs cross-platform. Only observed on
+                #      ROCm/RCCL/MI350X; CUDA FSDP passes without this fix.
+                #      The standalone repro shows the stream-ordering
+                #      hazard (vector 1) is cross-platform, but FSDP's
+                #      ref-hold closes it on both. The residual FSDP-side
+                #      race on ROCm (vector 2) is on a non-Python-reachable
+                #      buffer — RCCL workspace or allocator fragment.
+                #      Whether vector 2 exists on CUDA FSDP but is timing-
+                #      masked is unresolved. See
+                #      ``fsdp2_chunked_loss_rocm_race.md``.
+                self.device_handle.current_stream().wait_event(self._post_reduce_event)
             if all_reduce_input is not None:
                 if self.device.type != "cpu":
                     if all_reduce_event is None:
