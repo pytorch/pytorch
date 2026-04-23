@@ -1544,7 +1544,6 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
 @instantiate_parametrized_tests
 class ComboKernelMetadataTests(TestCase):
-
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.reset()
@@ -1587,6 +1586,17 @@ class ComboKernelMetadataTests(TestCase):
         inps = [torch.rand(1024, device=GPU_TYPE, requires_grad=True) for _ in range(2)]
         code = self._combo_code(fn, inps)
         self.assertIn("'optimize_mem': False", code)
+
+    @requires_gpu_and_triton
+    @parametrize("disable_ftz", [False, True])
+    def test_combo_triton_meta_has_disable_ftz(self, disable_ftz):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+        with torch._inductor.config.patch({"eager_numerics.disable_ftz": disable_ftz}):
+            code = self._combo_code(fn, inps)
+        self.assertIn(f"'disable_ftz': {disable_ftz}", code)
 
 
 if __name__ == "__main__":

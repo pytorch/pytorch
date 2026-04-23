@@ -1329,6 +1329,15 @@ strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
 )
 
+# Use _FastCudaLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
+# and cuCtxGetCurrent.
+use_fast_triton_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: str | None
 if is_fbcode():
@@ -1997,8 +2006,7 @@ class triton:
 
     # Don't allow multi-stages by default to avoid out of shared memory
     mix_order_reduction_allow_multi_stages = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
-        == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES") == "1"
     )
 
     # Map for storing the amount of kernel runs with dumped input tensors
