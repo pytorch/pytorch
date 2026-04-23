@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # meant to be called only from the neighboring build.sh and build_cpu.sh scripts
+# NOTE: This script is only used for ROCm, XPU, and s390x builds.
+#       CPU/CUDA x86 and aarch64 builds use build_wheel.sh + repair_wheel.sh.
 
 set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
@@ -27,18 +29,6 @@ PLATFORM=""
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
-    # Set platform based on architecture
-    case $ARCH in
-        x86_64)
-            PLATFORM="manylinux_2_28_x86_64"
-            ;;
-        aarch64)
-            PLATFORM="manylinux_2_28_aarch64"
-            ;;
-        *)
-            echo "Other architectures: $ARCH, not setting PLATFORM"
-            ;;
-    esac
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -360,16 +350,6 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
-    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
-        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
-    fi
-    if [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
-        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_aarch64#"${PLATFORM}"# $wheel_file;
-    fi
-
     # regenerate the RECORD file with new hashes
     record_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/RECORD/g')
     if [[ -e $record_file ]]; then
@@ -409,24 +389,11 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # Rename wheel for Manylinux 2_28
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
-        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
-        zip -rq $pkg_name $PREIX*
-        rm -f $pkg
-        mv $pkg_name $(dirname $pkg)/$pkg_name
-    elif [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
-        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_aarch64#"${PLATFORM}"#)
-        zip -rq $pkg_name $PREIX*
-        rm -f $pkg
-        mv $pkg_name $(dirname $pkg)/$pkg_name
-    else
-        # zip up the wheel back
-        zip -rq $(basename $pkg) $PREIX*
-        # remove original wheel
-        rm -f $pkg
-        mv $(basename $pkg) $pkg
-    fi
+    # zip up the wheel back
+    zip -rq $(basename $pkg) $PREIX*
+    # remove original wheel
+    rm -f $pkg
+    mv $(basename $pkg) $pkg
 
     cd ..
     rm -rf tmp

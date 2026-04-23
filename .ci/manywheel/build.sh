@@ -4,14 +4,13 @@ set -ex
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
+# CPU/CUDA x86 and aarch64 builds use linux-binary-manywheel.yml.
+# This script handles only ROCm, XPU, and s390x.
 case "${GPU_ARCH_TYPE:-BLANK}" in
-    cuda | cuda-aarch64)
-        bash "${SCRIPTPATH}/build_cuda.sh"
-        ;;
     rocm)
         bash "${SCRIPTPATH}/build_rocm.sh"
         ;;
-    cpu | cpu-cxx11-abi | cpu-aarch64 | cpu-s390x)
+    cpu-s390x)
         bash "${SCRIPTPATH}/build_cpu.sh"
         ;;
     xpu)

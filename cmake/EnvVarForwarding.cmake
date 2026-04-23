@@ -13,6 +13,7 @@ set(_ENV_ALIASES
 # Additional env vars forwarded with the same name.
 set(_ENV_PASSTHROUGH
   UBSAN_FLAGS
+  ACL_ROOT_DIR
   BLAS
   WITH_BLAS
   CUDA_HOST_COMPILER

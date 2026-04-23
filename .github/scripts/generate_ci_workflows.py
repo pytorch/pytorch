@@ -103,8 +103,14 @@ class OperatingSystem:
     LINUX_S390X = "linux-s390x"
 
 
+# Linux CPU + CUDA x86 and aarch64 builds are handled by
+# linux-binary-manywheel.yml (container: directive).
+# ROCm, XPU, and s390x remain on the legacy Jinja2 template path.
+# TODO: Remove once ROCm and XPU are migrated to container: directive.
 _LINUX_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
-    OperatingSystem.LINUX
+    OperatingSystem.LINUX,
+    arches=generate_binary_build_matrix.ROCM_ARCHES
+    + generate_binary_build_matrix.XPU_ARCHES,
 )
 
 LINUX_BINARY_BUILD_WORFKLOWS = [
@@ -116,13 +122,8 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={
                 LABEL_CIFLOW_BINARIES,
                 LABEL_CIFLOW_BINARIES_WHEEL,
-                LABEL_CIFLOW_BINARIES_LIBTORCH,
             },
             isolated_workflow=True,
-        ),
-        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
-            OperatingSystem.LINUX,
-            _LINUX_WHEEL_CONFIGS,
         ),
     ),
 ]
@@ -227,20 +228,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
-AARCH64_BINARY_BUILD_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX_AARCH64,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX_AARCH64
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
-        ),
-    ),
-]
-
 S390X_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX_S390X,
@@ -267,15 +254,12 @@ def main() -> None:
         undefined=jinja2.StrictUndefined,
     )
 
-    # not ported yet
+    # TODO: Remove linux templates once ROCm, XPU, s390x are migrated
+    # to the container: directive (linux-binary-manywheel.yml).
     template_and_workflows = [
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             LINUX_BINARY_BUILD_WORFKLOWS,
-        ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            AARCH64_BINARY_BUILD_WORKFLOWS,
         ),
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
