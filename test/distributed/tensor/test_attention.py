@@ -29,6 +29,7 @@ from torch.distributed.tensor.experimental._attention import (
     _PerDocumentHeadTailLoadBalancer,
     _PTRRLoadBalancer,
     _RotateMethod,
+    _VarlenPTRRLoadBalancer,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
@@ -1250,9 +1251,7 @@ TestShardingWithLocalTensor = create_local_tensor_test_class(
 class _MockMesh:
     """Minimal DeviceMesh stand-in for non-distributed unit tests."""
 
-    def __init__(
-        self, world_size: int, rank: int, device_type: str = "cpu"
-    ) -> None:
+    def __init__(self, world_size: int, rank: int, device_type: str = "cpu") -> None:
         self._world_size = world_size
         self._rank = rank
         self.device_type = device_type
@@ -1264,9 +1263,7 @@ class _MockMesh:
         return self._rank
 
 
-def _build_varlen_meta(
-    cu_seq_q: list[int], B: int, seq_len: int
-) -> VarlenMetadata:
+def _build_varlen_meta(cu_seq_q: list[int], B: int, seq_len: int) -> VarlenMetadata:
     """Build a global VarlenMetadata from a per-batch cumulative tensor.
 
     The given ``cu_seq_q`` covers a single batch element ``[0, ..., seq_len]``.
@@ -1446,7 +1443,7 @@ class TestCPVarlenMetadata(TestCase):
         self.assertEqual(self._seg_lens(per_rank[0]), ([10, 6, 10, 6], [10, 6, 10, 6]))
         self.assertEqual(self._seg_lens(per_rank[1]), ([16, 16], [22, 22]))
         expected_rank0_k = torch.tensor(
-            list(range(0, 10))
+            list(range(10))
             + list(range(10, 16))
             + list(range(32, 42))
             + list(range(42, 48)),
@@ -1486,6 +1483,223 @@ class TestCPVarlenMetadata(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "self-attention"):
             meta._shard_for_cp(_MockMesh(2, 0), batch_size=1, seq_length=32)
+
+
+def _synthetic_doc_lengths(seq_len: int, kind: str, seed: int = 0) -> list[int]:
+    """Generate doc lengths summing to seq_len.
+
+    ``kind="mixture"`` (deterministic, hand-checkable):
+        ~30 short docs U(16,64), 2 medium docs U(200,320), 1 long doc =
+        remainder. Long doc placed mid-sequence (worst for headtail).
+    """
+    rng = torch.Generator().manual_seed(seed)
+    if kind == "mixture":
+        short_lens = [
+            int(torch.randint(16, 65, (1,), generator=rng).item()) for _ in range(30)
+        ]
+        medium_lens = [
+            int(torch.randint(200, 321, (1,), generator=rng).item()) for _ in range(2)
+        ]
+        used = sum(short_lens) + sum(medium_lens)
+        if used >= seq_len:
+            raise ValueError("mixture overflows seq_len; bump seq_len")
+        long_len = seq_len - used
+        # Place long doc at the midpoint of the short docs.
+        mid = len(short_lens) // 2
+        return short_lens[:mid] + medium_lens + [long_len] + short_lens[mid:]
+    else:
+        raise ValueError(f"unknown kind {kind!r}")
+
+
+def _build_varlen_meta_from_doc_lens(
+    doc_lens: list[int], B: int, seq_len: int, device: str = "cpu"
+) -> VarlenMetadata:
+    """Per-batch doc lens replicated across B with offsets (mirrors
+    create_varlen_metadata_for_document)."""
+    if sum(doc_lens) != seq_len:
+        raise ValueError("doc_lens must sum to seq_len")
+    cum = [0]
+    for length in doc_lens:
+        cum.append(cum[-1] + length)
+    parts: list[torch.Tensor] = []
+    for b in range(B):
+        parts.append(
+            torch.tensor(cum[:-1], dtype=torch.int32, device=device) + b * seq_len
+        )
+    parts.append(torch.tensor([B * seq_len], dtype=torch.int32, device=device))
+    cu = torch.cat(parts)
+    return VarlenMetadata(
+        cu_seq_q=cu,
+        cu_seq_k=cu.clone(),
+        max_q=int(torch.diff(cu).max().item()),
+        max_k=int(torch.diff(cu).max().item()),
+    )
+
+
+def _per_rank_total_work(
+    indices: torch.Tensor, cu_seq_q: torch.Tensor, B: int, S: int, W: int
+) -> torch.Tensor:
+    """Sum of visible-K-token-counts per rank for a given (B, S) permutation.
+
+    Used to compare load-balance quality: a rank's "work" is the sum
+    over its Q tokens of (offset_within_doc + 1) under causal masking.
+    """
+    cu = cu_seq_q.to(torch.long)
+    positions = torch.arange(B * S, dtype=torch.long)
+    doc_id = torch.searchsorted(cu, positions, right=True) - 1
+    work_per_token = positions - cu[doc_id] + 1  # (B*S,)
+    work_per_token_2d = work_per_token.view(B, S)
+    work_rearr = torch.gather(work_per_token_2d, 1, indices.to(torch.long))
+    shard = S // W
+    return work_rearr.view(B, W, shard).sum(dim=(0, 2))
+
+
+class TestVarlenPTRRLoadBalancer(TestCase):
+    """Pure-logic CPU tests for _VarlenPTRRLoadBalancer."""
+
+    @staticmethod
+    def _check_perm(indices: torch.Tensor) -> None:
+        B, S = indices.shape
+        for b in range(B):
+            torch.testing.assert_close(
+                torch.sort(indices[b]).values,
+                torch.arange(S, dtype=indices.dtype),
+            )
+
+    @staticmethod
+    def _check_restore(lb: _VarlenPTRRLoadBalancer) -> None:
+        fwd = lb._generate_indices(restore=False).to(torch.long)
+        rev = lb._generate_indices(restore=True).to(torch.long)
+        for b in range(fwd.shape[0]):
+            roundtrip = fwd[b][rev[b]]
+            torch.testing.assert_close(
+                roundtrip, torch.arange(fwd.shape[1], dtype=torch.long)
+            )
+
+    def test_single_doc_hand_balance(self) -> None:
+        # B=1, W=2, S=128, BS=32. One full-seq doc.
+        # work blocks: sum(1..32)=528, sum(33..64)=1552, sum(65..96)=2576,
+        # sum(97..128)=3600. PTRR pairs (heaviest, lightest): rank gets
+        # blocks summing to 528+3600 and 1552+2576 -- both 4128.
+        S, BS, W = 128, 32, 2
+        meta = _build_varlen_meta_from_doc_lens([S], B=1, seq_len=S)
+        lb = _VarlenPTRRLoadBalancer(
+            meta.cu_seq_q,
+            batch_size=1,
+            seq_length=S,
+            world_size=W,
+            block_size=BS,
+        )
+        idx = lb._generate_indices(restore=False)
+        self._check_perm(idx)
+        self._check_restore(lb)
+        per_rank = _per_rank_total_work(idx, meta.cu_seq_q, B=1, S=S, W=W)
+        torch.testing.assert_close(
+            per_rank, torch.tensor([4128, 4128], dtype=per_rank.dtype)
+        )
+
+    def test_multi_batch_different_doc_structures(self) -> None:
+        BS, W = 32, 2
+        # batch 0: one doc of 128; batch 1: two docs of 64+64.
+        cu = torch.tensor([0, 128, 192, 256], dtype=torch.int32)
+        lb = _VarlenPTRRLoadBalancer(
+            cu,
+            batch_size=2,
+            seq_length=128,
+            world_size=W,
+            block_size=BS,
+        )
+        idx = lb._generate_indices(restore=False)
+        self._check_perm(idx)
+        self._check_restore(lb)
+
+    def test_balance_quality_beats_headtail(self) -> None:
+        # The point of PTRR. On the synthetic mixture (skewed),
+        # PTRR's per-rank-work spread should be < 0.5x headtail's.
+        S, BS, W = 4096, 128, 2
+        doc_lens = _synthetic_doc_lengths(S, kind="mixture", seed=0)
+        meta = _build_varlen_meta_from_doc_lens(doc_lens, B=1, seq_len=S)
+
+        ptrr = _VarlenPTRRLoadBalancer(
+            meta.cu_seq_q,
+            batch_size=1,
+            seq_length=S,
+            world_size=W,
+            block_size=BS,
+        )
+        ht = _HeadTailLoadBalancer(S, W, torch.device("cpu"))
+
+        ptrr_work = _per_rank_total_work(
+            ptrr._generate_indices(restore=False),
+            meta.cu_seq_q,
+            B=1,
+            S=S,
+            W=W,
+        )
+        ht_work = _per_rank_total_work(
+            ht._generate_indices(restore=False),
+            meta.cu_seq_q,
+            B=1,
+            S=S,
+            W=W,
+        )
+        ptrr_spread = (ptrr_work.max() - ptrr_work.min()).item()
+        ht_spread = (ht_work.max() - ht_work.min()).item()
+        self.assertLess(
+            ptrr_spread,
+            0.5 * ht_spread,
+            msg=(
+                f"PTRR spread {ptrr_spread} should be < 0.5 * "
+                f"headtail spread {ht_spread}"
+            ),
+        )
+
+    def test_num_blocks_equals_world_size(self) -> None:
+        S, BS, W = 64, 32, 2  # num_blocks = 2 = W
+        meta = _build_varlen_meta_from_doc_lens([S], B=1, seq_len=S)
+        lb = _VarlenPTRRLoadBalancer(
+            meta.cu_seq_q,
+            batch_size=1,
+            seq_length=S,
+            world_size=W,
+            block_size=BS,
+        )
+        idx = lb._generate_indices(restore=False)
+        self._check_perm(idx)
+
+    def test_block_size_divisibility_error(self) -> None:
+        meta = _build_varlen_meta_from_doc_lens([128], B=1, seq_len=128)
+        with self.assertRaisesRegex(ValueError, "divisible by block_size"):
+            _VarlenPTRRLoadBalancer(
+                meta.cu_seq_q,
+                batch_size=1,
+                seq_length=128,
+                world_size=2,
+                block_size=100,
+            )
+
+    def test_world_size_divisibility_error(self) -> None:
+        # num_blocks = 6, not divisible by W=4.
+        meta = _build_varlen_meta_from_doc_lens([192], B=1, seq_len=192)
+        with self.assertRaisesRegex(ValueError, "must be divisible by world_size"):
+            _VarlenPTRRLoadBalancer(
+                meta.cu_seq_q,
+                batch_size=1,
+                seq_length=192,
+                world_size=4,
+                block_size=32,
+            )
+
+    def test_consistency_error(self) -> None:
+        cu_bad = torch.tensor([0, 50], dtype=torch.int32)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            _VarlenPTRRLoadBalancer(
+                cu_bad,
+                batch_size=1,
+                seq_length=64,
+                world_size=2,
+                block_size=32,
+            )
 
 
 class CPVarlenAttentionTest(DTensorTestBase):
@@ -1548,8 +1762,13 @@ class CPVarlenAttentionTest(DTensorTestBase):
 
         # Identical Q/K/V on every rank.
         q_full = torch.randn(
-            B, seq_len, n_heads, head_dim,
-            device=device, dtype=torch.bfloat16, requires_grad=True,
+            B,
+            seq_len,
+            n_heads,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
         )
         kv_kwargs = dict(device=device, dtype=torch.bfloat16, requires_grad=True)
         k_full = torch.randn(B, seq_len, n_heads, head_dim, **kv_kwargs)
@@ -1746,8 +1965,67 @@ class CPVarlenAttentionTest(DTensorTestBase):
             doc_lens=[40, 88],
             n_heads=4,
             head_dim=32,
-            load_balancer_factory=lambda *, global_meta, seq_len, B, world_size, device: _HeadTailLoadBalancer(
-                seq_len, world_size, device
+            load_balancer_factory=lambda *,
+            global_meta,
+            seq_len,
+            B,
+            world_size,
+            device: _HeadTailLoadBalancer(seq_len, world_size, device),
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_ptrr(self) -> None:
+        # B=1, multi-doc straddling.  Default block_size=32 (small enough
+        # for the 128-token test seq).
+        self._run_varlen_cp(
+            B=1,
+            seq_len=128,
+            doc_lens=[40, 88],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=lambda *,
+            global_meta,
+            seq_len,
+            B,
+            world_size,
+            device: _VarlenPTRRLoadBalancer(
+                global_meta.cu_seq_q,
+                batch_size=B,
+                seq_length=seq_len,
+                world_size=world_size,
+                block_size=32,
+            ),
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_ptrr_multi_batch(self) -> None:
+        # B=2, exercises both per-batch PTRR rearrangement and
+        # k_local_indices re-packing.
+        self._run_varlen_cp(
+            B=2,
+            seq_len=128,
+            doc_lens=[40, 88],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=lambda *,
+            global_meta,
+            seq_len,
+            B,
+            world_size,
+            device: _VarlenPTRRLoadBalancer(
+                global_meta.cu_seq_q,
+                batch_size=B,
+                seq_length=seq_len,
+                world_size=world_size,
+                block_size=32,
             ),
         )
 

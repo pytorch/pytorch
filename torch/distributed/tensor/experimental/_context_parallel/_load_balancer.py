@@ -467,6 +467,104 @@ class _PTRRLoadBalancer(_LoadBalancer):
         return indices
 
 
+class _VarlenPTRRLoadBalancer(_LoadBalancer):
+    """Processing-Time based Round-Robin (PTRR) load balancer for
+    **document-causal** varlen attention.
+
+    .. warning::
+        This balancer assumes per-document causal masking. The per-Q-block
+        work estimate is ``t - doc_start[t] + 1`` summed over the block,
+        which is only the correct work estimate under causal masking.
+        Using this balancer with a non-causal varlen mask will produce a
+        valid permutation but a meaningless load balance -- callers are
+        responsible for ensuring the attention mask is causal.
+
+    Estimates per-Q-block work directly from ``cu_seq_q`` (no ``BlockMask``
+    needed). Per-block work is the sum of per-token work over the block.
+    The same scheduling primitive (``_PTRRLoadBalancer.ptrr_scheduling``)
+    is reused.
+
+    Outputs a ``(B, S)`` permutation tensor where each batch element is
+    rearranged independently -- important when documents differ across
+    the batch.
+    """
+
+    def __init__(
+        self,
+        cu_seq_q: Tensor,
+        *,
+        batch_size: int,
+        seq_length: int,
+        world_size: int,
+        block_size: int = 128,
+    ):
+        if cu_seq_q.dim() != 1:
+            raise ValueError(
+                f"cu_seq_q must be 1-D, got shape {tuple(cu_seq_q.shape)}."
+            )
+        if not bool(torch.all(cu_seq_q[1:] >= cu_seq_q[:-1]).item()):
+            raise ValueError("cu_seq_q must be monotonically non-decreasing.")
+        if seq_length % block_size != 0:
+            raise ValueError(
+                f"seq_length {seq_length} must be divisible by block_size {block_size}."
+            )
+        num_blocks = seq_length // block_size
+        if num_blocks % world_size != 0:
+            raise ValueError(
+                f"num_blocks (seq_length / block_size = {num_blocks}) "
+                f"must be divisible by world_size {world_size}."
+            )
+        expected_total = batch_size * seq_length
+        if int(cu_seq_q[-1].item()) != expected_total:
+            raise ValueError(
+                f"cu_seq_q[-1]={int(cu_seq_q[-1].item())} does not match "
+                f"batch_size * seq_length = {expected_total}."
+            )
+
+        self.cu_seq_q = cu_seq_q
+        self.batch_size = batch_size
+        self.seq_length = seq_length
+        self.world_size = world_size
+        self.block_size = block_size
+
+    def _generate_indices(self, restore: bool = False) -> Tensor:
+        B = self.batch_size
+        S = self.seq_length
+        W = self.world_size
+        BS = self.block_size
+        num_blocks = S // BS
+
+        device = self.cu_seq_q.device
+        cu = self.cu_seq_q.to(torch.long)
+
+        # Per-token causal work = (token's offset within its doc) + 1.
+        positions = torch.arange(B * S, device=device, dtype=torch.long)
+        doc_id = torch.searchsorted(cu, positions, right=True) - 1
+        work_per_token = positions - cu[doc_id] + 1  # (B*S,)
+
+        # Per-block work: sum of token work within each block, per batch.
+        work_per_block = work_per_token.view(B, num_blocks, BS).sum(dim=-1)
+        # (B, num_blocks)
+
+        batch_ptrr = torch.vmap(
+            functools.partial(_PTRRLoadBalancer.ptrr_scheduling, group_size=W)
+        )
+        ptrr_blocks = batch_ptrr(work_per_block)  # (B, W, num_blocks_per_rank)
+        ptrr_blocks = ptrr_blocks.reshape(B, -1)  # (B, num_blocks)
+
+        # Expand block indices to token indices.
+        block_indices = torch.arange(num_blocks * BS, device=device).view(
+            num_blocks, BS
+        )  # (num_blocks, BS)
+        indices = block_indices[ptrr_blocks].view(B, -1)  # (B, S)
+
+        if restore:
+            # pyrefly: ignore[missing-argument]
+            indices = torch.vmap(torch.argsort)(indices)
+
+        return indices
+
+
 def _create_default_load_balancer(
     seq_length: int, world_size: int, device: str | torch.device
 ) -> _LoadBalancer | None:

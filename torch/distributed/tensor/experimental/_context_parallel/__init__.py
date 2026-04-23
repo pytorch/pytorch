@@ -21,6 +21,7 @@ from ._load_balancer import (
     _LoadBalancer,
     _PerDocumentHeadTailLoadBalancer,
     _PTRRLoadBalancer,
+    _VarlenPTRRLoadBalancer,
 )
 
 
@@ -45,4 +46,5 @@ __all__ = [
     "_LoadBalancer",
     "_PerDocumentHeadTailLoadBalancer",
     "_PTRRLoadBalancer",
+    "_VarlenPTRRLoadBalancer",
 ]
