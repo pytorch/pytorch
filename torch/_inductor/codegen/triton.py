@@ -2144,19 +2144,12 @@ class TritonKernelOverrides(TritonOverrides):
             """
             Cast index variables to int64 for value computation.
 
-            This is used when an index_expr is determined to be used ONLY for computing
-            tensor values, the original dtype is int64, and
-            the kernel index dtype is int32.
-
             Example:
                 Input:  "1000000000*x0"
                 Output: "1000000000*x0.to(tl.int64)"
 
                 Input:  "10000000*r0_0"  (reduction variable)
                 Output: "10000000*r0_0.to(tl.int64)"
-
-                When Triton evaluates: 1000000000 (int32) * x0.to(tl.int64) (int64)
-                Result: int64 (type promotion)
 
             Args:
                 index_str: String containing index expression with index variables
@@ -2188,44 +2181,32 @@ class TritonKernelOverrides(TritonOverrides):
         is_for_values_only = False
         index_str_to_use = indexing.index_str
         current_fx_node = V.interpreter.current_node
-        is_for_values_only = False
         original_dtype = None
 
-        # Check if this index_expr has int64 iota ancestor via origin_node tracing
+        # Check if this index_expr has int64 iota ancestor via tracing
         if current_fx_node:
-            # Lazy evaluation: only analyze once when first index_expr is encountered
-            if V.kernel.current_node._body.index_expr_usage is None:
-                from ..loop_body import analyze_index_expr_usage
+            from ..loop_body import get_index_expr_int64_usage
 
-                # Get IR node data (e.g., Pointwise) which has origin_node
-                ir_data = None
-                if hasattr(V.kernel.current_node, "node"):
-                    scheduler_node = V.kernel.current_node.node
-                    if hasattr(scheduler_node, "data"):
-                        ir_data = scheduler_node.data
-                V.kernel.current_node._body.index_expr_usage = analyze_index_expr_usage(
-                    V.kernel.current_node._body, ir_data
-                )
-
-            usage_info = V.kernel.current_node._body.index_expr_usage.get(
-                current_fx_node, (False, False)
-            )
-            is_for_values_only, has_int64_iota = usage_info
+            is_for_values_only, has_int64_iota = get_index_expr_int64_usage()
 
             # Set original_dtype if this is a value computation from int64 iota
             if is_for_values_only and has_int64_iota:
                 original_dtype = torch.int64
 
         # Determine dtype to use based on usage chain and original dtype
+        if (
+            is_for_values_only
+            and original_dtype == torch.int64
+            and index_dtype == torch.int32
+        ):
+            index_str_to_use = _cast_index_vars_to_int64(indexing.index_str)
+
         if is_for_values_only and original_dtype == torch.int64:
             dtype_to_use = torch.int64
-            if index_dtype == torch.int32:
-                index_str_to_use = _cast_index_vars_to_int64(indexing.index_str)
         elif dtype not in (torch.int32, torch.int64):
             # Non-integer dtypes: respect requested dtype
             dtype_to_use = dtype
         else:
-            # INDEXING chain OR original dtype was not int64 → use kernel index dtyped
             dtype_to_use = index_dtype
 
         # after we emit this var we cast it to the correct dtype
@@ -2251,8 +2232,6 @@ class TritonKernelOverrides(TritonOverrides):
                 shape=var.shape,
             )
         elif is_for_values_only and original_dtype == torch.int64:
-            # For VALUE chain with int64 original dtype: already generated with int64
-            # The var was generated with dtype_to_use (int64) and index vars cast if needed
             pass
         else:
             # TODO: we are not always consistent in enforcing that the output of the index expr printing

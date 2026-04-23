@@ -859,8 +859,7 @@ def _has_int64_iota_ancestor(dynamo_fx_node: torch.fx.Node | None) -> bool:
         dynamo_fx_node: Starting node in Dynamo FX graph (origin_node from IR)
 
     Returns:
-        True if this node has an int64 iota ancestor that's used for int64 computation
-        (i.e., NOT immediately converted to float via convert_element_type)
+        True if this node has an int64 iota ancestor that's used for int64)
     """
     if not dynamo_fx_node:
         return False
@@ -994,3 +993,32 @@ def analyze_index_expr_usage(
             result[node] = (is_for_values_only, has_int64_iota)
 
     return result
+
+
+def get_index_expr_int64_usage() -> tuple[bool, bool]:
+    """
+    Determine if index_expr should use int64 based on usage analysis.
+
+    Returns:
+        (is_for_values_only, has_int64_iota_ancestor)
+        - is_for_values_only: True if this index_expr is only used for tensor values
+        - has_int64_iota_ancestor: True if traced back to int64 iota operation
+    """
+    from .virtualized import V
+
+    if hasattr(V.interpreter, "current_node") and hasattr(
+        V.kernel.current_node, "_body"
+    ):
+        current_fx_node = V.interpreter.current_node
+        loop_body = V.kernel.current_node._body
+        scheduler_node = getattr(V.kernel.current_node, "node", None)
+        ir_node = getattr(scheduler_node, "data", None)
+
+        # Lazy evaluation: run analysis once per LoopBody and cache result
+        if loop_body.index_expr_usage is None:
+            loop_body.index_expr_usage = analyze_index_expr_usage(loop_body, ir_node)
+
+        # Look up usage info for this specific FX node
+        return loop_body.index_expr_usage.get(current_fx_node, (False, False))
+
+    return (False, False)
