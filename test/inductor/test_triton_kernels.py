@@ -175,12 +175,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         eager_out = f(x, y)
         compiled_out, (code,) = run_and_get_code(torch.compile(f), x, y)
         self.assertEqual(compiled_out, eager_out)
-        # The generated variable name should use single-underscore prefix
-        # (_dunder_add_kernel_0) not double (__dunder_add_kernel_0).
-        # The original __dunder_add_kernel still appears in triton source
-        # strings, which is fine -- only the variable name matters.
-        self.assertNotIn("__dunder_add_kernel_0", code)
-        self.assertIn("_dunder_add_kernel_0", code)
+        # Match as a standalone identifier; substrings inside other names
+        # (e.g. cpp_wrapper's `call__dunder_add_kernel_0`) are harmless C++
+        # identifiers and aren't subject to Python name mangling.
+        import re as _re
+
+        self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
+        self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
