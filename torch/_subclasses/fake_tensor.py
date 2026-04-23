@@ -1394,7 +1394,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
-        # the fake_device of the tensor so that code such as as `if x.is_cuda`
+        # the fake_device of the tensor so that code such as `if x.is_cuda`
         # or torch.zeros([10, 10], device=x.device) continues to execute as if
         # the FakeTensor were real. However, within kernel execution, we return
         # the `Meta` device because all computation within the kernels should
