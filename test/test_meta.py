@@ -1973,6 +1973,16 @@ class TestMetaKernelRegistrations(TestCase):
         )
         self.assertEqual(cpp_result, decomp_result)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_linalg_eig_strides(self):
+        A_cpu = torch.randn(3, 3)
+        A_meta = torch.randn(3, 3, device="meta")
+        _, eigvecs_cpu = torch.linalg.eig(A_cpu)
+        _, eigvecs_meta = torch.linalg.eig(A_meta)
+        self.assertEqual(eigvecs_cpu.stride(), eigvecs_meta.stride())
+        self.assertEqual(eigvecs_cpu.shape, eigvecs_meta.shape)
+        self.assertEqual(eigvecs_cpu.dtype, eigvecs_meta.dtype)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
