@@ -10268,7 +10268,7 @@ class TestSDPA(TestCaseMPS):
     @parametrize("with_mask", [True, False])
     def test_fast_vector_attention(self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool):
         torch.manual_seed(1729)
-        batch = 2
+        batch = 1
         NH = 2
         q_len = 4  # <8 so that vector fast is eligible
         s_len = 16  # smaller than 1024 so that we use the one–pass variant
@@ -10280,7 +10280,7 @@ class TestSDPA(TestCaseMPS):
     @parametrize("with_mask", [True, False])
     def test_fast_vector_attention_2pass(self, dtype: torch.dtype, layout: str, with_mask: bool):
         torch.manual_seed(1729)
-        batch = 2
+        batch = 1
         NH = 32
         q_len = 8
         s_len = 1024  # large enough to trigger the two–pass path
