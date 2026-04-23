@@ -74,8 +74,8 @@ op_skip = _make_dummy_op("op_skip")
 op_skip_f32 = _make_dummy_op("op_skip_f32")
 op_xfail = _make_dummy_op("op_xfail")
 # op_precision starts with a low precision override (1e-5) declared in the OpInfo itself.
-# op_decorators will later register a higher override (1e-2) for float32 to verify
-# that the op_decorators entry takes precedence (because it is appended last to
+# op_overrides will later register a higher override (1e-2) for float32 to verify
+# that the op_overrides entry takes precedence (because it is appended last to
 # op.decorators and therefore applied last, overwriting precision_overrides).
 op_precision = _make_dummy_op(
     "op_precision",
@@ -115,7 +115,7 @@ class TestDeviceTypeOpenReg(TestCase):
                 self.precision,
                 1e-2,
                 msg=(
-                    f"Expected op_decorators precisionOverride (1e-2) to win over "
+                    f"Expected op_overrides precisionOverride (1e-2) to win over "
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )
@@ -123,10 +123,10 @@ class TestDeviceTypeOpenReg(TestCase):
 
     @ops([op_normal])
     def test_op_narrow_ops(self, device, dtype, op):
-        """Verify that having extra entries in op_skips that are NOT present in
+        """Verify that having extra entries in op_overrides that are NOT present in
         the @ops list does not raise a KeyError (safety check in _apply_op_overrides).
 
-        op_skips includes op_skip and PrivateUse1TestBase.op_skips also
+        op_overrides includes op_skip and PrivateUse1TestBase.op_overrides also
         lists op_skip; here @ops only exposes op_normal.  The safety check
         introduced in _apply_op_overrides must silently ignore the missing keys.
         """
@@ -134,13 +134,11 @@ class TestDeviceTypeOpenReg(TestCase):
 
 
 # Modify PrivateUse1TestBase which is automatically included for OpenReg
-PrivateUse1TestBase.op_skips = {
+PrivateUse1TestBase.op_overrides = {
     "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
     "op_skip_f32": [
         DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
     ],
-}
-PrivateUse1TestBase.op_decorators = {
     "op_xfail": [DecorateInfo(unittest.expectedFailure)],
     # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
     "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],

@@ -335,8 +335,7 @@ class DeviceTypeTestBase(TestCase):
     # These are intentionally placed on DeviceTypeTestBase (rather than solely on
     # PrivateUse1TestBase) so that in-tree backends can adopt the same mechanism
     # in the future.
-    op_decorators = None  # type: Optional[dict[str, list[DecorateInfo]]]
-    op_skips = None  # type: Optional[dict[str, list[DecorateInfo]]]
+    op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -364,40 +363,22 @@ class DeviceTypeTestBase(TestCase):
 
     @classmethod
     def _apply_op_overrides(cls, ops):
-        if cls.op_decorators is None and cls.op_skips is None:
+        if cls.op_overrides is None:
             return
 
         op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
 
-        if cls.op_decorators is not None:
-            for op_name, decorators in cls.op_decorators.items():
+        if cls.op_overrides is not None:
+            for op_name, decorators in cls.op_overrides.items():
                 for decorator in decorators:
                     if cls.device_type == "privateuse1":
                         decorator.device_type = torch._C._get_privateuse1_backend_name()
                     else:
                         decorator.device_type = cls.device_type
                     # op_name may not be in op_dict if @ops() has restricted the
-                    # OpInfo list to a smaller set than op_decorators covers.
+                    # OpInfo list to a smaller set than op_overrides covers.
                     if op_name in op_dict:
                         op_dict[op_name].decorators += (decorator,)
-
-        if cls.op_skips is not None:
-            for op_name, skips in cls.op_skips.items():
-                for skip in skips:
-                    if cls.device_type == "privateuse1":
-                        skip.device_type = torch._C._get_privateuse1_backend_name()
-                    else:
-                        skip.device_type = cls.device_type
-                    # op_name may not be in op_dict if @ops() has restricted the
-                    # OpInfo list to a smaller set than op_skips covers.
-                    if op_name in op_dict:
-                        # We must add to both .skips and .decorators because
-                        # OpInfo.__post_init__ has already executed and folded the
-                        # original .skips into .decorators (see OpInfo.__post_init__).
-                        # Only .decorators is consulted by ops._parametrize_test, so
-                        # adding to .skips alone would have no effect at this point.
-                        op_dict[op_name].skips += (skip,)
-                        op_dict[op_name].decorators += (skip,)
 
         ops.op_list = list(op_dict.values())
 
