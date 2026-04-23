@@ -280,6 +280,19 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "triton.enable_template_tma_store": tma_store,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
+                # If we dynamically disable pipelining,
+                # triton_blackwell_ws_persistent_device_tma template will
+                # be picked and then cause mis-aligned memory access.
+                # If we don't dynamically disable pipelining,
+                # this template is skipped and triton_tem_fused_addmm_repeat_3
+                # is used.
+                #
+                # Fundamentally we should fix the triton_blackwell_ws_persistent_device_tma template
+                # The flag below work around the problem.
+                #
+                # This only happens in fbcode https://www.internalfb.com/diff/D101855575.
+                # Can not repro it in OSS build.
+                "triton.dynamic_disable_pipelining": False,
             }
         ):
             c_actual, code = run_and_get_code(
