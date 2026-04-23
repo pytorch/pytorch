@@ -913,6 +913,60 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ac=False,
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_partial_group_chunked_loss_rs_output_race(self):
+        """Cross-platform regression for the chunked-loss rs_output stream-
+        ordering race (PR #181218).
+
+        Mechanism: in a grouped ``fully_shard([norm, head])`` with the
+        chunked-loss pattern, ``post_backward`` for chunk N queues the
+        accumulate on the reduce-scatter stream that writes to
+        ``head.weight.grad._local_tensor``. Unless
+        ``current_stream().wait_event(self._post_reduce_event)`` fires
+        before returning to autograd, chunk N+1's autograd on the default
+        stream races the in-flight accumulate on the RS stream, corrupting
+        the sharded grad bit-deterministically. The racing buffer is a
+        PyTorch-managed 8 KiB ``torch.empty`` from
+        ``_fsdp_collectives.DefaultAllocMixin.allocate`` on the RS stream
+        (not an RCCL workspace, not an allocator fragment), accessed on the
+        default stream via the ``param.grad._local_tensor`` Python alias
+        with no ``record_stream`` hook. Cross-platform by code path; ROCm
+        exposes it through kernel timing.
+
+        This test widens the race window deterministically on both CUDA
+        and ROCm by injecting ``torch.cuda._sleep`` on the post-reduce
+        stream between the collective and the accumulate loop, via a
+        monkey-patch of ``_to_dtype_if_needed`` (the single call site in
+        ``foreach_reduce`` that runs inside the ``with
+        stream(post_reduce_stream)`` block and precedes the accumulate).
+        The sleep is many orders of magnitude wider than FSDP's
+        post-backward-to-next-autograd CPU gap, so the race fires at
+        iter 0 when the ``wait_event`` fix is absent.
+
+        Run without the fix (comment out the ``wait_event`` in
+        ``FSDPParamGroup.post_backward``) to verify the race reproduces.
+        See ``fsdp2_chunked_loss_rocm_race.md``.
+        """
+        from unittest.mock import patch as mock_patch
+
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives as col
+
+        orig = col._to_dtype_if_needed
+        sleep_cycles = 10**8
+
+        def patched(tensor, dtype):
+            result = orig(tensor, dtype)
+            torch.cuda._sleep(sleep_cycles)
+            return result
+
+        with mock_patch.object(col, "_to_dtype_if_needed", patched):
+            self._test_partial_group_forward_then_standalone(
+                reshard_after_forward=True,
+                weight_tying=False,
+                mp_policy_mode="none",
+                ac=False,
+            )
+
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,

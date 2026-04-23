@@ -674,35 +674,20 @@ class FSDPParamGroup:
             if is_partial_group_backward:
                 # Serialize the default stream on this invocation's
                 # post-accumulate event before returning to autograd.
-                # Otherwise the next partial-group invocation's autograd
-                # kernels queue on the default stream concurrently with
-                # this one's accumulate on the RS stream; the caching
-                # allocator then hands an autograd kernel a block that is
-                # a live input/output of this accumulate, corrupting grads
-                # on non-zero ranks. The post-accumulate event is load-
-                # bearing (pre-accumulate reduce_scatter_event is NOT, per
-                # MI350X); waiting at the next post_backward's entry is
-                # too late because autograd runs between post_backwards.
-                # No CPU sync.
+                # Otherwise chunk N+1's autograd on the default stream
+                # aliases this chunk's rs_output block via
+                # ``param.grad._local_tensor`` — a Python tensor alias,
+                # so the allocator has no ``record_stream`` hook to
+                # protect it. Post-accumulate event is load-bearing
+                # (pre-accumulate ``reduce_scatter_event`` is NOT, per
+                # MI350X); waiting at next post_backward's entry is too
+                # late because autograd runs between post_backwards.
+                # No CPU sync. Cross-platform FSDP stream-order bug;
+                # ROCm exposes it through kernel timing. See
+                # ``fsdp2_chunked_loss_rocm_race.md``.
                 #
-                # TODO(#181218): open questions on scope.
-                #   1. Conditional vs unconditional. The same cross-stream
-                #      hazard exists structurally in regular FSDP but has
-                #      not been observed to fire, plausibly because
-                #      ``reduce_scatter_states.append(...)`` ref-holds
-                #      ``reduce_scatter_input`` and cross-layer allocator
-                #      pressure is looser than within a group. Dropping
-                #      the gate needs a real-model overlap-loss measurement.
-                #   2. ROCm-specific vs cross-platform. Only observed on
-                #      ROCm/RCCL/MI350X; CUDA FSDP passes without this fix.
-                #      The standalone repro shows the stream-ordering
-                #      hazard (vector 1) is cross-platform, but FSDP's
-                #      ref-hold closes it on both. The residual FSDP-side
-                #      race on ROCm (vector 2) is on a non-Python-reachable
-                #      buffer — RCCL workspace or allocator fragment.
-                #      Whether vector 2 exists on CUDA FSDP but is timing-
-                #      masked is unresolved. See
-                #      ``fsdp2_chunked_loss_rocm_race.md``.
+                # TODO(#181218): drop ``is_partial_group_backward`` gate
+                # pending real-model overlap-loss measurement.
                 self.device_handle.current_stream().wait_event(self._post_reduce_event)
             if all_reduce_input is not None:
                 if self.device.type != "cpu":
