@@ -12,6 +12,7 @@ import sympy
 
 import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
+from torch._inductor.utils import get_bounds_index_expr
 from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -224,6 +225,19 @@ class CuteDSLOpOverrides(OpOverrides):
         elif math.isnan(value):
             return "float('nan')"
         return repr(value)
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        if isinstance(expr, (int, sympy.Integer)):
+            return CuteDSLOpOverrides.constant(int(expr), dtype)
+
+        idx_str = V.kernel.kexpr(V.kernel.rename_indexing(expr))
+        return V.kernel.cse.generate(
+            V.kernel.body,
+            idx_str,
+            bounds=get_bounds_index_expr(expr),
+            dtype=dtype,
+        )
 
     @staticmethod
     def add(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
