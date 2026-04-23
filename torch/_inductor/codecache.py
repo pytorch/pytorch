@@ -2538,11 +2538,14 @@ end
                 config.aot_inductor.package_constants_in_so
                 or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
             ):
-                serialized_weights = b"".join(
-                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants
-                    if name not in graph.folded_constants
-                )
+                with dynamo_timed(
+                    "aoti_serialize_constants", log_pt2_compile_event=True
+                ):
+                    serialized_weights = b"".join(
+                        _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                        for name in graph.constants
+                        if name not in graph.folded_constants
+                    )
             else:
                 serialized_weights = b""
 
@@ -2599,21 +2602,22 @@ end
 
             # potentially, precompile the AOT header for this device
             if config.aot_inductor.precompile_headers and not _IS_WINDOWS:
-                header_file = _get_cpp_wrapper_header(
-                    device_type, aot_mode=graph.aot_mode
-                )
-                wrapper_build_options.precompiled_header = _precompile_header(
-                    header_file,
-                    cpp_command,
-                    min_optimize=not config.aot_inductor.package_cpp_only,
-                    **compile_command,
-                )
-                if cpp_prefix := _get_cpp_prefix_header(device_type):
-                    kernel_build_options.precompiled_header = _precompile_header(
-                        cpp_prefix,
+                with dynamo_timed("aoti_precompile_header", log_pt2_compile_event=True):
+                    header_file = _get_cpp_wrapper_header(
+                        device_type, aot_mode=graph.aot_mode
+                    )
+                    wrapper_build_options.precompiled_header = _precompile_header(
+                        header_file,
                         cpp_command,
+                        min_optimize=not config.aot_inductor.package_cpp_only,
                         **compile_command,
                     )
+                    if cpp_prefix := _get_cpp_prefix_header(device_type):
+                        kernel_build_options.precompiled_header = _precompile_header(
+                            cpp_prefix,
+                            cpp_command,
+                            **compile_command,
+                        )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
@@ -2812,7 +2816,10 @@ end
                             )
                             raise
 
-                    with ThreadPoolExecutor() as pool:
+                    with (
+                        dynamo_timed("aoti_compile_fatbin", log_pt2_compile_event=True),
+                        ThreadPoolExecutor() as pool,
+                    ):
                         list(pool.map(_compile_fatbin, fatbin_cmds))
 
                 if cubins_to_embed:
