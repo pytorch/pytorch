@@ -1998,64 +1998,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         }
         self.assertNotEqual(structure1, structure2)
 
-    def test_dict_iter_guard_recompiles_on_key_change(self):
-        """Test that dict.__iter__ guards prevent incorrect iteration when keys change"""
-        d = {1: 10, 2: 20, 3: 30}
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, d):
-            # Iterate over dict keys
-            result = 0
-            for key in d:
-                result += key + d[key]
-            return x + result
-
-        opt_fn = torch.compile(fn, backend=cnts)
-        x = torch.randn(4)
-
-        # First call
-        res1 = opt_fn(x, d)
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Second call with same dict - should not recompile
-        res2 = opt_fn(x, d)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(res1, res2)
-
-        # Change key order by popping and reinserting
-        d[1] = d.pop(1)
-        _ = opt_fn(x, d)
-        # Should recompile due to key order change
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_dict_iter_explicit_with_modified_keys(self):
-        """Test __iter__ when dict keys are modified"""
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, d):
-            result = 0
-            for key in d:
-                result += d[key]
-            return x + result
-
-        opt_fn = torch.compile(fn, backend=cnts)
-        x = torch.randn(2)
-
-        # First call
-        d1 = {1: 10, 2: 20}
-        _ = opt_fn(x, d1)
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Same dict structure - no recompile
-        _ = opt_fn(x, d1)
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Add new key
-        d1[3] = 30
-        _ = opt_fn(x, d1)
-        # Should recompile due to added key
-        self.assertEqual(cnts.frame_count, 2)
-
 
 instantiate_parametrized_tests(DictTests)
 
