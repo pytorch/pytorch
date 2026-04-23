@@ -2673,7 +2673,7 @@ class SymbolicAnalyzer:
       - Induction variables (InductionVar): derived from loop bounds and step
       - Iteration arguments (IterArg): modeled as init + iv * step
 
-    Bounds are read and stored in the appropirate dataclass (Op, InductionVar, ...) from
+    Bounds are read and stored in the appropriate dataclass (Op, InductionVar, ...) from
     MLIR integer attributes during TTIR parsing. If a required attr is absent,
     `Op.get_int_attr` raises, and this traversal will fall back to ConservativeAnalyzer.
 
@@ -2816,7 +2816,7 @@ class SymbolicAnalyzer:
         elif isinstance(node, Intermediate) and not node.fake():
             op_list = self.ops.get(node)
 
-            assert op_list is not None
+            assert op_list is not None  # noqa: S101
             op = op_list[0]
             name = op.name
 
