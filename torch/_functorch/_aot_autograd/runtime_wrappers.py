@@ -996,6 +996,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 return out
             return compiled_fn(runtime_args)
 
+        wrapper._boxed_call = True  # type: ignore[attr-defined]
         return wrapper
 
     # Calling convention: If we are running functionalized RNG, then outs consists
@@ -1190,24 +1191,27 @@ class EffectTokensWrapper(CompilerWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
         num_tokens = len(runtime_metadata.tokens)
+        if num_tokens == 0:
+            return compiled_fn
 
-        @wraps(compiled_fn)
-        def inner_fn(args: list[Any]) -> Any:
-            if num_tokens > 0:
-                # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-                old_args = args
-                args = [*([None] * num_tokens), *args]
-                old_args.clear()
+        from .subclass_codegen import _compile_and_exec_source
 
-            outs = compiled_fn(args)
+        lines = ["def _effect_tokens_wrapper(args):"]
+        lines.append(f"    new_args = [{', '.join(['None'] * num_tokens)}, *args]")
+        lines.append("    args.clear()")
+        lines.append("    outs = _compiled_fn_(new_args)")
+        lines.append("    if outs is None:")
+        lines.append("        return None")
+        lines.append(f"    return outs[{num_tokens}:]")
+        source = "\n".join(lines)
 
-            # Inductor cache DummyModule can return None
-            if outs is None:
-                return None
-            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            return outs[num_tokens:] if num_tokens != 0 else outs
-
-        # box it
+        inner_fn = _compile_and_exec_source(
+            source,
+            {"_compiled_fn_": compiled_fn},
+            "_effect_tokens_wrapper",
+            "effect_tokens_wrapper",
+            wrapped_fn=compiled_fn,
+        )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 
