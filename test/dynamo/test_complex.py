@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
@@ -69,6 +71,17 @@ class ComplexTests(ComplexDynamoTestCase):
         ):
             fn_c(a)
 
+    @unittest.expectedFailure
+    def test_aliasing_semantics_graphbreak(self):
+        def f(a):
+            out = torch.view_as_real(a)
+            a[...] = torch.zeros_like(a)
+            return out
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        fn_c = torch.compile(f, fullgraph=False)
+        self.assertEqual(f(a.clone()), fn_c(a.clone()))
+
     def test_aliasing_semantics_2(self):
         def f(a):
             return a
@@ -86,6 +99,19 @@ class ComplexTests(ComplexDynamoTestCase):
             msg=r"For wrapped complex output \d+, aliasing input data is not supported.",
         ):
             mutate(fn_c)
+
+    def test_aliasing_semantics_2_graphbreak(self):
+        def f(a):
+            return a
+
+        def mutate(f):
+            a = torch.ones(2, 2, dtype=torch.complex64)
+            out = f(a)
+            a[...] = torch.zeros_like(a)
+            return out
+
+        fn_c = torch.compile(f, fullgraph=False)
+        self.assertEqual(mutate(f), mutate(fn_c))
 
 
 instantiate_parametrized_tests(ComplexTests)
