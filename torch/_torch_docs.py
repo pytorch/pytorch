@@ -8329,8 +8329,8 @@ total number of elements in each tensor need to be the same.
           its device with the CPU.
 
 Args:
-    mean (Tensor): the tensor of per-element means
-    std (Tensor): the tensor of per-element standard deviations
+    mean (float or Tensor): per-element mean(s). Only floating point types are supported.
+    std (float or Tensor): per-element standard deviation(s). Only floating point types are supported.
 
 Keyword args:
     {generator}
