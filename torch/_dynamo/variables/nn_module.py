@@ -686,13 +686,6 @@ class NNModuleVariable(VariableTracker):
             source=NNModuleSource(GetItemSource(self.source, key_value)),
         )
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        from . import ListIteratorVariable
-
-        return ListIteratorVariable(
-            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-        )
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -938,7 +931,9 @@ class NNModuleVariable(VariableTracker):
                 items_result.append(named_embed(name, submod))
             return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
         elif name == "__iter__":
-            return self.tp_iter_impl(tx)
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))

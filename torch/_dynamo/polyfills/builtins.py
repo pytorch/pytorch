@@ -63,69 +63,65 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
     return functools.reduce(operator.add, iterable, start)
 
 
-# TODO(guilhermeleobas): Implement this iterator as a VariableTracker to see if
-# it is faster than tracing through it
 class _CallableIterator:
     def __init__(self, fn, sentinel):  # type: ignore[no-untyped-def]
         self.fn = fn
         self.sentinel = sentinel
-        self.exhausted = False
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         return self
 
     def __next__(self):  # type: ignore[no-untyped-def]
-        if self.exhausted:
-            raise StopIteration
-
         # The iterator created in this case will call object with no arguments
         # for each call to its __next__() method;
         r = self.fn()
 
         # If the value returned is equal to sentinel, StopIteration will be raised
         if r == self.sentinel:
-            self.exhausted = True
             raise StopIteration
 
         # otherwise the value will be returned.
         return r
 
 
-class _SequenceIterator:
-    def __init__(self, iterable) -> None:
-        self.iterable = iterable
-        self.index = 0
-        self.exhausted = False
-
-    def __iter__(self) -> _SequenceIterator:
-        return self
-
-    def __next__(self) -> object:
-        if self.exhausted:
-            raise StopIteration
-
-        try:
-            result = self.iterable.__getitem__(self.index)
-            self.index += 1
-            return result
-        except (IndexError, StopIteration):
-            self.exhausted = True
-            raise StopIteration from None
+_sentinel_missing = object()
 
 
-def sequence_iterator(iterable) -> Iterable[object]:
-    if hasattr(iterable, "__getitem__"):
-        return _SequenceIterator(iterable)
-    raise TypeError(f"'{type(iterable)}' object is not iterable")
+# TODO(guilhermeleobas): use substitute_in_graph for iter()
+def iter_(fn_or_iterable, sentinel=_sentinel_missing, /):  # type: ignore[no-untyped-def]
+    # Without a second argument, object must be a collection object which supports
+    # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
+    # starting at 0)
+    if sentinel is _sentinel_missing:
+        iterable = fn_or_iterable
+        if hasattr(iterable, "__iter__"):
+            iterator = iterable.__iter__()
+            if hasattr(iterator, "__next__"):
+                return iterator
+            else:
+                raise TypeError(f"'{type(iterator)}' object is not iterable")
+        if hasattr(iterable, "__getitem__"):
+            # Needs to be a new function to avoid iter becoming a generator
+            def sequence_protocol(iterable):  # type: ignore[no-untyped-def]
+                i = 0
+                while True:
+                    try:
+                        yield iterable.__getitem__(i)
+                        i += 1
+                    except IndexError:
+                        break
 
+            return sequence_protocol(iterable)
+        raise TypeError(f"'{type(iterable)}' object is not iterable")
+    else:
+        # If the second argument, sentinel, is given, then object must be a
+        # callable object.
+        fn = fn_or_iterable
 
-def callable_iterator(fn, sentinel, /):
-    # If the second argument, sentinel, is given, then object must be a
-    # callable object.
-    if not isinstance(fn, Callable):  # type: ignore[arg-type]
-        raise TypeError("iter(v, w): v must be a callable")
+        if not isinstance(fn, Callable):  # type: ignore[arg-type]
+            raise TypeError("iter(v, w): v must be a callable")
 
-    return _CallableIterator(fn, sentinel)
+        return _CallableIterator(fn, sentinel)
 
 
 @substitute_in_graph(typing.cast, can_constant_fold_through=True)

@@ -1198,10 +1198,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
-        return self
-
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False
 
@@ -1255,6 +1251,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__next__":
             return self.next_variable(tx)
+        elif name == "__iter__":
+            # iter(gen) returns itself
+            return self
         elif name == "send":
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator

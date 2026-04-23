@@ -581,17 +581,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
-        """
-        Implements PyObject_GetIter semantics (tp_iter slot).
-        Subclasses override this to support iteration.
-        """
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"'{self.python_type_name()}' object is not iterable"],
-        )
-
     def call_function(
         self,
         tx: Any,
@@ -661,8 +650,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
-        elif name == "__iter__" and not args and not kwargs:
-            return self.tp_iter_impl(tx)
         elif (
             name == "__getattr__"
             and len(args) == 1
