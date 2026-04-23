@@ -428,6 +428,7 @@ These APIs are experimental and subject to change without notice.
     generate_binconstraint_d
     generate_binconstraint_t
     generate_broadcasting
+    generate_calc_conv
     generate_calc_maxpool
     generate_calc_product
     generate_conj
@@ -513,6 +514,7 @@ These APIs are experimental and subject to change without notice.
 
     embedding_override
     functional_relu_override
+    gen_constructor_wrapper
     nn_layernorm_override
     proxys_to_metas
     symbolic_trace
