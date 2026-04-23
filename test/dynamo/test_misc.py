@@ -30,6 +30,7 @@ import unittest
 import unittest.mock as mock
 import warnings
 import weakref
+from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import numpy as np
@@ -121,7 +122,7 @@ parametrize_pytree_module = parametrize(
 )
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
-T = typing.TypeVar("T")
+T = TypeVar("T")
 
 
 # Defined in CPython's Include/object.h

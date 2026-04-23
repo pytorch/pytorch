@@ -5,7 +5,8 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic
+from typing_extensions import TypeVar
 
 import torch
 from torch._dynamo.package import (

@@ -7,7 +7,8 @@ from __future__ import annotations
 import itertools
 import operator
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import overload, TYPE_CHECKING, TypeAlias
+from typing_extensions import TypeVar, TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
@@ -38,6 +39,7 @@ _U = TypeVar("_U")
 _Predicate: TypeAlias = Callable[[_T], object]
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
+_Ts = TypeVarTuple("_Ts")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
@@ -152,24 +154,8 @@ def starmap(
 
 @overload
 def starmap(
-    function: Callable[[_T], _U],
-    iterable: Iterable[tuple[_T]],
-    /,
-) -> itertools.starmap[_U]: ...
-
-
-@overload
-def starmap(
-    function: Callable[[_T, _T1], _U],
-    iterable: Iterable[tuple[_T, _T1]],
-    /,
-) -> itertools.starmap[_U]: ...
-
-
-@overload
-def starmap(
-    function: Callable[[_T, _T1, _T2], _U],
-    iterable: Iterable[tuple[_T, _T1, _T2]],
+    function: Callable[[_T, Unpack[_Ts]], _U],
+    iterable: Iterable[tuple[_T, Unpack[_Ts]]],
     /,
 ) -> itertools.starmap[_U]: ...
 

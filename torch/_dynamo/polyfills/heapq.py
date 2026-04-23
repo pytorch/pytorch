@@ -7,7 +7,8 @@ from __future__ import annotations
 import heapq
 import importlib
 import sys
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
+from typing_extensions import TypeVar
 
 from ..decorators import substitute_in_graph
 

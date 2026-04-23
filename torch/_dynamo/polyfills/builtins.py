@@ -9,7 +9,8 @@ import functools
 import operator
 import typing
 from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
+from typing_extensions import TypeVar
 
 from ..decorators import substitute_in_graph
 

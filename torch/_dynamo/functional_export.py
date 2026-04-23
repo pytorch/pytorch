@@ -5,7 +5,8 @@ import traceback
 import types
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 

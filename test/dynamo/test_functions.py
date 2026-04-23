@@ -15,8 +15,8 @@ import types
 import typing
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
-from typing_extensions import NamedTuple
+from typing import Any, Generic
+from typing_extensions import NamedTuple, TypeVar
 from unittest.mock import patch
 
 import numpy as np
