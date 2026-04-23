@@ -4605,7 +4605,21 @@ class TestPrologueFusion(TestCase):
         c = torch.rand([M, K], dtype=torch.bfloat16, device=GPU_TYPE)
         d = torch.rand([K, N], dtype=torch.bfloat16, device=GPU_TYPE)
 
-        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        # Mock benchmarks to return deterministic results so fusion decisions
+        # don't depend on noisy GPU microbenchmarks.
+        with (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
         FileCheck().check("tem_fused__to_copy_add_mm_mul").check(
             "to_copy_add_div_mm_mul_relu_sub_tanh_1"
         ).run(code[0])
