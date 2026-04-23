@@ -9985,7 +9985,7 @@ class <lambda>(torch.nn.Module):
             add_2: "f32[2]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
             copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add_1);  arg1_1 = add_1 = copy_ = None
             return (add_2,)
-""",  # noqa: B950
+""",
             )
 
     @requires_cuda
@@ -10045,7 +10045,7 @@ class <lambda>(torch.nn.Module):
             copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
             copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, add_1);  arg2_1 = add_1 = copy__1 = None
             return (sub,)
-""",  # noqa: B950
+""",
             )
 
     @requires_cuda
@@ -10096,7 +10096,7 @@ class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
             add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             return (add,)
-""",  # noqa: B950
+""",
             )
 
     @requires_cuda
@@ -10155,7 +10155,7 @@ class <lambda>(torch.nn.Module):
             add_1: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, sum_1);  arg0_1 = sum_1 = None
             copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
             return (add_1,)
-""",  # noqa: B950
+""",
             )
 
 
