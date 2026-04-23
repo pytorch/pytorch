@@ -369,10 +369,19 @@ struct TORCH_PYTHON_API type_caster<c10::Layout> {
   static handle cast(
       c10::Layout layout,
       return_value_policy /*unused*/,
-      handle /*parent*/);
-  bool load(handle src, bool /*convert*/);
-};
+      handle /*parent*/) {
+    return handle(Py_NewRef(torch::getTHPLayout(layout)));
+  }
 
+  bool load(handle src, bool /*convert*/) {
+    if (!THPLayout_Check(src.ptr())) {
+      return false;
+    }
+    const auto layout = reinterpret_cast<THPLayout*>(src.ptr());
+    value = layout->layout;
+    return true;
+  }
+};
 } // namespace pybind11::detail
 
 namespace torch::impl {
