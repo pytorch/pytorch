@@ -32,7 +32,7 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
-from .cutedsl_op_overrides import CuteDSLOpOverrides
+from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -132,6 +132,9 @@ class CuteDSLTemplateKernel(Kernel):
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
         return cutedsl_pexpr(expr)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CuteDSLCSEVariable(*args, **kwargs)
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
@@ -532,6 +535,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 final_expr,
                 dtype=var_dtype,
                 bounds=ValueRanges.unknown(),
+                shape=(1,),
             )
             return out
 
