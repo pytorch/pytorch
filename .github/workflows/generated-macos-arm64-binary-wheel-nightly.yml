@@ -31,10 +31,132 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Builds every Python version sequentially on a single runner. libtorch_cpu
+  # is Python-ABI-free and shared across iterations via `build/` — only
+  # libtorch_python + _C are recompiled per interpreter (~5 min each after the
+  # first ~80 min full build), thanks to the Python-cache invalidation in
+  # tools/setup_helpers/cmake.py.
   wheel-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-26-xlarge
     timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.13t 3.14 3.14t"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
+    steps:
+      # BINARY_ENV_FILE needs ${RUNNER_TEMP} so it has to be populated in-step
+      # rather than at the workflow env level.
+      - name: Populate runner env
+        shell: bash
+        run: |
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+      - name: Install libomp
+        run: |
+          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          # enable-cache persists ~/.cache/uv across nightlies (keyed on the
+          # workflow file hash by default); a warm cache makes the subsequent
+          # `uv python install` a no-op.
+          enable-cache: true
+      - name: Pre-fetch all CPython versions
+        # One command, parallel downloads of everything in DESIRED_PYTHONS.
+        # Cached under ~/.local/share/uv/python/; the build script's per-
+        # iteration `uv python install <ver>` becomes a cache hit.
+        run: uv python install $DESIRED_PYTHONS
+      - name: Build all wheels
+        run: |
+          "${PYTORCH_ROOT}/.ci/wheel/build_all_macos_wheels.sh"
+      - name: Delocate all wheels
+        run: |
+          "${PYTORCH_ROOT}/.ci/wheel/delocate_wheels.sh"
+      # Upload phase: each wheel becomes its own artifact (one call per name).
+      - name: Upload wheel-py3_10-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_10-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_10-cpu
+      - name: Upload wheel-py3_11-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_11-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_11-cpu
+      - name: Upload wheel-py3_12-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_12-cpu
+      - name: Upload wheel-py3_13-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_13-cpu
+      - name: Upload wheel-py3_13t-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_13t-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_13t-cpu
+      - name: Upload wheel-py3_14-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_14-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_14-cpu
+      - name: Upload wheel-py3_14t-cpu
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_14t-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/wheel-py3_14t-cpu
+  # Each matrix entry invokes _binary-test-macos.yml independently, so the
+  # test (on macos-26) -> upload (on ubuntu, via _binary-upload.yml) chain
+  # runs per-Python-version: test-X failing blocks only upload-X.
+  wheel-test-upload:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-build
+    # Must be granted at this level; permissions do not automatically flow into
+    # the upload step of the nested _binary-test-macos.yml → _binary-upload.yml
+    # chain, and the inner upload needs id-token:write for AWS OIDC.
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -67,131 +189,22 @@ jobs:
             setup_python_version: "3.14.0"
             freethreaded: true
             build_name: wheel-py3_14t-cpu
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: ${{ matrix.desired_python }}
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
-    steps:
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          # shellcheck disable=SC2129
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          # shellcheck disable=SC2129
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          # shellcheck disable=SC2129
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
-          python-version: ${{ matrix.setup_python_version }}
-          freethreaded: ${{ matrix.freethreaded }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-      - name: Populate binary env
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        run: |
-          set -eux -o pipefail
-          # shellcheck disable=SC1090
-          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
-          mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
-
-          # Build
-          USE_PYTORCH_METAL_EXPORT=1
-          USE_COREML_DELEGATE=1
-          TORCH_PACKAGE_NAME="${TORCH_PACKAGE_NAME//-/_}"
-          export USE_PYTORCH_METAL_EXPORT
-          export USE_COREML_DELEGATE
-          export TORCH_PACKAGE_NAME
-          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
-          "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
-      - name: Test PyTorch wheel
-        run: |
-          set -eux -o pipefail
-          # shellcheck disable=SC1090
-          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
-          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-
-          # Create new "clean" conda environment for testing
-
-          SMOKE_TEST_PARAMS=""
-
-          # shellcheck disable=SC2086
-          python -mvenv test_venv
-          source test_venv/bin/activate
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
-
-          # shellcheck disable=SC2086
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: ${{ matrix.build_name }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-
-  wheel-upload:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: wheel-build
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - desired_python: "3.10"
-            build_name: wheel-py3_10-cpu
-          - desired_python: "3.11"
-            build_name: wheel-py3_11-cpu
-          - desired_python: "3.12"
-            build_name: wheel-py3_12-cpu
-          - desired_python: "3.13"
-            build_name: wheel-py3_13-cpu
-          - desired_python: "3.13t"
-            build_name: wheel-py3_13t-cpu
-          - desired_python: "3.14"
-            build_name: wheel-py3_14-cpu
-          - desired_python: "3.14t"
-            build_name: wheel-py3_14t-cpu
+    uses: ./.github/workflows/_binary-test-macos.yml
     with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: wheel
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu
-      DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
-      use_s3: False
+      setup_python_version: ${{ matrix.setup_python_version }}
+      freethreaded: ${{ matrix.freethreaded }}
+      desired_python: ${{ matrix.desired_python }}
+      package_type: wheel
+      desired_cuda: cpu
+      gpu_arch_type: cpu
+      docker_image: manylinux2_28-builder
+      docker_image_tag_prefix: cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-build
