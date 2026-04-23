@@ -2937,15 +2937,12 @@ class OutputGraph(OutputGraphCommon):
             if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
-        from torch._higher_order_ops.passes.inline_invoke_subgraph import (
-            inline_invoke_subgraph,
-            inline_single_use_invoke_subgraph,
-        )
-
         if config.inline_invoke_subgraph:
+            from torch._higher_order_ops.passes.inline_invoke_subgraph import (
+                inline_invoke_subgraph,
+            )
+
             gm = inline_invoke_subgraph(gm)
-        elif config.inline_single_use_invoke_subgraph:
-            gm = inline_single_use_invoke_subgraph(gm)
 
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
