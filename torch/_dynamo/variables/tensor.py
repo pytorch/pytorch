@@ -2683,6 +2683,11 @@ class UntypedStorageVariable(VariableTracker):
 
 
 class DataPtrVariable(VariableTracker):
+    _DATA_PTR_PRESERVING_TARGETS = {
+        ("call_method", "detach"),
+        ("call_function", torch.ops.aten.detach.default),
+    }
+
     def __init__(
         self,
         from_tensor: TensorVariable,
@@ -2692,9 +2697,56 @@ class DataPtrVariable(VariableTracker):
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
         self.method_name = method_name
+        self.tensor_version = from_tensor._get_fake_version()
 
     def python_type(self) -> type:
         return int
+
+    @classmethod
+    def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:
+        while (
+            isinstance(node, torch.fx.Node)
+            and (node.op, node.target) in cls._DATA_PTR_PRESERVING_TARGETS
+            and len(node.args) == 1
+            and isinstance(node.args[0], torch.fx.Node)
+        ):
+            node = node.args[0]
+        return node
+
+    def _is_same_data_ptr(self, other: "VariableTracker") -> bool:
+        if not isinstance(other, DataPtrVariable):
+            return False
+
+        if self.tensor_version is None or self.tensor_version != other.tensor_version:
+            return False
+
+        self_root = self._strip_data_ptr_preserving_aliases(
+            self.from_tensor.as_proxy().node
+        )
+        other_root = self._strip_data_ptr_preserving_aliases(
+            other.from_tensor.as_proxy().node
+        )
+        return self_root is other_root
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) == 1 and not kwargs and name in ("__eq__", "__ne__"):
+            same_data_ptr = self._is_same_data_ptr(args[0])
+            if same_data_ptr:
+                return ConstantVariable.create(name == "__eq__")
+            unimplemented(
+                gb_type="Data pointer comparison",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation="Dynamo can only trace data pointer comparisons "
+                "when it can prove both operands have the same data pointer.",
+                hints=[],
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)

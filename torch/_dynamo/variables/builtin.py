@@ -106,6 +106,7 @@ from .lists import (
 from .misc import NullVariable, StringFormatVariable
 from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
+    DataPtrVariable,
     FakeItemVariable,
     supported_comparison_ops,
     SymNodeVariable,
@@ -837,6 +838,20 @@ class BuiltinVariable(BaseBuiltinVariable):
                     ]
                 )
 
+                if op in (operator.eq, operator.ne):
+
+                    def compare_by_method(
+                        tx: "InstructionTranslator",
+                        a: VariableTracker,
+                        b: VariableTracker,
+                    ) -> VariableTracker:
+                        method_name = "__eq__" if op is operator.eq else "__ne__"
+                        return a.call_method(tx, method_name, [b], {})
+
+                    result.append(
+                        ((DataPtrVariable, VariableTracker), compare_by_method)
+                    )
+
                 def handler(
                     tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
                 ) -> VariableTracker:
@@ -1413,11 +1428,15 @@ class BuiltinVariable(BaseBuiltinVariable):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
-            if fn is operator.eq and len(args) == 2 and args[0].is_tensor():
-                # Dynamo expects `__eq__` str while operator.eq gives just `eq`
-                # TODO - supporting all comparison operators could also work but
-                # it fails lots of tests because graph str changes.
-                return args[0].call_method(tx, "__eq__", list(args[1:]), kwargs)
+            if (
+                fn in (operator.eq, operator.ne)
+                and len(args) == 2
+                and args[0].is_tensor()
+            ):
+                # Dynamo expects `__eq__` / `__ne__` strings while operator.{eq,ne}
+                # provides call_function dispatch first.
+                method_name = "__eq__" if fn is operator.eq else "__ne__"
+                return args[0].call_method(tx, method_name, list(args[1:]), kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,

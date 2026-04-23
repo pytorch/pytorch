@@ -14278,6 +14278,67 @@ fn
 
         self.assertEqual(expected, actual)
 
+    def test_data_ptr_detach_equality_fullgraph(self):
+        def f(x):
+            detached = x.detach()
+            same_data = (
+                x.data_ptr() == detached.data_ptr()
+                and x.stride() == detached.stride()
+                and x.shape == detached.shape
+            )
+            return torch.tensor([same_data], dtype=torch.long, device=x.device)
+
+        x = torch.randn(1, 1, 1, 3)
+
+        expected = f(x)
+        actual = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(expected, actual)
+
+    def test_data_ptr_equality_after_mutation_graph_break(self):
+        def f(x):
+            ptr_before = x.data_ptr()
+            x.add_(1)
+            ptr_after = x.detach().data_ptr()
+            return torch.tensor([ptr_before == ptr_after], dtype=torch.long)
+
+        x = torch.randn(4)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(x.clone())
+
+        expected = f(x.clone())
+        actual = torch.compile(f, backend="eager")(x.clone())
+
+        self.assertEqual(expected, actual)
+
+    def test_data_ptr_constant_comparison_graph_break(self):
+        def ptr_eq_zero(x):
+            return x.data_ptr() == 0
+
+        def zero_eq_ptr(x):
+            return 0 == x.data_ptr()
+
+        def ptr_ne_zero(x):
+            return x.data_ptr() != 0
+
+        def zero_ne_ptr(x):
+            return 0 != x.data_ptr()
+
+        x = torch.randn(4)
+
+        for fn in (ptr_eq_zero, zero_eq_ptr, ptr_ne_zero, zero_ne_ptr):
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+            torch._dynamo.reset()
+
+            expected = fn(x)
+            actual = torch.compile(fn, backend="eager")(x)
+
+            self.assertEqual(expected, actual)
+            torch._dynamo.reset()
+
     def test_data_ptr_graph_break_aten(self):
         def f(a):
             # torch.add not implemented for DataPtrVariable
