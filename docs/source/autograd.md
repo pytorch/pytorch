@@ -362,6 +362,7 @@ and vtune profiler based using
     :nosignatures:
 
     grad_mode.set_multithreading_enabled
+    grad_mode.enforce_grad_layout_policy
 
 
 ```
