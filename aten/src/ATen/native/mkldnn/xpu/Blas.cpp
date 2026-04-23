@@ -89,37 +89,28 @@ Tensor& addmm_out(
   float beta_ = beta.to<float>();
   float alpha_ = alpha.to<float>();
 
-  // For reduced-precision types (bf16/f16) with non-trivial alpha/beta, the
-  // oneDNN post-ops path introduces extra rounding at each post-op stage.
-  // which accumulates precision loss compared to CPU/CUDA that handle
-  // alpha/beta n f32 within the GEMM.
   bool is_reduced_float =
       mat1.scalar_type() == kBFloat16 || mat1.scalar_type() == kHalf;
-  bool needs_nontrivial_alphabeta =
-      !(beta_ == 0.f || (alpha_ == 1.f && beta_ == 1.f));
-  if (is_reduced_float && needs_nontrivial_alphabeta) {
-    // f32 mm + alpha/beta, single cast to output dtype.
-    auto result_f32 = at::empty(result_shape, result.options().dtype(kFloat));
-    onednn::matmul(result_f32, mat1, mat2, Tensor(), true, onednn::Attr());
-    // Apply alpha/beta in f32
-    auto self_expanded = self.expand(result_shape);
-    result_f32.mul_(alpha_).add_(self_expanded, beta_);
-    result.copy_(result_f32);
-    return result;
-  }
 
   Tensor bias = Tensor();
   onednn::Attr attr;
-  float alpha_ratio = beta_ == 0.f ? alpha_ : alpha_ / beta_;
   if (beta_ == 0.f) {
-    attr.append_post_eltwise(1.f, alpha_ratio, 0.f, attr.kind_with_linear);
-  } else if (alpha_ratio == 1.f && beta_ == 1.f && !result.is_same(self)) {
+    attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+  } else if (alpha_ == 1.f && beta_ == 1.f && !result.is_same(self)) {
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
     Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
     binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
+    if (!inplace && is_reduced_float) {
+      // For reduced-precision types, the 3-step post-op chain
+      // (eltwise -> binary_add -> eltwise) rounds intermediates to
+      // bf16/f16, losing precision. Use post_sum which fuses the
+      // addition in oneDNN's f32 accumulator, matching CPU behavior.
+      result.copy_(self.expand(result.sizes()));
+      inplace = true;
+    }
     if (inplace) {
       attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_sum(beta_);
@@ -136,6 +127,7 @@ Tensor& addmm_out(
       // Thus we need the following transformation
       // alpha * matmul(mat1, mat2) + beta * binary
       // beta * (alpha/beta * matmul(src, wei) + binary)
+      float alpha_ratio = alpha_ / beta_;
       attr.append_post_eltwise(1.f, alpha_ratio, 0.f, attr.kind_with_linear);
       attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
@@ -245,8 +237,11 @@ Tensor& baddbmm_out(
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
-  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
-  Tensor binary;
+  float alpha_ = alpha.to<float>();
+
+  bool is_reduced_float =
+      batch1.scalar_type() == kBFloat16 || batch1.scalar_type() == kHalf;
+
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
@@ -255,9 +250,16 @@ Tensor& baddbmm_out(
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
+    if (!inplace && is_reduced_float) {
+      // For reduced-precision types, the 3-step post-op chain
+      // (eltwise -> binary_add -> eltwise) rounds intermediates to
+      // bf16/f16, losing precision. Use post_sum which fuses the
+      // addition in oneDNN's f32 accumulator, matching CPU behavior.
+      result.copy_(input.expand(result.sizes()));
+      inplace = true;
+    }
     if (inplace) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_sum(beta_);
     } else {
       if (at::native::onednn::is_broadcast(binary)) {
@@ -266,12 +268,13 @@ Tensor& baddbmm_out(
       binary = at::native::onednn::is_onednn_matmul_strides(binary)
           ? binary
           : binary.contiguous();
-      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      float alpha_ratio = alpha_ / beta_;
+      attr.append_post_eltwise(1.f, alpha_ratio, 0.f, attr.kind_with_linear);
       attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
-  onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
+  onednn::matmul(result, batch1, batch2, Tensor(), true, attr);
   return result;
 }
 
@@ -294,8 +297,8 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     return result;
   }
 
-  onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
-  return result;
+  onednn::matmul(result, self, batch2, Tensor(), true, onednn::Attr());
+    return result;
 }
 
 Tensor bmm(const Tensor& self, const Tensor& batch2) {

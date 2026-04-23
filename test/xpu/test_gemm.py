@@ -1612,6 +1612,49 @@ def forward(self, x_1, w_1):
             self.assertEqual(out.dtype, output_dtype)
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.1})
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_reduced_float_non_inplace_precision(self, device, dtype):
+        M, K, N = 10, 25, 15
+        mat1 = torch.randn(M, K, device=device, dtype=torch.float32).to(dtype)
+        mat2 = torch.randn(K, N, device=device, dtype=torch.float32).to(dtype)
+        bias = torch.randn(M, N, device=device, dtype=torch.float32).to(dtype)
+
+        for alpha, beta in [(0.5, 2.0), (2.0, 0.5), (0.3, 0.7)]:
+            result = torch.addmm(bias, mat1, mat2, alpha=alpha, beta=beta)
+            expected = alpha * (
+                mat1.float().cpu().numpy() @ mat2.float().cpu().numpy()
+            )
+            expected += beta * bias.float().cpu().numpy()
+            expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(result, expected)
+
+            out = torch.empty(M, N, device=device, dtype=dtype)
+            torch.addmm(bias, mat1, mat2, alpha=alpha, beta=beta, out=out)
+            self.assertEqual(out, expected)
+
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
+    @dtypes(torch.bfloat16, torch.half)
+    def test_baddbmm_reduced_float_non_inplace_precision(self, device, dtype):
+        B, M, K, N = 3, 10, 25, 15
+        batch1 = torch.randn(B, M, K, device=device, dtype=torch.float32).to(dtype)
+        batch2 = torch.randn(B, K, N, device=device, dtype=torch.float32).to(dtype)
+        input_t = torch.randn(B, M, N, device=device, dtype=torch.float32).to(dtype)
+
+        for alpha, beta in [(0.5, 2.0), (2.0, 0.5), (0.3, 0.7)]:
+            result = torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta)
+            expected = alpha * (
+                batch1.float().cpu().numpy() @ batch2.float().cpu().numpy()
+            )
+            expected += beta * input_t.float().cpu().numpy()
+            expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(result, expected)
+
+            out = torch.empty(B, M, N, device=device, dtype=dtype)
+            torch.baddbmm(
+                input_t, batch1, batch2, alpha=alpha, beta=beta, out=out
+            )
+            self.assertEqual(out, expected)
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 
