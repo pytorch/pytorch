@@ -114,7 +114,7 @@ fastNLP_Bert,pass,4
 
 
 
-functorch_dp_cifar10,pass,0
+functorch_dp_cifar10,fail_accuracy,0
 
 
 
