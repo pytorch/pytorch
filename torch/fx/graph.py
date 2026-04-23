@@ -9,6 +9,7 @@ import inspect
 import keyword
 import logging
 import math
+import operator
 import os
 import pprint
 import re
@@ -34,6 +35,7 @@ from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 log = logging.getLogger(__name__)
+
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -1535,6 +1537,24 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
+        # TODO: Once all passes are fixed, make this a hard error instead of a warning.
+        from torch.utils._pytree import tree_map
+
+        def _warn_symint(val: object) -> object:
+            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                import warnings
+
+                warnings.warn(
+                    f"Raw {type(val).__name__} value ({val}) passed as argument to "
+                    f"Graph.create_node(op='{op}', target={target}). "
+                    f"Use create_*_node() helpers (e.g. create_size_node, create_numel_node) instead.",
+                    stacklevel=4,
+                )
+            return val
+
+        tree_map(_warn_symint, args)
+        tree_map(_warn_symint, kwargs)
+
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
@@ -1889,6 +1909,122 @@ class Graph:
         return self.create_node(
             "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
+
+    @compatibility(is_backward_compatible=False)
+    def create_size_node(self, tensor_node: "Node", dim: int) -> "Node":
+        """Create an FX node for ``tensor_node.size(dim)``."""
+        val = tensor_node.meta["val"]
+        size_val = val.size(dim)
+        node = self.call_function(torch.ops.aten.sym_size.int, (tensor_node, dim))
+        node.meta["val"] = size_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_size_nodes(self, tensor_node: "Node") -> "list[Node]":
+        """Create FX nodes for all dimensions of ``tensor_node.size()``."""
+        ndim = tensor_node.meta["val"].ndim
+        return [self.create_size_node(tensor_node, i) for i in range(ndim)]
+
+    @compatibility(is_backward_compatible=False)
+    def create_stride_node(self, tensor_node: "Node", dim: int) -> "Node":
+        """Create an FX node for ``tensor_node.stride(dim)``."""
+        val = tensor_node.meta["val"]
+        stride_val = val.stride(dim)
+        node = self.call_function(torch.ops.aten.sym_stride.int, (tensor_node, dim))
+        node.meta["val"] = stride_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_stride_nodes(self, tensor_node: "Node") -> "list[Node]":
+        """Create FX nodes for all dimensions of ``tensor_node.stride()``."""
+        ndim = tensor_node.meta["val"].ndim
+        return [self.create_stride_node(tensor_node, i) for i in range(ndim)]
+
+    @compatibility(is_backward_compatible=False)
+    def create_storage_offset_node(self, tensor_node: "Node") -> "Node":
+        """Create an FX node for ``tensor_node.storage_offset()``."""
+        val = tensor_node.meta["val"]
+        offset_val = val.storage_offset()
+        node = self.call_function(
+            torch.ops.aten.sym_storage_offset.default, (tensor_node,)
+        )
+        node.meta["val"] = offset_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_numel_node(self, tensor_node: "Node") -> "Node":
+        """Create an FX node representing ``tensor_node.numel()``."""
+        val = tensor_node.meta["val"]
+        numel_val = val.numel()
+        node = self.call_function(torch.ops.aten.sym_numel.default, (tensor_node,))
+        node.meta["val"] = numel_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_add_node(self, a: "Node | int", b: "Node | int") -> "Node":
+        """Create an FX node for ``a + b``."""
+        node = self.call_function(operator.add, (a, b))
+        a_val = a.meta["val"] if isinstance(a, Node) else a
+        b_val = b.meta["val"] if isinstance(b, Node) else b
+        node.meta["val"] = a_val + b_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_mul_node(self, a: "Node | int", b: "Node | int") -> "Node":
+        """Create an FX node for ``a * b``."""
+        node = self.call_function(operator.mul, (a, b))
+        a_val = a.meta["val"] if isinstance(a, Node) else a
+        b_val = b.meta["val"] if isinstance(b, Node) else b
+        node.meta["val"] = a_val * b_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_floordiv_node(self, a: "Node | int", b: "Node | int") -> "Node":
+        """Create an FX node for ``a // b``."""
+        node = self.call_function(operator.floordiv, (a, b))
+        a_val = a.meta["val"] if isinstance(a, Node) else a
+        b_val = b.meta["val"] if isinstance(b, Node) else b
+        node.meta["val"] = a_val // b_val
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_sum_node(self, nodes: "list[Node]") -> "Node":
+        """Create FX nodes that sum a list of nodes via chained ``operator.add``."""
+        if not nodes:
+            raise ValueError("Cannot create_sum_node with an empty list")
+        result = nodes[0]
+        for n in nodes[1:]:
+            result = self.create_add_node(result, n)
+        return result
+
+    @compatibility(is_backward_compatible=False)
+    def create_product_node(self, nodes: "list[Node | int]") -> "Node | int":
+        """Create FX nodes that multiply a list of nodes via chained ``operator.mul``."""
+        if not nodes:
+            raise ValueError("Cannot create_product_node with an empty list")
+        result = nodes[0]
+        for n in nodes[1:]:
+            result = self.create_mul_node(result, n)
+        return result
+
+    @compatibility(is_backward_compatible=False)
+    def create_contiguous_strides_nodes(
+        self, size_nodes: "list[Node | int]"
+    ) -> "list[Node | int]":
+        """Create FX nodes for contiguous strides given a list of size nodes.
+
+        Computes: stride[-1] = 1, stride[i] = size[i+1] * stride[i+1]
+        """
+        ndim = len(size_nodes)
+        if ndim == 0:
+            return []
+        stride_nodes: list = [None] * ndim
+        stride_nodes[ndim - 1] = 1
+        for i in range(ndim - 2, -1, -1):
+            stride_nodes[i] = self.create_mul_node(
+                size_nodes[i + 1], stride_nodes[i + 1]
+            )
+        return stride_nodes
 
     @compatibility(is_backward_compatible=True)
     def node_copy(
