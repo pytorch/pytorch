@@ -5723,7 +5723,7 @@ def _new_group_with_tag(
     _check_valid_timeout(timeout)
 
     if use_local_synchronization:
-        # MPI backend doesn't have have a way for us to perform a partial sync
+        # MPI backend doesn't have a way for us to perform a partial sync
         if backend == Backend.MPI:
             raise ValueError(
                 "MPI backend doesn't support use_local_synchronization=True"

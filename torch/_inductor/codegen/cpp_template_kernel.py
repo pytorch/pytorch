@@ -384,7 +384,7 @@ class CppTemplateKernel(CppKernel):
         1. `src` and `dst` buffer could be the same buffer in which case we are doing in-place compute
            and stores. In case `epilogue_nodes` are not provided, we do nothing.
         2. The `epilogue_nodes`, if exist, have computations on `src` before storing to `dst` but since
-           they come form the original Inductor IR, they might need to be adjusted before working with
+           they come from the original Inductor IR, they might need to be adjusted before working with
            `src` and `dst` as outlined below:
            a) `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes`work on.
               In this case, the `offsets` could be provided to adjust the indices passed to
