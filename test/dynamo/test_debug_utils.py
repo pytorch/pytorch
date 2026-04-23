@@ -255,7 +255,8 @@ instantiate_device_type_tests(
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), except_for="mps")
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices, allow_xpu=True)
 
 
 class TestBackendOverrideIntegration(TestCase):
