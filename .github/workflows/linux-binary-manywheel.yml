@@ -70,11 +70,18 @@ jobs:
   # Merge per-Python artifacts into per-GPU artifacts for the upload job.
   # Build produces: wheels-cpu-cp310, wheels-cpu-cp311, ...
   # Upload expects: wheels-cpu (containing all Python wheels)
+  # Runs on non-PR events even if some build/test matrix entries failed, so
+  # successful configs can still be uploaded. Missing artifacts fail only
+  # their own matrix entry (fail-fast: false).
   merge-artifacts:
-    if: github.repository_owner == 'pytorch'
+    if: |
+      !cancelled()
+      && github.repository_owner == 'pytorch'
+      && github.event_name != 'pull_request'
     needs: [generate-matrix, test]
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         gpu_config: ${{ fromJSON(needs.generate-matrix.outputs.upload-configs) }}
     steps:
@@ -93,12 +100,16 @@ jobs:
           path: merged/*.whl
 
   upload:
-    if: github.repository_owner == 'pytorch'
+    if: |
+      !cancelled()
+      && github.repository_owner == 'pytorch'
+      && github.event_name != 'pull_request'
     needs: [generate-matrix, merge-artifacts]
     permissions:
       id-token: write
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         gpu_config: ${{ fromJSON(needs.generate-matrix.outputs.upload-configs) }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -117,7 +128,10 @@ jobs:
 
   # Extract libtorch (C++ library) from py3.10 wheel builds.
   libtorch-extract:
-    if: github.repository_owner == 'pytorch'
+    if: |
+      !cancelled()
+      && github.repository_owner == 'pytorch'
+      && github.event_name != 'pull_request'
     needs: [generate-matrix, build]
     runs-on: ubuntu-latest
     strategy:
@@ -162,12 +176,16 @@ jobs:
           path: "${{ runner.temp }}/libtorch_output/"
 
   libtorch-upload:
-    if: github.repository_owner == 'pytorch'
+    if: |
+      !cancelled()
+      && github.repository_owner == 'pytorch'
+      && github.event_name != 'pull_request'
     needs: [generate-matrix, libtorch-extract]
     permissions:
       id-token: write
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         libtorch: ${{ fromJSON(needs.generate-matrix.outputs.libtorch-configs) }}
     uses: ./.github/workflows/_binary-upload.yml

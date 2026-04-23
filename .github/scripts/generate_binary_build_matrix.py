@@ -331,15 +331,14 @@ MANYWHEEL_RUNNERS = {
 }
 
 # Python version -> manylinux tag / ABI tag mapping.
-# TODO: Re-enable full list for release builds.
 MANYWHEEL_PYTHON_VERSIONS = [
     {"tag": "cp310-cp310", "abi": "cp310", "version": "3.10"},
-    # {"tag": "cp311-cp311", "abi": "cp311", "version": "3.11"},
-    # {"tag": "cp312-cp312", "abi": "cp312", "version": "3.12"},
-    # {"tag": "cp313-cp313", "abi": "cp313", "version": "3.13"},
-    # {"tag": "cp313-cp313t", "abi": "cp313t", "version": "3.13t"},
-    # {"tag": "cp314-cp314", "abi": "cp314", "version": "3.14"},
-    # {"tag": "cp314-cp314t", "abi": "cp314t", "version": "3.14t"},
+    {"tag": "cp311-cp311", "abi": "cp311", "version": "3.11"},
+    {"tag": "cp312-cp312", "abi": "cp312", "version": "3.12"},
+    {"tag": "cp313-cp313", "abi": "cp313", "version": "3.13"},
+    {"tag": "cp313-cp313t", "abi": "cp313t", "version": "3.13t"},
+    {"tag": "cp314-cp314", "abi": "cp314", "version": "3.14"},
+    {"tag": "cp314-cp314t", "abi": "cp314t", "version": "3.14t"},
 ]
 
 
