@@ -14,8 +14,31 @@ try:
 except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
-
 __all__ = ["local_map"]
+
+
+def _get_spmd_types():
+    from spmd_types._dtensor_checker import (
+        _assert_placements,  # pyrefly: ignore
+        _redistribute_to_placements,  # pyrefly: ignore
+    )
+    from spmd_types._state import _maybe_local_spmd_mode  # pyrefly: ignore
+    from spmd_types.runtime import has_local_type  # pyrefly: ignore
+
+    return (
+        has_local_type,
+        _assert_placements,
+        _redistribute_to_placements,
+        _maybe_local_spmd_mode,
+    )
+
+
+(
+    _has_spmd_local_type,
+    _assert_placements,
+    _redistribute_to_placements,
+    _maybe_local_spmd_mode,
+) = _get_spmd_types()
 
 PlacementType = Sequence[Placement] | None
 InputPlacements = tuple[PlacementType, ...] | None
@@ -179,16 +202,15 @@ def _local_map_wrapped(
     # we assume every DTensor object is placed on the same device mesh
     flat_local_args = []
     seen_dtensor_arg = False
+    seen_spmd_arg = False
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, DTensor):
+            seen_dtensor_arg = True
             # TODO: the current code doesn't consider the uneven sharding case
             # Need to think about what the consequence is when the input DTensor
             # is uneven sharded.
             if device_mesh is None:  # infer device mesh from the DTensor arg
                 device_mesh = arg.device_mesh
-
-            # this function is applied to at least one DTensor argument
-            seen_dtensor_arg = True
 
             if in_placements is not None:
                 spec = in_placements[idx]
@@ -229,6 +251,21 @@ def _local_map_wrapped(
                 local_arg = local_arg.wait()
 
             flat_local_args.append(local_arg)
+
+        elif isinstance(arg, torch.Tensor) and _has_spmd_local_type(arg):
+            seen_spmd_arg = True
+            if in_placements is not None and in_placements[idx] is not None:
+                grad_spec = (
+                    in_grad_placements[idx] if in_grad_placements is not None else None
+                )
+                if redistribute_inputs:
+                    arg = _redistribute_to_placements(
+                        arg, device_mesh, in_placements[idx], grad_spec
+                    )
+                else:
+                    _assert_placements(arg, device_mesh, in_placements[idx], grad_spec)
+            flat_local_args.append(arg)
+
         else:
             # Non-Tensor input must have None in `in_placements`
             if in_placements is not None and not isinstance(arg, torch.Tensor):
@@ -241,8 +278,27 @@ def _local_map_wrapped(
 
             flat_local_args.append(arg)
 
+    if seen_dtensor_arg and seen_spmd_arg:
+        raise ValueError(
+            "local_map does not support mixed DTensor and spmd_types inputs"
+        )
+
     # pyrefly: ignore [bad-argument-type]
     local_args = pytree.tree_unflatten(flat_local_args, args_spec)
+
+    if seen_spmd_arg:
+        with _maybe_local_spmd_mode():
+            out = func(*local_args, **kwargs)
+
+        flat_out, out_spec = pytree.tree_flatten(out)
+        out_placements_tuple = (
+            out_placements if isinstance(out_placements, tuple) else (out_placements,)
+        )
+        for tensor, spec in zip(flat_out, out_placements_tuple):
+            if isinstance(tensor, torch.Tensor) and spec is not None:
+                _assert_placements(tensor, device_mesh, spec)
+        # pyrefly: ignore [bad-argument-type]
+        return pytree.tree_unflatten(flat_out, out_spec)
 
     out = func(*local_args, **kwargs)
 
