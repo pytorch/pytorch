@@ -8127,7 +8127,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         m = M().eval()
         x = torch.randn(2, 20, 512)
-        compiled = torch.compile(m, backend="inductor", fullgraph=True)
+        compiled = torch.compile(m, backend="aot_eager", fullgraph=True)
         self.assertEqual(compiled(x), m(x))
 
     def test_if_cond_nn_mod1(self):

@@ -495,9 +495,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # runtime by the graph nodes emitted by Dynamo.
         _inference_mode_ctx = None
         if torch.is_inference_mode_enabled():
-            _inference_mode_ctx = torch.autograd.grad_mode._enter_inference_mode(
-                False
-            )
+            _inference_mode_ctx = torch.autograd.grad_mode._enter_inference_mode(False)
         try:
             return self._torch_dispatch_impl(func, types, args, kwargs)
         finally:
@@ -511,7 +509,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-
         if (
             func not in FunctionalTensor.metadata_fns
             and self._can_decompose(func, args, kwargs)
