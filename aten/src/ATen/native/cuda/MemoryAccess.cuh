@@ -113,6 +113,14 @@ struct multi_outputs_store_helper {
   }
 };
 
+template <int arg_index>
+struct reset_helper {
+  template <typename args_t>
+  static __device__ void apply(args_t *args, int idx) {
+    std::get<arg_index>(args[idx]) = {};
+  }
+};
+
 }  // namespace detail
 
 struct LoadWithoutCast {
@@ -186,7 +194,11 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
 template <int vec_size, typename scalar_t>
 __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
   using vec_t = aligned_vector<scalar_t, vec_size>;
+#if defined(USE_ROCM)
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+#else
+  auto *from = static_cast<const vec_t *>(__builtin_assume_aligned(base_ptr, alignof(vec_t)));
+#endif
 #if defined(USE_ROCM) && defined(__gfx942__)
   using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
   if constexpr (sizeof(vec_t) == sizeof(int)) {
@@ -235,7 +247,8 @@ template <
     typename loader_t,
     typename storer_t,
     int elems_per_thread,
-    int num_outputs = 1>
+    int num_outputs = 1,
+    bool check_compute_bounds = true>
 struct unroll_base {
   data_t data;
   int remaining;
@@ -261,36 +274,46 @@ struct unroll_base {
         storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((int)(threadIdx.x + thread_work_elem * num_threads) < remaining);
+    if constexpr (!check_compute_bounds) {
+      return true;
+    } else {
+      return ((int)(threadIdx.x + thread_work_elem * num_threads) < remaining);
+    }
   }
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
+    int base_idx = thread_idx + block_work_size * idx;
+
     #pragma unroll
     for (int i = 0; i < elems_per_thread; i++) {
+      int linear_idx = base_idx + i * num_threads;
+      auto offset = input_offset_calculator.get(linear_idx);
       if (thread_idx < remaining) {
-        int linear_idx = thread_idx + block_work_size * idx;
-        auto offset = input_offset_calculator.get(linear_idx);
         detail::static_unroll<detail::unroll_load_helper, arity>::with_args(
             *this, args, offset, loader, i, num_outputs);
-        thread_idx += num_threads;
+      } else {
+        detail::static_unroll<detail::reset_helper, arity>::with_args(args, i);
       }
+      thread_idx += num_threads;
     }
   }
 
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
+    int base_idx = thread_idx + block_work_size * idx;
+
     #pragma unroll
     for (int i = 0; i < elems_per_thread; i++) {
+      int linear_idx = base_idx + i * num_threads;
+      int offset = output_offset_calculator.get(linear_idx)[0];
       if (thread_idx < remaining) {
-        int linear_idx = thread_idx + block_work_size * idx;
-        int offset = output_offset_calculator.get(linear_idx)[0];
         storer.store(from[i], data[0], offset);
-        thread_idx += num_threads;
       }
+      thread_idx += num_threads;
     }
   }
 };
@@ -364,6 +387,94 @@ struct vectorized {
         v.val[j] = from[vec_size * i + j];
       }
       to_[index] = v;
+    }
+  }
+};
+
+// Advance each pointer in data by offset elements of its respective type.
+template <typename result_t, typename args_tuple, typename array_t, int... Is>
+__device__ inline void advance_data_impl(
+    array_t& data, int offset,
+    std::integer_sequence<int, Is...>) {
+  data[0] += offset * int{sizeof(result_t)};
+  ((data[Is + 1] += offset * int{sizeof(std::tuple_element_t<Is, args_tuple>)}), ...);
+}
+
+template <typename result_t, typename args_tuple, typename array_t>
+__device__ inline void advance_data(array_t& data, int offset) {
+  static_assert(std::tuple_size_v<args_tuple> == std::tuple_size_v<array_t> - 1,
+    "data array must have one more element than the number of arguments");
+  advance_data_impl<result_t, args_tuple>(
+      data, offset,
+      std::make_integer_sequence<int, std::tuple_size_v<args_tuple>>{});
+}
+
+// Like vectorized, but with a configurable thread count and bounds-checked
+// loads/stores if necessary.
+// note: also expects that pointers are always pre-advanced between loads/stores.
+template <bool has_remaining, int vec_size_, int vectors_per_unroll_, int num_threads_, typename data_t>
+struct streaming_vectorized {
+  static constexpr int vec_size = vec_size_;
+  static constexpr int vectors_per_unroll = vectors_per_unroll_;
+  static constexpr int num_threads = num_threads_;
+
+  data_t data;
+  int remaining;
+
+  __device__ streaming_vectorized(data_t data, int remaining)
+      : data(data), remaining(remaining) {}
+
+  template <typename result_t, typename args_tuple>
+  __device__ inline void advance(int offset) {
+    advance_data<result_t, args_tuple>(data, offset);
+    if constexpr (has_remaining) {
+      remaining -= offset;
+    }
+  }
+
+  template<typename accessor_t, typename scalar_t>
+  __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
+    int index = threadIdx.x;
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    #pragma unroll
+    for (int unroll_vec = 0; unroll_vec < vectors_per_unroll; unroll_vec++) {
+      int idx = index + unroll_vec * num_threads;
+      vec_t v;
+      // note: avoid putting too much faith into compiler optimization by
+      // using something like if (!has_remaining || index + i * vec_size < remaining)
+      if constexpr (has_remaining) {
+        v = idx * vec_size < remaining ? load_vector<vec_size>(from, idx) : vec_t{};
+      } else {
+        v = load_vector<vec_size>(from, idx);
+      }
+      #pragma unroll
+      for (int j = 0; j < vec_size; j++) {
+        to(unroll_vec * vec_size + j) = v.val[j];
+      }
+    }
+  }
+
+  template<typename args_t>
+  __device__ inline void load(args_t *args) {
+    constexpr int arity = std::tuple_size_v<args_t>;
+    // no need for index here as pointers are pre-advanced between loads/stores
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, 0, 0);
+  }
+
+  template<typename scalar_t>
+  __device__ inline void store(scalar_t *from, int unroll_vec) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    vec_t *to = static_cast<vec_t *>(__builtin_assume_aligned(data[0], alignof(vec_t)));
+    vec_t *from_ = reinterpret_cast<vec_t *>(from);
+    int index = unroll_vec * num_threads + threadIdx.x;
+    // note: avoid putting too much faith into compiler optimization by
+    // using something like if (!has_remaining || index * store_vec_size < remaining)
+    if constexpr (has_remaining) {
+      if (index * vec_size < remaining) {
+        to[index] = *from_;
+      }
+    } else {
+      to[index] = *from_;
     }
   }
 };

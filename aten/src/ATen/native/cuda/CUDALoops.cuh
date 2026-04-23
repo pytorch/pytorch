@@ -40,6 +40,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
 
+#ifndef USE_ROCM
+#include <cuda/cmath>
+#endif
+
 #ifdef __NVCC__
 #define ASSERT_HOST_DEVICE_LAMBDA(type)                       \
   static_assert(                                              \
@@ -50,6 +54,51 @@
 #endif
 
 namespace at::native {
+
+template <typename func_t, int cc_major, int cc_minor, typename = void>
+struct get_is_simple {
+  static constexpr bool value = false;
+};
+
+template <typename func_t, int cc_major, int cc_minor>
+struct get_is_simple<func_t, cc_major, cc_minor, std::void_t<
+      decltype(func_t::template is_simple<cc_major, cc_minor>)>
+    > {
+  static constexpr bool value = func_t::template is_simple<cc_major, cc_minor>;
+};
+
+template <int cc_major_, int cc_minor_>
+struct cc_helper {
+  static constexpr int major = cc_major_;
+  static constexpr int minor = cc_minor_;
+};
+
+// Runtime CC dispatch: defines `using cc = cc_helper<M,N>` then
+// executes __VA_ARGS__ in that scope, for each supported CC.
+#define AT_DISPATCH_CC(major, minor, ...)                                     \
+  if ((major) == 12 && (minor) == 1) {                                        \
+    using cc = cc_helper<12, 1>; __VA_ARGS__;                                 \
+  } else if ((major) == 12 && (minor) == 0) {                                 \
+    using cc = cc_helper<12, 0>; __VA_ARGS__;                                 \
+  } else if ((major) == 11 && (minor) == 0) {                                 \
+    using cc = cc_helper<11, 0>; __VA_ARGS__;                                 \
+  } else if ((major) == 10 && (minor) == 3) {                                 \
+    using cc = cc_helper<10, 3>; __VA_ARGS__;                                 \
+  } else if ((major) == 10 && (minor) == 0) {                                 \
+    using cc = cc_helper<10, 0>; __VA_ARGS__;                                 \
+  } else if ((major) == 9 && (minor) == 0) {                                  \
+    using cc = cc_helper<9, 0>; __VA_ARGS__;                                  \
+  } else if ((major) == 8 && (minor) == 9) {                                  \
+    using cc = cc_helper<8, 9>; __VA_ARGS__;                                  \
+  } else if ((major) == 8 && (minor) == 7) {                                  \
+    using cc = cc_helper<8, 7>; __VA_ARGS__;                                  \
+  } else if ((major) == 8 && (minor) == 6) {                                  \
+    using cc = cc_helper<8, 6>; __VA_ARGS__;                                  \
+  } else if ((major) == 8 && (minor) == 0) {                                  \
+    using cc = cc_helper<8, 0>; __VA_ARGS__;                                  \
+  } else {                                                                    \
+    using cc = cc_helper<7, 5>; __VA_ARGS__;                                  \
+  }
 
 #ifdef USE_ROCM
 // Custom configuration for vectorized elementwise kernel
@@ -159,68 +208,309 @@ constexpr auto calc_io_size(){
 }
 
 #ifndef USE_ROCM
-// To save on binary size of libtorch_cuda.so, we split the vectorized_elementwise_kernel
-// into two: one for vec_size=8 and one for vec_size=[2, 4], since vec8 is going to be
-// used on sm_90 and sm_10x exclusively.
-template <int vec_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads())
-__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
-  if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
-    using traits = function_traits<func_t>;
-    constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
 
-    // note: unless the compiler has a good reason to move code, it won't.
-    // Thus, the if-condition typically comes first in SASS, so the "hot" path
-    // should go first, improving instruction cache use.
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
-      array_t,
-      decltype(input_calc),
-      decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
+struct LaunchConfig {
+  dim3 grid_size, block_size;
+  int shared_memory_size;
+};
+
+template <typename func_t_>
+struct TuningConstantsSelector {
+  using func_t = func_t_;
+
+  template <int cc_major_, int cc_minor_, bool small_footprint_>
+  struct tc {
+    using func_t = func_t_;
+    static constexpr int cc_major = cc_major_;
+    static constexpr int cc_minor = cc_minor_;
+    static constexpr bool small_footprint = small_footprint_;
+    static constexpr bool is_simple =
+        get_is_simple<func_t, cc_major, cc_minor>::value;
+    // note: for a simple vectorized kernel, there is no point in having more than
+    // 128 threads per block: this will just cause less parallelism (bad at lower sizes),
+    // and using less than 128 threads per block risks under-using warp schedulers
+    // on all current supported architectures. Thus, we set it to 128.
+    static constexpr int threads_per_block = 128;
+    // note: the bytes per thread determine how many bytes in flight the kernel
+    // can achieve, along with the total number of threads per SM (not block!).
+    // For sm 90, 10, 10.3, 32 bytes per thread are required, for all other
+    // currently supported architectures, 16 bytes per thread is sufficient.
+    // For small footprints, we always use 16 bytes per thread.
+    static constexpr int bytes_per_thread = (
+      ((cc_major == 8 && cc_minor == 0 && is_simple) ||
+      cc_major == 9 || cc_major == 10) &&
+      !small_footprint) ? 32 : 16;
+    // note: the max unroll plays an important role for lambdas with many instructions:
+    // if we allow too much unroll, code-generation may be far from optimal, because
+    // the compiler will need to issue more and more instructions to comply with
+    // register constraints. For non-simple lambdas, we thus limit unroll to 8.
+    static constexpr int max_unroll = is_simple ? 32 : 8;
+    // note: in order to allow more flexibility for the compiler with register
+    // constraints, we allow up to 2 unroll sequences per loaded set of registers.
+    static constexpr int max_vectors_per_unroll = 2;
+    // for non-simple lambdas, we want to hide more latency even within a thread,
+    // thus we split the load set into 2 instructions.
+    static constexpr int max_bytes_per_load_inst =
+        is_simple ? bytes_per_thread : bytes_per_thread / 2;
+    // note: the fallback path requires significantly more registers for bounds-checking
+    // and branching, so we limit the unroll more than for the vectorized path.
+    static constexpr int max_unroll_fallback = is_simple ? 8 : 4;
+  };
+};
+
+template <typename V = void>
+struct MaxArgSize {
+  static constexpr int value = 0;
+};
+
+template <typename... Ts>
+struct MaxArgSize<std::tuple<Ts...>> {
+  static constexpr int value = [] {
+    int max_size{0};
+    ((max_size = std::max(max_size, int{sizeof(Ts)})), ...);
+    return max_size;
+  }();
+};
+
+template <typename tc_t>
+struct KernelConfig {
+  using tc = tc_t;
+  using func_t = typename tc::func_t;
+  using func_traits = function_traits<func_t>;
+  using args_tuple = typename func_traits::ArgsTuple;
+  using result_type = typename func_traits::result_type;
+
+  // this is a maximum for the load/store instruction size we must respect
+  static constexpr int max_io_size = tc::cc_major >= 10 ? 32 : 16;
+
+  // +1 for output tensor
+  static constexpr int num_tensors = func_traits::arity + 1;
+  static constexpr int num_inputs = func_traits::arity;
+
+  // elements per thread depends on the max argument size and the bytes per thread
+  static constexpr int max_arg_size = num_inputs == 0 ?
+    int{sizeof(result_type)} : MaxArgSize<args_tuple>::value;
+  static_assert(tc::bytes_per_thread % max_arg_size == 0,
+    "bytes_per_thread must be a multiple of max_arg_size");
+  static constexpr int elems_per_thread = tc::bytes_per_thread / max_arg_size;
+  // now we know the total elems per block
+  static constexpr int block_elems = elems_per_thread * tc::threads_per_block;
+
+  // maximum number of elements that can fit in one IO instruction
+  static constexpr int max_elems_per_load_inst = max_io_size / max_arg_size;
+  static constexpr int max_elems_per_store_inst = max_io_size / int{sizeof(result_type)};
+
+  static constexpr int max_total_unroll = std::min(elems_per_thread, tc::max_unroll);
+  // get the store vector size from max_unroll and max io size
+  static constexpr int store_vec_size = std::min(max_total_unroll, max_elems_per_store_inst);
+  // get the load vector size from max_bytes_per_load_inst and max io size
+  static constexpr int load_vec_size = std::min(
+    ::cuda::ceil_div(tc::max_bytes_per_load_inst, max_arg_size), max_elems_per_load_inst);
+  // final vec size must be the minimum of the above two
+  static constexpr int vec_size_uncapped = std::min(load_vec_size, store_vec_size);
+  // NVCC bug: vec_size > 4 causes numerical mismatches with 1-byte types
+  // (e.g. uint8, int8) on sm80 and sm90. Cap at 4 for safety.
+  static constexpr int vec_size = int{sizeof(result_type)} < 2
+      ? std::min(vec_size_uncapped, 4) : vec_size_uncapped;
+  // get the loads/stores per unroll according to max_vectors_per_unroll and max total unroll
+  static_assert(max_total_unroll % vec_size == 0,
+    "max_total_unroll must be a multiple of vec_size");
+  static constexpr int vectors_per_unroll = std::min(
+    max_total_unroll / vec_size, tc::max_vectors_per_unroll);
+
+  static constexpr int elems_per_unroll = vectors_per_unroll * vec_size;
+  // at this point, we can determine the number of unrolls
+  static_assert(elems_per_thread % elems_per_unroll == 0,
+    "elems_per_thread must be a multiple of elems_per_unroll");
+  static constexpr int num_unrolls = elems_per_thread / elems_per_unroll;
+
+  // in case we are simply unrolling, we should just limit the
+  // elements per thread (and block) to max_unroll_fallback
+  // note: the unrolled path typically requires significantly more registers
+  // for bounds-checking and branching (required at least for every load/store),
+  // so limit unroll more than for the vectorized path.
+  static constexpr int elems_per_thread_unroll = std::min(elems_per_thread, tc::max_unroll_fallback);
+  static constexpr int block_elems_unroll = elems_per_thread_unroll * tc::threads_per_block;
+
+  template <typename array_t, int... Is>
+  static bool inputs_same_misalignment(
+      int r, array_t const& data, std::integer_sequence<int, Is...>) {
+    return ((r == int(reinterpret_cast<uintptr_t>(data[Is + 1])
+                 / sizeof(std::tuple_element_t<Is, args_tuple>)
+                 % vec_size)) && ...);
+  }
+
+  template <typename array_t>
+  static std::pair<int, int> get_aligned_offset_and_size(array_t const& data, int64_t N) {
+    static_assert(std::tuple_size_v<array_t> == num_tensors, "array_t must match num_tensors");
+    // note that there cannot always be a single offset and size which works
+    // for all input pointers: for example, if we have two pointers with 2-byte data type sizes
+    // one pointer is aligned to 4 bytes and another to 2 bytes, then there is no
+    // single offset in number of elements that aligns both pointers to 4 bytes.
+    // in such a case, we return a pair of -1, -1 to indicate that there is no
+    // aligned offset and size that works for all pointers, and this will be handled
+    // in a special way by the kernel.
+
+    // for each tensor, compute how many elements past the last vec_size-aligned
+    // boundary the pointer sits: r_i = (addr_i / sizeof(type_i)) % vec_size.
+    // a common aligned_offset exists iff all r_i are equal.
+    int r = int(reinterpret_cast<uintptr_t>(data[0])
+                / sizeof(result_type) % vec_size);
+    if (!inputs_same_misalignment(
+        r, data, std::make_integer_sequence<int, num_inputs>{})) {
+      return {-1, -1};
     }
-#else
-    CUDA_KERNEL_ASSERT(false && "Fatal! vectorized_elementwise_kernel<8,...> supports only sm_90 and sm_10x. Please report an issue on GitHub.");
-#endif // __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
-  } else {
-    using traits = function_traits<func_t>;
-    constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
 
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
+    // aligned_offset is the number of elements to skip to reach the next
+    // vec_size-aligned boundary (at most vec_size - 1).
+    int aligned_offset = (vec_size - r) % vec_size;
+    int64_t tail = N - aligned_offset;
+    // round down to block_elems so that every inner block is a full tile
+    int aligned_size = tail > 0
+        ? static_cast<int>((tail / block_elems) * block_elems) : 0;
+    return {aligned_offset, aligned_size};
+  }
+
+  static LaunchConfig launch_config(int64_t N, int aligned_size) {
+    int grid_size = 0;
+    if (aligned_size >= 0) {
+      if constexpr (tc::small_footprint) {
+        grid_size = static_cast<int>(::cuda::ceil_div(N, int64_t{block_elems}));
+      } else {
+        // use aligned_size (not N) so the number of inner blocks matches
+        // the aligned region; the boundary blocks handle prefix/suffix.
+        grid_size = static_cast<int>(
+            ::cuda::ceil_div(int64_t{aligned_size}, int64_t{block_elems})) + 2;
+      }
+    } else {
+      grid_size = static_cast<int>(::cuda::ceil_div(N, int64_t{block_elems_unroll}));
+    }
+    return LaunchConfig{
+      dim3(grid_size, 1, 1),
+      dim3(tc::threads_per_block, 1, 1),
+      /*shared_memory_size*/0
+    };
+  }
+};
+
+template <int num_threads,
+          int elems_per_thread_unroll,
+          int elems_per_thread,
+          typename args_tuple,
+          typename result_type,
+          typename func_t,
+          typename array_t>
+__device__ __noinline__ void vectorized_elementwise_kernel_fallback(
+    int N, func_t f, array_t data, int aligned_offset, int aligned_size) {
+  int block1_start = aligned_offset + aligned_size;
+  // Block 0 processes [0, aligned_offset).
+  // Block 1 processes [aligned_offset+aligned_size, N).
+  int remaining = blockIdx.x == 0 ? aligned_offset : N - block1_start;
+
+  // add an early exit: this avoids loading unnecessary code for common cases
+  if (remaining <= 0) {
+    return;
+  }
+  constexpr int block_elems_unroll = elems_per_thread_unroll * num_threads;
+  // note: block 0 handles at most vec_size - 1 elements, so as long as
+  // block_elems_unroll >= vec_size - 1, we will have a single iteration of
+  // the unrolled fallback. Since elems_per_thread must be strictly greater than
+  // vec_size - 1, the static_assert checks whether the above is satisfied.
+  static_assert(block_elems_unroll >= elems_per_thread,
+    "block_elems_unroll must be >= elems_per_thread");
+  // Block 1 handles at most elems_per_thread * num_threads - 1 elements,
+  // so the number of iterations is
+  // ceil_div(elems_per_thread * num_threads - 1, block_elems_unroll).
+  int max_iters = blockIdx.x == 0 ? 1 : ::cuda::ceil_div(
+    elems_per_thread * num_threads - 1, block_elems_unroll);
+
+  if (blockIdx.x == 1) {
+    memory::policies::advance_data<result_type, args_tuple>(data, block1_start);
+  }
+
+  auto input_calc = TrivialOffsetCalculator<std::tuple_size_v<args_tuple>>();
+  auto output_calc = TrivialOffsetCalculator<1>();
+
+  #pragma unroll 1
+  for (int iter = 0; iter < max_iters; ++iter) {
+    auto policy = memory::policies::unroll_base<
+      num_threads,
       array_t,
       decltype(input_calc),
       decltype(output_calc),
       memory::LoadWithoutCast,
       memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
+      elems_per_thread_unroll,
+      /*num_outputs*/1,
+      /*check_compute_bounds*/false>(
+        data, remaining, input_calc, output_calc,
+        memory::LoadWithoutCast(), memory::StoreWithoutCast());
+    elementwise_kernel_helper(f, policy, /*zero_idx*/true);
+    memory::policies::advance_data<result_type, args_tuple>(data, block_elems_unroll);
+    remaining -= block_elems_unroll;
+  }
+}
+
+// note: we explicitly put all relevant parameters as template parameters
+// to facilitate profiling and debugging, as the parameters show up directly
+// in the kernel name, instead of being inferred from the function signature.
+// This doesn't increase the number of instantiations.
+template <int num_threads,
+          int elems_per_thread,
+          int elems_per_thread_unroll,
+          int num_unrolls,
+          int vectors_per_unroll,
+          int vec_size,
+          bool small_footprint,
+          bool is_simple,
+          typename func_t,
+          typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data, int aligned_offset, int aligned_size) {
+  using traits = function_traits<func_t>;
+  using args_tuple = typename traits::ArgsTuple;
+  using result_type = typename traits::result_type;
+  constexpr int block_elems = elems_per_thread * num_threads;
+
+  if constexpr (small_footprint) {
+    // for small footprints, we assume that both input/output base pointers
+    // and sizes are aligned to the vector size. Thus, there is no fallback.
+    // However, we still need to check the remaining elements as the size
+    // might not be a multiple of the block tile size.
+    memory::policies::advance_data<result_type, args_tuple>(
+      data, block_elems * static_cast<int>(blockIdx.x));
+    int remaining = N - block_elems * static_cast<int>(blockIdx.x);
+    auto policy = memory::policies::streaming_vectorized<
+        /*has_remaining*/true,
+        vec_size,
+        vectors_per_unroll,
+        num_threads,
+        array_t>(data, remaining);
+    streaming_elementwise_kernel_helper<num_unrolls>(f, policy);
+  } else {
+    // Blocks 0 and 1 are fallback blocks handling the unaligned
+    // prefix and suffix respectively. Blocks >= 2 are inner blocks
+    // that process full vectorized block tiles.
+    if (blockIdx.x >= 2) {
+      memory::policies::advance_data<result_type, args_tuple>(data,
+          aligned_offset + static_cast<int>(blockIdx.x - 2) * block_elems);
+      int remaining = -1;  // inner blocks must be full tiles
+      auto policy = memory::policies::streaming_vectorized<
+          /*has_remaining*/false,
+          vec_size,
+          vectors_per_unroll,
+          num_threads,
+          array_t>(data, remaining);
+      streaming_elementwise_kernel_helper<num_unrolls>(f, policy);
+    } else {
+      // note: the fallback is explicitly no-inlined, such that compiler does
+      // not pollute the main path with the fallback logic.
+      vectorized_elementwise_kernel_fallback<
+          num_threads,
+          elems_per_thread_unroll,
+          elems_per_thread,
+          args_tuple,
+          result_type>(N, f, data, aligned_offset, aligned_size);
     }
   }
 }
@@ -304,35 +594,14 @@ static inline void launch_vectorized_kernel(
   AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
   // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
   int tws = at::detail::getCUDAHooks().isGPUArch({"gfx942"}, curDevice) ? 16 : elems_per_thread<io_size>();
-#else
-  using cpp_type = typename function_traits<func_t>::result_type;
-  const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
-  uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
-  vec_size = std::min<uint16_t>(vec_size, max_vec_size);
-  // due to excessive binary size the `vectorized_elementwise_kernel` of
-  // the size 8 is compiled for sm_90 and sm_10x only.
-  // TODO: Lift this limitation when CUDA 12.x support is fully dropped
-  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
-  if (p->major != 9 && p->major != 10) {
-    vec_size = std::min<uint16_t>(vec_size, 4);
-  }
-#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
-  if constexpr (sizeof(cpp_type) < 2) {
-    vec_size = std::min<uint16_t>(vec_size, 4);
-  }
-#endif
-  int tws = elems_per_thread<io_size>();
-#endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
   switch (vec_size) {
-#ifdef USE_ROCM
     case 16:
       vectorized_elementwise_kernel<16, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
-#endif
     case 8:
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
@@ -363,6 +632,104 @@ static inline void launch_vectorized_kernel(
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
+#else // USE_ROCM
+  // here we determine whether we have a small footprint or not
+  // by default, we don't have a small footprint
+  bool use_small_footprint = false;
+  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
+  AT_DISPATCH_CC(p->major, p->minor, [&] {
+    using tc_selector_t = TuningConstantsSelector<func_t>;
+    using tc_default = typename tc_selector_t::template tc<cc::major, cc::minor, false>;
+    using tc_small = typename tc_selector_t::template tc<cc::major, cc::minor, true>;
+    constexpr bool is_simple = get_is_simple<func_t, cc::major, cc::minor>::value;
+    // there is no way to obtain the number of instructions of a kernel, but
+    // here we are making a guess / heuristic which states that a simple function
+    // has ~200 instructions while a non-simple function has ~1000 instructions,
+    // for the default kernel path (no small footprint / with fallback), with
+    // a total unroll of 4.
+    constexpr int default_n_instructions_unroll4 = is_simple ? 200 : 1000;
+    // determine the actual unroll size we would have
+    using config_default = KernelConfig<tc_default>;
+    constexpr int default_unroll = config_default::elems_per_thread;
+    constexpr int default_n_instructions = default_unroll >= 4 ?
+      (default_n_instructions_unroll4 * default_unroll) / 4 :
+      (default_n_instructions_unroll4 * 4) / default_unroll;
+    constexpr int default_size = default_n_instructions * 16;
+    // note : each SM needs to load the code once, at the very least
+    int64_t default_code_footprint = p->multiProcessorCount * default_size;
+    // we determine how many bytes per element we need to load
+    using args_t = typename function_traits<func_t>::ArgsTuple;
+    constexpr int bytes_per_element = at::native::sum_of_sizes(
+      args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+    // the expected load footprint for data
+    int64_t data_footprint = N * int64_t{bytes_per_element};
+    // if the code footprint isn't smaller than the data footprint,
+    // we consider the input size to be small
+    bool is_small_footprint = default_code_footprint >= data_footprint;
+    // just because we have a small input size doesn't mean we can launch
+    // the small footprint kernel, as it requires alignment (no fallback).
+    // thus, we determine whether we are aligned
+    using config_small = KernelConfig<tc_small>;
+    if (is_small_footprint) {
+      // if we can vectorize up to the required vector size and the number of elements
+      // aligns with the required vector size, we can use the small footprint kernel
+      if (memory::can_vectorize_up_to<func_t>(data) >= config_small::vec_size &&
+          (N % config_small::vec_size == 0)) {
+        use_small_footprint = true;
+      }
+    }
+    if (use_small_footprint) {
+      // note aligned offset and size must not be used by the small footprint kernel
+      int aligned_offset = 0, aligned_size = 0;
+      auto lc = config_small::launch_config(N, aligned_size);
+      auto& kernel = vectorized_elementwise_kernel<
+        tc_small::threads_per_block,
+        config_small::elems_per_thread,
+        config_small::elems_per_thread_unroll,
+        config_small::num_unrolls,
+        config_small::vectors_per_unroll,
+        config_small::vec_size,
+        /*small_footprint*/true,
+        tc_small::is_simple,
+        func_t,
+        array_t>;
+      kernel<<<lc.grid_size, lc.block_size, lc.shared_memory_size, stream>>>(
+          N, f, data, aligned_offset, aligned_size);
+      return;
+    }
+    auto [aligned_offset, aligned_size] = config_default::get_aligned_offset_and_size(data, N);
+    if (aligned_offset < 0) {
+      auto input_calc = TrivialOffsetCalculator<traits::arity>();
+      auto output_calc = TrivialOffsetCalculator<1>();
+      auto loader = memory::LoadWithoutCast();
+      auto storer = memory::StoreWithoutCast();
+      int64_t grid_unrolled = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
+      unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
+          <<<grid_unrolled, num_threads(), 0, stream>>>(
+              N, f, data, input_calc, output_calc, loader, storer);
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(aligned_offset >= 0);
+    TORCH_INTERNAL_ASSERT(aligned_offset < config_default::vec_size);
+    TORCH_INTERNAL_ASSERT(aligned_size >= 0 && aligned_size <= N);
+    TORCH_INTERNAL_ASSERT(N - aligned_offset - aligned_size < config_default::block_elems);
+    auto lc = config_default::launch_config(N, aligned_size);
+    auto& kernel = vectorized_elementwise_kernel<
+      tc_default::threads_per_block,
+      config_default::elems_per_thread,
+      config_default::elems_per_thread_unroll,
+      config_default::num_unrolls,
+      config_default::vectors_per_unroll,
+      config_default::vec_size,
+      /*small_footprint*/false,
+      tc_default::is_simple,
+      func_t,
+      array_t>;
+    kernel<<<lc.grid_size, lc.block_size, lc.shared_memory_size, stream>>>(
+        N, f, data, aligned_offset, aligned_size);
+  }());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif // USE_ROCM
 }
 
 #ifdef USE_ROCM
@@ -1132,5 +1499,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 #endif
   }
 }
+
+#undef AT_DISPATCH_CC
 
 } // namespace at::native

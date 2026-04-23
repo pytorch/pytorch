@@ -8,10 +8,8 @@
 #include <ATen/native/cuda/thread_constants.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
-#include <c10/util/C++17.h>
 #include <tuple>
-
-
+#include <type_traits>
 
 namespace at::native {
 
@@ -42,15 +40,13 @@ static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorI
 }
 
 template <bool reverted_idx = false, typename func_t, typename policy_t>
-__device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
+__device__ inline void elementwise_kernel_helper(func_t f, policy_t policy, bool zero_idx = false) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
   constexpr int elems_per_thread = policy_t::tws;
 
-  int idx = blockIdx.x;
-  if constexpr (reverted_idx)
-    idx = gridDim.x - blockIdx.x - 1;
+  int idx = zero_idx ? 0 : reverted_idx ? gridDim.x - blockIdx.x - 1 : blockIdx.x;
 
   return_t results[elems_per_thread];
   args_t args[elems_per_thread];
@@ -74,11 +70,48 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   policy.store(results, idx);
 }
 
+// Streaming variant of elementwise_kernel_helper. Processes data in chunks
+// of policy_t::vectors_per_unroll * policy_t::vec_size elements with an
+// explicitly unrolled inner loop to allow for better compiler optimization
+// and non-unrolled outer loop to allow reducing register pressure if necessary.
+// The policy should expect its data pointers to be pre-advanced to the block's start.
+template <int num_unrolls, typename func_t, typename policy_t>
+__device__ inline void streaming_elementwise_kernel_helper(func_t f, policy_t policy) {
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using args_t = typename traits::ArgsTuple;
+  constexpr int num_threads = policy_t::num_threads;
+  constexpr int vec_size = policy_t::vec_size;
+  constexpr int vectors_per_unroll = policy_t::vectors_per_unroll;
+  constexpr int unroll_stride = num_threads * vectors_per_unroll * vec_size;
+
+  #pragma unroll 1
+  for (int unroll = 0; unroll < num_unrolls; ++unroll) {
+    // note: avoid putting too much faith into compiler optimization by
+    // unrolling across all stores, each with individual compute + store.
+    // As soon as we know that we should store data, we should instruct
+    // the compiler to do so.
+    args_t args[vectors_per_unroll * vec_size];
+    policy.load(args);
+    #pragma unroll
+    for (int unroll_vec = 0; unroll_vec < vectors_per_unroll; ++unroll_vec) {
+      return_t results[vec_size];
+      #pragma unroll
+      for (int i = 0; i < vec_size; i++) {
+        results[i] = std::apply(f, args[unroll_vec * vec_size + i]);
+      }
+
+      policy.store(results, unroll_vec);
+    }
+    policy.template advance<return_t, args_t>(unroll_stride);
+  }
+}
+
 }  // namespace at::native
 
 #include <ATen/native/cuda/CUDALoops.cuh>
 
-namespace at:: native {
+namespace at::native {
 
 template <typename func_t>
 void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f, bool check_cast = true) {
