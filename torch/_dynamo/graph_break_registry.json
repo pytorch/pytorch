@@ -1562,6 +1562,14 @@
       ]
     }
   ],
+  "GB5976": [
+    {
+      "Gb_type": "Data pointer comparison",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo can only trace data pointer comparisons when it can prove both operands have the same data pointer.",
+      "Hints": []
+    }
+  ],
   "GB4695": [
     {
       "Gb_type": "torch.jit.script/freeze modules unsupported",
