@@ -188,7 +188,10 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     from .constant import ConstantVariable
 
     if obj.is_python_constant():
-        return ConstantVariable.create(bool(obj.as_python_constant()))
+        try:
+            return ConstantVariable.create(bool(obj.as_python_constant()))
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=[str(e)])
 
     obj_type = maybe_get_python_type(obj)
 
@@ -203,7 +206,12 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
 
         if isinstance(length, SymNodeVariable):
             return SymNodeVariable.create(tx, length.as_proxy() > 0)
-        return ConstantVariable.create(length.as_python_constant() > 0)
+        length_val = length.as_python_constant()
+        if length_val < 0:
+            raise_observed_exception(
+                ValueError, tx, args=["__len__() should return >= 0"]
+            )
+        return ConstantVariable.create(length_val > 0)
     except ObservedTypeError:
         handle_observed_exception(tx)
 
