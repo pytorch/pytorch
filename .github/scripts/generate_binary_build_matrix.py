@@ -296,9 +296,13 @@ TORCH_NVCC_FLAGS: dict[str, str] = {
 }
 
 # Container images for the linux-binary-manywheel workflow (container: directive).
+# x86_64 temporarily uses the legacy manylinux2_28-builder images (pre-baked
+# CUDA/cuDNN) until the test-infra images are ready.
 MANYWHEEL_CONTAINER_IMAGES: dict[str, str] = {
-    "cpu-x86_64": "ghcr.io/pytorch/test-infra:cpu-x86_64-latest",
-    "cuda-x86_64": "ghcr.io/pytorch/test-infra:cuda-x86_64-latest",
+    "cpu-x86_64": "pytorch/manylinux2_28-builder:cpu",
+    "cuda12.6-x86_64": "pytorch/manylinux2_28-builder:cuda12.6",
+    "cuda13.0-x86_64": "pytorch/manylinux2_28-builder:cuda13.0",
+    "cuda13.2-x86_64": "pytorch/manylinux2_28-builder:cuda13.2",
     "cpu-aarch64": "pytorch/manylinux2_28_aarch64-builder:cpu-aarch64",
     "cuda12.6-aarch64": "pytorch/manylinuxaarch64-builder:cuda12.6",
     "cuda13.0-aarch64": "pytorch/manylinuxaarch64-builder:cuda13.0",
@@ -621,7 +625,9 @@ def generate_manywheel_build_configs() -> list[dict[str, str]]:
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda",
                 "gpu_arch_version": cuda_ver,
-                "container_image": MANYWHEEL_CONTAINER_IMAGES["cuda-x86_64"],
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[
+                    f"cuda{cuda_ver}-x86_64"
+                ],
                 "extra_install_reqs": _extra_install_reqs(cuda_ver),
                 "torch_cuda_arch_list": TORCH_CUDA_ARCH_LIST[cuda_ver]["x86_64"],
                 "torch_nvcc_flags": _nvcc_flags(cuda_ver),
@@ -706,7 +712,9 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda",
                 "gpu_arch_version": cuda_ver,
-                "container_image": MANYWHEEL_CONTAINER_IMAGES["cuda-x86_64"],
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[
+                    f"cuda{cuda_ver}-x86_64"
+                ],
                 "runs_on": MANYWHEEL_RUNNERS["test_cuda"]["x86_64"],
             }
         )
