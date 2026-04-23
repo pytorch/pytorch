@@ -2167,8 +2167,11 @@ class NativeCachingAllocator : public XPUAllocator {
         "zeMemGetAllocProperties did not provide a valid DMA-BUF fd for XPU IPC");
 
     return {
+        std::string(),
         storage_offset_bytes,
+        true,
         static_cast<int64_t>(export_fd.fd),
+        true,
         static_cast<int64_t>(base_block->size)};
   }
 
@@ -2189,42 +2192,46 @@ class NativeCachingAllocator : public XPUAllocator {
     // Create and initialize entry without holding lock
     MemHandleCacheEntry entry(device, handle);
     entry.init();
+    std::shared_ptr<void> raced_devptr;
 
     // Slow path: insert into cache
-    std::lock_guard<std::mutex> lock(IpcMutex);
+    {
+      std::lock_guard<std::mutex> lock(IpcMutex);
 
-    // Check again in case another thread inserted while we were initializing
-    auto iter = ipcMemHandle_to_devptr.find(handle);
-    if (iter != ipcMemHandle_to_devptr.end()) {
-      auto devptr = iter->second.wp_.lock();
-      TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
-      // Our entry lost the race; release its device allocation before
-      // discarding.
-      entry.clear();
-      return devptr;
+      // Check again in case another thread inserted while we were initializing
+      auto iter = ipcMemHandle_to_devptr.find(handle);
+      if (iter != ipcMemHandle_to_devptr.end()) {
+        raced_devptr = iter->second.wp_.lock();
+        TORCH_INTERNAL_ASSERT(
+            raced_devptr, "entry in cache has missing shared_ptr");
+      } else {
+        // Insert the already-initialized entry
+        auto inserted =
+            ipcMemHandle_to_devptr.emplace(handle, std::move(entry));
+        auto& inserted_entry = inserted.first->second;
+        auto shared_handle = inserted.first->first;
+
+        auto sp = std::shared_ptr<void>(
+            inserted_entry.ptr(), [shared_handle, this](void* p) {
+              (void)p;
+              std::unique_lock<std::mutex> deleter_lock(IpcMutex);
+
+              auto it = ipcMemHandle_to_devptr.find(shared_handle);
+              TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
+              auto entry = std::move(it->second);
+              ipcMemHandle_to_devptr.erase(it);
+
+              deleter_lock.unlock();
+
+              entry.clear();
+            });
+        inserted_entry.wp_ = sp;
+        return sp;
+      }
     }
 
-    // Insert the already-initialized entry
-    auto inserted = ipcMemHandle_to_devptr.emplace(handle, std::move(entry));
-    auto& inserted_entry = inserted.first->second;
-    auto shared_handle = inserted.first->first;
-
-    auto sp = std::shared_ptr<void>(
-        inserted_entry.ptr(), [shared_handle, this](void* p) {
-          (void)p;
-          std::unique_lock<std::mutex> deleter_lock(IpcMutex);
-
-          auto it = ipcMemHandle_to_devptr.find(shared_handle);
-          TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
-          auto entry = std::move(it->second);
-          ipcMemHandle_to_devptr.erase(it);
-
-          deleter_lock.unlock();
-
-          entry.clear();
-        });
-    inserted_entry.wp_ = sp;
-    return sp;
+    entry.clear();
+    return raced_devptr;
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
