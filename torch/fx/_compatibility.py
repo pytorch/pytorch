@@ -1,6 +1,7 @@
 import textwrap
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 
 _BACK_COMPAT_OBJECTS: dict[Any, None] = {}

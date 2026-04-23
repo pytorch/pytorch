@@ -11,8 +11,8 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, cast, TypeVar
-from typing_extensions import Never
+from typing import Any, cast
+from typing_extensions import Never, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback

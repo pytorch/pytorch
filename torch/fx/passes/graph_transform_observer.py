@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable
 from types import TracebackType
-from typing import TypeVar
+from typing_extensions import TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility

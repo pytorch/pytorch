@@ -6,6 +6,7 @@ import typing
 import warnings
 from collections.abc import Callable
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 from torch._jit_internal import boolean_dispatched
@@ -79,7 +80,7 @@ _type_eval_globals = {
     "__torch__": _FakeGlobalNamespace(),
     "NoneType": type(None),
     "Storage": torch.UntypedStorage,
-    "t": typing.TypeVar("t"),
+    "t": TypeVar("t"),
     "PyObject": Any,
 }
 for k in dir(typing):

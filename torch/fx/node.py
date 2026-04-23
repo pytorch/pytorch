@@ -29,7 +29,7 @@ __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
 log = logging.getLogger(__name__)
 
-BaseArgumentTypes = Union[  # noqa: UP007
+BaseArgumentTypes: TypeAlias = Union[  # noqa: UP007
     str,
     int,
     float,
@@ -49,7 +49,7 @@ base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[  # noqa: UP045
+Argument: TypeAlias = Optional[  # noqa: UP045
     Union[
         tuple["Argument", ...],
         Sequence["Argument"],

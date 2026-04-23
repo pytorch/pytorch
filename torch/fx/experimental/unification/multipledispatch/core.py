@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeVarTuple, Unpack
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeVar, TypeVarTuple, Unpack
 
 
 if TYPE_CHECKING:

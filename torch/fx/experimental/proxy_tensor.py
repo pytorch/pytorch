@@ -26,10 +26,9 @@ from typing import (
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
-    TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, Self, TypeVar, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -109,11 +108,11 @@ __all__ = [
     "maybe_disable_thunkify",
 ]
 
-_ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
+_ProxyTracer: TypeAlias = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
 _TracingMode: TypeAlias = Literal["real", "fake", "symbolic"]
 
 _AnyScriptObject = (torch.ScriptObject, FakeScriptObject)
-_AnyScriptObjectType = torch.ScriptObject | FakeScriptObject
+_AnyScriptObjectType: TypeAlias = torch.ScriptObject | FakeScriptObject
 
 aten = torch.ops.aten
 prim = torch.ops.prim
@@ -121,17 +120,21 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: contextvars.ContextVar[
-    Mapping[OpOverload, Callable[..., Any]]
-] = contextvars.ContextVar("CURRENT_DECOMPOSITION_TABLE")
-
-CONSTANT_NUMEL_LIMIT = 1
-
 T = TypeVar("T")
 U = TypeVar("U")
 _P = ParamSpec("_P")
 R = TypeVar("R")
 _Ts = TypeVarTuple("_Ts")
+DecompositionTable: TypeAlias = Mapping[OpOverload, Callable[..., Any]]
+MaybeDecompositionTable: TypeAlias = DecompositionTable | None
+TensorMetaTuple: TypeAlias = tuple[torch._C._TensorMeta, ...]
+MaybeNestedTensors: TypeAlias = "_NestedTensors | None"
+
+CURRENT_DECOMPOSITION_TABLE: contextvars.ContextVar[DecompositionTable] = (
+    contextvars.ContextVar("CURRENT_DECOMPOSITION_TABLE")
+)
+
+CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
@@ -163,8 +166,8 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
 
 @contextmanager
 def decompose(
-    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
-) -> Generator[Mapping[OpOverload, Callable[..., Any]], None, None]:
+    decomposition_table: MaybeDecompositionTable,
+) -> Generator[DecompositionTable, None, None]:
     table = decomposition_table or {}
     token = CURRENT_DECOMPOSITION_TABLE.set(table)
     try:
@@ -886,10 +889,10 @@ def track_tensor(
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 
-_NestedProxys = Union[  # noqa: UP007
+_NestedProxys: TypeAlias = Union[  # noqa: UP007
     Proxy, Sequence["_NestedProxys"], Mapping[object, "_NestedProxys"]
 ]
-_NestedTensors = Union[  # noqa: UP007
+_NestedTensors: TypeAlias = Union[  # noqa: UP007
     Tensor, Sequence["_NestedTensors"], Mapping[object, "_NestedTensors"]
 ]
 
@@ -898,7 +901,7 @@ def track_tensor_tree(
     inner_res: T,
     proxy_res: _NestedProxys,
     *,
-    constant: _NestedTensors | None,
+    constant: MaybeNestedTensors,
     tracer: _ProxyTracer,
 ) -> T:
     # NB: We call set_unbacked_bindings only on the *topmost* call to
@@ -917,7 +920,7 @@ def track_tensor_tree(
     _set_unbacked_bindings(inner_res, proxy_res)
 
     def wrap_with_proxy(
-        e: object, proxy: _NestedProxys, constant: _NestedTensors | None
+        e: object, proxy: _NestedProxys, constant: MaybeNestedTensors
     ) -> None:
         if isinstance(e, Tensor):
             if not isinstance(proxy, Proxy):
@@ -951,9 +954,7 @@ def track_tensor_tree(
             if isinstance(proxy, fx.Proxy):
                 set_meta(proxy, e)
 
-            def get_constant(
-                c: _NestedTensors | None, idx: int
-            ) -> _NestedTensors | None:
+            def get_constant(c: MaybeNestedTensors, idx: int) -> MaybeNestedTensors:
                 if c is None:
                     return None
                 else:
@@ -1788,7 +1789,7 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: tuple[torch._C._TensorMeta, ...],
+        types: TensorMetaTuple,
         args: tuple[object, ...] = (),
         kwargs: dict[str, object] | None = None,
     ) -> object:
@@ -1818,7 +1819,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload | Callable[..., Any],
-        types: tuple[torch._C._TensorMeta, ...],
+        types: TensorMetaTuple,
         args: tuple[object, ...] = (),
         kwargs: dict[str, object] | None = None,
     ) -> object:
@@ -1964,7 +1965,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: OpOverload,
-        types: tuple[torch._C._TensorMeta, ...],
+        types: TensorMetaTuple,
         args: tuple[object, ...] = (),
         kwargs: dict[str, object] | None = None,
     ) -> object:
@@ -2004,7 +2005,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __sym_dispatch__(
         self,
         func: OpOverload,
-        types: tuple[torch._C._TensorMeta, ...],
+        types: TensorMetaTuple,
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> object:
@@ -2099,7 +2100,7 @@ class DecompositionInterpreter(fx.Interpreter):
         self,
         module: fx.GraphModule,
         new_graph: fx.Graph,
-        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+        decomposition_table: MaybeDecompositionTable = None,
         **kwargs: object,
     ) -> None:
         super().__init__(module, **kwargs)  # type: ignore[arg-type]
@@ -2166,7 +2167,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         self,
         module: fx.GraphModule,
         should_decompose: Callable[[fx.Node], bool],
-        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+        decomposition_table: MaybeDecompositionTable,
         **kwargs: object,
     ) -> None:
         """
@@ -2181,7 +2182,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
     def recursive_wrap(
         gm: fx.GraphModule,
         should_decompose: Callable[[fx.Node], bool],
-        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+        decomposition_table: MaybeDecompositionTable,
         **kwargs: object,
     ) -> _SelectiveDecomposeInterpreter:
         """
@@ -2224,7 +2225,7 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
 def selective_decompose(
     joint_gm: fx.GraphModule,
     *args: object,
-    decomposition: Mapping[OpOverload, Callable[..., Any]] | None,
+    decomposition: MaybeDecompositionTable,
     should_decompose: Callable[..., bool],
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
@@ -2591,7 +2592,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 class _MakefxTracer:
     def __init__(
         self,
-        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+        decomposition_table: MaybeDecompositionTable,
         tracing_mode: _TracingMode,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
@@ -2919,7 +2920,7 @@ class _MakefxTracer:
 
     def _make_sub_tracer(
         self,
-        decomp_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+        decomp_table: MaybeDecompositionTable = None,
         tracing_mode: _TracingMode = "real",
     ) -> _MakefxTracer:
         return _MakefxTracer(
@@ -2941,7 +2942,7 @@ class _MakefxTracer:
     def trace_subgraph_custom_decomp(
         self,
         f: Callable[..., Any],
-        decomp_table: Mapping[OpOverload, Callable[..., Any]],
+        decomp_table: DecompositionTable,
         *args: object,
     ) -> GraphModule:
         if not isinstance(decomp_table, Mapping):
@@ -2967,7 +2968,7 @@ def _set_make_fx_tracer(tracer: _MakefxTracer) -> Generator[None, None, None]:
 
 def make_fx(
     f: Callable[..., Any],
-    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+    decomposition_table: MaybeDecompositionTable = None,
     tracing_mode: _TracingMode = "real",
     _allow_non_fake_inputs: bool = False,
     *,
@@ -3095,7 +3096,7 @@ def get_isolated_graphmodule(
     args: tuple[object, ...],
     kwargs: dict[str, object],
     tracing_mode: _TracingMode = "real",
-    decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+    decomposition_table: MaybeDecompositionTable = None,
 ) -> GraphModule:
     """A helper function used to get the GraphModule for the given func.
 

@@ -1,18 +1,18 @@
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Any, TypeVar
-from typing_extensions import NamedTuple
+from typing import Any, TypeAlias
+from typing_extensions import NamedTuple, TypeVar
 
 import torch.return_types
 from torch.utils._pytree import PyTree, tree_flatten, TreeSpec
 
 
-FlattenFnSpec = Callable[[PyTree, TreeSpec], list[Any]]
-FlattenFnExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
+FlattenFnSpec: TypeAlias = Callable[[PyTree, TreeSpec], list[Any]]
+FlattenFnExactMatchSpec: TypeAlias = Callable[[PyTree, TreeSpec], bool]
 
 # Keep deprecated alias for backward compatibility
-FlattenFuncSpec = FlattenFnSpec  # deprecated
-FlattenFuncExactMatchSpec = FlattenFnExactMatchSpec  # deprecated
+FlattenFuncSpec: TypeAlias = FlattenFnSpec  # deprecated
+FlattenFuncExactMatchSpec: TypeAlias = FlattenFnExactMatchSpec  # deprecated
 
 SUPPORTED_NODES: dict[type[Any], FlattenFnSpec] = {}
 SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], FlattenFnExactMatchSpec | None] = {}
