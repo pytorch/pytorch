@@ -22,7 +22,7 @@ dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     const void* ptr) {
-  return make_onednn_memory(md, engine, const_cast<void*>ptr);
+  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
 }
 
 dnnl::memory::format_tag get_dnnl_default_format(
