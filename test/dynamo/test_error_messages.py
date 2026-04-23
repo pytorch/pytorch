@@ -18,7 +18,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, munge_exc
+from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -111,17 +111,10 @@ def _load_global_has_positions() -> bool:
 
 
 def _reconstruction_failure_gb_stack_source_attribution() -> str:
-    if IS_MACOS:
-        var_repr = "NullVariable originated from:"
-    else:
-        var_repr = (
-            "LazyVariableTracker(realized: SkipFunctionVariable()) originated from:"
-        )
-
     if sys.version_info >= (3, 14):
         return (
             "Stack variable source attribution:\n"
-            f"  {var_repr}\n"
+            "  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:\n"
             '  File "test_error_messages.py", line N\n'
             "                torch._dynamo.graph_break()\n"
             "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
@@ -131,7 +124,7 @@ def _reconstruction_failure_gb_stack_source_attribution() -> str:
     if sys.version_info >= (3, 11) and _load_global_has_positions():
         return (
             "Stack variable source attribution:\n"
-            f"  {var_repr}\n"
+            "  NullVariable originated from:\n"
             '  File "test_error_messages.py", line N\n'
             "                torch._dynamo.graph_break()\n"
             "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
@@ -143,7 +136,7 @@ def _reconstruction_failure_gb_stack_source_attribution() -> str:
 
     return (
         "Stack variable source attribution:\n"
-        f"  {var_repr}\n"
+        "  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:\n"
         '  File "test_error_messages.py", line N\n'
         "                torch._dynamo.graph_break()\n"
         "\n"
@@ -288,13 +281,16 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(zip)`.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+Unsupported method call
+  Explanation: Dynamo does not know how to trace method `__iter__` of class `zip`
+  Hint: Avoid calling `zip.__iter__` in your code.
+  Hint: Please report an issue to PyTorch.
+  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
-  Developer debug context: tp_iter_impl not implemented for zip
+  Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ [] {}
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0156.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -313,13 +309,17 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
             """\
-missing tp_iter
-  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(dict_items)`.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+Unsupported method call
+  Explanation: Dynamo does not know how to trace method `__iter__` of class `dict_items`
+  Hint: Avoid calling `dict_items.__iter__` in your code.
+  Hint: Please report an issue to PyTorch.
+  Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
+  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
-  Developer debug context: tp_iter_impl not implemented for dict_items
+  Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ [] {}
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0156.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
