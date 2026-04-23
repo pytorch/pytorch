@@ -3696,6 +3696,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Tensor.requires_grad_()"):
             grad(grad(f))(x)
 
+    @skipIfTorchDynamo("test for eager functorch, flaky under dynamo")
     def test_retain_grad_inside_transform(self, device):
         def f(x):
             y = x.sin()
