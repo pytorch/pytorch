@@ -909,22 +909,22 @@ def meta_segment_reduce(
             "segment_reduce(): indices based reduction is not supported yet."
         )
 
-    def segment_reduce_output(segment_count):
-        output_shape = list(data.shape)
-        output_shape[axis] = segment_count
+    def segment_reduce_lengths_tensor(lengths_shape):
         return torch.empty(
-            output_shape,
+            lengths_shape + data.shape[axis + 1 :],
             dtype=data.dtype,
             device="meta",
             memory_format=torch.contiguous_format,
         )
 
     if lengths is not None:
-        return segment_reduce_output(lengths.shape[axis])
+        return segment_reduce_lengths_tensor(lengths.shape)
     # FIXME should probably check that lengths and offset aren't both set, but
     # the ATen implementation neglects this too
     if offsets is not None:
-        return segment_reduce_output(offsets.shape[axis] - 1)
+        # lengths == torch.diff(offsets)
+        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
+        return segment_reduce_lengths_tensor(lengths_shape)
     raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
 
 
