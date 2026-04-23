@@ -366,7 +366,7 @@ op_db: list[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
+        ref=(lambda x: scipy.special.airy(x)[0]) if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -847,7 +847,7 @@ op_db: list[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        ref=(lambda x: scipy.special.spherical_jn(0, x)) if TEST_SCIPY else None,
         supports_autograd=False,
         skips=(
             DecorateInfo(
