@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/DynamicLibrary.h>
-#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062 && !defined(_WIN32)
 #include <locale.h>
 #endif
 #include <stdexcept>
@@ -147,7 +147,7 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
 }
 
 // Workaround nvrtcCompileProgram changing the locale until 12.6.2
-#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062 && !defined(_WIN32)
 nvrtcResult nvrtcCompileProgram_wrapped(nvrtcProgram prog,
                                         int numOptions,
                                         const char * const *options) {
@@ -326,7 +326,7 @@ NVRTC lazyNVRTC = {
 #define _REFERENCE_MEMBER(name) _stubs::name,
   AT_FORALL_NVRTC(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
-#if defined(CUDA_VERSION) && CUDA_VERSION < 12062
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12062 && !defined(_WIN32)
   /* nvrtcCompileProgram_real = */ nullptr,
 #endif
 };
