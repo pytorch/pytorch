@@ -495,7 +495,13 @@ def while_loop_tracing(
             "call_function", op, proxy_args, kwargs, name=op._name
         )
 
-        out = op(*args, **kwargs)
+        out = op(
+            cond_graph,
+            body_graph,
+            unspecialized_carried_inputs,
+            additional_inputs,
+            **kwargs,
+        )
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
