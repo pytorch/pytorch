@@ -85,7 +85,9 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
-            "-ffast-math",
+            "-funsafe-math-optimizations",
+            "-fno-math-errno",
+            "-ffinite-math-only",
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -133,7 +135,9 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
-            "-ffast-math",
+            "-funsafe-math-optimizations",
+            "-fno-math-errno",
+            "-ffinite-math-only",
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -181,7 +185,9 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
-            "-ffast-math",
+            "-funsafe-math-optimizations",
+            "-fno-math-errno",
+            "-ffinite-math-only",
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -384,7 +390,9 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
-            "-ffast-math",
+            "-funsafe-math-optimizations",
+            "-fno-math-errno",
+            "-ffinite-math-only",
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -493,7 +501,9 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
-            "-ffast-math",
+            "-funsafe-math-optimizations",
+            "-fno-math-errno",
+            "-ffinite-math-only",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         ] + select({
             "DEFAULT": [],
