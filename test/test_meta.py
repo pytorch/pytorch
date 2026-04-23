@@ -1983,6 +1983,30 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs_cpu.shape, eigvecs_meta.shape)
         self.assertEqual(eigvecs_cpu.dtype, eigvecs_meta.dtype)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_randint_like_tensor_dtype_kwarg(self):
+        x_cpu = torch.randn(3, 4)
+        high_cpu = torch.tensor(10)
+        y_cpu = torch.ops.aten.randint_like.Tensor(x_cpu, high_cpu, dtype=torch.int32)
+        x_meta = torch.randn(3, 4, device="meta")
+        high_meta = torch.tensor(10, device="meta")
+        y_meta = torch.ops.aten.randint_like.Tensor(
+            x_meta, high_meta, dtype=torch.int32
+        )
+        self.assertEqual(y_cpu.dtype, y_meta.dtype)
+        self.assertEqual(y_cpu.shape, y_meta.shape)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_randint_like_tensor_preserves_default(self):
+        x_cpu = torch.randn(3, 4, dtype=torch.float16)
+        high_cpu = torch.tensor(10)
+        y_cpu = torch.ops.aten.randint_like.Tensor(x_cpu, high_cpu)
+        x_meta = torch.randn(3, 4, device="meta", dtype=torch.float16)
+        high_meta = torch.tensor(10, device="meta")
+        y_meta = torch.ops.aten.randint_like.Tensor(x_meta, high_meta)
+        self.assertEqual(y_cpu.dtype, y_meta.dtype)
+        self.assertEqual(y_cpu.shape, y_meta.shape)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
