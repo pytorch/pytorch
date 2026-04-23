@@ -356,7 +356,7 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   }
 
   onednn::matmul(result, self, batch2, Tensor(), true, onednn::Attr());
-    return result;
+  return result;
 }
 
 Tensor& addmv_out(
