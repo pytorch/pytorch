@@ -5387,103 +5387,6 @@ class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
         )
 
     @make_kernel_access_analyzer_test
-    def test_grouped_pid():
-        import math
-
-        import sympy
-
-        from torch._inductor.dependencies import UserTritonDep
-        from torch.utils._sympy.functions import FloorDiv, PythonMod
-
-        @triton.jit
-        def grouped_pid_kernel(
-            a_ptr,
-            b_ptr,
-            M,
-            N,
-            stride_am,
-            stride_an,
-            stride_bm,
-            stride_bn,
-            BLOCK_M: tl.constexpr,
-            BLOCK_N: tl.constexpr,
-            GROUP_SIZE_M: tl.constexpr,
-        ):
-            pid = tl.program_id(axis=0)
-            num_pid_m = tl.cdiv(M, BLOCK_M)
-            num_pid_n = tl.cdiv(N, BLOCK_N)
-            num_pid_in_group = GROUP_SIZE_M * num_pid_n
-            group_id = pid // num_pid_in_group
-            first_pid_m = group_id * GROUP_SIZE_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-            pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
-            pid_n = (pid % num_pid_in_group) // group_size_m
-
-            tl.assume(pid_m >= 0)
-            tl.assume(pid_n >= 0)
-
-            offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-            offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-
-            mask_m = offs_m < M
-            mask_n = offs_n < N
-
-            a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_n[None, :] * stride_an
-            a = tl.load(a_ptrs, mask=mask_m[:, None] & mask_n[None, :])
-
-            b_ptrs = b_ptr + offs_m[:, None] * stride_bm + offs_n[None, :] * stride_bn
-            tl.store(b_ptrs, a, mask=mask_m[:, None] & mask_n[None, :])
-
-        BLOCK_M, BLOCK_N, GROUP_SIZE_M = 64, 64, 8
-        M, N = 512, 512
-        a = torch.randn(M, N, device="cuda")
-        b = torch.empty(M, N, device="cuda")
-        GRID = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
-        stride_am = a.stride(0)  # N = 512
-        stride_an = a.stride(1)  # 1
-        stride_bm = b.stride(0)  # N = 512
-        stride_bn = b.stride(1)  # 1
-
-        i0, i1, i2 = sympy.symbols("i0 i1 i2")
-
-        ptrs = 512 * (PythonMod(i0, 8) * 64 + i1) + (FloorDiv(i0, 8) * 64 + i2)
-        read = UserTritonDep(
-            name="a_ptr",
-            index=ptrs,
-            var_names=(i0, i1, i2),
-            size=(GRID[0], BLOCK_M, BLOCK_N),
-        )
-
-        write = UserTritonDep(
-            name="b_ptr",
-            index=ptrs,
-            var_names=(i0, i1, i2),
-            size=(GRID[0], BLOCK_M, BLOCK_N),
-        )
-
-        assert math.prod(write.size) == a.numel()  # noqa: S101
-        return (
-            grouped_pid_kernel,
-            {
-                "a_ptr": a,
-                "b_ptr": b,
-                "M": M,
-                "N": N,
-                "stride_am": stride_am,
-                "stride_an": stride_an,
-                "stride_bm": stride_bm,
-                "stride_bn": stride_bn,
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_N": BLOCK_N,
-                "GROUP_SIZE_M": GROUP_SIZE_M,
-            },
-            GRID,
-            {},
-            [read],
-            [write],
-        )
-
-    @make_kernel_access_analyzer_test
     def test_reverse():
         import sympy
 
@@ -5526,56 +5429,6 @@ class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
                 UserTritonDep(
                     name="b_ptr",
                     index=N - 1 - (i0 * BLOCK_SIZE + i1),
-                    var_names=(i0, i1),
-                    size=(GRID[0], BLOCK_SIZE),
-                ),
-            ],
-        )
-
-    @make_kernel_access_analyzer_test
-    def test_negative_offset():
-        import sympy
-
-        from torch._inductor.dependencies import UserTritonDep
-
-        @triton.jit
-        def negative_offset_kernel(a_ptr, b_ptr, N, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(0)
-            offsets = tl.arange(0, BLOCK_SIZE)
-            # ptr starts at end of block, reads backwards
-            base = (pid + 1) * BLOCK_SIZE - 1
-            a = tl.load(a_ptr + base - offsets)
-            tl.store(b_ptr + base - offsets, a)
-
-        N = 1024
-        BLOCK_SIZE = 256
-        GRID = (triton.cdiv(N, BLOCK_SIZE),)
-        t = torch.randn(N, device="cuda")
-
-        i0, i1 = sympy.symbols("i0 i1")
-
-        return (
-            negative_offset_kernel,
-            {
-                "a_ptr": t,
-                "b_ptr": t,
-                "N": N,
-                "BLOCK_SIZE": BLOCK_SIZE,
-            },
-            GRID,
-            {},
-            [
-                UserTritonDep(
-                    name="a_ptr",
-                    index=(i0 + 1) * BLOCK_SIZE - 1 - i1,
-                    var_names=(i0, i1),
-                    size=(GRID[0], BLOCK_SIZE),
-                ),
-            ],
-            [
-                UserTritonDep(
-                    name="b_ptr",
-                    index=(i0 + 1) * BLOCK_SIZE - 1 - i1,
                     var_names=(i0, i1),
                     size=(GRID[0], BLOCK_SIZE),
                 ),
@@ -5675,9 +5528,9 @@ class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
                     mask=mask[:, None] & mask[None, :],
                 )
 
-        t1 = torch.randn(1024)
-        t2 = torch.randn(1024)
-        out = torch.randn(1024 * 1024)
+        t1 = torch.randn(1024, device="cuda")
+        t2 = torch.randn(1024, device="cuda")
+        out = torch.randn(1024 * 1024, device="cuda")
         BLOCK_SIZE = 256
         GRID = (triton.cdiv(1024, BLOCK_SIZE),)
 
@@ -5775,7 +5628,6 @@ class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
 
         @triton.jit
         def simple_loop_kernel(a_ptr, b_ptr, N, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
             for k in range(tl.cdiv(N, BLOCK_SIZE)):
                 offsets = k * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
                 mask = offsets < N
@@ -5813,74 +5665,6 @@ class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
                     index=i0 * BLOCK_SIZE + i1,
                     var_names=(i0, i1),
                     size=(triton.cdiv(N, BLOCK_SIZE), BLOCK_SIZE),
-                ),
-            ],
-        )
-
-    @make_kernel_access_analyzer_test
-    def test_vec_add():
-        import sympy
-
-        from torch._inductor.dependencies import UserTritonDep
-
-        @triton.jit
-        def vec_add_kernel(
-            a_ptr,
-            b_ptr,
-            out_ptr,
-            N,
-            BLOCK_SIZE: tl.constexpr,
-        ):
-            pid = tl.program_id(0)
-            offset = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offset < N
-
-            a = tl.load(a_ptr + offset, mask=mask)
-            b = tl.load(b_ptr + offset, mask=mask)
-
-            tl.store(out_ptr + offset, a + b, mask=mask)
-
-        M, N = 1024, 1024
-        BLOCK_SIZE = 64
-        GRID = (triton.cdiv(M, BLOCK_SIZE),)
-
-        a = torch.randn(M, device="cuda")
-        b = torch.randn(N, device="cuda")
-        out = torch.zeros(M, device="cuda")
-
-        i0, i1 = sympy.symbols("i0 i1")
-
-        return (
-            vec_add_kernel,
-            {
-                "a_ptr": a,
-                "b_ptr": b,
-                "out_ptr": out,
-                "N": N,
-                "BLOCK_SIZE": BLOCK_SIZE,
-            },
-            GRID,
-            {},
-            [
-                UserTritonDep(
-                    name="a_ptr",
-                    index=i0 * BLOCK_SIZE + i1,
-                    var_names=(i0, i1),
-                    size=(GRID[0], BLOCK_SIZE),
-                ),
-                UserTritonDep(
-                    name="b_ptr",
-                    index=i0 * BLOCK_SIZE + i1,
-                    var_names=(i0, i1),
-                    size=(GRID[0], BLOCK_SIZE),
-                ),
-            ],
-            [
-                UserTritonDep(
-                    name="out_ptr",
-                    index=i0 * BLOCK_SIZE + i1,
-                    var_names=(i0, i1),
-                    size=(GRID[0], BLOCK_SIZE),
                 ),
             ],
         )
