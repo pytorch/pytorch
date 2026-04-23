@@ -21,7 +21,7 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata,
+    const c10::intrusive_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
@@ -169,7 +169,7 @@ struct TORCH_API AutogradContext {
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
   // will always be alive when we want to use it.
-  std::weak_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_fn_{c10::intrusive_ptr<Node>()};
   bool has_freed_buffers_{false};
 
   // Compiled autograd overrides saved_variables() and needs_input_grad().
@@ -284,7 +284,7 @@ struct CppNode : public Node {
 
   void release_variables() override;
 
-  void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
+  void set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node);
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) const override {
@@ -475,7 +475,7 @@ auto Function<T>::apply(Args&&... args)
     functorch_tls->checkSupportsCppAutogradFunction();
   }
 
-  std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
+  auto node = c10::make_intrusive<CppNode<T>>();
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
@@ -573,7 +573,7 @@ void CppNode<T>::save_variables_to_ctx() {
 }
 
 template <class T>
-void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
+void CppNode<T>::set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node) {
   ctx_.grad_fn_ = node;
 }
 
