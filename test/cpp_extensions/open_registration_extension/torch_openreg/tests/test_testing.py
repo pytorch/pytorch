@@ -124,11 +124,11 @@ class TestDeviceTypeOpenReg(TestCase):
     @ops([op_normal])
     def test_op_narrow_ops(self, device, dtype, op):
         """Verify that having extra entries in op_skips that are NOT present in
-        the @ops list does not raise a KeyError (safety check in update_op_list).
+        the @ops list does not raise a KeyError (safety check in _apply_op_overrides).
 
         op_skips includes op_skip and PrivateUse1TestBase.op_skips also
         lists op_skip; here @ops only exposes op_normal.  The safety check
-        introduced in update_op_list must silently ignore the missing keys.
+        introduced in _apply_op_overrides must silently ignore the missing keys.
         """
         # If we reach here without a KeyError the safety check worked.
 

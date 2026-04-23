@@ -363,7 +363,7 @@ class DeviceTypeTestBase(TestCase):
         self._tls.rel_tol = prec
 
     @classmethod
-    def update_op_list(cls, ops):
+    def _apply_op_overrides(cls, ops):
         if cls.op_decorators is None and cls.op_skips is None:
             return
 
@@ -1144,7 +1144,7 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
-        device_cls.update_op_list(self)
+        device_cls._apply_op_overrides(self)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
