@@ -262,7 +262,7 @@ class GroupNorm(Module):
     .. math::
         \begin{alignat*}{2}
           x               &=&    x  &(n, \phantom{g,}\mathclap{c\;\;}\phantom{s} ,i_2,i_3,\dots) =  \\
-                          & &  = x' &(n, \overbracket{g,s}^{\mathclap{c = g \cdot G/C + s}}\!\! ,i_2,i_3,\dots)  \\
+                          & &  = x' &(n, \overbracket{g,s}^{\mathclap{c = g \cdot C/G + s}}\!\! ,i_2,i_3,\dots)  \\
           \mathrm{E}[x]   &=& \mathrm{E}_{s,i_2,i_3,\dots}[x']   &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
           \mathrm{Var}[x] &=& \mathrm{Var}_{s,i_2,i_3,\dots}[x'] &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
           \gamma          &=& \gamma(c)=\quad  \gamma' &(\phantom{n,}g,s\phantom{,i_2,i_3,\dots\,})  \\
@@ -271,7 +271,7 @@ class GroupNorm(Module):
 
     The input `x` may be 2D or higher-dimensional. The input channels are separated
     into `G =` :attr:`num_groups` groups, each containing ``num_channels / num_groups``
-    `= G/C` channels. `C =` :attr:`num_channels` must be divisible by
+    `= C/G` channels. `C =` :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
     separately over each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
