@@ -3268,7 +3268,6 @@ def forward(self, L_x_ : torch.Tensor):
         result.backward(grad_o)
         self.assertEqual(x2.grad, grad_o * 1.5)
 
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_invoke_subgraph(self):
         @torch.compiler.nested_compile_region
         def fn(scale_obj, x):
