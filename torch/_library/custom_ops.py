@@ -654,9 +654,7 @@ class CustomOpDef:
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
-                    return utils.generate_trivial_fake_impl(
-                        self._opoverload, *args, **kwargs
-                    )
+                    return None
                 raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
                     f"This is necessary for torch.compile/export/fx tracing to work. "
