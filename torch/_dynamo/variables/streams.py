@@ -260,6 +260,22 @@ def _(
 has_side_effect(torch.ops.streams.record_stream.default)
 
 
+@custom_op("streams::record_use", mutates_args=())
+def record_use(tensor: torch.Tensor, stream_index: int) -> None:
+    tensor.record_use(_get_stream_by_index(stream_index))
+
+
+@record_use.register_fake
+def _(
+    tensor: torch.Tensor,
+    stream_index: int,
+) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.record_use.default)
+
+
 class SymbolicStreamState:
     """Track the currently entered stream if any"""
 

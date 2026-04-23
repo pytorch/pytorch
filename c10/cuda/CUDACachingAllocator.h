@@ -140,6 +140,18 @@ class CUDAAllocator : public DeviceAllocator {
     CUDAStream cuda_stream = CUDAStream(stream);
     recordStream(ptr, cuda_stream);
   }
+  // Precise variant of recordStream: records the completion event on
+  // `stream` at the call site (typically right after the caller's last use
+  // of the tensor), rather than at block free time. Default falls back to
+  // recordStream so allocator implementations that do not natively support
+  // precise tracking remain correct.
+  virtual void recordUse(const DataPtr& ptr, CUDAStream stream) {
+    recordStream(ptr, stream);
+  }
+  void recordUse(const DataPtr& ptr, c10::Stream stream) override {
+    CUDAStream cuda_stream = CUDAStream(stream);
+    recordUse(ptr, cuda_stream);
+  }
   virtual SnapshotInfo snapshot(
       MempoolId_t mempool_id = {0, 0},
       bool include_traces = true) = 0;
@@ -340,6 +352,10 @@ inline void* getBaseAllocation(void* ptr, size_t* size) {
 
 inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
   get()->recordStream(dataPtr, stream);
+}
+
+inline void recordUse(const DataPtr& dataPtr, CUDAStream stream) {
+  get()->recordUse(dataPtr, stream);
 }
 
 inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(

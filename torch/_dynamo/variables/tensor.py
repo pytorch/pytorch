@@ -1471,6 +1471,25 @@ class TensorVariable(VariableTracker):
         )
         return ConstantVariable.create(None)
 
+    def method_record_use(
+        self,
+        tx: "InstructionTranslator",
+        stream: VariableTracker,
+    ) -> VariableTracker:
+        from .streams import StreamVariable
+
+        if not isinstance(stream, StreamVariable):
+            raise RuntimeError(
+                f"record_use() expects a Stream argument, got {stream.python_type().__name__}"
+            )
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_use,
+            (self.as_proxy(), stream.user_object_index),
+            {},
+        )
+        return ConstantVariable.create(None)
+
     def method_item(
         self,
         tx: "InstructionTranslator",

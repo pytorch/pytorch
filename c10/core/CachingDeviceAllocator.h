@@ -225,6 +225,16 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   // stream complete
   virtual void recordStream(const DataPtr& ptr, c10::Stream stream) = 0;
 
+  // Precise variant of recordStream: records a completion event on `stream`
+  // at the point of this call (rather than at block free time) and attaches
+  // it to the allocation. Allows the allocator to reuse memory as soon as
+  // the recorded event fires, without waiting for unrelated later work on
+  // the stream. Default fallback delegates to recordStream (imprecise, but
+  // correct) for devices that have not implemented precise tracking.
+  virtual void recordUse(const DataPtr& ptr, c10::Stream stream) {
+    recordStream(ptr, stream);
+  }
+
   // Retrieves comprehensive memory statistics for the specified device,
   // including allocation patterns, usage metrics
   virtual CachingDeviceAllocator::DeviceStats getDeviceStats(

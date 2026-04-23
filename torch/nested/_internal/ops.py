@@ -2632,6 +2632,17 @@ def record_stream_default(func, *args, **kwargs) -> None:
         func(inp._lengths, stream)
 
 
+@register_jagged_func(torch.ops.aten.record_use.default, "self: jt_all, s: any")
+def record_use_default(func, *args, **kwargs) -> None:
+    inp = args[0]
+    stream = args[1]
+    # precise variant — record event on stream now for each component
+    func(inp._values, stream)
+    func(inp._offsets, stream)
+    if inp._lengths is not None:
+        func(inp._lengths, stream)
+
+
 @register_jagged_func(
     [
         torch.ops.aten.new_empty.default,

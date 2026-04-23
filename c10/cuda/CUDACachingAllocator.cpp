@@ -152,6 +152,11 @@ enum ShareableHandleType : char {
 namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
+// Handle for a pooled CUDA event. Shared between Block's `pending_waits`
+// (FIFO-chain path: consumed at alloc via cudaStreamWaitEvent) and
+// EventPool::Event (record_stream polling path via cuda_events).
+using event_handle =
+    std::unique_ptr<cudaEvent_t, std::function<void(cudaEvent_t*)>>;
 
 void decrease_stat_array(
     StatArray& stat_array,
@@ -198,6 +203,15 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
+  // Events pre-recorded on specific streams at user-designated end-of-use
+  // points (populated by recordUse()). These travel with the block through
+  // free into the pool and are consumed by issue_pending_waits at the next
+  // allocation: for each (event, stream) pair we call cudaStreamWaitEvent
+  // on the REUSING stream before the block is handed back. This gives the
+  // same timing semantics as FSDP2's manual stream.wait_event(prev_event)
+  // before its next-iteration allocation — deterministic, no polling via
+  // cudaEventQuery / cuda_events.
+  std::vector<std::pair<event_handle, cuda::CUDAStream>> pending_waits;
   int32_t registration_counter{-1};
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
@@ -1074,7 +1088,7 @@ struct AllocParams {
 // rates.
 class EventPool {
  public:
-  using Event = std::unique_ptr<cudaEvent_t, std::function<void(cudaEvent_t*)>>;
+  using Event = event_handle;
   // TODO: Explicit device count
   EventPool() : pools_(at::cuda::device_count()) {}
 
@@ -1835,12 +1849,26 @@ class DeviceCachingAllocator {
         endAllocateToPool(mempool_id);
         releasePool(mempool_id);
         if (block_found) {
-          params = mempool_params;
+          // Move — AllocParams holds a Block (search_key) whose pending_waits
+          // vector contains move-only unique_ptrs, so the type is move-only.
+          params = std::move(mempool_params);
           break;
         }
       }
     }
     return block_found;
+  }
+
+  // Issue cudaStreamWaitEvent on `reusing_stream` for each event on `source`'s
+  // pending_waits. Caller decides whether to clear source->pending_waits
+  // afterwards: if source is being handed out entirely to the user, clear; if
+  // source is `remaining` (stays in pool with a shrunk size after a split),
+  // do not clear — those waits still protect source's physical memory for
+  // future allocations. Called with allocator mutex held.
+  void issue_pending_waits(Block* source, cudaStream_t reusing_stream) {
+    for (auto& [event, recorded_stream] : source->pending_waits) {
+      C10_CUDA_CHECK(cudaStreamWaitEvent(reusing_stream, *event, 0));
+    }
   }
 
   Block* alloc_found_block(
@@ -1897,6 +1925,24 @@ class DeviceCachingAllocator {
         stats.inactive_split_bytes[stat_type].decrease(block->size);
         stats.inactive_split[stat_type].decrease(1);
       });
+    }
+
+    // FIFO-chain for record_use: if the physical region has attached waits
+    // (from a prior record_use call, now resident on `block` or — in the
+    // split case — on `remaining`), issue cudaStreamWaitEvent on the
+    // requesting stream before the caller sees the block. This orders the
+    // reusing stream's FIFO after the consumer's end-of-use event, without
+    // any cudaEventQuery polling.
+    Block* waits_source = split_remainder ? remaining : block;
+    if (!waits_source->pending_waits.empty()) {
+      issue_pending_waits(waits_source, stream);
+      if (!split_remainder) {
+        // `block` is being handed out whole — the waits are consumed.
+        // In the split case, `remaining` stays in the pool and keeps its
+        // waits for future allocations that take further chunks of its
+        // physical memory.
+        block->pending_waits.clear();
+      }
     }
 
     block->allocated = true;
@@ -2205,6 +2251,9 @@ class DeviceCachingAllocator {
       stats.oversize_allocations.decrease(1);
 
     // If the block has been used on more than one stream, handle accordingly.
+    // Only `stream_uses` (populated by recordStream) gates free here —
+    // pending_waits (populated by recordUse) does NOT delay the free; it
+    // travels with the block into the pool and is paid at next allocation.
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
@@ -2290,6 +2339,47 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
+  }
+
+  // Precise variant of recordStream. Records a completion event on `stream`
+  // right now (at the caller-designated end of use) and stashes it on the
+  // block. When the block is handed to a new allocation later,
+  // issue_pending_waits will call cudaStreamWaitEvent on the reusing stream
+  // — so reuse is ordered by GPU stream dependencies, not by CPU polling.
+  void recordUse(Block* block, cuda::CUDAStream stream) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (stream.stream() == block->stream) {
+      // Same-stream uses are ordered by FIFO — no event needed.
+      return;
+    }
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      // Precise cross-stream lifetime under graph capture is a separate
+      // question: a cudaEventRecord issued inside a capture participates in
+      // the graph's dependency structure, which would require integration
+      // with the existing graph_capture_record_stream_reuse machinery. Out
+      // of scope for this change; skip silently (FSDP2 also does not use
+      // this pattern under capture).
+      TORCH_WARN_ONCE(
+          "record_use(stream) called during CUDA graph capture; skipping. "
+          "Precise cross-stream lifetime inside captured graphs is not "
+          "supported yet.");
+      return;
+    }
+    if (stream.device_index() != block->device) {
+      // Cross-device waits are valid CUDA but require peer-access setup we
+      // don't validate here. Scope out for this change.
+      TORCH_WARN_ONCE(
+          "record_use(stream) called with a stream on a different device "
+          "than the tensor's allocation device; skipping.");
+      return;
+    }
+    c10::DeviceIndex prev_device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
+    EventPool::Event event = create_event_internal(stream.device_index());
+    C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
+    C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
+    block->pending_waits.emplace_back(std::move(event), stream);
   }
 
   /** get memory fraction limiting maximum allocated memory **/
@@ -3214,6 +3304,9 @@ class DeviceCachingAllocator {
   void free_block(
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
+    // Note: pending_waits is intentionally not asserted empty here — blocks
+    // enter the pool with their attached waits, which are consumed by
+    // issue_pending_waits at the next allocation that picks up this block.
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
@@ -3313,6 +3406,13 @@ class DeviceCachingAllocator {
     }
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
+    // Preserve any pending waits from src — dst now spans src's physical
+    // range and a later allocation that takes dst must wait on these before
+    // reuse. Appending to dst is sufficient; order doesn't matter.
+    for (auto& wait : src->pending_waits) {
+      dst->pending_waits.push_back(std::move(wait));
+    }
+    src->pending_waits.clear();
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto erased =
         src->mapped ? pool.blocks.erase(src) : pool.unmapped.erase(src);
@@ -4469,6 +4569,19 @@ class NativeCachingAllocator : public CUDAAllocator {
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
     device_allocator[block->device]->recordStream(block, stream);
+  }
+
+  void recordUse(const DataPtr& ptr, cuda::CUDAStream stream) override {
+    // Mirrors recordStream's null/foreign-ptr handling.
+    if (!ptr.get()) {
+      return;
+    }
+    if (ptr.get_deleter() != &local_raw_delete) {
+      return;
+    }
+    Block* block = get_allocated_block(ptr.get());
+    TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
+    device_allocator[block->device]->recordUse(block, stream);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {

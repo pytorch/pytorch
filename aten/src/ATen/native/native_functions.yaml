@@ -13584,6 +13584,11 @@
   dispatch:
     CUDA: record_stream_cuda
 
+- func: record_use(Tensor(a!) self, Stream s) -> ()
+  variants: method
+  dispatch:
+    CUDA: record_use_cuda
+
 - func: isposinf(Tensor self) -> Tensor
   variants: function, method
   structured_delegate: isposinf.out

@@ -1483,6 +1483,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.qscheme: lambda self: -1,
         Tensor.random_: lambda self, from_=0, to=None, *, generator=None: -1,
         Tensor.record_stream: lambda self, stream: -1,
+        Tensor.record_use: lambda self, stream: -1,
         Tensor.refine_names: lambda self, names: -1,
         Tensor.register_hook: lambda self, hook: -1,
         Tensor.register_post_accumulate_grad_hook: lambda self, hook: -1,

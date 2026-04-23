@@ -4155,6 +4155,72 @@ complete.
 )
 
 add_docstr_all(
+    "record_use",
+    r"""
+record_use(stream)
+
+Records a completion event on :attr:`stream` at the point of this call and
+attaches it to the tensor's underlying allocation. When the caching
+allocator later hands this block to a new allocation, it issues
+``cudaStreamWaitEvent`` on the requesting stream for each attached event
+before returning the block — so the requesting stream's FIFO is ordered
+after the consumer's end-of-use without any ``cudaEventQuery`` polling.
+
+Memory behavior is **timing-deterministic**: the tensor's block returns to
+the pool as soon as the Python ref drops; the ordering required for safe
+reuse is paid at the next allocation, by the reusing stream, via
+``cudaStreamWaitEvent``. This is the same ordering mechanism production
+multi-stream subsystems (e.g. FSDP2) implement manually as
+``next_stream.wait_event(prev_consumer_event)`` before the next iteration's
+allocation; :meth:`~Tensor.record_use` moves that pattern into the
+allocator so user code writes one call instead of a multi-step recipe with
+a Python-side stash.
+
+Typical use: call right after the consumer's last read of the tensor on
+:attr:`stream`, then drop the tensor normally.
+
+.. warning::
+
+    The caller must place :meth:`~Tensor.record_use` **after** the
+    consumer's last read of the tensor on :attr:`stream`. Calling it too
+    early is a use-after-free — the allocator will reuse the block while
+    the consumer kernel is still reading. (:meth:`~Tensor.record_stream`
+    does not have this trap because its event is recorded at free time.)
+
+Properties:
+
+* Calling with the tensor's allocation stream is a no-op.
+* Multiple :meth:`~Tensor.record_use` calls compose: all attached events
+  are waited on at reuse time.
+* Composes with :meth:`~Tensor.record_stream`: both mechanisms gate reuse
+  independently.
+* Under CUDA graph capture, the call is skipped with a warning; precise
+  cross-stream lifetime inside captured graphs is not yet supported.
+* If the stream is on a different device than the tensor's allocation
+  device, the call is skipped with a warning.
+
+.. note::
+
+    :meth:`~Tensor.record_use` is currently implemented only by the native
+    CUDA caching allocator. Other allocators (``cudaMallocAsync``,
+    pluggable custom allocators) fall back to
+    :meth:`~Tensor.record_stream` semantics, which is correct but uses
+    event polling rather than FIFO ordering.
+
+Example::
+
+    # producer on s0, consumer on s1
+    with torch.cuda.stream(s0):
+        x = torch.zeros(N)
+    s1.wait_stream(s0)
+    with torch.cuda.stream(s1):
+        y = some_op(x)      # consumer's read of x
+        x.record_use(s1)    # mark x's use on s1 as complete here
+    del x                   # safe from any stream, any thread
+""",
+)
+
+add_docstr_all(
     "remainder",
     r"""
 remainder(divisor) -> Tensor

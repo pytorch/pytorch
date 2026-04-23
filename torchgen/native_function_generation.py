@@ -84,6 +84,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "q_zero_point",  # returns an int
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
+    "record_use",  # no return
     "sparse_dim",  # returns an int
     "sym_constrain_range",  # no return
     "sym_constrain_range_for_size",  # no return

@@ -163,6 +163,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "allclose",
     # Functions return none are not differentiable
     "record_stream",
+    "record_use",
     # These functions are not differentiable
     "logical_and",
     "logical_xor",
