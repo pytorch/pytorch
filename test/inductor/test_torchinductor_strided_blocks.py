@@ -810,6 +810,21 @@ class CommonTemplate:
         """
         if reduction_op == torch.sum and torch.version.hip is not None:
             view_size = (513, 513) if view_size == (129, 129) else view_size
+
+        # Blackwell+ (SM >= 10.0) raises the split-reduction threshold from
+        # 8K to 524K (see InductorChoices.split_reduction), so reductions that
+        # used to split on older GPUs may no longer split.
+        reduction_numel = math.prod(view_size)
+        no_split_threshold = (
+            524288
+            if torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (10, 0)
+            else 8192
+        )
+        if num_triton_kernels > 1 and reduction_numel <= no_split_threshold:
+            num_block_pointers = 1
+            num_triton_kernels = 1
+
         view = self._discontiguous_tensor(view_size, self.device)
 
         # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
