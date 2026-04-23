@@ -32,7 +32,7 @@ def get_cudnn_mode(mode):
         # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.gru)
     else:
-        raise ValueError(f"Unknown mode: {mode}")  # noqa: TRY002
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 # NB: We don't actually need this class anymore (in fact, we could serialize the
@@ -46,8 +46,6 @@ class Unserializable:
         return self.inner
 
     def __getstate__(self):
-        # Note: can't return {}, because python2 won't call __setstate__
-        # if the value evaluates to False
         return "<unserializable>"
 
     def __setstate__(self, state):

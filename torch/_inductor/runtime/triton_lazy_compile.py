@@ -114,7 +114,7 @@ def start_kernel_compile(
 
     # Evaluate the kernel source to get the Future or CachingAutotuner
     # The kernel_source is like: async_compile.triton('name', '''...''', ...)
-    kernel_obj = eval(kernel_source.strip())  # noqa: S307
+    kernel_obj = eval(kernel_source.strip())
 
     pending_kernels[kernel_name] = kernel_obj
 
@@ -175,6 +175,15 @@ def run_triton_kernel_with_autotune(
     shared_mem = cached_params["shared_mem"]
 
     config = config_to_dict(launcher.config) if launcher.config else {}
+
+    # For combo/foreach kernels, the autotuned config may have empty kwargs
+    # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
+    # In that case, use the default_config from combo_grid_meta
+    combo_grid_meta = inductor_meta.get("combo_grid_meta") if inductor_meta else None
+    default_config = combo_grid_meta.get("default_config") if combo_grid_meta else None
+    if default_config:
+        config = {**default_config, **config}
+
     xblock = config.get("XBLOCK", 128)
     yblock = config.get("YBLOCK", 1)
     zblock = config.get("ZBLOCK", 1)

@@ -216,6 +216,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
 
 
 def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch.compiler.is_exporting():
+        return None
+
     if not torch._C._is_torch_function_mode_enabled():
         return None
 
@@ -397,7 +400,7 @@ def _check_symint(
                     path = get_keystr(keypath)
                     if i is not None:
                         path += f".shape[{i}]"
-                    raise RuntimeError(  # noqa: B904
+                    raise RuntimeError(
                         f"Expected input {path} = {arg} to be "
                         f"of the form {symint.node.expr}, where {symbol} is an integer"
                     )
@@ -472,7 +475,17 @@ def _check_input_constraints_for_graph(
                 )
 
         elif isinstance(node_val, (int, float, str)):
-            if type(arg) is not type(node_val) or arg != node_val:
+            if type(arg) is not type(node_val):
+                raise RuntimeError(
+                    f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
+                )
+            # NaN != NaN in Python, so use math.isnan for NaN-to-NaN comparison
+            if isinstance(node_val, float) and math.isnan(node_val):
+                if not isinstance(arg, float) or not math.isnan(arg):
+                    raise RuntimeError(
+                        f"Expected input at {get_keystr(key_path)} to be nan, but got {arg}",
+                    )
+            elif arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )

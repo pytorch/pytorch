@@ -333,12 +333,11 @@ inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input
       weight.scalar_type() == at::kDouble) {
     return at::MemoryFormat::Contiguous;
   }
-  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
   auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
+  bool can_use_cudnn_channels_last_2d = weight_ndim == 4 && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
@@ -346,7 +345,7 @@ inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input
     return at::MemoryFormat::ChannelsLast;
   }
 
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
+  bool can_use_cudnn_channels_last_3d = weight_ndim == 5 && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
   );
@@ -471,8 +470,14 @@ inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor
     return false;
   }
 
+  // Use exact-match so a tensor whose strides merely *look* like channels-last
+  // (e.g. a channel-slice of a channels-last tensor) is not misclassified --
+  // MPS reads raw buffers assuming packed NHWC, which would be incorrect for
+  // such views. exact_match also correctly excludes degenerate 1x1 weights
+  // whose NCHW-contiguous strides happen to also satisfy is_contiguous(CL).
+  // See https://github.com/pytorch/pytorch/issues/180984
   auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format();
+    auto fmt = t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
     return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
   };
   return is_channel_last(input) || is_channel_last(weight);

@@ -65,6 +65,16 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
+from torch._library.opaque_object import OpaqueBase, register_opaque_type
+
+
+class _CudagraphTestScaleFactor(OpaqueBase):
+    def __init__(self, factor):
+        self.factor = factor
+
+
+register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+
 
 def get_compile_fn(backend):
     if backend == "cudagraphs":
@@ -746,8 +756,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(foo_opt(ones), foo(ones))
             # paths
             children = self.get_root_children()
-            # one root with two children
-            self.assertEqual(children, [2])
+            self.assertEqual(children, [1])
 
         def test_end_recording_early(self):
             def foo(x):
@@ -1929,7 +1938,9 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(
+            (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
+        )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
         def test_workspace_allocation_error(self):
@@ -2638,9 +2649,9 @@ if HAS_CUDA_AND_TRITON:
                 t = torch.rand([32], device="cuda")
                 self.assertEqual(foo(t), foo_c(t))
 
-            FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
-                log_stream.getvalue()
-            )
+            FileCheck().check(
+                "skipping cudagraphs due to cpp-wrapper does not support graph partition yet"
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_storage_access_error(self):
@@ -5098,6 +5109,221 @@ if HAS_CUDA_AND_TRITON:
             run(10)
             run(25)
 
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_opaque_value_input_cudagraph(self):
+            """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)
+            passed alongside tensors must be marked "static" so they are
+            excluded from the tensor-copy path (non_static_input_idx).
+            "Static" here just means "don't copy as a tensor", not that
+            the object is semantically immutable."""
+
+            sf = _CudagraphTestScaleFactor(3.0)
+
+            def foo(args):
+                obj = args[0]
+                x = args[1]
+                args.clear()
+                return (x * obj.factor,)
+
+            inp = torch.rand([4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [sf, inp], ())
+            result = foo_cg([sf, inp])
+            self.assertEqual(result[0], inp * 3.0)
+
+            result2 = foo_cg([sf, inp])
+            self.assertEqual(result2[0], inp * 3.0)
+
+    class TestCUDAGraphPolicy(TestCase):
+        def setUp(self):
+            super().setUp()
+            counters.clear()
+            self._stack = contextlib.ExitStack()
+            self._stack.enter_context(
+                config.patch(
+                    {
+                        "triton.cudagraphs": True,
+                        "triton.cudagraph_trees": True,
+                    }
+                )
+            )
+            torch._dynamo.reset()
+
+        def tearDown(self):
+            super().tearDown()
+            torch._dynamo.reset()
+            self._stack.close()
+
+        def test_policy_cudagraphify_called(self):
+            """Custom policy's cudagraphify is called instead of the default."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            calls = []
+
+            class RecordingPolicy(CUDAGraphPolicy):
+                def cudagraphify(self, model, inputs, static_input_idxs, **kwargs):
+                    calls.append(
+                        {
+                            "static_input_idxs": static_input_idxs,
+                            "device_index": kwargs.get("device_index"),
+                        }
+                    )
+                    return model
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", RecordingPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                compiled(x)
+                compiled(x)
+
+            self.assertGreater(len(calls), 0)
+
+        def test_should_wrap_false_skips_cudagraph(self):
+            """When should_wrap returns False, cudagraph wrapping is skipped."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            class NoWrapPolicy(CUDAGraphPolicy):
+                def should_wrap(self, compiled_graph):
+                    return False
+
+            def foo(x):
+                return x + 1
+
+            with config.patch("cudagraph_policy", NoWrapPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x + 1)
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_wrap_output_called(self):
+            """Policy's wrap_output is called in BundledOutputCodeLoadable."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            wrapped = []
+
+            class WrapPolicy(CUDAGraphPolicy):
+                def wrap_output(self, output_code):
+                    wrapped.append(type(output_code).__name__)
+                    return output_code
+
+            def foo(x):
+                return x * 2
+
+            with config.patch("cudagraph_policy", WrapPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x * 2)
+            self.assertGreater(len(wrapped), 0)
+            self.assertIn("CompiledFxGraph", wrapped)
+
+        def test_default_policy_matches_builtin(self):
+            """Default CUDAGraphPolicy produces same results as no policy."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            def foo(x):
+                return x * x + x
+
+            x = torch.randn(4, device="cuda")
+
+            compiled_default = torch.compile(foo)
+            ref = compiled_default(x)
+            ref = compiled_default(x)
+
+            torch._dynamo.reset()
+
+            with config.patch("cudagraph_policy", CUDAGraphPolicy()):
+                compiled_policy = torch.compile(foo)
+                out = compiled_policy(x)
+                out = compiled_policy(x)
+
+            self.assertEqual(ref, out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_default_policy_matches_builtin_partition(self):
+            """Default CUDAGraphPolicy matches builtin when graph_partition=True."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            def foo(x):
+                return x * x + x
+
+            x = torch.randn(4, device="cuda")
+
+            compiled_default = torch.compile(foo)
+            ref = compiled_default(x)
+            ref = compiled_default(x)
+
+            torch._dynamo.reset()
+
+            with config.patch("cudagraph_policy", CUDAGraphPolicy()):
+                compiled_policy = torch.compile(foo)
+                out = compiled_policy(x)
+                out = compiled_policy(x)
+
+            self.assertEqual(ref, out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_policy_cudagraphify_partition(self):
+            """Custom policy's cudagraphify is called when graph_partition is enabled."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            calls = []
+
+            class RecordingPolicy(CUDAGraphPolicy):
+                def cudagraphify(self, model, inputs, static_input_idxs, **kwargs):
+                    calls.append(
+                        {
+                            "static_input_idxs": static_input_idxs,
+                            "device_index": kwargs.get("device_index"),
+                        }
+                    )
+                    return model
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", RecordingPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                compiled(x)
+                compiled(x)
+
+            self.assertGreater(len(calls), 0)
+
+        def test_should_wrap_false_with_wrap_output(self):
+            """should_wrap=False skips inner wrapping; wrap_output does outer wrapping."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            wrap_calls = []
+
+            class OuterOnlyPolicy(CUDAGraphPolicy):
+                def should_wrap(self, compiled_graph):
+                    return False
+
+                def wrap_output(self, output_code):
+                    wrap_calls.append(type(output_code).__name__)
+                    return output_code
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", OuterOnlyPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x * x + 1)
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertGreater(len(wrap_calls), 0)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -5501,6 +5727,7 @@ if HAS_CUDA_AND_TRITON:
             )
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
+    instantiate_parametrized_tests(TestCUDAGraphPolicy)
     instantiate_parametrized_tests(TestSAC)
 
     # OpInfo-based test for index/scatter ops with cudagraphs

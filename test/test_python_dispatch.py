@@ -26,7 +26,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     TEST_WITH_ROCM,
     TestCase,
@@ -47,6 +49,8 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
     is_in_torch_dispatch_mode,
+    is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
@@ -55,6 +59,49 @@ from torch.utils._pytree import tree_map, tree_map_only
 # used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda
 def _identity(x):
     return x
+
+
+class _TraceableWrapperSubclassTestBase(torch.Tensor):
+    elem: torch.Tensor
+
+    __slots__ = ["elem"]
+
+    @staticmethod
+    def __new__(cls, elem):
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            elem.size(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            device=elem.device,
+            requires_grad=elem.requires_grad,
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+        )
+        r.elem = elem
+        return r
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise RuntimeError("NYI")
+
+
+class _StaticUnflattenWrapper(_TraceableWrapperSubclassTestBase):
+    def __tensor_flatten__(self):
+        return ["elem"], {"kind": "static"}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return _StaticUnflattenWrapper(inner_tensors["elem"])
+
+
+class _ClassmethodUnflattenWrapper(_TraceableWrapperSubclassTestBase):
+    def __tensor_flatten__(self):
+        return ["elem"], {"kind": "classmethod"}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["elem"])
 
 
 class TestDispatcherPythonBindings(TestCase):
@@ -219,9 +266,6 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
-    @unittest.skip(
-        "Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108"
-    )
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -243,6 +287,29 @@ class TestPythonRegistration(TestCase):
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+
+    def test_include_dispatch_key_guard_restores_tls_exactly(self) -> None:
+        before = torch._C._dispatch_tls_local_include_set().raw_repr()
+        with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
+            pass
+        after = torch._C._dispatch_tls_local_include_set().raw_repr()
+        self.assertEqual(before, after)
+
+    @parametrize(
+        "key",
+        [
+            torch.DispatchKey.Meta,
+            torch.DispatchKey.CUDA,
+            torch.DispatchKey.CPU,
+        ],
+    )
+    def test_exclude_dispatch_key_guard_restores_tls_exactly(self, key) -> None:
+        keyset = torch._C.DispatchKeySet(key)
+        before = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        with torch._C._ExcludeDispatchKeyGuard(keyset):
+            pass
+        after = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        self.assertEqual(before, after)
 
     def test_dispatchkeyset_pickle(self) -> None:
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
@@ -689,6 +756,9 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
 
 
+instantiate_parametrized_tests(TestPythonRegistration)
+
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -1054,6 +1124,49 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.0)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_traceable_wrapper_subclass_protocol_runtime_check(self) -> None:
+        @torch._dynamo.disable
+        def run_checks() -> None:
+            base = torch.randn(2, 2)
+            static = _StaticUnflattenWrapper(base)
+            classmethod_wrapper = _ClassmethodUnflattenWrapper(base)
+
+            self.assertFalse(is_traceable_wrapper_subclass(base))
+            self.assertTrue(is_traceable_wrapper_subclass(static))
+            self.assertTrue(is_traceable_wrapper_subclass(classmethod_wrapper))
+            self.assertTrue(is_traceable_wrapper_subclass_type(type(static)))
+            self.assertTrue(
+                is_traceable_wrapper_subclass_type(type(classmethod_wrapper))
+            )
+            self.assertFalse(is_traceable_wrapper_subclass_type(torch.Tensor))
+
+            static_attrs, static_meta = static.__tensor_flatten__()
+            static_rebuilt = type(static).__tensor_unflatten__(
+                {attr: getattr(static, attr) for attr in static_attrs},
+                static_meta,
+                static.size(),
+                static.stride(),
+            )
+            self.assertIs(type(static_rebuilt), _StaticUnflattenWrapper)
+            self.assertEqual(static_rebuilt.elem, static.elem)
+
+            classmethod_attrs, classmethod_meta = (
+                classmethod_wrapper.__tensor_flatten__()
+            )
+            classmethod_rebuilt = type(classmethod_wrapper).__tensor_unflatten__(
+                {
+                    attr: getattr(classmethod_wrapper, attr)
+                    for attr in classmethod_attrs
+                },
+                classmethod_meta,
+                classmethod_wrapper.size(),
+                classmethod_wrapper.stride(),
+            )
+            self.assertIs(type(classmethod_rebuilt), _ClassmethodUnflattenWrapper)
+            self.assertEqual(classmethod_rebuilt.elem, classmethod_wrapper.elem)
+
+        run_checks()
 
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):

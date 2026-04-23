@@ -14,7 +14,11 @@ from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    slowTest,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
@@ -66,6 +70,7 @@ class TestGpuWrapper(InductorTestCase):
         comp = torch.compile(
             options={
                 "cpp_wrapper": True,
+                "cpp_wrapper_build_separate": True,
                 "aot_inductor.debug_intermediate_value_printer": "2",
             }
         )(test_fn)
@@ -144,11 +149,139 @@ class TestGpuWrapper(InductorTestCase):
 
         self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
 
+    @parametrize("per_subkernel_blocks", [False, True])
+    def test_lazy_compile_combo_kernel_default_config(self, per_subkernel_blocks):
+        """Lazy compile should use default_config from combo_grid_meta for XBLOCK."""
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from unittest.mock import patch
+
+        from torch._inductor.codegen.triton_combo_kernel import (
+            DEFAULT_COMBO_BLOCK_SIZE_1D,
+        )
+        from torch._inductor.runtime import triton_lazy_compile as tlc
+
+        captured = {}
+        original = tlc.run_triton_kernel_with_autotune
+
+        def capture(pending_kernels, kernel_name, stream, args):
+            result = original(pending_kernels, kernel_name, stream, args)
+            if "triton_for_fused" in kernel_name:
+                captured[kernel_name] = result.xblock
+            return result
+
+        with patch.object(tlc, "run_triton_kernel_with_autotune", side_effect=capture):
+            params = [torch.randn(1024, device=self.device) for _ in range(4)]
+            grads = [torch.randn_like(p) for p in params]
+
+            @torch.compile(
+                options={
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": False,
+                    "combo_kernels": True,
+                    "combo_kernel_per_subkernel_blocks": per_subkernel_blocks,
+                }
+            )
+            def fn(params, grads):
+                torch._foreach_add_(params, grads, alpha=-0.1)
+
+            fn(params, grads)
+
+        self.assertTrue(len(captured) > 0, "No combo kernels were lazy-compiled")
+        for name, xblock in captured.items():
+            # When per_subkernel_blocks=False, default_config has a single XBLOCK
+            # that must be picked up correctly (not the hardcoded fallback of 128).
+            # When per_subkernel_blocks=True, default_config uses per-subkernel
+            # XBLOCK_N keys instead, so result.xblock is not used for grid
+            # computation; just verify compilation succeeded.
+            if not per_subkernel_blocks:
+                self.assertEqual(
+                    xblock,
+                    DEFAULT_COMBO_BLOCK_SIZE_1D,
+                    f"{name} got XBLOCK={xblock}, expected {DEFAULT_COMBO_BLOCK_SIZE_1D}",
+                )
+
+    def test_cudagraph_no_partition(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def test_fn(x, s):
+            return (x + s).sum()
+
+        x = torch.randn(4, device=self.device)
+        s = 3
+        expected = test_fn(x, s)
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "triton.cudagraphs": True,
+                "graph_partition": False,
+            }
+        )(test_fn)
+        for i in range(3):
+            res = comp(x, s)
+            self.assertEqual(res, expected)
+
+    def test_many_args_fold_expression_nesting(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE == "xpu":
+            self.skipTest("ocloc backend compiler crashes with too many kernel args")
+
+        num_params = 130
+        params = [torch.randn(64, device=self.device) for _ in range(num_params)]
+        grads = [torch.randn_like(p) for p in params]
+        expected = [p.clone() + (-0.1) * g for p, g in zip(params, grads)]
+
+        @torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "combo_kernels": True,
+                "combo_kernel_max_num_args": 1000,
+            }
+        )
+        def fn(params, grads):
+            torch._foreach_add_(params, grads, alpha=-0.1)
+
+        fn(params, grads)
+
+        for p, e in zip(params, expected):
+            self.assertEqual(p, e)
+
+    def test_cpp_wrapper_backward_lazy_compile(self):
+        """Test that options={"cpp_wrapper": True} works with backward pass.
+
+        Backward graphs may be compiled lazily (after compile_fx returns).
+        The cpp_wrapper triton config (store_cubin, autotune_at_compile_time)
+        must still be applied. See https://github.com/pytorch/pytorch/issues/178845
+        """
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x, output_grad):
+            layer_norm = torch.nn.LayerNorm(normalized_shape=4).to(self.device)
+            output = layer_norm(x)
+            output.backward(output_grad)
+            return output
+
+        x = torch.randn(2, 3, 4, device=self.device)
+        output_grad = torch.randn(2, 3, 4, device=self.device)
+
+        opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
+        result = opt_fn(x, output_grad)
+        self.assertEqual(result.shape, x.shape)
+
+
+instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.
 _LAZY_COMPILE_COLLISION_SCRIPT = """\
 import torch
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
 from torch._inductor import config
 
 config.cpp_wrapper = True
@@ -164,7 +297,7 @@ def fn(x, y, z, w):
     d = (c * w).cos()
     return d.sum()
 
-args = [torch.randn(32, device="cuda", requires_grad=True) for _ in range(4)]
+args = [torch.randn(32, device=GPU_TYPE, requires_grad=True) for _ in range(4)]
 ref_args = [a.detach().clone().requires_grad_(True) for a in args]
 ref = fn(*ref_args)
 ref.backward()
@@ -250,6 +383,20 @@ test_failures_gpu_wrapper = {
         ("gpu_wrapper",), is_skip=True
     ),
 }
+
+# XPU: complex add decomposition can return NotImplemented in cpp_wrapper path,
+# which currently surfaces as InductorError in test_add_complex4_xpu_gpu_wrapper.
+# Keep this targeted skip to XPU only.
+if device_type == "xpu":
+    test_failures_gpu_wrapper["test_add_complex4_xpu"] = test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=True
+    )
+    test_failures_gpu_wrapper["test_add_complex_xpu"] = test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=True
+    )
+    test_failures_gpu_wrapper["test_adding_tensor_offsets_xpu"] = (
+        test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+    )
 
 # Skip only on CUDA as wrapper dynamic shapes passes on ROCm.
 # Per https://github.com/pytorch/pytorch/pull/172780

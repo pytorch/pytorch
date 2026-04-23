@@ -25,23 +25,18 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" # 1 GPU A10G 24GB each
     environment: target-determinator-env
     steps:
-      - name: Clone PyTorch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          path: pytorch
-
       - name: Setup Linux
-        uses: ./pytorch/.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
-        uses: ./pytorch/.github/actions/ecr-login
+        uses: ./.github/actions/ecr-login
 
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-          working-directory: pytorch
+          working-directory: .
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -105,6 +100,9 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           # Disable shellcheck warning for GPU_FLAG
           # shellcheck disable=SC2086
+          # setup-linux checks out pytorch directly at GITHUB_WORKSPACE, but
+          # llm-target-determinator@v0.0.2 expects `pytorch/` as a sibling of
+          # its own checkout, so remap the layout inside the container.
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -115,11 +113,13 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace/pytorch" \
+            -v "${GITHUB_WORKSPACE}/codellama:/var/lib/jenkins/workspace/codellama" \
+            -v "${GITHUB_WORKSPACE}/llm-target-determinator:/var/lib/jenkins/workspace/llm-target-determinator" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          chmod +x pytorch/.github/scripts/td_llm_indexer.sh
+          chmod +x .github/scripts/td_llm_indexer.sh
           docker exec -t "${container_name}" sh -c 'pytorch/.github/scripts/td_llm_indexer.sh'
 
       - name: Upload to s3

@@ -7,7 +7,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg
+from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     TritonKernelOverrides,
@@ -189,6 +189,59 @@ class TestCodegenTriton(InductorTestCase):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    def test_config_of_emit_pointer_range_32_enabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(0,),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, (0,))
+        else:
+            self.assertIsInstance(config, dict)
+            self.assertIn(["tt.pointer_range", 32], config[(0,)])
+
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_config_of_emit_pointer_range_32_disabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, ())
+        else:
+            self.assertIsInstance(config, dict)
+            if (0,) in config:
+                self.assertNotIn(["tt.pointer_range", 32], config[(0,)])
+
     @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_pointer_range_in_generated_code(self):
@@ -201,6 +254,61 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x)
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
+
+    def test_is_multiple_of_rules(self):
+        """Test structural divisibility rules in _is_multiple_of."""
+        from torch.utils._sympy.functions import FloorDiv, Mod
+
+        sv = V.graph.sizevars
+        shape_env = sv.shape_env
+
+        s1 = sympy.Symbol("s1", positive=True, integer=True)
+        s2 = sympy.Symbol("s2", positive=True, integer=True)
+        s3 = sympy.Symbol("s3", positive=True, integer=True)
+
+        # Product: any factor divisible → product divisible
+        self.assertTrue(sv.statically_known_multiple_of(16 * s1, 16))
+        self.assertTrue(sv.statically_known_multiple_of(4 * 4 * s1, 16))
+        shape_env.axioms[sympy.Eq(Mod(s1, 16), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s1 * s2, 16))
+        self.assertFalse(sv.statically_known_multiple_of(s2 * s3, 16))
+
+        # Sum: all terms divisible → sum divisible
+        self.assertFalse(sv.statically_known_multiple_of(s1 + s2, 16))
+        shape_env.axioms[sympy.Eq(Mod(s2, 16), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s1 + s2, 16))
+        self.assertTrue(sv.statically_known_multiple_of(s1 + 32, 16))
+        self.assertFalse(sv.statically_known_multiple_of(s1 + 3, 16))
+
+        # FloorDiv(a, b): a must be multiple of b*n
+        self.assertFalse(sv.statically_known_multiple_of(FloorDiv(s1, 3), 16))
+        shape_env.axioms[sympy.Eq(Mod(s3, 48), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(FloorDiv(s3, 3), 16))
+
+        # Mod(a, b): both a and b must be multiples of n
+        self.assertTrue(sv.statically_known_multiple_of(Mod(s1, 48), 16))
+        s_nodiv = sympy.Symbol("s_nodiv", positive=True, integer=True)
+        self.assertFalse(sv.statically_known_multiple_of(Mod(s_nodiv, 32), 16))
+        self.assertFalse(sv.statically_known_multiple_of(Mod(s1, 7), 16))
+
+        # Axiom fallback: bare symbol resolved via statically_known_true
+        s4 = sympy.Symbol("s4", positive=True, integer=True)
+        self.assertFalse(sv.statically_known_multiple_of(s4, 8))
+        shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+    def test_signature_of_fp8_dtypes(self):
+        """fp8 dtypes should produce correct Triton pointer signatures via _type_of."""
+        expected = {
+            torch.float8_e4m3fn: "*fp8e4nv",
+            torch.float8_e5m2: "*fp8e5",
+            torch.float8_e4m3fnuz: "*fp8e4b8",
+            torch.float8_e5m2fnuz: "*fp8e5b16",
+        }
+        for dtype, expected_sig in expected.items():
+            arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
+            sig = triton_utils.signature_of(arg, size_dtype=None)
+            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
 
 
 if __name__ == "__main__":

@@ -262,6 +262,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "alias",
     "atan",
     "ldexp",
+    "linear",
     "log",
     "log10",
     "log1p",
@@ -1902,14 +1903,12 @@ def emit_body(
                                 )
                             )
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
                                 req_inp=inp_name + "[i]"
                             )
                         )
                     else:
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp_name)
                         )
 

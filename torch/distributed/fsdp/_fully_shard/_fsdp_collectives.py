@@ -20,6 +20,12 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
+def _label_with_suffix(label: str, suffix: str) -> str:
+    if suffix:
+        return f"{label} {suffix}"
+    return label
+
+
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -330,43 +336,49 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
+    label_suffix: str = "",
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
+
     with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs
+        with torch.profiler.record_function(
+            _label_with_suffix("FSDP::all_gather_copy_in", label_suffix)
+        ):
+            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+            (
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+            if dtype == torch.uint8:
+                all_gather_inputs = [
+                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+                ]
+            else:
+                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+            inp_split_sizes = [t.numel() for t in all_gather_inputs]
+            all_gather_input_numel = sum(inp_split_sizes)
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+                all_gather_inputs,
+                all_gather_output,
+                inp_split_sizes,
+                all_gather_input_numel,
+                rank,
+            )
+            del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
-        all_gather_work = all_gather_comm(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
-        )
+        with dist.record_comm(_label_with_suffix("FSDP::all_gather", label_suffix)):
+            all_gather_work = all_gather_comm(
+                output_tensor=all_gather_output,
+                input_tensor=all_gather_input,
+                group=group,
+                async_op=async_op,
+            )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
             all_gather_output,
@@ -537,6 +549,7 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
+    label_suffix: str = "",
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -617,12 +630,15 @@ def foreach_reduce(
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if world_size > 1:
-            reduce_scatter_comm(
-                output_tensor=reduce_output,
-                input_tensor=reduce_scatter_input,
-                group=reduce_scatter_group,
-                op=reduce_scatter_op,
-            )
+            with dist.record_comm(
+                _label_with_suffix("FSDP::reduce_scatter", label_suffix)
+            ):
+                reduce_scatter_comm(
+                    output_tensor=reduce_output,
+                    input_tensor=reduce_scatter_input,
+                    group=reduce_scatter_group,
+                    op=reduce_scatter_op,
+                )
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
@@ -655,11 +671,22 @@ def foreach_reduce(
             else:
                 all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
-                dist.all_reduce(
-                    reduce_output,
-                    group=all_reduce_group,
-                    op=all_reduce_op,
-                )
+                with dist.record_comm(
+                    _label_with_suffix("FSDP::all_reduce", label_suffix)
+                ):
+                    dist.all_reduce(
+                        reduce_output,
+                        group=all_reduce_group,
+                        op=all_reduce_op,
+                    )
+                # Keep refs to the reduce-dtype AR buffer + completion
+                # event so FSDPParamGroup._all_reduce_state can hold them
+                # across layers. This keeps the buffer off the caching
+                # allocator's free list; otherwise the next layer's
+                # reduce-scatter can reuse the same physical block while
+                # this layer's AR is still in flight, causing cross-layer
+                # gradient aliasing under slow AR. See PR #140044,
+                # regression test PR #180900.
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -676,6 +703,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
+        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
+        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
+        # the old reduce-dtype buffer's lifetime: the rebind orders the
+        # cast before the free-event on AR stream, but the freed block
+        # lands on the caching allocator's free list and the next layer's
+        # RS on RS stream can reuse it without waiting for this layer's
+        # AR to finish. The reduce-dtype buffer is held across layers by
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent
+        # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -692,10 +728,28 @@ def foreach_reduce(
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
-                # Only overlap the D2H copy (copying to pinned memory) if not
-                # accumulating gradients since the CPU add kernel depends on
-                # the copy result and we cannot run the add as a callback
-                non_blocking = fsdp_param.pin_memory and not to_accumulate_grad
+                # Only overlap the D2H copy (copying to pinned memory) when no
+                # in-backward CPU consumer of the grad exists. Two such
+                # consumers suppress the overlap:
+                #   - Accumulating grads: the CPU add kernel depends on the
+                #     copy result and we cannot run the add as a callback.
+                #   - Post-accumulate-grad hooks: user code (e.g.
+                #     optimizer-in-backward) reads ``param.grad`` on CPU
+                #     synchronously. With ``non_blocking=True`` the hook would
+                #     observe in-flight pinned memory — silently wrong
+                #     optimizer updates.
+                has_post_acc_grad_hook = bool(
+                    getattr(
+                        fsdp_param.sharded_param,
+                        "_post_accumulate_grad_hooks",
+                        None,
+                    )
+                )
+                non_blocking = (
+                    fsdp_param.pin_memory
+                    and not to_accumulate_grad
+                    and not has_post_acc_grad_hook
+                )
                 # Since the GPU sharded gradient is allocated in the RS stream,
                 # we can free it here by not keeping a ref without waiting for
                 # the D2H copy since future RS-stream ops run after the copy
@@ -811,7 +865,7 @@ def _get_gradient_divide_factors(
         if reduce_scatter_group is not None and factor == reduce_scatter_group.size():
             reduce_scatter_op = ReduceOp.AVG
         else:
-            reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
+            reduce_scatter_op = ReduceOp.PREMUL_SUM(1 / factor)
         return None, None, reduce_scatter_op, ReduceOp.SUM
 
     if factor is None:

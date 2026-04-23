@@ -693,19 +693,25 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
-            all_bases = kwargs["_all_bases"]
-            bases_to_clone = range(len(all_bases))
-            base_tensors_dct = dict(enumerate(all_bases))
-            new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
-                bases_to_clone,
-                base_tensors_dct,
-                node.target,
-                ReInplaceTrigger.AUTO_FUNC_V2,
-            )
-            # Stash the metadata. There is a pass later on where we decompose
-            # auto_functionalized into clones + a mutable op; this metadata
-            # tells the decomp to only clone the following inputs
-            node.meta["only_clone_these_tensors"] = new_bases_to_clone
+            if isinstance(
+                _mutable_op, torch._ops.OpOverload
+            ) and torch._library.utils.is_out(_mutable_op):
+                # Out args are write-only, always safe to reinplace (no clones needed)
+                node.meta["only_clone_these_tensors"] = []
+            else:
+                all_bases = kwargs["_all_bases"]
+                bases_to_clone = range(len(all_bases))
+                base_tensors_dct = dict(enumerate(all_bases))
+                new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
+                    bases_to_clone,
+                    base_tensors_dct,
+                    node.target,
+                    ReInplaceTrigger.AUTO_FUNC_V2,
+                )
+                # Stash the metadata. There is a pass later on where we decompose
+                # auto_functionalized into clones + a mutable op; this metadata
+                # tells the decomp to only clone the following inputs
+                node.meta["only_clone_these_tensors"] = new_bases_to_clone
         elif node.target is torch.ops.higher_order.auto_functionalized:
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
@@ -761,15 +767,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         mutated_tensors_flat.append(arg)
 
                 # Check if all mutated args can be inplaced
-                all_can_inplace = all_can_inplace(node, mutated_tensors_flat)
+                can_inplace_all = all_can_inplace(node, mutated_tensors_flat)
 
                 log.debug(
-                    "reinplace with_effects: mutated_tensors=%s, all_can_inplace=%s",
+                    "reinplace with_effects: mutated_tensors=%s, can_inplace_all=%s",
                     [str(a) for a in mutated_tensors_flat],
-                    all_can_inplace,
+                    can_inplace_all,
                 )
 
-                if all_can_inplace and inplaceable_op.extra_check(node):
+                if can_inplace_all and inplaceable_op.extra_check(node):
                     log.debug(
                         "reinplace with_effects: converting %s -> %s",
                         inner_op,

@@ -1059,11 +1059,11 @@ class TestForeach(TestCase):
         # foreach_max cannot handle empty tensors as max requires an identity
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
-        N = 600
+        N = 4000
         indices_with_empty_tensors = (
             set()
             if not intersperse_empty_tensors
-            else {200, 300, 301, 400, 401, 402, 404, 598}
+            else {200, 1500, 1501, 2800, 2801, 2802, 3500, 3998}
         )
         tensorlist = [
             make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False)
@@ -1076,7 +1076,7 @@ class TestForeach(TestCase):
         import math
 
         if op.name == "_foreach_norm":
-            ords = [1, 2]
+            ords = [0, 1, 2]
             if not intersperse_empty_tensors:
                 # inf norm over an empty tensor is not defined by vector norm as it expects an identity
                 ords.append(math.inf)
@@ -1111,7 +1111,7 @@ class TestForeach(TestCase):
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
     def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
-        # test inputs larger than kChunkSize (65536) * max_num_blocks (320)
+        # test inputs larger than kChunkSize (65536) * max_num_blocks (2240 for the 32kb config)
         N = 65536 * 320 * 2
         disable_fastpath = False
         kwargs = {}
@@ -1169,6 +1169,25 @@ class TestForeach(TestCase):
             result_l2 = torch._foreach_norm([empty_tensor], ord=2)
             self.assertEqual(result_l1[0].item(), 0.0)
             self.assertEqual(result_l2[0].item(), 0.0)
+
+    @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_max"],
+    )
+    def test_foreach_max_empty_tensor_error(self, device, dtype, op):
+        """Test that _foreach_max errors on empty tensors"""
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        err_re = (
+            "_foreach_max cannot compute the maximum of an empty tensor; "
+            "max over zero elements is undefined\\."
+        )
+        with self.assertRaisesRegex(RuntimeError, err_re):
+            torch._foreach_max([empty_tensor])
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, err_re):
+            torch._foreach_max([empty_tensor, non_empty_tensor])
 
     @onlyCUDA
     @ops(

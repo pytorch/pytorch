@@ -27,12 +27,14 @@ def normalize_graph(gm):
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
+        super().setUp()
         # Use FakeProcessGroup to run tests on a single process
         dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
         self.world_size = 2
 
     def tearDown(self):
+        super().tearDown()
         dist.destroy_process_group()
 
     def test_all_to_all_single_autograd(self):
@@ -65,7 +67,7 @@ class GraphModule(torch.nn.Module):
 
         wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, floordiv)
-""",  # noqa: B950
+""",
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
@@ -75,7 +77,7 @@ class GraphModule(torch.nn.Module):
         all_to_all_single_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, wait_tensor_1)
-""",  # noqa: B950
+""",
         )
 
         backend.fw_graphs.clear()
@@ -106,7 +108,7 @@ class GraphModule(torch.nn.Module):
 
         wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
-""",  # noqa: B950
+""",
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
@@ -116,7 +118,7 @@ class GraphModule(torch.nn.Module):
         all_to_all_single_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, None, wait_tensor_1)
-""",  # noqa: B950
+""",
         )
 
     def test_device_mesh_get_local_rank(self):
@@ -158,6 +160,7 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_device_mesh_init_skip_after_graph_break(self):
         device_mesh = init_device_mesh(
             device_type="cpu",

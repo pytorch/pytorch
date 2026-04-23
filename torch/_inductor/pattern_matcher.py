@@ -157,11 +157,9 @@ def _transfer_meta(
 ) -> None:
     from torch.fx.traceback import NodeSource, NodeSourceAction
 
-    # transfer metadata after pattern matching occurs.
-    # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
-    # to remain accurate after pattern matching has occurred.
+    # Transfer metadata after pattern matching occurs.
+    # Copies _COPY_META_FIELDS, stack_trace, and (if missing) val/tensor_meta.
     if config.trace.provenance_tracking_level == 1:
-        # We handle "from_node" field of the node meta specially to record that the new node comes from the old_node.
         new_from_node = new_meta.get("from_node", []).copy()
         new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
         new_meta.update(
@@ -178,6 +176,13 @@ def _transfer_meta(
         )
     if "stack_trace" in old_node.meta:
         new_meta["stack_trace"] = old_node.meta["stack_trace"]
+    # Copy val/tensor_meta only when the new node doesn't already have them
+    # (e.g. from tracing the replacement graph). Don't overwrite if present
+    # since the replacement's own val is more accurate.
+    if "val" not in new_meta and "val" in old_node.meta:
+        new_meta["val"] = old_node.meta["val"]
+    if "tensor_meta" not in new_meta and "tensor_meta" in old_node.meta:
+        new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
 
 
 class Match:
@@ -1154,7 +1159,7 @@ class LoweringPatternEntry(PatternEntry):
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
         with graph.inserting_before(node):
             replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
-            replacement.meta.update(node.meta)
+            _transfer_meta(replacement.meta, node)
             node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
         match.erase_nodes()
@@ -1188,6 +1193,7 @@ class ReplacementPatternEntry(PatternEntry):
         graph: torch.fx.Graph,
         replacement_graph: torch.fx.Graph | torch.fx.GraphModule,
         args: Sequence[torch.fx.Node],
+        pass_name: str | None = None,
     ) -> None:
         """
         Inserts the replacement graph into the toplevel graph at the match
@@ -1212,18 +1218,14 @@ class ReplacementPatternEntry(PatternEntry):
                     _transfer_meta(
                         new_meta=result.meta,
                         old_node=node,
-                        pass_name="Interpreter_Replacer",
+                        pass_name=pass_name or "",
                     )
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
-                    # or val/tensor_meta, we propagate those over.
+                    # we propagate those over (val/tensor_meta are handled by
+                    # _transfer_meta above).
                     if "eager_input_vals" in node.meta:
                         result.meta["eager_input_vals"] = node.meta["eager_input_vals"]
-                    if "val" in node.meta and "val" not in result.meta:
-                        result.meta["val"] = node.meta["val"]
-                        if isinstance(node.meta["val"], torch.Tensor):
-                            assert "tensor_meta" in node.meta
-                            result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
                 if node.op == "get_attr":
                     # If the replacement graph contains a HOP, the subgraphs of the HOP are "get_attr" nodes.
@@ -1329,8 +1331,7 @@ class ReplacementPatternEntry(PatternEntry):
                         graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
-                    if "val" not in new.meta:
-                        new.meta.update(old.meta)
+                    _transfer_meta(new.meta, old, pass_name=pass_name or "")
 
                     # Preserve the recompute tags in the replacement graph. We
                     # look at the recompute tags of the original output node to
@@ -1417,6 +1418,7 @@ class ReplacementPatternEntry(PatternEntry):
             graph,
             match.replacement_graph,
             self.normalize_args(*match.args, **match.kwargs),
+            pass_name=self.pattern_name or "replace_with_graph",
         )
 
 
@@ -1477,7 +1479,7 @@ def check_and_add_duplicate_pattern(
 def register_replacement(
     search_fn: SearchFn,
     replace_fn: ReplaceFn,
-    example_inputs: Iterable[Any],
+    example_inputs: list[Any] | tuple[Any, ...],
     trace_fn: TraceFn,
     pass_dicts: _PassDictsType | Sequence[_PassDictsType],
     extra_check: Callable[[Match], bool] = _return_true,
@@ -1509,6 +1511,11 @@ def register_replacement(
     if inspect.ismethod(replace_fn):
         replace_argnames = [*inspect.signature(replace_fn).parameters.keys()]
         replace_fn = _wrap_bound_method(replace_fn, replace_argnames)
+
+    if not isinstance(example_inputs, (list, tuple)):
+        raise TypeError(
+            f"example_inputs must be a list or tuple, got {type(example_inputs)}"
+        )
 
     def check_fn(match: Match) -> bool:
         """
@@ -2072,6 +2079,7 @@ class PatternMatcherPass:
         return self.patterns[item]
 
     def apply(self, gm: torch.fx.GraphModule | torch.fx.Graph) -> int:
+        """Apply all registered patterns to the graph, returning the number of matches."""
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -2122,6 +2130,18 @@ class PatternMatcherPass:
                         is_match(m)
                         and len(
                             OrderedSet(map(get_mutation_region_id_partial, m.nodes))
+                        )
+                        != 1
+                    ):
+                        continue
+                    # pattern match crosses stream boundary - discard
+                    if (
+                        is_match(m)
+                        and len(
+                            OrderedSet(
+                                n.meta.get("custom", {}).get("stream", 0)
+                                for n in m.nodes
+                            )
                         )
                         != 1
                     ):

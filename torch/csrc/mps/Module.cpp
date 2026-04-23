@@ -13,6 +13,7 @@
 #include <memory>
 
 #ifdef USE_MPS
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
@@ -495,6 +496,26 @@ void initModule(PyObject* module) {
       .def_property_readonly(
           "static_thread_group_memory_length",
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
+  py::class_<
+      PrecompiledMetalShaderLibrary,
+      std::shared_ptr<PrecompiledMetalShaderLibrary>>(
+      m, "_mps_PrecompiledShaderLibrary")
+      .def(
+          "__getattr__",
+          [](PrecompiledMetalShaderLibrary& self, const std::string& name) {
+            return self.getKernelFunction(name);
+          })
+      .def("__dir__", [](PrecompiledMetalShaderLibrary& self) {
+        return self.getFunctionNames();
+      });
+  m.def("_mps_loadMetalllib", [](const py::bytes& data) {
+    auto sv = static_cast<std::string_view>(data);
+    std::vector<uint8_t> bytes(sv.begin(), sv.end());
+    return std::make_shared<PrecompiledMetalShaderLibrary>(std::move(bytes));
+  });
+  m.def("_mps_loadMetallibFromPath", [](const std::string& path) {
+    return std::make_shared<PrecompiledMetalShaderLibrary>(path);
+  });
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
   });
@@ -513,6 +534,18 @@ void initModule(PyObject* module) {
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
+    PyObject* obj = py_storage.ptr();
+    TORCH_CHECK_TYPE(
+        THPStorage_Check(obj),
+        "_mps_host_alias_storage: expected a torch.UntypedStorage");
+    const c10::Storage& mps_storage = THPStorage_Unpack(obj);
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_CHECK(allocator, "MPS allocator is not available");
+    c10::Storage host_alias = allocator->getHostAliasStorage(mps_storage);
+    return py::reinterpret_steal<py::object>(
+        THPStorage_Wrap(std::move(host_alias)));
   });
 }
 #endif /* USE_MPS */

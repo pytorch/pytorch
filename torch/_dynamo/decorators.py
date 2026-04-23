@@ -315,6 +315,8 @@ def _invoke_leaf_function_python(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     mutates_args: frozenset[str] | None = None,
+    hook_fn: Callable[..., Any] | None = None,
+    hook_fake_fn: Callable[..., Any] | None = None,
 ) -> Any:
     """Call invoke_leaf_function HOP directly from Python.
 
@@ -355,6 +357,10 @@ def _invoke_leaf_function_python(
 
     real_fn_callable = _LeafCallable(wrapped_real)
     fake_fn_callable = _LeafCallable(wrapped_fake)
+
+    if hook_fn is not None:
+        real_fn_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
+        real_fn_callable._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
 
     mutated_flat_indices = ""
     if mutates_args:
@@ -507,6 +513,37 @@ def leaf_function(
 
         To validate that your fake implementation matches the real function's outputs, set
         ``torch._dynamo.config.leaf_function_validate_outputs = True``.
+
+        **register_multi_grad_hook (optional)**:
+        You can register a backward hook via ``@fn.register_multi_grad_hook``
+        to run code when gradients have been computed
+        for all requires_grad tensor inputs during backward. The hook fires exactly once
+        per backward pass. The hook function has the same signature as the leaf function;
+        each requires_grad tensor argument receives the corresponding gradient instead
+        of the original tensor. Non-tensor arguments and tensors without requires_grad
+        are passed through unchanged. The hook must return ``None``. The hook is called
+        as a leaf function itself, so it is also opaque to the compiler.
+
+        Example::
+
+            >>> @leaf_function
+            ... def debug_log(t, tag):
+            ...     print(f"[{tag}][fwd] norm={t.norm().item()}")
+            ...     return None
+            ...
+            >>> @debug_log.register_fake
+            ... def debug_log_fake(t, tag):
+            ...     return None
+            ...
+            >>> @debug_log.register_multi_grad_hook
+            ... def debug_log_hook(t_grad, tag):
+            ...     print(f"[{tag}][bwd] norm={t_grad.norm().item()}")
+            ...
+            >>> x = torch.randn(4, requires_grad=True)
+            >>> debug_log(x, "intermediate")  # no assignment needed
+            [intermediate][fwd] norm=...
+            >>> (x * 2).sum().backward()
+            [intermediate][bwd] norm=...
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
@@ -709,6 +746,8 @@ def leaf_function(
             args,
             kwargs,
             mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
+            hook_fn=inner._torchdynamo_leaf_hook_fn,  # type: ignore[attr-defined]
+            hook_fake_fn=inner._torchdynamo_leaf_hook_fake_fn,  # type: ignore[attr-defined]
         )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
@@ -716,6 +755,8 @@ def leaf_function(
     inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
         frozenset(mutates_args) if mutates_args else frozenset()
     )  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_hook_fn = None  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
     # Follow nonstrict_trace implementation
     wrapped_id = id(inner)
@@ -733,6 +774,13 @@ def leaf_function(
         return inner
 
     inner.register_fake = register_fake_setter  # type: ignore[attr-defined]
+
+    def register_hook_setter(hook_fn: Callable[..., Any]) -> Callable[..., Any]:
+        inner._torchdynamo_leaf_hook_fn = hook_fn  # type: ignore[attr-defined]
+        inner._torchdynamo_leaf_hook_fake_fn = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+        return inner
+
+    inner.register_multi_grad_hook = register_hook_setter  # type: ignore[attr-defined]
 
     return inner
 
@@ -1637,6 +1685,80 @@ def override_cudagraphs(
              If None, don't override.
     """
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
+
+
+def override_optimization_hint(x: Any, val: int) -> None:
+    """Override the optimization hint for a scalar unbacked symbol.
+
+    When the compiler or runtime needs a non-guarding integer hint for an
+    unbacked ``SymInt`` — for example during FX passes, graph partitioning,
+    or inductor autotuning — it calls
+    ``_optimization_hint_base``
+    (see ``torch/fx/experimental/_size_hinting.py``).  By default
+    that function uses internal heuristics to choose a hint and a global fixed
+    fallback;
+    this function lets user code override that choice.  This is similar to
+    the ``hint_override`` parameter in ``mark_unbacked``, but applies to
+    symbols that already exist (e.g. from ``.item()`` calls).
+
+    Typical usage::
+
+        u = x.item()  # unbacked SymInt
+        torch._dynamo.override_optimization_hint(u, 42)
+        # From now on, any call to shape_env.optimization_hint(u, ...)
+        # returns 42 instead of the default heuristic value.
+
+    This updates ``shape_env.var_to_hint_override`` so that any consumer
+    of ``_optimization_hint_base`` sees *val* as the hint for the
+    unbacked symbol behind *x*.
+
+    Works both eagerly (during FX passes or outside dynamo) and inside
+    ``torch.compile`` regions.
+
+    Behavior during compilation:
+        The dynamo handler applies the hint as a **side effect** on
+        ``shape_env.var_to_hint_override`` during tracing.  No FX graph
+        node is emitted — the call is fully consumed at trace time and
+        does not appear in the pre-grad, joint, or post-autograd graphs.
+        ``FXGraphCache`` includes ``var_to_hint_override`` in its cache
+        key, so cache hits/misses correctly reflect hint changes.
+
+    .. note::
+
+        To maximize performance, it is recommended to pass hints for
+        **all** unbacked symbols in the program to guide optimizations.
+
+    Args:
+        x: A ``torch.SymInt`` wrapping an unbacked symbol (e.g. from
+            ``.item()``), or a plain ``int``.  If *x* is a plain ``int``
+            the call is a no-op.
+        val: The integer hint value to record.
+    """
+    if not isinstance(val, int):
+        raise TypeError(
+            f"override_optimization_hint expects val to be an int, got {type(val)}"
+        )
+    if isinstance(x, int):
+        return
+    if not isinstance(x, torch.SymInt):
+        raise TypeError(
+            f"override_optimization_hint expects a torch.SymInt or int, got {type(x)}"
+        )
+    shape_env = x.node.shape_env
+    expr = x.node.expr
+    import sympy
+
+    if not isinstance(expr, sympy.Symbol):
+        raise ValueError(
+            f"override_optimization_hint expects a single unbacked symbol, "
+            f"got derived expression: {expr}"
+        )
+    if not shape_env.is_unbacked_symint(expr):
+        raise ValueError(
+            f"override_optimization_hint expects an unbacked symbol, "
+            f"but {expr} is backed"
+        )
+    shape_env.var_to_hint_override[expr] = val
 
 
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
