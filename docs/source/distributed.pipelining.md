@@ -12,7 +12,7 @@ development. API changes may be possible. It was migrated from the [PiPPy](https
 
 ## Why Pipeline Parallel?
 
-Pipeline Parallelism is one of the **primitive** parallelism for deep learning.
+Pipeline Parallelism is one of the primitive forms of parallelism for deep learning.
 It allows the **execution** of a model to be partitioned such that multiple
 **micro-batches** can execute different parts of the model code concurrently.
 Pipeline parallelism can be an effective technique for:
@@ -70,7 +70,7 @@ A `PipelineStage` needs to know the input and output shapes for the stage
 model, so that it can correctly allocate communication buffers. The shapes must
 be static, e.g. at runtime the shapes can not change from step to step. A class
 `PipeliningShapeError` will be raised if runtime shapes do not match the
-expected shapes. When composing with other paralleisms or applying mixed
+expected shapes. When composing with other parallelisms or applying mixed
 precision, these techniques must be taken into account so the `PipelineStage`
 knows the correct shape (and dtype) for the output of the stage module at
 runtime.
@@ -380,7 +380,7 @@ change.
 
 ## Implementing Your Own Schedule
 
-You can implement your own pipeline schedule by extending one of the following two class:
+You can implement your own pipeline schedule by extending one of the following two classes:
 
 - `PipelineScheduleSingle`
 - `PipelineScheduleMulti`
