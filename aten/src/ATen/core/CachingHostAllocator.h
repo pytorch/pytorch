@@ -30,7 +30,7 @@ struct HostBlock {
   // constructor for search key
   HostBlock(size_t size) : size_(size) {}
 
-  HostBlock(size_t size, void* ptr) : size_(size), ptr_(ptr) {}
+  HostBlock(size_t size, void* ptr) : size_(size), ptr_(ptr), original_ptr_(ptr) {}
 
   std::mutex mutex_;
   size_t size_{0}; // block size in bytes
@@ -40,6 +40,11 @@ struct HostBlock {
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
   bool was_allocated_during_stream_capture_;
+
+  // Newly added fields for the buddy system
+  void* original_ptr_{nullptr}; // Original allocation address (used for tracking buddy block relationships)
+  bool is_buddy_split_{false}; // Flag indicating whether it is a split block
+  size_t original_size_{0}; // Original block size
 };
 
 template <typename B>
@@ -243,6 +248,23 @@ struct HostBlockPool {
   // Events pending for blocks in this pool.
   alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E_, B_*>> events_;
+
+  // Newly Added Fields for Buddy System
+  struct PreallocInfo {
+    size_t block_count = 0;      // Pre-allocated block count
+    size_t block_size = 0;       // Pre-allocated block size
+    size_t released_count = 0;   // Number of freed pre-allocated blocks
+  };
+  
+  alignas(hardware_destructive_interference_size) std::mutex buddy_mutex_;
+  PreallocInfo prealloc_info_;
+  
+  // Cached environment variable values (to avoid repeated reads)
+  size_t buddy_block_size_mb_{1024};
+  size_t buddy_block_count_{8};
+  size_t buddy_max_index_{40};
+  size_t buddy_threshold_bytes_{4 * 1024 * 1024};
+  bool buddy_initialized_{false};
 };
 
 // The HostBlockPool owned by one HostPrivatePool cannot share blocks
@@ -284,6 +306,20 @@ struct CachingHostAllocatorImpl {
     }
 
     auto&& [mempool_id, pool] = get_allocation_pool_for_current_stream();
+
+    // Initialize buddy system
+    static std::once_flag init_flag;
+    std::call_once(init_flag, [this] {
+      init_buddy_system(default_pool_);
+    });
+
+    // Check if freed pre-allocated blocks need to be re-requested.
+    {
+      std::lock_guard<std::mutex> g(pool.buddy_mutex_);
+      if (pool.prealloc_info_.released_count > 0) {
+        reallocate_prealloc_blocks(pool);
+      }
+    }
 
     // If we are using background threads, we can process events in the
     // background.
@@ -337,6 +373,11 @@ struct CachingHostAllocatorImpl {
     block->allocated_ = true;
     block->owning_pool_ = mempool_id;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
+    
+    // Initialize buddy system fields
+    block->original_size_ = roundSize;
+    block->is_buddy_split_ = false;
+    
     add_allocated_block(block, pool);
     return {block->ptr_, reinterpret_cast<void*>(block)};
   }
@@ -380,11 +421,11 @@ struct CachingHostAllocatorImpl {
       }
     }
 
+    auto& pool = pool_from_block(block);
+
     if (!events.has_value()) {
-      auto& pool = pool_from_block(block);
-      auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-      pool.free_list_[index].list_.push_back(block);
+      // Release logic using buddy system version: attempt to merge with buddy.
+      try_merge_with_buddies(block, pool);
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -400,7 +441,6 @@ struct CachingHostAllocatorImpl {
       // return this block.
     } else {
       // restore these events that record by used streams.
-      auto& pool = pool_from_block(block);
       std::lock_guard<std::mutex> g(pool.events_mutex_);
       for (auto&& event : *events) {
         pool.events_.emplace_front(std::move(event), block);
@@ -452,13 +492,13 @@ struct CachingHostAllocatorImpl {
   // TODO: Make this take a pool id like in CUDACachingAllocator
   virtual void empty_cache() {
     process_events(default_pool_);
-    free_from_pool(default_pool_);
+    free_from_pool_buddy(default_pool_);
 
     {
       std::unique_lock<std::shared_mutex> lg(instance_mutex_);
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
         process_events(it->second->blocks);
-        free_from_pool(it->second->blocks);
+        free_from_pool_buddy(it->second->blocks);
         if (it->second->blocks.blocks_.empty()) {
           auto erase_count = graph_pools_.erase(it->first);
           TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -538,7 +578,7 @@ struct CachingHostAllocatorImpl {
     return stats;
   }
 
-  void resetAccumulatedStats() {
+    void resetAccumulatedStats() {
     // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -599,6 +639,319 @@ struct CachingHostAllocatorImpl {
   }
 
  private:
+  // Buddy system version of pool release logic
+void free_from_pool_buddy(BlockPool& pool) {
+  // Collect free blocks grouped by original block
+  ska::flat_hash_map<void*, std::vector<B*>> original_blocks_map;
+  std::vector<B*> regular_blocks;  // Non-pre-allocated blocks (independently allocated blocks)
+
+  // Phase 1: Collect and classify all free blocks
+  {
+    std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+
+    for (auto* block : pool.blocks_) {
+      std::lock_guard<std::mutex> g_block(block->mutex_);
+
+      // Process only blocks that are free and have no events.
+      if (!block->allocated_ && block->event_count_ == 0) {
+        // Classify based on whether they belong to pre-allocated blocks.
+        if (block->original_ptr_ != nullptr) {
+          // This is a pre-allocated block (could be an original block or a split block).
+          original_blocks_map[block->original_ptr_].push_back(block);
+        } else {
+          // This is an independently allocated non-pre-allocated block (original_ptr_ == nullptr).
+          regular_blocks.push_back(block);
+        }
+      }
+    }
+  }
+
+  // Phase 2: Clear all free lists.
+  for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+    std::lock_guard<std::mutex> g(pool.free_list_[i].mutex_);
+    pool.free_list_[i].list_.clear();
+  }
+
+  // Phase 3: Safely release memory.
+
+  // 3.1 Release independently allocated non-pre-allocated blocks.
+  for (auto* block : regular_blocks) {
+    size_t block_size = block->size_;
+    size_t block_index = size_index(block_size);
+
+    {
+      std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+      pool.blocks_.erase(block);
+      pool.ptr_to_block_.erase(block->ptr_);
+    }
+
+    stats_.allocations.decrease(1);
+    stats_.allocated_bytes.decrease(block_size);
+    stats_.allocation_bucket_stats[block_index].decrease(1);
+    stats_.allocated_bytes_bucket_stats[block_index].decrease(block_size);
+
+    free_block(block);
+    delete block;
+  }
+
+  // 3.2 Process pre-allocated blocks (grouped by original block).
+  for (auto& [original_ptr, block_group] : original_blocks_map) {
+    // Check if this original block is completely free (all split parts are in the block group).
+    bool can_free_entire_block = true;
+    size_t total_free_size = 0;
+    B* original_block = nullptr;
+
+    for (auto* block : block_group) {
+      total_free_size += block->size_;
+
+      // Find the original block (`ptr == original_ptr`).
+      if (block->ptr_ == original_ptr) {
+        original_block = block;
+      }
+
+      // Double-check the block status.
+      std::lock_guard<std::mutex> g_block(block->mutex_);
+      if (block->allocated_ || block->event_count_ > 0) {
+        can_free_entire_block = false;
+      }
+    }
+
+    if (can_free_entire_block && original_block &&
+        total_free_size == original_block->original_size_) {
+      // Case 1: The entire original block is completely free and fully merged.
+      // Memory can be actually released.
+
+      size_t original_size = original_block->original_size_;
+      size_t original_index = size_index(original_size);
+
+      {
+        std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+        // Remove all related blocks from the management structure.
+        for (auto* block : block_group) {
+          pool.blocks_.erase(block);
+          pool.ptr_to_block_.erase(block->ptr_);
+        }
+      }
+
+      stats_.allocations.decrease(1);
+      stats_.allocated_bytes.decrease(original_size);
+      stats_.allocation_bucket_stats[original_index].decrease(1);
+      stats_.allocated_bytes_bucket_stats[original_index].decrease(original_size);
+
+      free_block(original_block);
+
+      {
+        std::lock_guard<std::mutex> g(pool.buddy_mutex_);
+        pool.prealloc_info_.released_count++;
+
+        std::cout << "[BuddySystem] Released preallocated block of size "
+                  << (original_size / (1024.0 * 1024.0)) << " MB, "
+                  << "total released: " << pool.prealloc_info_.released_count
+                  << std::endl;
+      }
+
+      for (auto* block : block_group) {
+        if (block != original_block) {
+          delete block;
+        }
+      }
+      delete original_block;
+
+    } else {
+      // Case 2: The original block is partially in use, or not fully merged.
+      // Memory cannot be released. Return free blocks to the free list for subsequent use.
+
+      for (auto* block : block_group) {
+        std::lock_guard<std::mutex> g_block(block->mutex_);
+        if (!block->allocated_ && block->event_count_ == 0) {
+          auto index = size_index(block->size_);
+          std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+          pool.free_list_[index].list_.push_back(block);
+        }
+      }
+    }
+  }
+
+  // Phase 4: Clean up the event queue.
+  {
+    std::lock_guard<std::mutex> g(pool.events_mutex_);
+    pool.events_.clear();
+  }
+
+  #ifdef BUDDY_DEBUG
+  {
+    std::lock_guard<std::mutex> g(pool.buddy_mutex_);
+    std::cout << "[BuddySystem] empty_cache completed for pool. "
+              << "Prealloc info: block_count=" << pool.prealloc_info_.block_count
+              << ", block_size=" << (pool.prealloc_info_.block_size / (1024*1024)) << "MB"
+              << ", released_count=" << pool.prealloc_info_.released_count
+              << std::endl;
+  }
+  #endif
+}
+
+  // *** Buddy System Core Methods ***
+
+  // Initialize the buddy system and pre-allocate memory.
+  virtual void init_buddy_system(BlockPool& pool) {
+    const char* block_size_env = getenv("BUDDY_BLOCK_SIZE_MB");
+    size_t block_size_mb = 1024;
+    if (block_size_env && *block_size_env != '\0') {
+      try {
+        block_size_mb = std::stoul(block_size_env);
+        std::cout << "[BuddySystem] Using block size from BUDDY_BLOCK_SIZE_MB: "
+                  << block_size_mb << " MB" << std::endl;
+      } catch (const std::exception& e) {
+        std::cerr << "[BuddySystem] Invalid BUDDY_BLOCK_SIZE_MB value '"
+                  << block_size_env << "', using default 1024MB. Error: " << e.what() << std::endl;
+        block_size_mb = 1024;
+      }
+    } else {
+      std::cout << "[BuddySystem] BUDDY_BLOCK_SIZE_MB not set, using default 1024MB" << std::endl;
+    }
+
+    const char* block_count_env = getenv("BUDDY_BLOCK_COUNT");
+    size_t block_count = 8;
+    if (block_count_env && *block_count_env != '\0') {
+      try {
+        block_count = std::stoul(block_count_env);
+        std::cout << "[BuddySystem] Using block count from BUDDY_BLOCK_COUNT: "
+                  << block_count << std::endl;
+      } catch (const std::exception& e) {
+        std::cerr << "[BuddySystem] Invalid BUDDY_BLOCK_COUNT value '"
+                  << block_count_env << "', using default 8. Error: " << e.what() << std::endl;
+        block_count = 8;
+      }
+    } else {
+      std::cout << "[BuddySystem] BUDDY_BLOCK_COUNT not set, using default 8" << std::endl;
+    }
+
+    const char* threshold_env = getenv("BUDDY_THRESHOLD_MB");
+    size_t threshold_bytes = 4 * 1024 * 1024; // Default 4MB
+    if (threshold_env && *threshold_env != '\0') {
+      try {
+        size_t threshold_mb = std::stoul(threshold_env);
+        threshold_bytes = threshold_mb * 1024 * 1024;
+        std::cout << "[BuddySystem] Using threshold from BUDDY_THRESHOLD_MB: "
+                  << threshold_mb << " MB" << std::endl;
+      } catch (const std::exception& e) {
+        std::cerr << "[BuddySystem] Invalid BUDDY_THRESHOLD_MB value '"
+                  << threshold_env << "', using default 4MB. Error: " << e.what() << std::endl;
+        threshold_bytes = 4 * 1024 * 1024;
+      }
+    } else {
+      std::cout << "[BuddySystem] BUDDY_THRESHOLD_MB not set, using default 4MB" << std::endl;
+    }
+
+    size_t max_index = 40;
+
+    {
+      std::lock_guard<std::mutex> g(pool.buddy_mutex_);
+      pool.buddy_block_size_mb_ = block_size_mb;
+      pool.buddy_block_count_ = block_count;
+      pool.buddy_max_index_ = max_index;
+      pool.buddy_threshold_bytes_ = threshold_bytes;
+    }
+
+    const size_t single_block_size = block_size_mb * 1024 * 1024;
+    const size_t total_size = single_block_size * block_count;
+
+    std::cout << "[BuddySystem] Configuration:" << std::endl;
+    std::cout << "[BuddySystem]   Single block size: " << block_size_mb << " MB ("
+              << single_block_size << " bytes)" << std::endl;
+    std::cout << "[BuddySystem]   Block count: " << block_count << std::endl;
+    std::cout << "[BuddySystem]   Total preallocated memory: "
+              << (total_size / (1024.0 * 1024 * 1024)) << " GB ("
+              << total_size << " bytes)" << std::endl;
+
+    auto single_block_index = size_index(single_block_size);
+    if (single_block_index > max_index) {
+      std::cerr << "[BuddySystem] ERROR: Single block size " << block_size_mb
+                << "MB (" << single_block_size << " bytes) is too large." << std::endl;
+      std::cerr << "[BuddySystem] Calculated index " << single_block_index << " exceeds MAX_INDEX " << max_index
+                << " (max single block size: " << ((1ULL << max_index) / (1024*1024)) << " MB)" << std::endl;
+      std::cerr << "[BuddySystem] Please set BUDDY_BLOCK_SIZE_MB to a smaller value." << std::endl;
+      return;
+    }
+
+    std::cout << "[BuddySystem] Starting preallocation of " << block_count << " blocks..." << std::endl;
+
+    size_t successful_allocations = 0;
+    for (size_t i = 0; i < block_count; i++) {
+      try {
+        void* ptr = nullptr;
+        allocate_host_memory(single_block_size, &ptr);
+        auto* block = new B(single_block_size, ptr);
+        block->original_size_ = single_block_size;
+        block->is_buddy_split_ = false;
+        block->owning_pool_ = c10::MempoolId_t{0, 0};  // Pre-allocated blocks belong to the default pool.
+        add_allocated_block(block, pool);
+
+        std::lock_guard<std::mutex> g(pool.free_list_[single_block_index].mutex_);
+        pool.free_list_[single_block_index].list_.push_back(block);
+        successful_allocations++;
+
+      } catch (const std::exception& e) {
+        std::cerr << "[BuddySystem] WARNING: Failed to allocate block " << (i + 1)
+                  << "/" << block_count << ": " << e.what() << std::endl;
+      }
+    }
+
+    {
+      std::lock_guard<std::mutex> g(pool.buddy_mutex_);
+      pool.prealloc_info_.block_count = successful_allocations;
+      pool.prealloc_info_.block_size = single_block_size;
+      pool.prealloc_info_.released_count = 0;
+      pool.buddy_initialized_ = true;
+    }
+
+    std::cout << "[BuddySystem] Preallocation completed: " << successful_allocations
+              << "/" << block_count << " blocks allocated successfully" << std::endl;
+    std::cout << "[BuddySystem] Total preallocated memory: "
+              << (successful_allocations * single_block_size / (1024.0 * 1024 * 1024))
+              << " GB" << std::endl;
+    std::cout << "[BuddySystem] Ready to serve allocations from preallocated memory pool" << std::endl;
+  }
+
+  // Reallocate pre-allocated blocks that were returned to the system by empty_cache.
+  virtual void reallocate_prealloc_blocks(BlockPool& pool) {
+    size_t block_size = pool.prealloc_info_.block_size;
+    size_t released = pool.prealloc_info_.released_count;
+
+    if (released == 0 || block_size == 0) {
+      return;
+    }
+
+    std::cout << "[BuddySystem] Reallocating " << released
+              << " preallocated blocks of size "
+              << (block_size / (1024*1024)) << " MB" << std::endl;
+
+    auto block_index = size_index(block_size);
+    size_t successful = 0;
+
+    for (size_t i = 0; i < released; i++) {
+      try {
+        void* ptr = nullptr;
+        allocate_host_memory(block_size, &ptr);
+        auto* block = new B(block_size, ptr);
+        block->original_size_ = block_size;
+        block->is_buddy_split_ = false;
+        block->owning_pool_ = c10::MempoolId_t{0, 0};
+        add_allocated_block(block, pool);
+
+        std::lock_guard<std::mutex> g(pool.free_list_[block_index].mutex_);
+        pool.free_list_[block_index].list_.push_back(block);
+        successful++;
+      } catch (const std::exception& e) {
+        std::cerr << "[BuddySystem] WARNING: Failed to reallocate block "
+                  << (i + 1) << "/" << released
+                  << ": " << e.what() << std::endl;
+      }
+    }
+
+    pool.prealloc_info_.released_count -= successful;
+  }
+
   virtual void add_allocated_block(B* block, BlockPool& pool) {
     std::lock_guard<std::mutex> g(pool.blocks_mutex_);
     pool.blocks_.insert(block);
@@ -620,18 +973,210 @@ struct CachingHostAllocatorImpl {
     }
   }
 
+  // get_free_block with splitting logic added.
   virtual B* get_free_block(size_t size, BlockPool& pool) {
-    auto index = size_index(size);
-    std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-    if (!pool.free_list_[index].list_.empty()) {
-      B* block = pool.free_list_[index].list_.back();
-      pool.free_list_[index].list_.pop_back();
-      block->allocated_ = true;
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
+    size_t threshold = pool.buddy_threshold_bytes_;
+    size_t max_index = pool.buddy_max_index_;
+    size_t single_block_size = pool.buddy_block_size_mb_ * 1024 * 1024;
+
+    auto start_index = size_index(size);
+
+    // Requests smaller than the threshold: exact match, no splitting.
+    if (size <= threshold) {
+      std::lock_guard<std::mutex> g(pool.free_list_[start_index].mutex_);
+      if (!pool.free_list_[start_index].list_.empty()) {
+        B* block = pool.free_list_[start_index].list_.back();
+        pool.free_list_[start_index].list_.pop_back();
+        {
+          std::lock_guard<std::mutex> block_g(block->mutex_);
+          block->allocated_ = true;
+        }
+        stats_.active_bucket_stats[start_index].increase(1);
+        stats_.active_bytes_bucket_stats[start_index].increase(size);
+        return block;
+      }
+      return nullptr;
+    }
+
+    // Firstly, perform exact matching.
+    {
+      std::lock_guard<std::mutex> g(pool.free_list_[start_index].mutex_);
+      if (!pool.free_list_[start_index].list_.empty()) {
+        B* block = pool.free_list_[start_index].list_.back();
+        pool.free_list_[start_index].list_.pop_back();
+        {
+          std::lock_guard<std::mutex> block_g(block->mutex_);
+          block->allocated_ = true;
+        }
+        stats_.active_bucket_stats[start_index].increase(1);
+        stats_.active_bytes_bucket_stats[start_index].increase(size);
+        return block;
+      }
+    }
+
+    // Then search upward for larger blocks to split.
+    for (size_t index = start_index + 1; index <= max_index; index++) {
+      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+      if (!pool.free_list_[index].list_.empty()) {
+        B* block = pool.free_list_[index].list_.back();
+        pool.free_list_[index].list_.pop_back();
+
+        if (index > start_index) {
+          split_block(block, start_index, index, pool);
+        }
+
+        if (!is_block_allocated(block, pool)) {
+          add_allocated_block(block, pool);
+        }
+
+        {
+          std::lock_guard<std::mutex> block_g(block->mutex_);
+          block->allocated_ = true;
+        }
+
+        stats_.active_bucket_stats[start_index].increase(1);
+        stats_.active_bytes_bucket_stats[start_index].increase(size);
+        return block;
+      }
+    }
+
+    // Still no available blocks; request new pre-allocated blocks.
+    if (size <= single_block_size) {
+      void* ptr = nullptr;
+      allocate_host_memory(single_block_size, &ptr);
+      auto* block = new B(single_block_size, ptr);
+      block->original_size_ = single_block_size;
+      block->is_buddy_split_ = false;
+      block->owning_pool_ = c10::MempoolId_t{0, 0};
+      add_allocated_block(block, pool);
+
+      auto index = size_index(single_block_size);
+      if (index > start_index) {
+        split_block(block, start_index, index, pool);
+      }
+
+      if (!is_block_allocated(block, pool)) {
+        add_allocated_block(block, pool);
+      }
+
+      {
+        std::lock_guard<std::mutex> block_g(block->mutex_);
+        block->allocated_ = true;
+      }
+
+      stats_.active_bucket_stats[start_index].increase(1);
+      stats_.active_bytes_bucket_stats[start_index].increase(size);
       return block;
     }
+
     return nullptr;
+  }
+
+// Split memory block.
+  virtual void split_block(B* block, size_t target_index, size_t current_index, BlockPool& pool) {
+    if (current_index <= target_index) {
+      return;
+    }
+
+    size_t current_size = block->size_;
+    size_t half_size = current_size / 2;
+
+    void* buddy_ptr = static_cast<char*>(block->ptr_) + half_size;
+    B* buddy_block = new B(half_size, buddy_ptr);
+
+    // Set buddy system fields.
+    buddy_block->original_ptr_ = block->original_ptr_;
+    buddy_block->original_size_ = block->original_size_;
+    buddy_block->is_buddy_split_ = true;
+    buddy_block->owning_pool_ = block->owning_pool_;
+
+    block->is_buddy_split_ = true;
+    block->size_ = half_size;
+
+    add_allocated_block(buddy_block, pool);
+
+    auto buddy_index = current_index - 1;
+    {
+      std::lock_guard<std::mutex> g(pool.free_list_[buddy_index].mutex_);
+      pool.free_list_[buddy_index].list_.push_back(buddy_block);
+    }
+
+    if (current_index - 1 > target_index) {
+      split_block(block, target_index, current_index - 1, pool);
+    }
+  }
+
+  // Merging logic after free.
+  virtual void try_merge_with_buddies(B* block, BlockPool& pool) {
+    size_t max_index = pool.buddy_max_index_;
+    size_t index = size_index(block->size_);
+
+    while (index < max_index) {
+      void* buddy_addr = get_buddy_address(block->ptr_, block->size_);
+      bool merged = false;
+
+      {
+        std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+        auto& list = pool.free_list_[index].list_;
+
+        auto it = std::find_if(list.begin(), list.end(),
+          [buddy_addr, block](B* b) {
+            return b->ptr_ == buddy_addr &&
+                   b->size_ == block->size_ &&
+                   b->original_ptr_ == block->original_ptr_;
+          });
+
+        if (it != list.end()) {
+          B* buddy = *it;
+          list.erase(it);
+
+          void* merged_addr = (block->ptr_ < buddy_addr) ? block->ptr_ : buddy_addr;
+          block->ptr_ = merged_addr;
+          block->size_ *= 2;
+
+          if (block->size_ == block->original_size_) {
+            block->is_buddy_split_ = false;
+          }
+
+          // Remove buddy from blocks.
+          {
+            std::lock_guard<std::mutex> blocks_g(pool.blocks_mutex_);
+            pool.blocks_.erase(buddy);
+            pool.ptr_to_block_.erase(buddy->ptr_);
+          }
+
+          delete buddy;
+          merged = true;
+          index++;
+        }
+      }
+
+      if (!merged) {
+        break;
+      }
+    }
+
+    // Place the merged block back into the free list.
+    auto final_index = size_index(block->size_);
+    {
+      std::lock_guard<std::mutex> g(pool.free_list_[final_index].mutex_);
+      pool.free_list_[final_index].list_.push_back(block);
+
+      stats_.active_bucket_stats[final_index].decrease(1);
+      stats_.active_bytes_bucket_stats[final_index].decrease(block->size_);
+    }
+  }
+
+  // Helper function: Get the address of the corresponding buddy block.
+  void* get_buddy_address(void* addr, size_t size) {
+    uintptr_t addr_val = reinterpret_cast<uintptr_t>(addr);
+    return reinterpret_cast<void*>(addr_val ^ size);
+  }
+
+  // Helper function: Check if the memory block is allocated.
+  bool is_block_allocated(B* block, BlockPool& pool) {
+    std::lock_guard<std::mutex> g(pool.blocks_mutex_);
+    return pool.blocks_.find(block) != pool.blocks_.end();
   }
 
   virtual void process_events(BlockPool& pool) {
