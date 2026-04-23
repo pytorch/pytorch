@@ -276,8 +276,12 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
-    custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    if (other.custom_data_ptr_error_msg_) {
+      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    }
+    if (other.custom_storage_error_msg_) {
+      custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    }
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
   }
