@@ -26,6 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
+from collections.abc import Set as AbstractSet
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -569,7 +570,7 @@ class FxGraphCachePickler(pickle.Pickler):
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
-            raise BypassFxGraphCache("mkldnn tensors unpickleable")
+            CacheabilityValidator.check_tensor(t)
 
         metadata = extract_tensor_metadata_for_cache_key(t)
         if self._device_id_agnostic:
@@ -616,7 +617,7 @@ class FxGraphCachePickler(pickle.Pickler):
         Custom reducer to handle any objects that we don't support and therefore
         raise to bypass caching.
         """
-        raise BypassFxGraphCache("Reduce unsupported")
+        CacheabilityValidator.bypass("Reduce unsupported")
 
     def _reduce_graph_module(
         self, gm: torch.fx.GraphModule
@@ -662,14 +663,12 @@ class FxGraphCachePickler(pickle.Pickler):
             return self._stream.getvalue()
         except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
             # Some configs options may not pickle.
-            log.warning("Failed to pickle cache key", exc_info=True)
-            raise BypassFxGraphCache("Failed to pickle cache key") from e
+            CacheabilityValidator.bypass_for_pickle_error(e)
         except RuntimeError as e:
             # pybind11 raises RuntimeError with message like:
             # "<pybind11_builtins... object at 0x...> is not pickleable."
             if "pybind11" in str(e) and "is not pickleable" in str(e):
-                log.warning("Failed to pickle cache key", exc_info=True)
-                raise BypassFxGraphCache("Failed to pickle cache key") from e
+                CacheabilityValidator.bypass_for_pickle_error(e)
             raise
         finally:
             # Reset our stream for the next dump.
@@ -818,6 +817,165 @@ class BypassFxGraphCache(Exception):
     """
     Exception to indicate that the FxGraphCache should be bypassed.
     """
+
+
+@dataclasses.dataclass(frozen=True)
+class CacheabilityValidator:
+    """
+    Centralized validation for deciding whether an FX graph can use the cache.
+
+    The cache key pickler still defends itself when serializing arbitrary objects,
+    but non-cacheable inputs should be rejected here before hashing starts.
+    """
+
+    gm: torch.fx.GraphModule
+    example_inputs: Sequence[InputType] = ()
+    fx_kwargs: _CompileFxKwargs | None = None
+    require_shape_env: bool = True
+    shape_env: ShapeEnv | None = None
+
+    def validate(self) -> None:
+        self._check_custom_passes()
+        self._check_frozen_params()
+        self._check_runtime_constant_folding()
+        self._check_compiler_bisector()
+        self._check_shape_env()
+        self.validate_graph(include_constants=True)
+        self._check_cache_key_object(self.example_inputs)
+        if self.fx_kwargs is not None:
+            self._check_cache_key_object(self.fx_kwargs)
+
+    def validate_graph(self, include_constants: bool) -> None:
+        for module in self.gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    self.bypass(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                # TODO: this check is broken in two ways:
+                # 1. FX uses "get_attr" (with underscore), not "getattr"
+                # 2. It only checks for ScriptObject, not FakeScriptObject
+                # Fixing it would also bypass AOTAutogradCache (which calls
+                # _check_can_cache), so we'd need to decouple the two first.
+                if node.op == "getattr" and isinstance(
+                    getattr(self.gm, node.target), torch._C.ScriptObject
+                ):
+                    self.bypass("Can't cache torchbind objects")
+                if include_constants and node.op == "get_attr":
+                    try:
+                        attr = self._get_attr(module, node.target)
+                    except AttributeError:
+                        continue
+                    self._check_cache_key_object(attr)
+
+    @staticmethod
+    def check_tensor(t: Tensor) -> None:
+        if t.is_mkldnn:
+            CacheabilityValidator.bypass("mkldnn tensors unpickleable")
+
+    @staticmethod
+    def bypass(reason: str) -> NoReturn:
+        raise BypassFxGraphCache(reason)
+
+    @staticmethod
+    def bypass_for_pickle_error(e: Exception) -> NoReturn:
+        log.warning(
+            "Failed to pickle cache key",
+            exc_info=(type(e), e, e.__traceback__),
+        )
+        raise BypassFxGraphCache("Failed to pickle cache key") from e
+
+    @staticmethod
+    def _get_attr(module: torch.fx.GraphModule, target: str) -> Any:
+        from torch.fx.graph_module import _get_attr
+
+        return _get_attr(module, target)
+
+    def _check_custom_passes(self) -> None:
+        # Custom passes must implement the CustomGraphPass or we don't
+        # know how to include them in the cache key calculation.
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if resolve_pre_grad_pass_timing() != "early":
+            if config.pre_grad_custom_pass and (
+                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                or not config.pre_grad_custom_pass.uuid()
+            ):
+                self.bypass("Unsupported pre grad custom pass")
+        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                self.bypass("Unsupported post grad custom pass")
+        # Same with the joint custom passes
+        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                self.bypass("Unsupported joint custom pass")
+        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
+        # and ensure they are not passing us raw callables
+        if config._pre_fusion_custom_pass is not None:
+            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+                self.bypass("Unsupported _pre_fusion_custom_pass")
+        for p in config._fuse_ddp_communication_passes:
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                self.bypass("Unsupported _fuse_ddp_communication_pass")
+
+    def _check_frozen_params(self) -> None:
+        # Freezing can embed constants that wouldn't be static across runs.
+        if has_frozen_params(self.gm) and not torch._utils_internal.justknobs_check(
+            "pytorch/inductor:allow_freezing_with_caching"
+        ):
+            self.bypass("Skipping graph with frozen constants")
+
+    def _check_runtime_constant_folding(self) -> None:
+        if config.aot_inductor.use_runtime_constant_folding:
+            self.bypass(
+                "Runtime constant folding can introduce constants that aren't "
+                "static across runs"
+            )
+
+    def _check_compiler_bisector(self) -> None:
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        if CompilerBisector.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            self.bypass("compiler bisector enabled")
+
+    def _check_shape_env(self) -> None:
+        # The treatment of guards in the caching implementation requires that
+        # we have a shape env.
+        if self.require_shape_env and self.shape_env is None:
+            log.debug("fx graph cache no shape env")
+            self.bypass("No shape env")
+
+    def _check_cache_key_object(
+        self,
+        obj: Any,
+        seen: set[int] | None = None,  # noqa: set_linter
+    ) -> None:
+        if seen is None:
+            seen = set()  # noqa: set_linter
+
+        obj_id = id(obj)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+
+        if isinstance(obj, torch.Tensor):
+            self.check_tensor(obj)
+            return
+        elif isinstance(obj, torch.fx.experimental._backward_state.BackwardState):
+            self.bypass("Reduce unsupported")
+        elif isinstance(obj, dict):
+            for key, value in obj.items():
+                self._check_cache_key_object(key, seen)
+                self._check_cache_key_object(value, seen)
+        elif isinstance(obj, (list, tuple, AbstractSet)):
+            for item in obj:
+                self._check_cache_key_object(item, seen)
 
 
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
@@ -1678,84 +1836,29 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
     @staticmethod
     def _check_for_hop(gm: torch.fx.GraphModule) -> None:
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                # TODO: this check is broken in two ways:
-                # 1. FX uses "get_attr" (with underscore), not "getattr"
-                # 2. It only checks for ScriptObject, not FakeScriptObject
-                # Fixing it would also bypass AOTAutogradCache (which calls
-                # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        CacheabilityValidator(gm, require_shape_env=False).validate_graph(
+            include_constants=False
+        )
 
     @staticmethod
-    def _check_can_cache(gm: torch.fx.GraphModule) -> None:
+    def _check_can_cache(
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType] = (),
+        fx_kwargs: _CompileFxKwargs | None = None,
+        require_shape_env: bool = True,
+    ) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Custom passes must implement the CustomGraphPass or we don't
-        # know how to include them in the cache key calculation.
-        # When timing is EARLY, pre-grad passes already ran before the cache
-        # lookup so there's nothing to validate here.
-        if resolve_pre_grad_pass_timing() != "early":
-            assert not config.pre_grad_custom_pass or (
-                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                and config.pre_grad_custom_pass.uuid()
-            ), "Unsupported pre grad custom pass"
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported post grad custom pass")
-        # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported joint custom pass")
-        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
-        # and ensure they are not passing us raw callables
-        if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
-        for p in config._fuse_ddp_communication_passes:
-            if callable(p) and not isinstance(p, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
-
-        # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
-            "pytorch/inductor:allow_freezing_with_caching"
-        ):
-            raise BypassFxGraphCache("Skipping graph with frozen constants")
-
-        if config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache(
-                "Runtime constant folding can introduce constants that aren't "
-                "static across runs"
-            )
-
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
-            raise BypassFxGraphCache
-
-        # The treatment of guards in the caching implementation requires that
-        # we have a shape env.
-        if FxGraphCache._get_shape_env() is None:
-            log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env")
-
-        # We skip caching if there are any HOPs or torchbind objects.
-        FxGraphCache._check_for_hop(gm)
+        shape_env = FxGraphCache._get_shape_env() if require_shape_env else None
+        CacheabilityValidator(
+            gm,
+            example_inputs=example_inputs,
+            fx_kwargs=fx_kwargs,
+            require_shape_env=require_shape_env,
+            shape_env=shape_env,
+        ).validate()
 
     @staticmethod
     def prepare_key(
@@ -1776,7 +1879,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         I personally believe it is more annoying/difficult to read in that format.
         """
         try:
-            FxGraphCache._check_can_cache(gm)
+            FxGraphCache._check_can_cache(gm, example_inputs, fx_kwargs)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
