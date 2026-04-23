@@ -2801,6 +2801,11 @@ class CudaMemoryLeakCheck:
         if exc_type is not None:
             return
 
+        self.testcase.before_cuda_memory_leak_check()
+        gc.collect()
+        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda.empty_cache()
+
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
@@ -3404,6 +3409,9 @@ class TestCase(expecttest.TestCase):
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
+
+    def before_cuda_memory_leak_check(self):
+        torch._dynamo.reset()
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
