@@ -256,19 +256,11 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {
-  // newer compilers say std::atomic<std::shared_ptr<T>> has to be used,
-  // but older clang versions fail to compile it
-  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
   return std::atomic_load(&currentRpcAgent_) != nullptr;
-  C10_DIAGNOSTIC_POP()
 }
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
-  // newer compilers say std::atomic<std::shared_ptr<T>> has to be used,
-  // but older clang versions fail to compile it
-  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
-  C10_DIAGNOSTIC_POP()
   TORCH_CHECK(
       agent,
       "Current RPC agent is not set! Did you initialize the RPC "
@@ -279,27 +271,19 @@ std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
 void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
   if (rpcAgent) {
     std::shared_ptr<RpcAgent> previousAgent;
-    // newer compilers say std::atomic<std::shared_ptr<T>> has to be used,
-    // but older clang versions fail to compile it
-    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
     // Use compare_exchange so that we don't actually perform the exchange if
     // that would trigger the assert just below. See:
     // https://en.cppreference.com/w/cpp/atomic/atomic_compare_exchange
     std::atomic_compare_exchange_strong(
         &currentRpcAgent_, &previousAgent, std::move(rpcAgent));
-    C10_DIAGNOSTIC_POP()
     TORCH_INTERNAL_ASSERT(
         previousAgent == nullptr, "Current RPC agent is set!");
   } else {
-    // newer compilers say std::atomic<std::shared_ptr<T>> has to be used,
-    // but older clang versions fail to compile it
-    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
     // We can't use compare_exchange (we don't know what value to expect) but we
     // don't need to, as the only case that would trigger the assert is if we
     // replaced nullptr with nullptr, which we can just do as it has no effect.
     std::shared_ptr<RpcAgent> previousAgent =
         std::atomic_exchange(&currentRpcAgent_, std::move(rpcAgent));
-    C10_DIAGNOSTIC_POP()
     TORCH_INTERNAL_ASSERT(
         previousAgent != nullptr, "Current RPC agent is not set!");
   }

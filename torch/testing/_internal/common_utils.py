@@ -1795,6 +1795,64 @@ def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
 
 
+def _is_cpu_device_type(dev) -> bool:
+    if isinstance(dev, torch.device):
+        return dev.type == "cpu"
+    if isinstance(dev, str):
+        return dev == "cpu" or dev.startswith("cpu:")
+    return False
+
+
+def _device_spec_from_test_call(args: tuple, kwargs: dict):
+    if "device" in kwargs:
+        return kwargs["device"]
+    if "devices" in kwargs:
+        return kwargs["devices"]
+    return None
+
+
+def xfailIfNoAcceleratorTriton(test_func):
+    """Run test normally if triton is present or if running on CPU (which falls back to openmp).
+    Otherwise mark as xfail — any accelerator (CUDA, XPU, ROCm, etc.) requires triton.
+    Can be applied to a test method or an entire test class."""
+    import inspect
+    import functools
+    from torch.utils._triton import has_triton
+
+    if inspect.isclass(test_func):
+        for attr_name in list(vars(test_func)):
+            if attr_name.startswith("test"):
+                method = getattr(test_func, attr_name)
+                if callable(method):
+                    setattr(test_func, attr_name, xfailIfNoAcceleratorTriton(method))
+        return test_func
+
+    @functools.wraps(test_func)
+    def wrapper(*args, **kwargs):
+        if has_triton():
+            return test_func(*args, **kwargs)
+
+        spec = _device_spec_from_test_call(args, kwargs)
+        if spec is None and args:
+            spec = getattr(args[0], "device_type", None)
+        if spec is not None and _is_cpu_device_type(spec):
+            try:
+                return test_func(*args, **kwargs)
+            except ImportError as e:
+                # This except block required only for TestUtilsCPU::test_get_device_tflops_cpu
+                # test_get_device_tflops imports triton directly in its body — even for CPU
+                if "triton" in str(e).lower():
+                    import pytest
+                    pytest.xfail(f"Triton not available (device={spec!r}): {e}")
+                raise
+
+        import pytest
+        device_info = f" (device={spec!r})" if spec is not None else ""
+        pytest.xfail(f"Triton not available{device_info}")
+
+    return wrapper
+
+
 def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")

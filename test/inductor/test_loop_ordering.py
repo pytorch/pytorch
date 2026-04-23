@@ -475,7 +475,9 @@ class LoopOrderingTest(TestCase):
         # Transposed input: shape [M, 8192] but stride (1, M)
         x = torch.randn(8192, M, dtype=torch.bfloat16).T
 
-        self.do_acc_test(f, x)
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(1, metrics.generated_kernel_count)
 
     @inductor_config.patch("loop_ordering_after_fusion", False)

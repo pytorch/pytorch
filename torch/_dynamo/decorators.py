@@ -1125,9 +1125,7 @@ def mark_unbacked(
 
     Args:
         t (Any): The tensor to mark as having an unbacked dimension.
-        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single
-            integer or a list/tuple of integers. Calls are additive: mark_unbacked(x, 0) followed
-            by mark_unbacked(x, 1) marks both dims.
+        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
             NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
@@ -1197,7 +1195,6 @@ def mark_unbacked(
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
         t._dynamo_unbacked_indices.add(index)
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     assert isinstance(index, (list, tuple))
@@ -1256,6 +1253,7 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
+
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -1283,7 +1281,6 @@ def mark_dynamic(
 
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -1295,6 +1292,7 @@ def mark_dynamic(
 
     assert isinstance(index, (list, tuple))
     for i in index:
+        mark_dynamic(t, i, min=min, max=max)
         mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
@@ -1315,7 +1313,6 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     assert isinstance(index, (list, tuple))
@@ -1379,7 +1376,6 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
             t._dynamo_static_indices = set()  # type: ignore[attr-defined]
         # TODO(voz): Should we bounds check?
         t._dynamo_static_indices.add(index)  # type: ignore[attr-defined]
-        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
     elif index is None:
         for i in range(t.dim()):
             mark_static(t, i)
