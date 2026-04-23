@@ -228,7 +228,7 @@ static void pool2d_template(const Tensor& input,
                                                                         gradOutputShape,
                                                                         memory_format != MemoryFormat::ChannelsLast,
                                                                         MPSDataTypeInvalid,
-                                                                        /*useMPSStridedAPI=*/false);
+                                                                        /*useMPSStridedAPI=*/true);
     Placeholder indicesPlaceholder = has_indices
         ? Placeholder(
               cachedGraph->indicesTensor, indices, nullptr, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false)
@@ -939,7 +939,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
   mps::pool2d_template(input,
                        grad_input,
                        std::nullopt,
-                       grad_output.contiguous(input.suggest_memory_format()),
+                       grad_output,
                        kernel_size,
                        stride,
                        padding,
