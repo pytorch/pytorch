@@ -27,7 +27,9 @@ class TestBiasCorrectionEager(QuantizationTestCase):
         Pn = torch.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
-    def correct_artificial_bias_quantize(self, float_model, img_data):
+    def correct_artificial_bias_quantize(
+        self, float_model, img_data, sqnr_threshold=30
+    ):
         """Adding artificial bias and testing if bias persists after bias
         correction. This test case changes the bias of a quantized submodule
         """
@@ -67,7 +69,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
                 artificial_bias = get_param(artificial_submodule, "bias")
 
                 self.assertTrue(
-                    self.compute_sqnr(float_bias, artificial_bias) > 30,
+                    self.compute_sqnr(float_bias, artificial_bias) > sqnr_threshold,
                     "Correcting quantized bias produced too much noise, sqnr score too low",
                 )
 
@@ -119,7 +121,15 @@ class TestBiasCorrectionEager(QuantizationTestCase):
             )
             for _ in range(50)
         ]
-        self.correct_artificial_bias_quantize(float_model, img_data)
+        # Use a slightly looser SQNR threshold for the conv chain. Quantization
+        # noise from per_tensor_symmetric weight quantization (qint8 scale uses
+        # asymmetric denominators max(|min|/128, max/127), aligned with C++
+        # ChooseQuantizationParams) accumulates across 3 conv layers with large
+        # spatial dimensions (125x125), producing a slightly lower SQNR than
+        # the linear chain.
+        self.correct_artificial_bias_quantize(
+            float_model, img_data, sqnr_threshold=29.5
+        )
 
 
 if __name__ == "__main__":
