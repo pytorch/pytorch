@@ -1622,9 +1622,7 @@ def forward(self, x_1, w_1):
 
         for alpha, beta in [(0.5, 2.0), (2.0, 0.5), (0.3, 0.7)]:
             result = torch.addmm(bias, mat1, mat2, alpha=alpha, beta=beta)
-            expected = alpha * (
-                mat1.float().cpu().numpy() @ mat2.float().cpu().numpy()
-            )
+            expected = alpha * (mat1.float().cpu().numpy() @ mat2.float().cpu().numpy())
             expected += beta * bias.float().cpu().numpy()
             expected = torch.from_numpy(expected).to(dtype)
             self.assertEqual(result, expected)
@@ -1651,10 +1649,9 @@ def forward(self, x_1, w_1):
             self.assertEqual(result, expected)
 
             out = torch.empty(B, M, N, device=device, dtype=dtype)
-            torch.baddbmm(
-                input_t, batch1, batch2, alpha=alpha, beta=beta, out=out
-            )
+            torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta, out=out)
             self.assertEqual(out, expected)
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 
