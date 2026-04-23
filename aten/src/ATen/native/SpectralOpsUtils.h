@@ -50,6 +50,20 @@ inline int64_t infer_ft_real_to_complex_onesided_size(int64_t real_size) {
   return (real_size / 2) + 1;
 }
 
+// Validates inputs of the low-level _fft_c2r operator. Without these checks, a
+// caller that passes a `last_dim_size` inconsistent with the input shape can
+// cause a heap-buffer overflow in the underlying FFT library.
+inline void check_fft_c2r_input(int64_t last_dim_size,
+                                int64_t input_last_dim_size) {
+  TORCH_CHECK(last_dim_size >= 1,
+              "Invalid number of data points (", last_dim_size, ") specified");
+  const int64_t expected = last_dim_size / 2 + 1;
+  TORCH_CHECK(input_last_dim_size == expected,
+              "Expected size of last transformed dimension of input to be ",
+              expected, " (= last_dim_size / 2 + 1, where last_dim_size=",
+              last_dim_size, "), but got ", input_last_dim_size);
+}
+
 inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
                                                       int64_t expected_size=-1) {
   int64_t base = (complex_size - 1) * 2;
