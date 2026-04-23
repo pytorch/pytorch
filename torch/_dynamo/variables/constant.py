@@ -206,6 +206,15 @@ its type to `common_constant_types`.
             raise NotImplementedError
         return member
 
+    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        from .lists import ListIteratorVariable
+
+        if istype(self.value, str):
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
+        return super().tp_iter_impl(tx)
+
     def call_method(
         self,
         tx: InstructionTranslator,
@@ -233,14 +242,6 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
-        elif name == "__iter__" and istype(self.value, str):
-            # this could be some generic iterator to avoid the circular import,
-            # but ListIterator does what we want
-            from .lists import ListIteratorVariable
-
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -253,6 +254,9 @@ its type to `common_constant_types`.
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
+
+        if name == "__iter__":
+            return self.tp_iter_impl(tx)
 
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
