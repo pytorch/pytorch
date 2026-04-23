@@ -5225,6 +5225,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         cls._stack = contextlib.ExitStack()
         torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
 
+    @classmethod
+    def tearDownClass(cls):
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = False
+        super().tearDownClass()
+
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
         from torch._inductor import config
 
