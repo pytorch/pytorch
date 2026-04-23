@@ -72,7 +72,18 @@ def run(fn: Callable[_P, _R] | None = None) -> Any:
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ignore[no-untyped-def]
+if TYPE_CHECKING:
+
+    def disable(
+        fn: Callable[_P, _R] | None = None,
+        recursive: bool = True,
+        *,
+        reason: str | None = None,
+        wrapping: bool = True,
+    ) -> Any: ...
+
+
+def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ignore[no-untyped-def]  # noqa: F811
     """
     Decorator to disable TorchDynamo
 
@@ -173,9 +184,23 @@ class set_stance(_DecoratorContextManager):
         return self.__class__(self.stance.stance, force_backend=self.stance.backend)
 
 
-def assume_constant_result(fn):  # type: ignore[no-untyped-def]
+if TYPE_CHECKING:
+
+    def assume_constant_result(fn: F) -> F: ...
+
+
+def assume_constant_result(fn):  # type: ignore[no-untyped-def]  # noqa: F811
     fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
     return fn
+
+
+if TYPE_CHECKING:
+
+    @overload
+    def allow_in_graph(fn: F) -> F: ...
+
+    @overload
+    def allow_in_graph(fn: list[F] | tuple[F, ...]) -> list[F]: ...
 
 
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]

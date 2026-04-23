@@ -1109,20 +1109,20 @@ def _constant_subclass_base_value(value: Any) -> Any:
 
 
 def register_guard_check_spec(
-    get_metadata_fn,
-    eval_fn,
-):
+    get_metadata_fn: Any,
+    eval_fn: Any,
+) -> Callable[[Any], Any]:
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
     handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
 
-    def decorator(fn):
+    def decorator(fn: Any) -> Any:
         fn.guard_check_spec = handler
         return fn
 
     return decorator
 
 
-def skip_guard_check_spec(fn):
+def skip_guard_check_spec(fn: Any) -> Any:
     """Mark a guard method as skipped during auto-cache dispatch."""
     fn.guard_check_spec = SKIP_GUARD
     return fn
@@ -1138,15 +1138,15 @@ class UnsupportedGuardCheckSpec:
         self._name = name
 
     @property
-    def get_metadata_fn(self):
+    def get_metadata_fn(self) -> Any:
         raise NotImplementedError(f"Guard check spec not implemented for {self._name}")
 
     @property
-    def eval_fn(self):
+    def eval_fn(self) -> Any:
         raise NotImplementedError(f"Guard check spec not implemented for {self._name}")
 
 
-def unsupported_guard_check_spec(fn):
+def unsupported_guard_check_spec(fn: Any) -> Any:
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)
     return fn

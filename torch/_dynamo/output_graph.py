@@ -2759,7 +2759,7 @@ class OutputGraph(OutputGraphCommon):
             if self.torch_function_subclass_inlined:
                 real_compiled_fn = compiled_fn
 
-                def _tf_disabled_wrapper(*args, **kwargs):
+                def _tf_disabled_wrapper(*args: Any, **kwargs: Any) -> Any:
                     with torch._C.DisableTorchFunctionSubclass():
                         return real_compiled_fn(*args, **kwargs)
 

@@ -426,7 +426,7 @@ def instantiate_user_defined_class_object(
 
 
 def mutable_mapping_update(
-    self,
+    self: Any,
     data: Mapping[T, U] | Iterable[tuple[T, U]] = (),
     /,
     **kwargs: Any,
@@ -499,10 +499,10 @@ def foreach_map_fn(*args: Any) -> Any:
 
 
 def foreach_lerp_inplace(
-    self,
+    self: list[torch.Tensor] | tuple[torch.Tensor, ...],
     end: list[torch.Tensor] | tuple[torch.Tensor, ...],
     weight: float | int | torch.Tensor,
-) -> None:
+) -> list[torch.Tensor] | tuple[torch.Tensor, ...]:
     # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
     # approach as CUDA's native lerp to get bitwise identical results:
     #   |w| <  0.5  (low):  fma(w, diff, start)

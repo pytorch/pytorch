@@ -1111,7 +1111,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         super().__init_subclass__(**kwargs)
 
-        def as_python_constant_failure(self) -> NoReturn:
+        def as_python_constant_failure(self: "VariableTracker") -> NoReturn:
             raise AsPythonConstantNotImplementedError(
                 self, msg=f"{self} is self-referential"
             )
@@ -1120,7 +1120,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             cls, "as_python_constant", as_python_constant_failure
         )
 
-        def reconstruct_failure(self) -> NoReturn:
+        def reconstruct_failure(self: "VariableTracker") -> NoReturn:
             unimplemented(
                 gb_type="Reconstruction failure (self-referential)",
                 context=str(self),
@@ -1151,7 +1151,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return
 
         @functools.wraps(original_method)
-        def guarded_method(self, *args: Any, **kwargs: Any) -> VariableTracker:
+        def guarded_method(self: "VariableTracker", *args: Any, **kwargs: Any) -> Any:
             active = _vt_active_calls.get()
             if active is None:
                 active = set()

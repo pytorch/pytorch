@@ -634,14 +634,18 @@ def create_fx_graph_from_captured_output(
             )
             assert graph_module._wrapped_call.cls_call is None
 
-            def dynamo_wrapped_call(self, *args: object, **kwargs: object) -> object:
+            def dynamo_wrapped_call(
+                self: Any, *args: object, **kwargs: object
+            ) -> object:
                 assert "forward" not in self.__dict__
 
                 fwd_hooks = self._forward_hooks
                 fwd_pre_hooks = self._forward_pre_hooks
                 original_forward = type(self).forward
 
-                def patched_forward(self, *args: object, **kwargs: object) -> object:
+                def patched_forward(
+                    self: Any, *args: object, **kwargs: object
+                ) -> object:
                     self._forward_hooks = fwd_hooks
                     self._forward_pre_hooks = fwd_pre_hooks
                     return original_forward(self, *args, **kwargs)

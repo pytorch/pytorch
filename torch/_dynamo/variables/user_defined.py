@@ -2851,7 +2851,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in (
             "args",
             "__cause__",

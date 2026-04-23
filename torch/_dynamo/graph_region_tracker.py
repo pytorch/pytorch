@@ -65,7 +65,7 @@ graph_expansion_log = torch._logging.getArtifactLogger(
 )
 
 
-def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
+def debug_log(msg: str, *args: Any) -> None:
     graph_expansion_log.debug(msg, *args)
 
 

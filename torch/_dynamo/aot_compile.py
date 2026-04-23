@@ -173,7 +173,7 @@ class AOTCompileSaveResult:
     serialized_data: bytes
 
 
-def atomic_write_binary(file_path: str, data: bytes):
+def atomic_write_binary(file_path: str, data: bytes) -> None:
     dir_name = os.path.dirname(file_path) or "."
 
     with tempfile.NamedTemporaryFile(

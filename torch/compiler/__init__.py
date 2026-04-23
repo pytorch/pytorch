@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -214,7 +214,9 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
+def list_backends(
+    exclude_tags: Sequence[str] | None = ("debug", "experimental"),
+) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 

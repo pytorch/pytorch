@@ -136,7 +136,9 @@ def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
 
 
 # NOTE: can't type this due to public api mismatch; follow up with dev team
-def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type: ignore[no-untyped-def]
+def list_backends(
+    exclude_tags: Sequence[str] | None = ("debug", "experimental"),
+) -> list[str]:
     """
     Return valid strings that can be passed to:
 

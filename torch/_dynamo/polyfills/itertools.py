@@ -7,7 +7,7 @@ from __future__ import annotations
 import itertools
 import operator
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -243,7 +243,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
     iterator = iter(iterable)
     shared_link = [None, None]
 
-    def _tee(link) -> Iterator[_T]:  # type: ignore[no-untyped-def]
+    def _tee(link: list[Any]) -> Iterator[_T]:
         try:
             while True:
                 if link[1] is None:

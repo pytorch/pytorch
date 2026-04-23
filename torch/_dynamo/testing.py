@@ -70,13 +70,17 @@ def remove_optimized_module_prefix(name: str) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
 
 
-def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+def extract_graph_and_tracker(
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[fx.Graph, Any]:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     gm = None
     region_tracker = None
 
-    def extract_graph_backend(_gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def extract_graph_backend(
+        _gm: fx.GraphModule, *args: Any, **kwargs: Any
+    ) -> fx.GraphModule:
         nonlocal gm
         nonlocal region_tracker
         gm = _gm
@@ -87,7 +91,14 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
     return gm.graph, region_tracker  # type: ignore[union-attr]
 
 
-def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+def extract_graph(
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[
+    Any,
+    list[torch.fx.GraphModule],
+    list[torch.fx.GraphModule],
+    list[torch.fx.GraphModule],
+]:
     backend = AotEagerAndRecordGraphs()
     result = torch.compile(backend=backend)(fn)(*args, **kwargs)
     return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
@@ -330,14 +341,16 @@ class InductorAndRecordGraphs:
         self.graphs: list[torch.fx.GraphModule] = []
         self.inductor_graphs: list[torch.fx.GraphModule] = []
 
-    def __call__(self, gm, example_inputs):  # type: ignore[no-untyped-def]
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+    ) -> Any:
         import torch._inductor.compile_fx as compile_fx_mod
 
         self.graphs.append(gm)
 
         old_compile_fx_inner = compile_fx_mod._compile_fx_inner
 
-        def patched(*args, **kwargs):  # type: ignore[no-untyped-def]
+        def patched(*args: Any, **kwargs: Any) -> Any:
             self.inductor_graphs.append(args[0])
             return old_compile_fx_inner(*args, **kwargs)
 

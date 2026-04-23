@@ -440,7 +440,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_module(self) -> str:
         return self.get_globals()["__name__"]
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         fn_dict = self.get_dict_vt(tx)
 
         # missing: __globals__, __closure__, __kwdefautls__, __defaults__
@@ -2437,7 +2437,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             return VariableTracker.build(tx, val, source)
         return super().var_getattr(tx, name)
 
-    def get_function(self):
+    def get_function(self) -> Any:
         return getattr(self.wrapper_obj, self.attr_to_trace)
 
     def self_args(self) -> list[VariableTracker]:
@@ -3614,7 +3614,7 @@ def emit_noargs_leaf_function_to_graph(
         make_leaf_function_wrappers,
     )
 
-    def fake_impl():
+    def fake_impl() -> None:
         return None
 
     captured_out_spec: list[pytree.TreeSpec | None] = [None]
@@ -3664,7 +3664,7 @@ class TritonSetAllocatorVariable(VariableTracker):
         # Emit an invoke_leaf_function node so it runs at runtime.
         set_allocator = self.value
 
-        def real_impl():
+        def real_impl() -> None:
             set_allocator(alloc_fn)
             return None
 
