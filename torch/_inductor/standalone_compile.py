@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import logging
+import operator
 import os
 import pickle
 import shutil
@@ -34,6 +35,167 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+def _rewrite_legacy_collectives(gm: GraphModule) -> GraphModule:
+    if not torch.distributed.is_available():
+        return gm
+
+    import torch.distributed as dist
+    import torch.distributed.distributed_c10d as c10d
+
+    reduce_op_to_str = {
+        0: "sum",
+    }
+
+    def _erase_get_attr_if_dead(node: torch.fx.Node) -> None:
+        if node.op == "get_attr" and not node.users:
+            target = node.target
+            gm.graph.erase_node(node)
+            if isinstance(target, str) and hasattr(gm, target):
+                delattr(gm, target)
+
+    def _resolve_group_name(pg_node: torch.fx.Node) -> str:
+        if pg_node.op != "get_attr":
+            raise RuntimeError(
+                "Expected c10d.allreduce_ process group argument to come from get_attr"
+            )
+        pg_names = list(c10d._world.pg_names.values())
+        if len(pg_names) != 1:
+            raise RuntimeError(
+                "standalone_compile only supports rewriting c10d.allreduce_ when exactly one "
+                "process group is registered. Use functional collectives in the graph instead."
+            )
+        return pg_names[0]
+
+    def _resolve_reduce_op_str(reduce_op_node: torch.fx.Node) -> str:
+        if reduce_op_node.op != "get_attr":
+            raise RuntimeError(
+                "Expected c10d.allreduce_ reduce-op argument to come from get_attr"
+            )
+        reduce_op = getattr(gm, reduce_op_node.target)
+        try:
+            reduce_op_int = reduce_op.op
+            if callable(reduce_op_int):
+                reduce_op_int = reduce_op_int()
+        except AttributeError as exc:
+            raise RuntimeError(
+                "Unable to inspect reduce op for c10d.allreduce_ rewrite"
+            ) from exc
+        if reduce_op_int not in reduce_op_to_str:
+            raise RuntimeError(
+                f"Unsupported reduce op for c10d.allreduce_ rewrite: op={reduce_op_int!r}"
+            )
+        return reduce_op_to_str[reduce_op_int]
+
+    changed = False
+
+    for node in list(gm.graph.nodes):
+        if node.op == "call_function" and node.target is dist.all_reduce:
+            raise RuntimeError(
+                "standalone_compile expected make_fx to lower dist.all_reduce before compile time. "
+                "Please use the traced c10d form or functional collectives."
+            )
+
+        if node.op != "call_function" or node.target is not torch.ops.c10d.allreduce_.default:
+            continue
+
+        if len(node.args) < 5:
+            raise RuntimeError(
+                "Unexpected c10d.allreduce_ signature in standalone_compile rewrite"
+            )
+        tensors, pg_node, reduce_op_node, sparse_indices, async_op = node.args[:5]
+        timeout = node.args[5] if len(node.args) > 5 else -1
+        if sparse_indices is not None or timeout != -1:
+            raise RuntimeError(
+                "standalone_compile only supports basic c10d.allreduce_ rewrites"
+            )
+        if async_op:
+            raise RuntimeError(
+                "standalone_compile does not support async c10d.allreduce_ traced via make_fx. "
+                "Use functional collectives in the graph instead."
+            )
+        if not isinstance(tensors, (list, tuple)) or len(tensors) != 1:
+            raise RuntimeError(
+                "standalone_compile only supports single-tensor c10d.allreduce_ rewrites"
+            )
+        tensor = tensors[0]
+        if not isinstance(tensor, torch.fx.Node):
+            raise RuntimeError(
+                "Expected c10d.allreduce_ tensor argument to be an FX node"
+            )
+        group_name = _resolve_group_name(pg_node)
+        reduce_op = _resolve_reduce_op_str(reduce_op_node)
+
+        first_output = None
+        work_output = None
+        for user in list(node.users):
+            if (
+                user.op == "call_function"
+                and user.target is operator.getitem
+                and len(user.args) == 2
+                and user.args[0] is node
+            ):
+                if user.args[1] == 0:
+                    first_output = user
+                elif user.args[1] == 1:
+                    work_output = user
+        if first_output is None:
+            raise RuntimeError(
+                "Expected c10d.allreduce_ output tuple to have a getitem(..., 0) user"
+            )
+        tensor_output = None
+        for user in list(first_output.users):
+            if (
+                user.op == "call_function"
+                and user.target is operator.getitem
+                and len(user.args) == 2
+                and user.args[0] is first_output
+                and user.args[1] == 0
+            ):
+                tensor_output = user
+                break
+        if tensor_output is None:
+            raise RuntimeError(
+                "Expected c10d.allreduce_ tensor list output to have a getitem(..., 0) user"
+            )
+
+        with gm.graph.inserting_before(node):
+            collective = gm.graph.call_function(
+                torch.ops._c10d_functional.all_reduce.default,
+                args=(tensor, reduce_op, group_name),
+            )
+            wait = gm.graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default, args=(collective,)
+            )
+            copy_ = gm.graph.call_function(torch.ops.aten.copy_.default, (tensor, wait))
+
+        collective.meta = dict(node.meta)
+        wait.meta = dict(node.meta)
+        copy_.meta = dict(node.meta)
+        for key in ("val", "example_value", "tensor_meta"):
+            if key in tensor.meta:
+                collective.meta[key] = tensor.meta[key]
+                wait.meta[key] = tensor.meta[key]
+                copy_.meta[key] = tensor.meta[key]
+
+        tensor_output.replace_all_uses_with(tensor)
+
+        gm.graph.erase_node(tensor_output)
+        if not first_output.users:
+            gm.graph.erase_node(first_output)
+        if work_output is not None and not work_output.users:
+            gm.graph.erase_node(work_output)
+        gm.graph.erase_node(node)
+        _erase_get_attr_if_dead(pg_node)
+        _erase_get_attr_if_dead(reduce_op_node)
+        changed = True
+
+    if changed:
+        gm.delete_all_unused_submodules()
+        gm.graph.lint()
+        gm.recompile()
+    return gm
 
 
 class CompiledArtifact(ABC):
@@ -456,6 +618,7 @@ def standalone_compile(
 
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
     with _standalone_context(gm, dynamic_shapes, aot):
+        gm = _rewrite_legacy_collectives(gm)
         # compile_fx takes ownership of gm and may mutate it on cache miss.
         if not donate_graph_module:
             gm = copy.deepcopy(gm)
