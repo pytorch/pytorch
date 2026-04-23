@@ -1445,7 +1445,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
 
     for i, rule in enumerate(fusions):
         with GraphTransformObserver(
-            graph.owning_module,
+            graph.owning_module,  # pyrefly: ignore[bad-argument-type]
             f"group_batch_fusion_{i}",
         ):
             apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]

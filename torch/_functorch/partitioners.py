@@ -2524,7 +2524,7 @@ def solve_min_cut(
                 joint_module.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
-                if joint_module
+                if joint_module is not None
                 else str(joint_graph)
             )
             # Always log to structured trace for production debugging

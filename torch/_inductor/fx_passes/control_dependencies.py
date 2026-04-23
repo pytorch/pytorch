@@ -226,6 +226,8 @@ def _create_subgraph_for_node(
     """
     # Get the owning module
     owning_module = graph.owning_module
+    if owning_module is None:
+        raise AssertionError("graph.owning_module must not be None")
 
     # Create a new graph for the subgraph
     subgraph = fx.Graph(owning_module)
