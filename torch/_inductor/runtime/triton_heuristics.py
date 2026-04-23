@@ -3159,12 +3159,49 @@ def pointwise(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
 
+
+    max_autotune = bool(
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    )
+
+    should_autotune = bool(inductor_meta.get("autotune_pointwise", True)) or max_autotune
+
     configs = None
     if len(size_hints) == 1:
-        if not inductor_meta.get("autotune_pointwise", True) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-        ):
+        if torch.version.hip:
+            # On ROCm use empirically-tuned 1d dispatch table.
+            from torch._inductor.codegen.rocm.pointwise_tuning import (
+                rocm_pointwise_params_1d,
+            )
+
+            xnumel = size_hints["x"]
+            rocm_params = rocm_pointwise_params_1d(xnumel)
+            # Use the dominant coverage config if exhaustive search is not requested, otherwise use all configs.
+            param_list = rocm_params.candidates if should_autotune else [rocm_params.dominant]
+            configs = [
+                triton_config_with_settings(size_hints, x, num_warps=nw, num_stages=ns)
+                for x, nw, ns in param_list
+            ]
+            if inductor_meta.get("max_autotune_pointwise"):
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                        ),
+                    ]
+                )
+            if inductor_meta.get("atomic_add_found"):
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints,
+                            64,
+                            num_warps=1,
+                            num_stages=1,  # 250% improvement
+                        )
+                    ]
+                )
+        elif not should_autotune:
             configs = [triton_config_with_settings(size_hints, bs)]
         else:
             configs = [
@@ -3212,18 +3249,28 @@ def pointwise(
                     ]
                 )
     if len(size_hints) == 2:
+        if torch.version.hip:
+            # On ROCm use empirically-tuned 2d dispatch table.
+            from torch._inductor.codegen.rocm.pointwise_tuning import (
+                rocm_pointwise_params_2d,
+            )
+
+            xnumel = size_hints["x"]
+            ynumel = size_hints["y"]
+            rocm_params = rocm_pointwise_params_2d(xnumel, ynumel)
+            param_list = rocm_params.candidates if should_autotune else [rocm_params.dominant]
+            configs = [
+                triton_config_with_settings(
+                    size_hints, x, y, num_warps=nw, num_stages=ns
+                )
+                for x, y, nw, ns in param_list
+            ]
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
-        if (
-            not inductor_meta.get("autotune_pointwise", True)
-            or (
-                torch.version.hip is None
-                and tile_hint == TileHint.SQUARE
-                and torch.version.xpu is None
-            )
-        ) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
+        elif not should_autotune or (
+            tile_hint == TileHint.SQUARE
+            and torch.version.xpu is None
+            and not max_autotune
         ):
             configs = [triton_config_with_settings(size_hints, 32, 32)]
         else:
@@ -3236,24 +3283,6 @@ def pointwise(
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
             ]
-            # Additional configs appended for ROCm builds
-            if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, 64, 32
-                        ),  # better for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 16
-                        ),  # +10% for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 32
-                        ),  # additional 10% more
-                        triton_config_with_settings(
-                            size_hints, 32, 512
-                        ),  # +30% for some kernels
-                    ]
-                )
             if torch.xpu.is_available():
                 configs.extend(
                     [

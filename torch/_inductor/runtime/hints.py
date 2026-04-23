@@ -14,7 +14,7 @@ from torch.utils._triton import has_triton_package
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 8192 if torch.version.hip else 4096,
-    "Y": 1024,
+    "Y": 2048 if torch.version.hip else 1024,
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
