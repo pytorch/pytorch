@@ -13,6 +13,7 @@ from ._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+    VarlenMetadata,
 )
 from ._cp_custom_ops import flex_cp_allgather
 from ._load_balancer import (
@@ -36,6 +37,7 @@ __all__ = [
     "context_parallel",
     "context_parallel_unshard",
     "set_rotate_method",
+    "VarlenMetadata",
     # From _cp_custom_ops
     "flex_cp_allgather",
     # From _load_balancer

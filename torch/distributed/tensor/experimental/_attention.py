@@ -14,6 +14,7 @@ from ._context_parallel._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+    VarlenMetadata,
 )
 from ._context_parallel._load_balancer import (
     _HeadTailLoadBalancer,
@@ -37,6 +38,7 @@ __all__ = [
     "context_parallel",
     "context_parallel_unshard",
     "set_rotate_method",
+    "VarlenMetadata",
     "_HeadTailLoadBalancer",
     "_LoadBalancer",
     "_PerDocumentHeadTailLoadBalancer",

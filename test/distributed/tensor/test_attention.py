@@ -32,6 +32,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+    VarlenMetadata,
 )
 from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
     flex_cp_allgather,
@@ -57,7 +58,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -246,7 +247,7 @@ class RingAttentionTest(DTensorTestBase):
         if load_balance and not is_causal:
             return
 
-        # Compilation with context_parallel doesn't work yet — both paths
+        # Compilation with context_parallel doesn't work yet -- both paths
         # (use_context=True monkey-patch and use_context=False parallelize_module)
         # fail during tracing because DTensor dispatch interferes with sdpa.
         # Previously CommDebugMode was active for all subtests, which caused
@@ -1244,6 +1245,511 @@ TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
 TestShardingWithLocalTensor = create_local_tensor_test_class(
     TestSharding,
 )
+
+
+class _MockMesh:
+    """Minimal DeviceMesh stand-in for non-distributed unit tests."""
+
+    def __init__(
+        self, world_size: int, rank: int, device_type: str = "cpu"
+    ) -> None:
+        self._world_size = world_size
+        self._rank = rank
+        self.device_type = device_type
+
+    def size(self) -> int:
+        return self._world_size
+
+    def get_local_rank(self) -> int:
+        return self._rank
+
+
+def _build_varlen_meta(
+    cu_seq_q: list[int], B: int, seq_len: int
+) -> VarlenMetadata:
+    """Build a global VarlenMetadata from a per-batch cumulative tensor.
+
+    The given ``cu_seq_q`` covers a single batch element ``[0, ..., seq_len]``.
+    It is replicated across ``B`` batches with offsets, matching what
+    ``create_varlen_metadata_for_document`` produces.
+    """
+    if cu_seq_q[0] != 0 or cu_seq_q[-1] != seq_len:
+        raise ValueError("cu_seq_q must start at 0 and end at seq_len")
+    per_batch = torch.tensor(cu_seq_q, dtype=torch.int32)
+    # For B batches, concat with offsets and dedupe the boundary.
+    parts = [per_batch[:-1] + b * seq_len for b in range(B)]
+    parts.append(torch.tensor([B * seq_len], dtype=torch.int32))
+    cu = torch.cat(parts)
+    seg_lens = torch.diff(cu)
+    return VarlenMetadata(
+        cu_seq_q=cu,
+        cu_seq_k=cu.clone(),
+        max_q=int(seg_lens.max().item()),
+        max_k=int(seg_lens.max().item()),
+    )
+
+
+class TestCPVarlenMetadata(TestCase):
+    """Pure-logic CPU tests for VarlenMetadata._shard_for_cp.
+
+    These do not require a real distributed environment; we mock the
+    DeviceMesh with ``_MockMesh`` and iterate over ranks manually.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Tests in this class only enable load balancing when they pass an
+        # explicit balancer; reset the global flag to make that the default.
+        self._saved_enable_lb = _cp_options.enable_load_balance
+        _cp_options.enable_load_balance = False
+
+    def tearDown(self) -> None:
+        _cp_options.enable_load_balance = self._saved_enable_lb
+        super().tearDown()
+
+    def _run(
+        self,
+        global_meta: VarlenMetadata,
+        cp_world_size: int,
+        B: int,
+        seq_len: int,
+        load_balancer_factory=None,
+    ) -> list[VarlenMetadata]:
+        """Return per-rank metadata for the given global metadata."""
+        results = []
+        for rank in range(cp_world_size):
+            mesh = _MockMesh(cp_world_size, rank)
+            lb = (
+                load_balancer_factory(seq_len, cp_world_size)
+                if load_balancer_factory
+                else None
+            )
+            results.append(
+                global_meta._shard_for_cp(
+                    mesh,
+                    batch_size=B,
+                    seq_length=seq_len,
+                    load_balancer=lb,
+                )
+            )
+        return results
+
+    @staticmethod
+    def _seg_lens(meta: VarlenMetadata) -> tuple[list[int], list[int]]:
+        return (
+            torch.diff(meta.cu_seq_q).tolist(),
+            torch.diff(meta.cu_seq_k).tolist(),
+        )
+
+    def test_single_doc_no_loadbalancer(self) -> None:
+        # B=1, one doc spanning [0, 32). CP=2 -> rank 0 gets [0, 16),
+        # rank 1 gets [16, 32). rank 1 is mid-doc so its seqlen_k = 32.
+        meta = _build_varlen_meta([0, 32], B=1, seq_len=32)
+        per_rank = self._run(meta, cp_world_size=2, B=1, seq_len=32)
+        self.assertEqual(self._seg_lens(per_rank[0]), ([16], [16]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([16], [32]))
+        self.assertEqual(per_rank[0].max_q, 16)
+        self.assertEqual(per_rank[1].max_k, 32)
+
+    def test_single_doc_headtail(self) -> None:
+        # seq_len=32, CP=2, headtail chunks=8 -> rearranged
+        # [0..7, 24..31, 8..15, 16..23]. Rank 0 gets [0..7, 24..31] (one
+        # contiguous + one tail chunk -> 2 segments). Rank 1 gets [8..23]
+        # contiguous -> 1 segment.
+        meta = _build_varlen_meta([0, 32], B=1, seq_len=32)
+        per_rank = self._run(
+            meta,
+            cp_world_size=2,
+            B=1,
+            seq_len=32,
+            load_balancer_factory=lambda s, w: _HeadTailLoadBalancer(
+                s, w, torch.device("cpu")
+            ),
+        )
+        self.assertEqual(self._seg_lens(per_rank[0]), ([8, 8], [8, 32]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([16], [24]))
+
+    def test_multi_doc_straddling(self) -> None:
+        # Worked example: docs [0,10), [10,50), [50,64). CP=2, no LB.
+        # rank 0 has [0..32): doc 0 fully + doc 1 prefix [10..32).
+        # rank 1 has [32..64): doc 1 mid [32..50) + doc 2 fully [50..64).
+        meta = _build_varlen_meta([0, 10, 50, 64], B=1, seq_len=64)
+        per_rank = self._run(meta, cp_world_size=2, B=1, seq_len=64)
+        self.assertEqual(self._seg_lens(per_rank[0]), ([10, 22], [10, 22]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([18, 14], [40, 14]))
+
+    def test_multi_doc_headtail(self) -> None:
+        # Same docs as test_multi_doc_straddling, with headtail balancer
+        # (chunk=16). Forward permutation is [0..16, 48..64, 16..48],
+        # inverse:
+        #   p_orig in [0,16)  -> p_rearr = p_orig
+        #   p_orig in [16,48) -> p_rearr = p_orig + 16
+        #   p_orig in [48,64) -> p_rearr = p_orig - 32
+        # Rank 0 Q = chunks 0+3 = [0..16, 48..64) -> 4 segs:
+        #   doc 0 [0..10) (10,10); doc 1 prefix [10..16) (6,6);
+        #   doc 1 tail [48..50) (2, 40); doc 2 [50..64) (14,14).
+        # Rank 1 Q = chunks 1+2 = [16..48) in doc 1 -> 1 seg (32, 38).
+        meta = _build_varlen_meta([0, 10, 50, 64], B=1, seq_len=64)
+        per_rank = self._run(
+            meta,
+            cp_world_size=2,
+            B=1,
+            seq_len=64,
+            load_balancer_factory=lambda s, w: _HeadTailLoadBalancer(
+                s, w, torch.device("cpu")
+            ),
+        )
+        self.assertEqual(self._seg_lens(per_rank[0]), ([10, 6, 2, 14], [10, 6, 40, 14]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([32], [38]))
+
+        # k_local_indices compose the K-gather with the inverse permutation.
+        # Rank 1 K covers original [10..48) -> [10..16) stays, [16..48) +16.
+        expected_rank1 = torch.tensor(
+            list(range(10, 16)) + list(range(32, 64)), dtype=torch.long
+        )
+        self.assertEqual(per_rank[1].k_local_indices, expected_rank1)
+        # Rank 0 K-gather covers originals [0..10), [10..16), [10..50), [50..64).
+        expected_rank0 = torch.tensor(
+            list(range(10))  # seg 0: doc 0
+            + list(range(10, 16))  # seg 1: doc 1 prefix
+            + list(range(10, 16))  # seg 2 piece [10,16)
+            + list(range(32, 64))  # seg 2 piece [16,48) shifted +16
+            + [16, 17]  # seg 2 piece [48,50) shifted -32
+            + list(range(18, 32)),  # seg 3: doc 2 [50,64) shifted -32
+            dtype=torch.long,
+        )
+        self.assertEqual(per_rank[0].k_local_indices, expected_rank0)
+
+    def test_one_token_segment(self) -> None:
+        # 1-token doc + 7-token doc; seq_len=8, CP=2.
+        # rank 0 has [0..4): doc 0 [0..1) + doc 1 prefix [1..4).
+        # rank 1 has [4..8): doc 1 only, mid-doc.
+        meta = _build_varlen_meta([0, 1, 8], B=1, seq_len=8)
+        per_rank = self._run(meta, cp_world_size=2, B=1, seq_len=8)
+        self.assertEqual(self._seg_lens(per_rank[0]), ([1, 3], [1, 3]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([4], [7]))
+
+    def test_multi_batch_multi_doc_straddling(self) -> None:
+        # B=2, per-batch docs [10, 22] -> packed cu_seq_q =
+        # [0, 10, 32, 42, 64]. CP=2, shard_len=16.
+        # Rank 0 has batch0[0..16) + batch1[0..16):
+        #   batch0: doc0 [0..10) + doc1 prefix [10..16) -> (10,10), (6,6)
+        #   batch1: doc2 [32..42) + doc3 prefix [42..48) -> (10,10), (6,6)
+        # Rank 1 has batch0[16..32) + batch1[16..32):
+        #   batch0: doc1 mid [16..32) -> (16, 22) (seqlen_k = 31-10+1)
+        #   batch1: doc3 mid [48..64) -> (16, 22) (seqlen_k = 63-42+1)
+        # Also asserts k_local_indices for rank 0: must pick out the
+        # non-contiguous per-segment K regions ([0..10), [10..16),
+        # [32..42), [42..48)) from the packed length-64 K view.
+        meta = _build_varlen_meta([0, 10, 32], B=2, seq_len=32)
+        per_rank = self._run(meta, cp_world_size=2, B=2, seq_len=32)
+        self.assertEqual(self._seg_lens(per_rank[0]), ([10, 6, 10, 6], [10, 6, 10, 6]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([16, 16], [22, 22]))
+        expected_rank0_k = torch.tensor(
+            list(range(0, 10))
+            + list(range(10, 16))
+            + list(range(32, 42))
+            + list(range(42, 48)),
+            dtype=torch.long,
+        )
+        self.assertEqual(per_rank[0].k_local_indices, expected_rank0_k)
+
+    def test_cp_world_size_4(self) -> None:
+        # CP=4 exercises off-by-one in the per-rank boundary math beyond
+        # the standard CP=2 cases. seq_len=64, docs [20, 44] -> packed
+        # cu_seq_q = [0, 20, 64]. shard_len=16.
+        # Rank 0 [0..16): doc 0 prefix -> seqlen_q=16, seqlen_k=16
+        # Rank 1 [16..32): doc 0 tail [16..20) + doc 1 prefix [20..32)
+        #   -> (4, 20) (seqlen_k = 19-0+1), (12, 12)
+        # Rank 2 [32..48): doc 1 mid -> (16, 28) (seqlen_k = 47-20+1)
+        # Rank 3 [48..64): doc 1 end -> (16, 44) (seqlen_k = 63-20+1)
+        meta = _build_varlen_meta([0, 20, 64], B=1, seq_len=64)
+        per_rank = self._run(meta, cp_world_size=4, B=1, seq_len=64)
+        self.assertEqual(self._seg_lens(per_rank[0]), ([16], [16]))
+        self.assertEqual(self._seg_lens(per_rank[1]), ([4, 12], [20, 12]))
+        self.assertEqual(self._seg_lens(per_rank[2]), ([16], [28]))
+        self.assertEqual(self._seg_lens(per_rank[3]), ([16], [44]))
+
+    def test_seq_len_divisibility(self) -> None:
+        meta = _build_varlen_meta([0, 30], B=1, seq_len=30)
+        with self.assertRaisesRegex(ValueError, "divisible"):
+            meta._shard_for_cp(_MockMesh(4, 0), batch_size=1, seq_length=30)
+
+    def test_cross_attention_unsupported(self) -> None:
+        # cu_seq_q != cu_seq_k must be rejected: only self-attention is
+        # supported.
+        meta = VarlenMetadata(
+            cu_seq_q=torch.tensor([0, 16, 32], dtype=torch.int32),
+            cu_seq_k=torch.tensor([0, 20, 40], dtype=torch.int32),
+            max_q=16,
+            max_k=20,
+        )
+        with self.assertRaisesRegex(ValueError, "self-attention"):
+            meta._shard_for_cp(_MockMesh(2, 0), batch_size=1, seq_length=32)
+
+
+class CPVarlenAttentionTest(DTensorTestBase):
+    """End-to-end correctness for varlen attention under CP.
+
+    Strategy: build identical global Q/K/V and global VarlenMetadata on
+    every rank; compute the reference output non-CP. Then shard Q on the
+    sequence dim and shard the metadata via ``VarlenMetadata._shard_for_cp``;
+    keep K/V replicated (in real training this is what DTensor's
+    ``Replicate`` placement on the CP dim achieves). Run varlen_attn on
+    each rank and unshard the output to compare to the reference.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _build_global_meta(
+        self, B: int, seq_len: int, doc_lens: list[int], device: str
+    ) -> VarlenMetadata:
+        if sum(doc_lens) != seq_len:
+            raise AssertionError("doc_lens must sum to seq_len")
+        per_batch = [0]
+        running = 0
+        for length in doc_lens:
+            running += length
+            per_batch.append(running)
+        # Replicate per-batch boundaries across B with offsets.
+        cu = []
+        offset = 0
+        for _ in range(B):
+            cu.extend(p + offset for p in per_batch[:-1])
+            offset += seq_len
+        cu.append(B * seq_len)
+        cu_t = torch.tensor(cu, dtype=torch.int32, device=device)
+        seg_lens = torch.diff(cu_t)
+        return VarlenMetadata(
+            cu_seq_q=cu_t,
+            cu_seq_k=cu_t.clone(),
+            max_q=int(seg_lens.max().item()),
+            max_k=int(seg_lens.max().item()),
+        )
+
+    def _run_varlen_cp(
+        self,
+        *,
+        B: int,
+        seq_len: int,
+        doc_lens: list[int],
+        n_heads: int,
+        head_dim: int,
+        load_balancer_factory,
+    ) -> None:
+        from torch.nn.attention.varlen import varlen_attn
+
+        torch.manual_seed(1234)
+        device = self.device_type
+
+        global_meta = self._build_global_meta(B, seq_len, doc_lens, device)
+
+        # Identical Q/K/V on every rank.
+        q_full = torch.randn(
+            B, seq_len, n_heads, head_dim,
+            device=device, dtype=torch.bfloat16, requires_grad=True,
+        )
+        kv_kwargs = dict(device=device, dtype=torch.bfloat16, requires_grad=True)
+        k_full = torch.randn(B, seq_len, n_heads, head_dim, **kv_kwargs)
+        v_full = torch.randn(B, seq_len, n_heads, head_dim, **kv_kwargs)
+
+        # Reference: non-CP varlen on packed global tensors.
+        ref_q = q_full.reshape(B * seq_len, n_heads, head_dim)
+        ref_k = k_full.reshape(B * seq_len, n_heads, head_dim)
+        ref_v = v_full.reshape(B * seq_len, n_heads, head_dim)
+        ref_out_packed = varlen_attn(
+            ref_q,
+            ref_k,
+            ref_v,
+            global_meta.cu_seq_q,
+            global_meta.cu_seq_k,
+            global_meta.max_q,
+            global_meta.max_k,
+            window_size=(-1, 0),
+        )
+        ref_out = ref_out_packed.view(B, seq_len, n_heads, head_dim)
+        ref_out.sum().backward()
+        ref_q_grad = q_full.grad.detach().clone()
+        ref_k_grad = k_full.grad.detach().clone()
+        ref_v_grad = v_full.grad.detach().clone()
+
+        # CP setup.
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        load_balancer = (
+            load_balancer_factory(
+                global_meta=global_meta,
+                seq_len=seq_len,
+                B=B,
+                world_size=self.world_size,
+                device=torch.device(device),
+            )
+            if load_balancer_factory
+            else None
+        )
+
+        # Shard Q (no requires_grad yet -- set after the to_local() inside
+        # _context_parallel_shard so the local tensor is a true leaf).
+        q_for_cp = q_full.detach().clone()
+        sharded = _context_parallel_shard(
+            mesh=device_mesh,
+            buffers=[q_for_cp, global_meta],
+            seq_dims=[1, 0],  # seq_dim ignored for VarlenMetadata
+            load_balancer=load_balancer,
+            batch_and_seq=(B, seq_len),
+        )
+        local_q, local_meta = sharded
+        local_q.requires_grad_(True)
+
+        # Simulate production K/V layout under DTensor Replicate-on-CP
+        # all-gather: each rank holds the full K/V, but in load-balancer
+        # rearranged order (concatenation of rank-local rearranged shards).
+        if load_balancer is not None:
+            rearrange_full = load_balancer._generate_indices(restore=False)
+            if rearrange_full.shape[0] == 1:
+                rearrange_full = rearrange_full.expand(B, -1)
+            expand_idx = (
+                rearrange_full.to(torch.long)
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+                .expand_as(k_full)
+            )
+            k_local = torch.gather(k_full.detach(), dim=1, index=expand_idx).clone()
+            v_local = torch.gather(v_full.detach(), dim=1, index=expand_idx).clone()
+        else:
+            expand_idx = None
+            k_local = k_full.detach().clone()
+            v_local = v_full.detach().clone()
+        k_local.requires_grad_(True)
+        v_local.requires_grad_(True)
+
+        shard_len = seq_len // self.world_size
+        local_q_packed = local_q.reshape(B * shard_len, n_heads, head_dim)
+        k_packed = k_local.reshape(B * seq_len, n_heads, head_dim)
+        v_packed = v_local.reshape(B * seq_len, n_heads, head_dim)
+        # Re-pack K/V to the per-segment visible regions; required when
+        # the rank's K is the full global K but cu_seq_k describes only
+        # the visible portions (which may be non-contiguous for B > 1).
+        if local_meta.k_local_indices is not None:
+            k_packed = k_packed.index_select(0, local_meta.k_local_indices)
+            v_packed = v_packed.index_select(0, local_meta.k_local_indices)
+        local_out_packed = varlen_attn(
+            local_q_packed,
+            k_packed,
+            v_packed,
+            local_meta.cu_seq_q,
+            local_meta.cu_seq_k,
+            local_meta.max_q,
+            local_meta.max_k,
+            window_size=(-1, 0),
+        )
+        local_out = local_out_packed.view(B, shard_len, n_heads, head_dim)
+        local_out.sum().backward()
+
+        # Unshard the local Q grad and the local output to compare.
+        seq_dim = 1
+        cp_out, cp_q_grad = context_parallel_unshard(
+            device_mesh,
+            buffers=[local_out, local_q.grad],
+            seq_dims=[seq_dim, seq_dim],
+            load_balancer=load_balancer,
+        )
+
+        # K/V grads live on each rank's (full) K/V copy and cover only the
+        # segments this rank's Q attended to. Un-rearrange into original
+        # coords (reverse of the forward torch.gather) and sum across CP
+        # ranks to reconstruct the full K/V grad.
+        if expand_idx is not None:
+            cp_k_grad = torch.empty_like(k_local.grad)
+            cp_k_grad.scatter_(1, expand_idx, k_local.grad)
+            cp_v_grad = torch.empty_like(v_local.grad)
+            cp_v_grad.scatter_(1, expand_idx, v_local.grad)
+        else:
+            cp_k_grad = k_local.grad.detach().clone()
+            cp_v_grad = v_local.grad.detach().clone()
+        dist.all_reduce(cp_k_grad, group=device_mesh.get_group())
+        dist.all_reduce(cp_v_grad, group=device_mesh.get_group())
+
+        atol = 5e-3
+        rtol = 5e-3
+        torch.testing.assert_close(cp_out, ref_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_q_grad, ref_q_grad, atol=atol, rtol=rtol)
+        # K/V grads pick up extra rounding error from the cross-rank sum,
+        # so use a bfloat16-appropriate tolerance.
+        kv_atol = 5e-2
+        kv_rtol = 5e-2
+        torch.testing.assert_close(cp_k_grad, ref_k_grad, atol=kv_atol, rtol=kv_rtol)
+        torch.testing.assert_close(cp_v_grad, ref_v_grad, atol=kv_atol, rtol=kv_rtol)
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_no_loadbalancer(self) -> None:
+        # Single doc, no load balancer, B=1 (the simplest path).
+        self._run_varlen_cp(
+            B=1,
+            seq_len=128,
+            doc_lens=[128],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=None,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_multi_batch_no_lb(self) -> None:
+        # Multi-batch exercises the K re-packing via k_local_indices.
+        self._run_varlen_cp(
+            B=2,
+            seq_len=128,
+            doc_lens=[128],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=None,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_multi_doc_no_lb(self) -> None:
+        # Multi-doc with straddling boundaries.
+        self._run_varlen_cp(
+            B=2,
+            seq_len=128,
+            doc_lens=[40, 88],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=None,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_cp_varlen_headtail(self) -> None:
+        self._run_varlen_cp(
+            B=2,
+            seq_len=128,
+            doc_lens=[40, 88],
+            n_heads=4,
+            head_dim=32,
+            load_balancer_factory=lambda *, global_meta, seq_len, B, world_size, device: _HeadTailLoadBalancer(
+                seq_len, world_size, device
+            ),
+        )
 
 
 if __name__ == "__main__":
