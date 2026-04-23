@@ -15,6 +15,7 @@ from torch._inductor.codegen.common import (
     CSEVariable,
     IndentedBuffer,
     Kernel,
+    PythonPrinter,
     ValueRanges,
 )
 from torch._inductor.ir import (
@@ -40,6 +41,7 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+cutedsl_pexpr = PythonPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
@@ -129,7 +131,7 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        return str(expr)
+        return cutedsl_pexpr(expr)
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""

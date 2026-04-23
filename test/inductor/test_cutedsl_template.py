@@ -406,6 +406,48 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         with self.assertRaises(AssertionError):
             kernel._get_subgraph(2)
 
+    def test_kexpr_prints_modular_indexing(self):
+        import sympy
+
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_kexpr",
+                input_nodes=[],
+                output_node=None,
+            )
+
+            expr = ModularIndexing(sympy.Symbol("tmp1", integer=True), 1, 2)
+            self.assertEqual(kernel.kexpr(expr), "(tmp1 % 2)")
+
+    def test_index_expr_supports_modular_indexing(self):
+        import sympy
+
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.functions import ModularIndexing
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_index_expr",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                result = CuteDSLOpOverrides.index_expr(
+                    ModularIndexing(sympy.Symbol("tmp1", integer=True), 1, 2),
+                    torch.int64,
+                )
+
+            self.assertIsInstance(result, CSEVariable)
+            self.assertEqual(result.dtype, torch.int64)
+            self.assertIn("(tmp1 % 2)", kernel.body.getvalue())
+
     def test_cutedsl_op_overrides(self):
         """Test the new CuteDSLOpOverrides class."""
         import torch
