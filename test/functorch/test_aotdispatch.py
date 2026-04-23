@@ -8,13 +8,15 @@
 
 import copy
 import itertools
+import logging
 import operator
 import unittest
 import warnings
 import weakref
 from collections.abc import Callable
-from contextlib import ContextDecorator, ExitStack, nullcontext
+from contextlib import ContextDecorator, contextmanager, ExitStack, nullcontext
 from functools import partial, wraps
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -7066,6 +7068,217 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    @contextmanager
+    def _capture_codegen_source(self, artifact_name):
+        trace_log = logging.getLogger("torch.__trace")
+        captured: list[str] = []
+
+        class _ArtifactHandler(logging.Handler):
+            def emit(self, record):
+                metadata = getattr(record, "metadata", {})
+                if (
+                    "artifact" in metadata
+                    and metadata["artifact"].get("name") == artifact_name
+                ):
+                    payload = getattr(record, "payload", None)
+                    if payload is not None:
+                        captured.append(payload)
+
+        handler = _ArtifactHandler()
+        handler.setLevel(logging.DEBUG)
+        old_level = trace_log.level
+        trace_log.setLevel(logging.DEBUG)
+        trace_log.addHandler(handler)
+        try:
+            yield captured
+        finally:
+            trace_log.removeHandler(handler)
+            trace_log.setLevel(old_level)
+
+    def _make_effectful_op(self, name):
+        @torch.library.custom_op(f"test::{name}", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        return op
+
+    def _make_wrapper_via_post_compile(self, compiled_fn, num_tokens):
+        from torch._functorch._aot_autograd.runtime_wrappers import EffectTokensWrapper
+
+        mock_meta = SimpleNamespace(tokens=dict.fromkeys(range(num_tokens)))
+        mock_aot_config = SimpleNamespace()
+        return EffectTokensWrapper().post_compile(
+            compiled_fn, mock_aot_config, runtime_metadata=mock_meta
+        )
+
+    def test_effect_tokens_codegen_single(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_single_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+            with self._capture_codegen_source("effect_tokens_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.ops.test.codegen_single_effect(x)
+
+                x = torch.randn(4)
+                out = f(x)
+
+            self.assertEqual(out, x)
+            self.assertEqual(
+                len(captured),
+                1,
+                "Expected effect_tokens_wrapper codegen artifact to be emitted",
+            )
+            source = captured[0]
+            self.assertIn("None", source)
+            self.assertIn("outs[1:]", source)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_no_codegen_when_zero(self):
+        with self._capture_codegen_source("effect_tokens_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4)
+            out = f(x)
+
+        self.assertEqual(out, x * 2)
+        self.assertEqual(
+            len(captured),
+            0,
+            "No codegen artifact should be emitted when there are no effect tokens",
+        )
+
+    def test_effect_tokens_codegen_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_correctness_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_correctness_effect(x)
+                return y + 1
+
+            x = torch.randn(3, 3)
+            out = f(x)
+            self.assertEqual(out, x + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_with_mutation(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_mutation_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_mutation_effect(x)
+                x.add_(1)
+                return y
+
+            x = torch.randn(4)
+            x_ref = x.clone()
+            out = f(x)
+
+            self.assertEqual(out, x_ref)
+            self.assertEqual(x, x_ref + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_multiple_outputs(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_multi_out_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_multi_out_effect(x)
+                return y, x * 2, x + 1
+
+            x = torch.randn(4)
+            out1, out2, out3 = f(x)
+
+            self.assertEqual(out1, x)
+            self.assertEqual(out2, x * 2)
+            self.assertEqual(out3, x + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_training_path(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_training_effect")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return grad
+
+        op.register_autograd(backward, setup_context=setup_context)
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_training_effect(x)
+                return y * 2
+
+            x = torch.randn(3, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+            self.assertEqual(out, x * 2)
+            self.assertEqual(x.grad, torch.full((3,), 2.0))
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_multiple_tokens(self):
+        call_log = []
+
+        def mock_compiled_fn(args):
+            call_log.append(list(args))
+            return list(range(len(args)))
+
+        wrapper = self._make_wrapper_via_post_compile(mock_compiled_fn, num_tokens=2)
+
+        args = [10, 20, 30]
+        result = wrapper(args)
+        self.assertEqual(len(call_log), 1)
+        self.assertEqual(call_log[0], [None, None, 10, 20, 30])
+        self.assertEqual(args, [])
+        self.assertEqual(list(result), [2, 3, 4])
+
+    def test_effect_tokens_codegen_none_output(self):
+        def mock_compiled_fn(args):
+            return None
+
+        wrapper = self._make_wrapper_via_post_compile(mock_compiled_fn, num_tokens=2)
+
+        result = wrapper([10, 20])
+        self.assertIsNone(result)
 
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
