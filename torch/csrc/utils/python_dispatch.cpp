@@ -152,7 +152,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
     const auto& schema = op.schema();
     const auto num_arguments = schema.arguments().size();
 
-    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
+    // Otherwise, find a PyInterpreter on a Tensor if it has Python key (which
     // means it's a nontrivial tensor subclass)
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {

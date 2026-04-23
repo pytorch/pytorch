@@ -340,7 +340,7 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   ///    be executed in the backward pass. One caveat is that we prioritize
   ///    AccumulateGrad nodes by explicitly setting its sequence_nr to be
   ///    UINT64_MAX.
-  /// 2) The sequence number of this `Node` is paired with with thread_id it was
+  /// 2) The sequence number of this `Node` is paired with thread_id it was
   /// created in
   ///    as a unique identifier by the profiler to annotate recorded events.
   ///    The purpose of this is to help users (and possibly programs)
