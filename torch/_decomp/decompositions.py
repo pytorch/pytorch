@@ -2958,8 +2958,12 @@ def _index_add(
 
 @register_decomposition(aten.pad_sequence.default)
 @aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="right"):
     torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
+    torch._check(
+        padding_side == "left" or padding_side == "right",
+        lambda: f"Expected padding_side to be one of left or right, but got {padding_side}.",
+    )
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
@@ -2973,9 +2977,15 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
         currseq = sequences[i]
-        row = aten.constant_pad_nd(
-            currseq, dim_paddings + (0, max_len - currseq.size(0)), padding_value
-        )
+        pad_amount = max_len - currseq.size(0)
+        if padding_side == "right":
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (0, pad_amount), padding_value
+            )
+        else:
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (pad_amount, 0), padding_value
+            )
         if batch_first:
             out = aten.select_scatter(out, row, dim=0, index=i)
         else:
