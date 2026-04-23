@@ -92,6 +92,54 @@ void PyAnomalyMetadata::assign_parent(
   }
 }
 
+std::vector<std::string> PyAnomalyMetadata::get_forward_traceback() {
+  std::vector<std::string> result;
+  pybind11::gil_scoped_acquire gil;
+
+  // Save/restore exception state to avoid interfering with pending exceptions.
+  // This runs from a CUDA allocator callback where a Python exception may
+  // already be pending.
+  PyObject* exc_type = nullptr;
+  PyObject* exc_value = nullptr;
+  PyObject* exc_tb = nullptr;
+  PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
+
+  PyObject* d = dict();
+  if (!d || !PyDict_Check(d)) {
+    PyErr_Restore(exc_type, exc_value, exc_tb);
+    return result;
+  }
+
+  PyObject* traceback = nullptr;
+  if (PyDict_GetItemStringRef(d, ANOMALY_TRACE_KEY, &traceback) < 0) {
+    PyErr_Clear();
+    PyErr_Restore(exc_type, exc_value, exc_tb);
+    return result;
+  }
+
+  if (!traceback || !PyList_Check(traceback)) {
+    Py_XDECREF(traceback);
+    PyErr_Restore(exc_type, exc_value, exc_tb);
+    return result;
+  }
+
+  Py_ssize_t size = PyList_Size(traceback);
+  result.reserve(size);
+  for (Py_ssize_t i = 0; i < size; ++i) {
+    PyObject* item = PyList_GetItem(traceback, i);
+    if (item && PyUnicode_Check(item)) {
+      const char* str = PyUnicode_AsUTF8(item);
+      if (str != nullptr) {
+        result.emplace_back(str);
+      }
+    }
+  }
+
+  Py_DECREF(traceback);
+  PyErr_Restore(exc_type, exc_value, exc_tb);
+  return result;
+}
+
 void _print_stack(
     PyObject* stack,
     const std::string& current_node_name,
