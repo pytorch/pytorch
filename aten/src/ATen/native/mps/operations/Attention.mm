@@ -194,10 +194,13 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+  uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
   uint q_seq_stride = q_.stride(2);
+  uint k_batch_stride = k_.stride(0);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
+  uint v_batch_stride = v_.stride(0);
   uint v_head_stride = v_.stride(1);
   uint v_seq_stride = v_.stride(2);
 
@@ -235,7 +238,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
         mtl_setArgs<9>(
             computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<11>(computeEncoder, has_mask);
+      mtl_setArgs<11>(
+          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -273,10 +277,13 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
 
+  uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
   uint q_seq_stride = q_.stride(2);
+  uint k_batch_stride = k_.stride(0);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
+  uint v_batch_stride = v_.stride(0);
   uint v_head_stride = v_.stride(1);
   uint v_seq_stride = v_.stride(2);
 
@@ -324,7 +331,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
         uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
         mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<13>(computeEncoder, has_mask);
+      mtl_setArgs<13>(
+          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
@@ -515,19 +523,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     return sdpa_general_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 
-  // dispatch to the fast SDPA implementation
-  auto is_contiguous_or_head_seq_transposed = [](const Tensor& t) -> bool {
-    if (t.is_contiguous())
-      return true;
-    auto sizes = t.sizes();
-    auto strides = t.strides();
-    return (strides[3] == 1) && (strides[2] == sizes[3] * sizes[1]) && (strides[1] == sizes[3]) &&
-        (strides[0] == strides[2] * sizes[2]);
-  };
+  // Kernels load head-dim elements linearly, so stride(-1) == 1 is the only hard requirement
+  auto can_use_kernel_strides = [](const Tensor& t) -> bool { return t.stride(-1) == 1; };
 
-  Tensor q_contig = is_contiguous_or_head_seq_transposed(q_) ? q_ : q_.contiguous();
-  Tensor k_contig = k_.contiguous();
-  Tensor v_contig = v_.contiguous();
+  Tensor q_contig = can_use_kernel_strides(q_) ? q_ : q_.contiguous();
+  Tensor k_contig = can_use_kernel_strides(k_) ? k_ : k_.contiguous();
+  Tensor v_contig = can_use_kernel_strides(v_) ? v_ : v_.contiguous();
 
   // for short sequences, differentiate based on key sequence length
   if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
