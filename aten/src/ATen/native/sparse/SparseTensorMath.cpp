@@ -1526,7 +1526,7 @@ SparseTensor& _sspaddmm_out_cpu(
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
-  Tensor csr = coo_to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
+  Tensor csr = coo_to_csr(indices.const_data_ptr<int64_t>(), dim_i, nnz);
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;

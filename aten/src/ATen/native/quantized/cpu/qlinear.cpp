@@ -537,7 +537,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
         weight_scales_data[0],
         reinterpret_cast<const underlying_t*>(
             xnnp_weight.template data_ptr<scalar_t>()),
-        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()),
+        reinterpret_cast<const int32_t*>(qbias.const_data_ptr<c10::qint32>()),
         output_zero_point,
         output_scale,
         output_min,
@@ -676,7 +676,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         w_zero_points.data(),
         requantization_scales.data(),
         reinterpret_cast<uint8_t*>(qnnp_w_data),
-        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
+        reinterpret_cast<const int32_t*>(qbias.const_data_ptr<c10::qint32>()));
     packB = w.get();
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
       // On mobile, we release the original weight by resetting the intrusive_ptr.
@@ -733,7 +733,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       output_zero_point,
       output_min,
       output_max,
-      (uint8_t*)input_contig.data_ptr<c10::quint8>(),
+      (uint8_t*)input_contig.const_data_ptr<c10::quint8>(),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
