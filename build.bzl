@@ -186,6 +186,7 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
+    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
