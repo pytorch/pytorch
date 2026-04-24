@@ -957,10 +957,9 @@ class CommonTemplate:
         expected_num_triton_kernels = 1 if cooperative_reductions else 2
 
         # On SM100+, these reductions fit in a single persistent kernel.
-        reduction_numel = 259 * 311
         if (
             expected_num_triton_kernels == 2
-            and reduction_numel <= _get_no_split_threshold()
+            and view.numel() <= _get_no_split_threshold()
         ):
             expected_num_triton_kernels = 1
             expected_num_block_pointers = 0
