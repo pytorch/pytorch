@@ -5219,11 +5219,11 @@ class Scheduler:
                     # All fusion outputs are in ancestors of node1 and node2, thus
                     # cannot introduce new path:
                     #
-                    # 1. if output is neither descendent of node1 or node2, the
+                    # 1. if output is neither descendant of node1 or node2, the
                     #        output cannot introduce a path
-                    # 2. due to [can_fuse]: if WLOG output is descendent of node1, it cannot be
+                    # 2. due to [can_fuse]: if WLOG output is descendant of node1, it cannot be
                     #        on path(node1->node2), hence it cannot be ancestor of node2
-                    # 3. due to [acyclic]: if WLOG output is descendent of node1, it cannot be
+                    # 3. due to [acyclic]: if WLOG output is descendant of node1, it cannot be
                     #        ancestor of node1
                     return False
                 else:

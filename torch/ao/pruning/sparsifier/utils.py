@@ -69,7 +69,7 @@ def swap_module(
 
 def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> str | None:
     """
-    Returns the fqn for a module or None if module not a descendent of model.
+    Returns the fqn for a module or None if module not a descendant of model.
     """
     if module is model:
         return ""
