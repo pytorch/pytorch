@@ -9,10 +9,12 @@ This package is lazily initialized, so you can always import it, and use
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import threading
 import traceback
 import warnings
+from ctypes import byref, c_uint32, c_void_p, cast, pointer
 from functools import lru_cache
 from typing import Any, NewType, TYPE_CHECKING
 
@@ -47,6 +49,16 @@ _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 _cached_device_count: int | None = None
+
+
+@dataclasses.dataclass
+class _ZesDeviceInfo:
+    device_handle: c_void_p
+    subdevice_id: int | None = None
+    is_integrated: bool = False
+
+
+_cached_zes_device_infos: list[_ZesDeviceInfo] = []
 
 
 def _is_compiled() -> bool:
@@ -97,12 +109,14 @@ def _parse_visible_devices() -> list[int]:
     return visible_devices
 
 
-def _raw_device_count_zes(visible_mask: list[int]) -> int:
-    r"""Return the number of visible XPU devices via Level Zero Sysman.
+def _enum_zes_device_infos(visible_mask: list[int]) -> int:
+    r"""Enumerate visible XPU devices via Level Zero Sysman and cache their info.
 
     Enumerates devices from the first Level Zero Sysman driver and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
+    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
+    device ordinal.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -116,26 +130,26 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
     - **COMPOSITE**: sub-devices are hidden; the whole physical device
       counts as one.
 
-    Returns a negative value on initialization or enumeration failure.
+    Returns the visible device count, or a negative value on failure.
     """
-    from ctypes import byref, c_uint32, c_void_p, cast, pointer
-
     try:
         import pyzes  # type: ignore[import]
     except ImportError:
         return -1
 
-    def _zes_check(rc: int, msg: str) -> bool:
-        """Return True if the call failed (rc != 0) after issuing a warning."""
-        if rc != 0:
-            warnings.warn(msg, stacklevel=3)
-        return rc != 0
+    global _cached_zes_device_infos
 
-    if _zes_check(pyzes.zesInit(0), "Can't initialize Level Zero Sysman"):
+    def _zes_check_warn(rc: int, msg: str) -> bool:
+        """Return True if the call failed (rc != ZE_RESULT_SUCCESS) after issuing a warning."""
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            warnings.warn(msg, stacklevel=3)
+        return rc != pyzes.ZE_RESULT_SUCCESS
+
+    if _zes_check_warn(pyzes.zesInit(0), "Can't initialize Level Zero Sysman"):
         return -1
 
     driver_count = c_uint32(0)
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDriverGet(byref(driver_count), None),
         "Can't get Level Zero Sysman driver count",
     ):
@@ -144,21 +158,21 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
         return 0
 
     drivers = (pyzes.zes_driver_handle_t * driver_count.value)()
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDriverGet(byref(driver_count), drivers),
         "Can't get Level Zero Sysman driver handles",
     ):
         return -1
 
     device_count = c_uint32(0)
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDeviceGet(drivers[0], byref(device_count), None),
         "Can't get Level Zero Sysman device count",
     ):
         return -1
 
     devices = (pyzes.zes_device_handle_t * device_count.value)()
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDeviceGet(drivers[0], byref(device_count), devices),
         "Can't get Level Zero Sysman device handles",
     ):
@@ -166,9 +180,9 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
 
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
-    hierarchy = os.getenv("ZE_FLAT_DEVICE_HIERARCHY")
-    expose_sub_devices = hierarchy != "COMPOSITE"
+    expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
 
+    _cached_zes_device_infos.clear()
     visible = set(visible_mask)
     logical_index = 0
     num_igpu = 0
@@ -180,7 +194,7 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
         ext_props = pyzes.zes_device_ext_properties_t()
         ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
         props.pNext = cast(pointer(ext_props), c_void_p)
-        if _zes_check(
+        if _zes_check_warn(
             pyzes.zesDeviceGetProperties(device, byref(props)),
             "Can't get Level Zero Sysman device properties",
         ):
@@ -188,25 +202,37 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
 
         is_integrated = bool(ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED)
 
-        # Determine how many logical indices this physical device occupies.
-        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device separately;
-        # everything else (iGPU, non-tiled dGPU, COMPOSITE mode) counts as one.
-        num_slots = (
-            props.numSubdevices
-            if not is_integrated and props.numSubdevices > 0 and expose_sub_devices
-            else 1
-        )
+        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
+        # separate logical device; everything else counts as one slot.
+        tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
+        num_slots = props.numSubdevices if tiled else 1
 
-        for _ in range(num_slots):
+        for slot in range(num_slots):
             if logical_index in visible:
+                _cached_zes_device_infos.append(
+                    _ZesDeviceInfo(
+                        device_handle=device,
+                        subdevice_id=slot if tiled else None,
+                        is_integrated=is_integrated,
+                    )
+                )
                 if is_integrated:
                     num_igpu += 1
                 else:
                     num_dgpu += 1
             logical_index += 1
 
-    # Prefer dGPU count; fall back to iGPU count only when no dGPU is visible.
+    # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
+    if num_dgpu and num_igpu:
+        _cached_zes_device_infos = [
+            info for info in _cached_zes_device_infos if not info.is_integrated
+        ]
     return num_dgpu or num_igpu
+
+
+def _raw_device_count_zes(visible_mask: list[int]) -> int:
+    r"""Return the visible XPU device count via Level Zero Sysman, or negative on failure."""
+    return _enum_zes_device_infos(visible_mask)
 
 
 def _device_count_zes() -> int:

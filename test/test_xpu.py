@@ -324,6 +324,45 @@ print(f"{r1}, {r2}")
         x = torch.xpu.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_cached_zes_device_infos(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        test_script = """\
+import torch
+import os
+from torch.xpu import _cached_zes_device_infos, _parse_visible_devices, _enum_zes_device_infos
+
+def device_key(info):
+    return (info.device_handle.value, info.subdevice_id)
+
+# Enumerate both devices and snapshot their keys
+os.environ['ZE_AFFINITY_MASK'] = '0, 1'
+_enum_zes_device_infos(_parse_visible_devices())
+orig_keys = [device_key(info) for info in _cached_zes_device_infos]
+
+# Restrict to device 1 only; cached entry should match orig device 1
+os.environ['ZE_AFFINITY_MASK'] = '1'
+_enum_zes_device_infos(_parse_visible_devices())
+match1 = orig_keys[1] == device_key(_cached_zes_device_infos[0])
+
+# Restrict to device 0 only; cached entry should match orig device 0
+os.environ['ZE_AFFINITY_MASK'] = '0'
+_enum_zes_device_infos(_parse_visible_devices())
+match0 = orig_keys[0] == device_key(_cached_zes_device_infos[0])
+print(match1, match0)
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
+
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
     )
