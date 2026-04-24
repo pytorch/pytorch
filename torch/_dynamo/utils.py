@@ -2896,6 +2896,13 @@ set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
     method for method in frozenset.__dict__.values() if callable(method)
 }
+base_exception_methods = {
+    method for method in BaseException.__dict__.values() if callable(method)
+}
+exception_methods = {
+    method for method in Exception.__dict__.values() if callable(method)
+}
+
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}

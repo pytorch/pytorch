@@ -1236,7 +1236,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> None:
         tracer = self.inline_tracer
         try:
-            tracer._raise_exception_variable(exc)
+            tracer._raise_exception_variable(exc, set_context=True)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
