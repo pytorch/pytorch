@@ -1632,6 +1632,7 @@ def configure_extension_build() -> tuple[
     entry_points = {
         "console_scripts": [
             "torchrun = torch.distributed.run:main",
+            "torchmux = torch.distributed.torchmux:main",
         ],
         "torchrun.logs_specs": [
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
