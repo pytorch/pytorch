@@ -446,6 +446,7 @@ ROCM_EAGER_EQUIV_XFAILS = {
         "log_softmax": {fp32},
     },
     "inductor_default": {
+        "log1p": {fp32},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
