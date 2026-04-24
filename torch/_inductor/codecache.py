@@ -2252,7 +2252,7 @@ class AotCodeCompiler:
             specified_sub_dir.mkdir(exist_ok=True)
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
-        def _compile_consts(consts: bytes, platform: str) -> str:
+        def _compile_consts(consts: bytes | bytearray, platform: str) -> str:
             # Load from aot_inductor, and update the value on demand.
             use_asm_build: bool = config.aot_inductor.use_consts_asm_build
 
@@ -2288,7 +2288,7 @@ class AotCodeCompiler:
             is_zero_size_consts = len(consts) == 0
 
             def format_consts_to_gnu_asm(
-                consts: bytes,
+                consts: bytes | bytearray,
                 align_bytes: int,
                 symbol_prefix: str,
                 is_large_consts: bool,
@@ -2313,7 +2313,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -2503,36 +2503,14 @@ end
                 if name not in graph.folded_constants
             )
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
+            import ctypes
 
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
+            def _constant_nbytes(t: torch.Tensor) -> int:
                 if t.numel() == 0:
-                    return b""
-
+                    return 0
                 if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                # pyrefly: ignore [missing-attribute]
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+                    return torch.ops.mkldnn._nbytes(t)
+                return t.untyped_storage().nbytes()
 
             if (
                 config.aot_inductor.package_constants_in_so
@@ -2541,11 +2519,62 @@ end
                 with dynamo_timed(
                     "aoti_serialize_constants", log_pt2_compile_event=True
                 ):
-                    serialized_weights = b"".join(
-                        _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                    constant_names = [
+                        name
                         for name in graph.constants
                         if name not in graph.folded_constants
-                    )
+                    ]
+                    if constant_names:
+                        from concurrent.futures import ThreadPoolExecutor
+
+                        # Compute offsets up front so each worker can write into a
+                        # disjoint slice of a single pre-allocated buffer independently
+                        offsets: list[int] = []
+                        sizes: list[int] = []
+                        total_size = 0
+                        for name in constant_names:
+                            t = graph.get_original_value_of_constant(name)
+                            n = _constant_nbytes(t)
+                            offsets.append(total_size)
+                            sizes.append(n)
+                            total_size += (
+                                n
+                                if all_cuda
+                                else (n + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES
+                            )
+
+                        serialized_weights = bytearray(total_size)
+                        # Hold one persistent view so the bytearray can't be resized,
+                        # and cache the base address for pointer arithmetic.
+                        buf_view = (ctypes.c_ubyte * total_size).from_buffer(
+                            serialized_weights
+                        )
+                        base_addr = ctypes.addressof(buf_view)
+
+                        def _worker(i: int) -> None:
+                            n = sizes[i]
+                            if n == 0:
+                                return
+                            t = graph.get_original_value_of_constant(constant_names[i])
+                            if t.is_mkldnn:
+                                data_ptr = torch.ops.mkldnn.data_ptr(t)
+                                ctypes.memmove(base_addr + offsets[i], data_ptr, n)
+                            else:
+                                # Hold the CPU storage until memmove finishes —
+                                # otherwise it may be freed and data_ptr dangles.
+                                t_cpu = t.untyped_storage().cpu()
+                                ctypes.memmove(
+                                    base_addr + offsets[i], t_cpu.data_ptr(), n
+                                )
+
+                        with ThreadPoolExecutor() as pool:
+                            # Consume iterator to surface any worker exceptions.
+                            for _ in pool.map(_worker, range(len(constant_names))):
+                                pass
+
+                        del buf_view
+                    else:
+                        serialized_weights = b""
             else:
                 serialized_weights = b""
 
