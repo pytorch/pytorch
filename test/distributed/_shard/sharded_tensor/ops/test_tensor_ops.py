@@ -5,7 +5,10 @@ import copy
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend, 
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -13,10 +16,12 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     with_comms,
 )
 
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 backend = torch.distributed.get_default_backend_for_device(device_type)
+
 
 class TestTensorOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False, backend=backend)

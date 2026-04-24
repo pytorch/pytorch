@@ -5,7 +5,10 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend, 
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -17,6 +20,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
     generate_chunk_sharding_specs_for_test,
     generate_local_weight_sharding_params_for_test,
 )
+
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
@@ -94,9 +98,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
                 offsets[0] = 0
                 if include_last_offset:
                     offsets[-1] = input_size[0]
-                offsets = (
-                    torch.unique(offsets, sorted=True).contiguous().to(self.rank)
-                )
+                offsets = torch.unique(offsets, sorted=True).contiguous().to(self.rank)
 
         # If max_norm is set, we need to ensure that the renorm has been applied across
         # inputs from all ranks.

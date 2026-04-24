@@ -3,15 +3,17 @@ import copy
 import sys
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
-
+import torch.nn as nn
 from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -31,6 +33,7 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 BACKEND = dist.Backend.default_device_backend_map[device_type]
+
 
 # a simple collection of embedding bag implementation
 class CustomEmbeddingBagCollection(nn.Module):
@@ -169,7 +172,9 @@ class TestCustomSharder(ShardedTensorTestBase):
             }
         )
 
-        sharded_model = CustomEmbeddingBagCollection(10, 10, 8).to(f"{device_type}:{self.rank}")
+        sharded_model = CustomEmbeddingBagCollection(10, 10, 8).to(
+            f"{device_type}:{self.rank}"
+        )
 
         with self.assertRaisesRegex(
             KeyError, "path must not be empty for custom sharder!"
@@ -178,7 +183,9 @@ class TestCustomSharder(ShardedTensorTestBase):
             shard_module(sharded_model, sharding_plan)
 
         # test conflicted sharding plan
-        spec = ChunkShardingSpec(dim=0, placements=[f"rank:0/{device_type}:0", f"rank:1/{device_type}:1"])
+        spec = ChunkShardingSpec(
+            dim=0, placements=[f"rank:0/{device_type}:0", f"rank:1/{device_type}:1"]
+        )
         sharding_plan = ShardingPlan(
             plan={
                 "embedding_bags.embedding_bag_0.weight": spec,
