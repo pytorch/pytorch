@@ -525,7 +525,6 @@ if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu/detail)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
