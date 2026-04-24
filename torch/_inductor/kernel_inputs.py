@@ -223,7 +223,7 @@ class MMKernelInputs(KernelInputs):
         """
         super().__init__(input_nodes, scalars, out_dtype)
         # for mm, we need at least 2 nodes, and we need to know which nodes
-        # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
+        # are the main matrices e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
         assert len(self._input_nodes) >= 2, "Expected at least 2 input nodes"
 
