@@ -1563,6 +1563,7 @@ class DeviceCachingAllocator {
       cb(te);
     }
 
+    bool should_skip = skip_actions_list.count(action) > 0;
     if (record_history && !should_skip) {
       alloc_buffer.insertEntries(te);
     }
