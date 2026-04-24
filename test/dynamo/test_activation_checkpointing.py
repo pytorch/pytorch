@@ -2635,10 +2635,10 @@ def forward(self, arg0_1):
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
     detach_3_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
-    detach_5 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_5);  expand = detach_5 = None
-    detach_6 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
-    return (detach_6,)""",
+    detach_4 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_4);  expand = detach_4 = None
+    detach_5 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_5,)""",
         )
 
     def test_joint_graph_passes_permute_optimization(self):
@@ -2683,10 +2683,10 @@ def forward(self, arg0_1):
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
     detach_3_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
-    detach_5 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_5);  expand = detach_5 = None
-    detach_6 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
-    return (detach_6,)""",
+    detach_4 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_4);  expand = detach_4 = None
+    detach_5 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_5,)""",
         )
 
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
@@ -2912,6 +2912,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "require recomputation",
         ):
             self._compile_and_capture(TwoBackwards(), True, (x,))
+
+    def test_recomputed_nodes_have_autograd_backward_meta(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def simple_fwd_bwd(x):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(torch.matmul(a, a)),
+                x,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+            dx = _grad(loss, (x,))
+            return dx[0].detach()
+
+        _, gm = self._compile_and_capture(simple_fwd_bwd, True, (x,))
+
+        recomputed = [n for n in gm.graph.nodes if "_recomputed" in n.name]
+        self.assertTrue(len(recomputed) > 0, "Expected recomputed nodes")
+        for node in recomputed:
+            self.assertTrue(
+                node.meta.get("autograd_backward", False),
+                f"Recomputed node {node.name} should have autograd_backward=True",
+            )
 
 
 devices = ["cuda", "hpu"]

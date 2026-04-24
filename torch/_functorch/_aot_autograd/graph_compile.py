@@ -261,7 +261,9 @@ def aot_stage1_graph_capture(
                     remat_using_tags_for_fwd_loss_bwd_graph,
                 )
 
-                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
+                graph = remat_using_tags_for_fwd_loss_bwd_graph(
+                    graph, updated_flat_args
+                )
 
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
