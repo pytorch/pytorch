@@ -1532,6 +1532,86 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skip_on_cpu
+    def test_kv_order_invariance_padded_causal(self, device):
+        if device == "cuda" and not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("bf16 is required for this regression test")
+
+        batch_size = 1
+        q_heads = 16
+        kv_heads = 4
+        seq_len = 256
+        head_dim = 128
+        shared_prefix = 201
+        dtype = torch.bfloat16
+
+        def make_block_mask(real_q_len: int, separate_full_blocks: bool):
+            def padded_causal_mask(b, h, q, kv):
+                return (q < real_q_len) & (q >= kv)
+
+            return create_block_mask(
+                padded_causal_mask,
+                B=batch_size,
+                H=1,
+                Q_LEN=seq_len,
+                KV_LEN=seq_len,
+                device=device,
+                separate_full_blocks=separate_full_blocks,
+            )
+
+        q = torch.randn(
+            batch_size, q_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        k = torch.randn(
+            batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        v = torch.randn(
+            batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+
+        compiled_attention = torch.compile(
+            flex_attention,
+            fullgraph=True,
+        )
+        default_partial_block_mask = make_block_mask(shared_prefix, True)
+        default_full_block_mask = make_block_mask(seq_len, True)
+        self.assertEqual(default_partial_block_mask.kv_indices[0, 0, 1, :2], [0, 1])
+        self.assertEqual(default_partial_block_mask.full_kv_num_blocks[0, 0, 1], 0)
+        self.assertEqual(default_full_block_mask.kv_indices[0, 0, 1, :1], [1])
+        self.assertEqual(default_full_block_mask.full_kv_indices[0, 0, 1, :1], [0])
+
+        partial_block_mask = make_block_mask(shared_prefix, False)
+        full_block_mask = make_block_mask(seq_len, False)
+        self.assertEqual(partial_block_mask.kv_indices[0, 0, 1, :2], [0, 1])
+        self.assertIsNone(partial_block_mask.full_kv_num_blocks)
+        self.assertEqual(full_block_mask.kv_indices[0, 0, 1, :2], [0, 1])
+        self.assertIsNone(full_block_mask.full_kv_num_blocks)
+
+        out_partial = compiled_attention(
+            q,
+            k,
+            v,
+            score_mod=_identity,
+            block_mask=partial_block_mask,
+            enable_gqa=True,
+            kernel_options={"BACKEND": "TRITON"},
+        )
+        out_full = compiled_attention(
+            q,
+            k,
+            v,
+            score_mod=_identity,
+            block_mask=full_block_mask,
+            enable_gqa=True,
+            kernel_options={"BACKEND": "TRITON"},
+        )
+        self.assertTrue(
+            torch.equal(
+                out_partial[:, :, :shared_prefix], out_full[:, :, :shared_prefix]
+            )
+        )
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
