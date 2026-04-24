@@ -1430,6 +1430,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1437,7 +1438,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
