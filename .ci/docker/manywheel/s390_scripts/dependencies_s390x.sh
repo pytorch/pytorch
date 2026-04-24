@@ -10,6 +10,19 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+
+# install test dependencies:
+# - grpcio requires system openssl, bundled crypto fails to build
+retry dnf install -y \
+  hdf5-devel \
+  python3-h5py \
+  git
+
+retry env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
+
+# cmake-3.28.0 from pip for onnxruntime
+retry python3 -mpip install cmake==3.28.0
+
 # protobuf with fix from https://github.com/protocolbuffers/protobuf/pull/25363
 retry wget https://files.pythonhosted.org/packages/ba/25/7c72c307aafc96fa87062aa6291d9f7c94836e43214d43722e86037aac02/protobuf-6.33.5.tar.gz
 tar xzvf protobuf-6.33.5.tar.gz
