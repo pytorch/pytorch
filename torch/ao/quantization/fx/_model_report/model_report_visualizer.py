@@ -593,7 +593,7 @@ class ModelReportVisualizer:
             ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
-            >>> # modules in block1 of model each channel gets it's own line,
+            >>> # modules in block1 of model each channel gets its own line,
             >>> # and it's plotted across the in-order modules on the x-axis
         """
         # checks if we have matplotlib and let's user know to install it if don't
