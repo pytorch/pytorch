@@ -3816,7 +3816,12 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD -> RECORD, but _is_stopped -> True
+            # step 1 -> 2: RECORD -> RECORD per schedule, but _is_stopped
+            # -> True overrides to RECORD_AND_SAVE (two-step wind-down).
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            # step 2 -> 3: RECORD_AND_SAVE -> NONE, fires stop_trace +
+            # _trace_ready to save the collected data.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()

@@ -880,7 +880,6 @@ class profile(_KinetoProfile):
                 self.start_trace,
             ],
             (ProfilerAction.WARMUP, ProfilerAction.NONE): [
-                partial(warn, "Incorrect schedule: WARMUP followed by NONE"),
                 self.start_trace,
                 self.stop_trace,
             ],
@@ -979,7 +978,12 @@ class profile(_KinetoProfile):
                 "GPU activity collection was stopped early. "
                 f"Aborting profiling at step {self.step_num}."
             )
-            self.current_action = ProfilerAction.NONE
+            if prev_action == ProfilerAction.RECORD:
+                self.current_action = ProfilerAction.RECORD_AND_SAVE
+            else:
+                # WARMUP: nothing to save, go straight to NONE.
+                # RECORD_AND_SAVE: transition to NONE fires stop_trace + _trace_ready.
+                self.current_action = ProfilerAction.NONE
 
         self._transit_action(prev_action, self.current_action)
         if os.environ.get("KINETO_USE_DAEMON", "") or (
