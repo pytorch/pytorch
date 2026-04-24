@@ -314,7 +314,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
               index,
               DynamicArgType::ListOptionalTensorType,
               serialized_arg_val.size(),
-              list_item_types);
+              std::move(list_item_types));
         } else if (serialized_arg_type == "as_tensors") {
           dynamic_args.emplace_back(
               index, DynamicArgType::ListTensorType, serialized_arg_val.size());
