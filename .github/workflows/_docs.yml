@@ -92,7 +92,7 @@ jobs:
             # Let's try to figure out how this can be improved
             timeout-minutes: 360
           - docs_type: python
-            runner: ${{ inputs.runner_prefix }}linux.c7i.8xlarge
+            runner: ${{ inputs.runner_prefix }}linux.12xlarge
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 120
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
