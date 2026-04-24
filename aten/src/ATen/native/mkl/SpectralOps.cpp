@@ -255,8 +255,6 @@ T compute_fct(const Tensor& t, IntArrayRef dim, int64_t normalization) {
 } // anonymous namespace
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  TORCH_CHECK(!dim.empty(), "_fft_c2r: dim must not be empty");
-  check_fft_c2r_input(last_dim_size, self.size(dim.back()));
   auto in_sizes = self.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
@@ -527,8 +525,6 @@ static DimVector _sort_dims(const Tensor& self, IntArrayRef dim, bool exclude_la
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
   TORCH_CHECK(self.is_complex(), "Only supports complex dtypes, but found: ", self.scalar_type());
-  TORCH_CHECK(!dim.empty(), "_fft_c2r: dim must not be empty");
-  check_fft_c2r_input(last_dim_size, self.size(dim.back()));
   // NOTE: Multi-dimensional C2R transforms don't agree with numpy in cases
   // where the input isn't strictly Hermitian-symmetric. Instead, we use a
   // multi-dim C2C transform followed by a 1D C2R transform.
