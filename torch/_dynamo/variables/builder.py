@@ -3611,7 +3611,7 @@ def infer_subclass_type(value: T) -> type[T] | None:
         # Ordinarily, we would fakeify a tensor so that it can get dynamic
         # shapes and be computed on without triggering actual operations.
         # However, how can we fakeify a tensor subclass?  Ordinary
-        # inheritance (nor multiple inheritance) won't work work.
+        # inheritance (nor multiple inheritance) won't work.
         #
         # Instead, our plan is to *manually simulate* the tensor subclass
         # inheriting from a fake tensor with dynamo.  This means our

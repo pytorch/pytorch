@@ -172,7 +172,7 @@ class SideEffects:
         self.deferred_attr_mutations: dict[tuple[int, str], tuple[Any, Any]] = {}
 
     def ignore_mutations_on(self, var: VariableTracker) -> None:
-        """Mutations to this variable will be executed but not not tracked,
+        """Mutations to this variable will be executed but not tracked,
         typically used for temporary mutations that are later restored."""
         self.ignore_mutation_on_these_variables.add(var)
 
