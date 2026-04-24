@@ -1242,7 +1242,7 @@ class TestBinaryUfuncs(TestCase):
 
     def test_inplace_binary_op_overlapping_views_error_message(self, device):
         base = torch.ones((4, 4), dtype=torch.bool, device=device)
-        with self.assertRaisesRegex(RuntimeError, "overlapping views"):
+        with self.assertRaisesRegex(RuntimeError, r"clone\(\) one of the tensors"):
             base[:, 1:].bitwise_or_(base[:, :-1])
 
     def check_internal_mem_overlap(
