@@ -635,17 +635,20 @@ def _handle_call_function_node_with_lowering(
         _set_shape_types(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
         for i, output in enumerate(outputs):
-            output.name = f"{node.name}__{i}"
-            # Set the name of the producing node using the value name for correspondence
+            # Skip renaming values that were passed through rather than produced
+            # by this node's translation (e.g. aten.copy lowers to CastLike which
+            # returns its input when src and self share a dtype). Overwriting the
+            # name of an input/initializer breaks later initializer registration.
             producer = output.producer()
             if producer is not None:
+                output.name = f"{node.name}__{i}"
                 producer.name = f"node_{output.name}"
     else:
         _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
-        outputs.name = node.name
         producer = outputs.producer()
         if producer is not None:
+            outputs.name = node.name
             producer.name = f"node_{outputs.name}"
 
     for ir_node in onnx_nodes:

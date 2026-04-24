@@ -461,6 +461,30 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
                 args=(torch.rand((4, 3), dtype=torch.float32), torch.randn(4, 3)),
             )
 
+    def test_export_exported_program_with_buffer_inplace_copy(self):
+        # https://github.com/pytorch/pytorch/issues/178868
+        # aten.copy lowers via CastLike, which returns its input unchanged when
+        # src and self share a dtype. Previously the lowering handler then
+        # renamed the passthrough value, destroying the buffer placeholder's
+        # name and producing "Key 'b_prompt_feat' does not match the name of
+        # the value 'copy'" at initializer registration time.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("prompt_feat", torch.zeros(1, 4, 8))
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                out = torch.zeros(1, 4, 8)
+                out[:, :, :] = self.prompt_feat.to(x.device)
+                return self.linear(out + x)
+
+        x = torch.randn(1, 4, 8)
+        exported_program = torch.export.export(Model().eval(), (x,))
+        onnx_program = self.export(exported_program, (x,))
+        # capture_strategy is None when exporting an ExportedProgram directly.
+        onnx_testing.assert_onnx_program(onnx_program, strategy=None)
+
     def test_export_with_non_arg_name_with_container_type(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
