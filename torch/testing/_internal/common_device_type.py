@@ -337,6 +337,17 @@ class DeviceTypeTestBase(TestCase):
     # in the future.
     op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
+    # An optional skip mechanism built upon instantiate_device_type_tests(),
+    # designed to facilitate skipping either an entire class or specific test cases
+    # within a class.
+    #
+    # Format:
+    #   test_exclusions = {
+    #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
+    #       "TestClassB": "*",                    # Global: Skips the entire class
+    #   }
+    test_exclusions: ClassVar[dict[str, Collection[str]]]
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -345,21 +356,6 @@ class DeviceTypeTestBase(TestCase):
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
 
-    # Optional skip mechanism built on top of instantiate_device_type_tests()
-    # and DeviceTypeTestBase. A class-level configuration field
-    # (test_exclusions) is read during instantiation to skip tests.
-    #
-    # Format:
-    #   test_exclusions = {
-    #       "TestClassA": ["test_a", "test_b"],   # skip specific methods
-    #       "TestClassB": "*",                    # skip entire class
-    #   }
-    #
-    # Behavior:
-    #   - If a class is not listed, it is unaffected by this configuration.
-    #   - ["test_method", ...]: skip only the specified methods.
-    #   - "*": skip all tests from the class.
-    test_exclusions: ClassVar[dict[str, Collection[str]]]
 
     @property
     def precision(self):
