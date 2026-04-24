@@ -1679,7 +1679,7 @@ class GraphModule(torch.nn.Module):
                 torch.cuda.is_available() and torch.cuda.is_bf16_supported()
             ):
                 continue
-            elif device == "xpu" and not (
+            if device == "xpu" and not (
                 torch.xpu.is_available() and torch.xpu.is_bf16_supported()
             ):
                 continue
