@@ -73,16 +73,16 @@ struct InputBuffer {
   // The streams corresponding to the events above. This is only used to
   // check if more synchronization is needed or not.
   std::vector<std::optional<c10::Stream>> ready_streams;
-  // The overridden parent stream when the stale-capture override fires.
-  // Set by InputBuffer::add() at the moment a producer triggers the
-  // override (i.e. only when set_override_stale_capture_stream is true and
-  // a stale non-capturing consumer is detected against a capturing
-  // producer). Subsequent add() calls reuse this so all producers feeding
-  // this buffer converge on the overridden stream, and
-  // Engine::evaluate_function uses it as the parent stream for the node.
-  // When no override has fired this is nullopt and
-  // Engine::evaluate_function falls back to the node's func->stream().
-  std::optional<c10::Stream> opt_parent_stream;
+  // The consumer stream after the stale-capture override fires. Set by
+  // InputBuffer::add() the first time a producer triggers the override
+  // (i.e. only when set_override_stale_capture_stream is true and a stale
+  // non-capturing consumer is detected against a capturing producer).
+  // Subsequent add() calls reuse this so all producers feeding this buffer
+  // converge on the overridden stream, and Engine::evaluate_function uses
+  // it as the parent stream for the node. When no override has fired this
+  // is nullopt and Engine::evaluate_function falls back to the node's
+  // func->stream().
+  std::optional<c10::Stream> opt_overridden_consumer_stream;
 };
 
 } // namespace torch::autograd

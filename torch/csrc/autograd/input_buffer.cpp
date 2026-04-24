@@ -273,8 +273,8 @@ void InputBuffer::add(
   // consumer stream. Otherwise honor the caller-provided value, falling
   // back to the device's current stream.
   std::optional<c10::Stream> opt_consumer_stream;
-  if (opt_parent_stream.has_value()) {
-    opt_consumer_stream = opt_parent_stream;
+  if (opt_overridden_consumer_stream.has_value()) {
+    opt_consumer_stream = opt_overridden_consumer_stream;
   } else if (opt_consumer_stream_.has_value()) {
     opt_consumer_stream = opt_consumer_stream_;
   } else {
@@ -300,9 +300,9 @@ void InputBuffer::add(
         opt_consumer_stream, opt_producer_stream, fn->name());
     if (resolved != opt_consumer_stream) {
       // Override was applied. Cache so subsequent add() calls and
-      // Engine::evaluate_function consult the same parent stream.
+      // Engine::evaluate_function consult the same consumer stream.
       opt_consumer_stream = resolved;
-      opt_parent_stream = opt_consumer_stream;
+      opt_overridden_consumer_stream = opt_consumer_stream;
       stream_mismatch = false;
     }
   }

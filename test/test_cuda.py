@@ -2402,7 +2402,6 @@ torch.cuda.synchronize()
         s = torch.cuda.Stream()
         static_x = torch.ones(4, 32, device="cuda")
 
-        raised = False
         with torch.cuda.stream(s):
             static_loss = model(static_x).sum()
             static_loss.backward()
@@ -2411,14 +2410,13 @@ torch.cuda.synchronize()
             g = torch.cuda.CUDAGraph()
             g.capture_begin(capture_error_mode="relaxed")
             try:
-                static_loss = model(static_x).sum()
-                static_loss.backward()
-            except RuntimeError as e:
-                self.assertIn("stale reference to the default stream", str(e))
-                raised = True
+                with self.assertRaisesRegex(
+                    RuntimeError, "stale reference to the default stream"
+                ):
+                    static_loss = model(static_x).sum()
+                    static_loss.backward()
             finally:
                 g.capture_end()
-        self.assertTrue(raised, "Expected RuntimeError about stale default stream")
         torch.cuda.synchronize()
 
     @unittest.skipIf(
