@@ -207,49 +207,16 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   Tensor costs = at::empty({batch_size}, log_probs->options());
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // MIOpen reads these buffers from host memory unless large BAR makes
-  // device allocations directly host-accessible.
-  Tensor labels_host = targets_t;
-  Tensor labels_device;
-  Tensor label_lengths_device;
-  Tensor input_lengths_device;
-  int* labels_ptr = labels_host.data_ptr<int>();
-  int* label_lengths_ptr = target_lengths.data();
-  int* input_lengths_ptr = input_lengths.data();
-#if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
-  if (at::cuda::getCurrentDeviceProperties()->isLargeBar) {
-    labels_device = labels_host.to(Device(at::kCUDA), at::kInt);
-    label_lengths_device = at::empty(
-        {static_cast<int64_t>(target_lengths.size())},
-        at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-    input_lengths_device = at::empty(
-        {static_cast<int64_t>(input_lengths.size())},
-        at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-    C10_CUDA_CHECK(hipMemcpy(
-        label_lengths_device.data_ptr<int>(),
-        target_lengths.data(),
-        target_lengths.size() * sizeof(int),
-        hipMemcpyHostToDevice));
-    C10_CUDA_CHECK(hipMemcpy(
-        input_lengths_device.data_ptr<int>(),
-        input_lengths.data(),
-        input_lengths.size() * sizeof(int),
-        hipMemcpyHostToDevice));
-    labels_ptr = labels_device.data_ptr<int>();
-    label_lengths_ptr = label_lengths_device.data_ptr<int>();
-    input_lengths_ptr = input_lengths_device.data_ptr<int>();
-  }
-#endif
-
+  // MIOpen reads labels/lengths on the host.
   size_t workspace_size;
   (void)deterministic; // MIOpen only supports deterministic algorithm
   MIOPEN_CHECK(miopenGetCTCLossWorkspaceSize(
       handle,
       probs_desc,
       grads_desc,
-      labels_ptr,
-      label_lengths_ptr,
-      input_lengths_ptr,
+      targets_t.data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       MIOPEN_CTC_LOSS_ALGO_DETERMINISTIC,
       ctc_desc,
       &workspace_size));
@@ -260,9 +227,9 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       log_probs_t.data_ptr(),
-      labels_ptr,
-      label_lengths_ptr,
-      input_lengths_ptr,
+      targets_t.data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       costs.data_ptr(),
       grads_desc,
       grad.data_ptr(),
