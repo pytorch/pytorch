@@ -1,8 +1,8 @@
 #if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__)) && \
     defined(FBCODE_CAFFE2)
 
-#include <dlfcn.h>
 #include <c10/util/flat_hash_map.h>
+#include <dlfcn.h>
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <torch/csrc/profiler/unwind/sections.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
