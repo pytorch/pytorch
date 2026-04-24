@@ -1,0 +1,1 @@
+ValueError: Invalid shape for `swap`. Ref shape: (1,). Expected shape: (). Value shape: (1,).
