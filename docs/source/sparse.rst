@@ -311,6 +311,16 @@ You can accelerate the linear layers in your model if the weights are already se
 
 .. autofunction:: torch.sparse.semi_structured.to_sparse_semi_structured
 
+.. currentmodule:: torch.sparse.semi_structured
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    SparseSemiStructuredTensorCUSPARSELT
+    SparseSemiStructuredTensorCUTLASS
+
+.. currentmodule:: torch
 
 .. _sparse-coo-docs:
 

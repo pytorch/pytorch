@@ -498,6 +498,7 @@ def maxpool2d_check(typ: Any, module_instance: Any) -> TensorType:
 def maxpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
     """
     Given a MaxPool2D instance and a node check the following conditions:
+
     - Input size matches size 3 or 4
     - Current node type is consistent with the output type we will calculate
     - Input size matches output size and the last two dimensions of the output
