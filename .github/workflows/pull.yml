@@ -509,7 +509,7 @@ jobs:
   # ╠══════════════════════════════════════════════════════════════════════╣
 
   linux-jammy-xpu-n-py3_10-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ') }}
+    if: false  # DISABLED: XPU job disabled on pull
     name: linux-jammy-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
