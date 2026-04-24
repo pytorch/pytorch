@@ -260,7 +260,11 @@ def _test_qlinear_pt2e_fast_path_helper(error_conn=None):
                 y_ref = F.linear(x_ref, w_ref, b)
                 qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
 
-                assert qy_ref.dim() == qy_cpu.dim()
+                np.testing.assert_equal(
+                    qy_ref.dim(),
+                    qy_cpu.dim(),
+                    err_msg="Quantized qlinear pt2e output dims do not match.",
+                )
                 np.testing.assert_array_almost_equal(
                     qy_ref.int_repr().cpu().numpy(),
                     qy_cpu.cpu().numpy(),
@@ -345,8 +349,16 @@ def _test_qlinear_fp8_fast_path_helper(error_conn=None):
                 y_ref = F.linear(x_ref, w_ref, b)
                 y_ref = _quantize_fp8_for_process(y_ref, torch.tensor([y_scale]))
 
-                assert y_ref.dim() == qy.dim()
-                assert torch.equal(y_ref.float(), qy.float())
+                np.testing.assert_equal(
+                    y_ref.dim(),
+                    qy.dim(),
+                    err_msg="Quantized qlinear fp8 output dims do not match.",
+                )
+                np.testing.assert_equal(
+                    y_ref.float().cpu().numpy(),
+                    qy.float().cpu().numpy(),
+                    err_msg="Quantized qlinear fp8 outputs do not match.",
+                )
                 if torch.isnan(qy).any():
                     raise AssertionError("Output qy contains NaN values")
         if error_conn is not None:
