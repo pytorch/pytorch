@@ -232,7 +232,8 @@ struct gelu_functor {
   template <typename T>
   inline T operator()(const T x) {
     const float xf = float(x);
-    return static_cast<T>(0.5f * xf * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F)));
+    return static_cast<T>(
+        0.5f * xf * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F)));
   }
 };
 
