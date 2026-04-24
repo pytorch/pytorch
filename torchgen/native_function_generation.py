@@ -347,6 +347,8 @@ def generate_function(
     )
     if func.is_out_fn():
         tags.add("out")
+    if func.name.name.inplace:
+        tags.add("inplace")
 
     return (
         NativeFunction(

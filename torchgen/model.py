@@ -759,6 +759,10 @@ class NativeFunction:
         if func.is_out_fn() and "out" in valid_tags:
             tags_inp.append("out")
 
+        # All inplace ops receive the "inplace" tag.
+        if func.name.name.inplace and "inplace" in valid_tags:
+            tags_inp.append("inplace")
+
         tags: set[str] = set()
         for t in tags_inp:
             if len(valid_tags) == 0:
