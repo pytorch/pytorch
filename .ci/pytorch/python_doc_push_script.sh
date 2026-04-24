@@ -155,6 +155,8 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
+  # Error out if credentials to push are missing
+  export GIT_TERMINAL_PROMPT=0
   # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
   git push -u origin HEAD^:pytorchbot/base -f
