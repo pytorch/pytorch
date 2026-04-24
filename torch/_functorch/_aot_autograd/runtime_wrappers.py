@@ -2319,6 +2319,7 @@ def _backward_prologue_functional(
     maybe_subclass_metadata: SubclassMeta | None,
     flat_args: Sequence[Any],
     codegen_unwrap_fn: Callable[..., Any] | None = None,
+    codegen_process_tangent_fn: Callable[..., Any] | None = None,
 ) -> list[Any]:
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -2515,25 +2516,34 @@ def _backward_prologue_functional(
             + unwrap(all_args[tangents_end_idx:])
         )
     else:
-        stack_traces = metadata.tangent_source_stack_traces or ()
-
-        all_args = [
-            (
-                AOTDispatchAutograd.process_runtime_tangent(
-                    t,
-                    metadata.subclass_tangent_meta[i - tangents_start_idx],
-                    tangent_idx=i - tangents_start_idx,
-                    tangent_desc=metadata.traced_tangents_descs[i - tangents_start_idx],
-                    compile_id_str=metadata.compile_id_str,
-                    tangent_stack_trace=(
-                        stack_traces[i - tangents_start_idx] if stack_traces else None
-                    ),
-                )[0]
-                if (tangents_start_idx <= i < tangents_end_idx)
-                else t
+        if codegen_process_tangent_fn is not None:
+            all_args = codegen_process_tangent_fn(
+                all_args, tangents_start_idx, tangents_end_idx
             )
-            for i, t in enumerate(all_args)
-        ]
+        else:
+            stack_traces = metadata.tangent_source_stack_traces or ()
+
+            all_args = [
+                (
+                    AOTDispatchAutograd.process_runtime_tangent(
+                        t,
+                        metadata.subclass_tangent_meta[i - tangents_start_idx],
+                        tangent_idx=i - tangents_start_idx,
+                        tangent_desc=metadata.traced_tangents_descs[
+                            i - tangents_start_idx
+                        ],
+                        compile_id_str=metadata.compile_id_str,
+                        tangent_stack_trace=(
+                            stack_traces[i - tangents_start_idx]
+                            if stack_traces
+                            else None
+                        ),
+                    )[0]
+                    if (tangents_start_idx <= i < tangents_end_idx)
+                    else t
+                )
+                for i, t in enumerate(all_args)
+            ]
 
     # Backward with forward inputs mutations is not supported in double backward.
     if (
@@ -3150,12 +3160,54 @@ class _AOTDispatchAutogradFunctionFactory:
 
         _codegen_bw_unwrap_fn = None
         _codegen_bw_wrap_fn = None
+        _codegen_process_tangent_fn = None
         if maybe_subclass_meta is not None:
             from .subclass_codegen import codegen_backward_subclass_fns
 
             _codegen_bw_unwrap_fn, _codegen_bw_wrap_fn = codegen_backward_subclass_fns(
                 grad_input_metas=maybe_subclass_meta.grad_input_metas,
             )
+
+        # Codegen tangent processing: for the non-subclass case, generate
+        # straight-line per-tangent coercion with baked-in memory formats.
+        if maybe_subclass_meta is None and fw_metadata.subclass_tangent_meta:
+            from .subclass_codegen import _compile_and_exec_source
+
+            tangent_metas = fw_metadata.subclass_tangent_meta
+            all_plain = all(isinstance(m, PlainTensorMeta) for m in tangent_metas)
+            if all_plain:
+                pt_lines = ["def _process_tangents(_coerce_, all_args, start, end):"]
+                pt_globals: dict[str, object] = {
+                    "torch": torch,
+                }
+                pt_lines.append("    result = list(all_args[:start])")
+                for i, meta in enumerate(tangent_metas):
+                    fmt_name = f"_fmt_{i}"
+                    pt_globals[fmt_name] = meta.memory_format
+                    pt_lines.append(f"    _t{i} = all_args[start + {i}]")
+                    pt_lines.append(
+                        f"    if isinstance(_t{i}, torch.Tensor): "
+                        f"_t{i} = _coerce_(_t{i}, {fmt_name})"
+                    )
+                    pt_lines.append(f"    result.append(_t{i})")
+                pt_lines.append("    result.extend(all_args[end:])")
+                pt_lines.append("    return result")
+                pt_source = "\n".join(pt_lines)
+
+                _codegen_pt_fn = _compile_and_exec_source(
+                    pt_source,
+                    pt_globals,
+                    "_process_tangents",
+                    "process_tangents",
+                )
+                _coerce_fn = coerce_to_expected_memory_format
+
+                def _codegen_process_tangent_fn(
+                    all_args: list[Any],
+                    start: int,
+                    end: int,
+                ) -> list[Any]:
+                    return _codegen_pt_fn(_coerce_fn, all_args, start, end)  # type: ignore[return-value]
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
@@ -3269,6 +3321,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
             _bw_prologue_unwrap_fn = _codegen_bw_unwrap_fn
+            _bw_process_tangent_fn = _codegen_process_tangent_fn
             boxed_grads_call = True
 
             @staticmethod
@@ -3334,6 +3387,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction.maybe_subclass_metadata,
                     grad_args,
                     codegen_unwrap_fn=CompiledFunction._bw_prologue_unwrap_fn,
+                    codegen_process_tangent_fn=CompiledFunction._bw_process_tangent_fn,
                 )
                 rng_state.add_backward_args(ctx, all_args)
 

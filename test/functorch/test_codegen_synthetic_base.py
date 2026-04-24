@@ -85,7 +85,7 @@ class TestCodegenSyntheticBase(TestCase):
                 return a + b
 
             x = torch.randn(4)
-            out = f(x.view(-1), x.view(-1))
+            f(x.view(-1), x.view(-1))
 
         self.assertEqual(len(captured), 1)
 
@@ -131,7 +131,7 @@ class TestCodegenSyntheticBase(TestCase):
             a = x.view(2, 2)
             b = x.view(2, 2)
             compiled_f = aot_function(f, nop)
-            out = compiled_f(a, b)
+            compiled_f(a, b)
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
