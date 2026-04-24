@@ -280,6 +280,19 @@ class TracerBase:
         log.debug("create_node %s", node)
         return node
 
+    _INTERNAL_PT_FILES: list[str] = [
+        "torch/fx/proxy.py",
+        "torch/fx/_symbolic_trace.py",
+        "torch/fx/experimental/proxy_tensor.py",
+        "torch/_ops.py",
+        "torch/_tensor.py",
+        "torch/utils/_python_dispatch.py",
+        "torch/_prims_common/wrappers.py",
+        "torch/_refs/__init__.py",
+        "torch/_refs/nn/functional/__init__.py",
+        "torch/utils/_stats.py",
+    ]
+
     def _filter_traceback_frames(
         self, user_stack_summary: traceback.StackSummary
     ) -> traceback.StackSummary:
@@ -296,6 +309,11 @@ class TracerBase:
                 )
             ]
         else:
+            # Filter out internal PyTorch frames from the end of the stack.
+            # The stack summary is ordered oldest-frame-first, so the most
+            # recent frames (the ones closest to user code) are at the end.
+            # We walk backwards to find the first non-internal frame relative
+            # to the top of the stack.
             first_forward = -1
             for i, frame in enumerate(user_stack_summary):
                 if frame.name == "forward":
@@ -303,10 +321,25 @@ class TracerBase:
                     first_forward = i
                     break
 
-            # Not having a "forward" call in the stacktrace implies the
-            # stacktrace will probably be irrelevant
+            # If no "forward" frame found, strip internal PyTorch frames
+            # from the end (most recent) of the traceback to recover user
+            # frames.  This matches the old _find_user_frame approach that
+            # walked the callstack until it hit the first non-PyTorch frame.
             if first_forward == -1:
-                user_frames: list[traceback.FrameSummary] = []
+                # Walk backwards: exclude frames from known internal files
+                # at the end of the traceback.
+                end = len(user_stack_summary)
+                for i in range(len(user_stack_summary) - 1, -1, -1):
+                    frame = user_stack_summary[i]
+                    is_internal = any(
+                        frame.filename.endswith(pt_file)
+                        for pt_file in self._INTERNAL_PT_FILES
+                    )
+                    if is_internal:
+                        end = i
+                    else:
+                        break
+                user_frames = user_stack_summary[:end]
 
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
 
