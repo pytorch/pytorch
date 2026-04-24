@@ -45,6 +45,7 @@ from torch._library.opaque_object import (
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
@@ -53,6 +54,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._import_utils import import_dill
 
 
 class Color(OpaqueBase):
@@ -3973,6 +3975,46 @@ class GraphModule(torch.nn.Module):
             0,
             "Forward graph should have opaque placeholder nodes",
         )
+
+    def test_hoisted_opaque_with_graphpickler(self):
+        if import_dill() is None:
+            self.skipTest("dill not available")
+
+        backend = EagerAndRecordGraphs()
+
+        def fn(x):
+            return torch.ops.mylib.op_with_string(x, HoistedString("double"))
+
+        compiled = torch.compile(fn, fullgraph=True, backend=backend)
+        compiled(torch.randn(3, 4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        captured_gm = backend.graphs[0]
+
+        placeholders = [n for n in captured_gm.graph.nodes if n.op == "placeholder"]
+        opaque_ph = None
+        for ph in placeholders:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                opaque_ph = ph
+                break
+        self.assertIsNotNone(opaque_ph, "no placeholder with FakeScriptObject found")
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        options = Options(ops_filter=None, node_metadata_key_filter=None)
+        data = GraphPickler.dumps(captured_gm, options)
+        restored_gm = GraphPickler.loads(data, fake_mode)
+
+        restored_phs = [n for n in restored_gm.graph.nodes if n.op == "placeholder"]
+        restored_opaque = None
+        for ph in restored_phs:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                restored_opaque = ph
+                break
+        restored_real = restored_opaque.meta["example_value"].real_obj
+        self.assertIsInstance(restored_real, HoistedString)
+        self.assertEqual(restored_real.val, "double")
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
