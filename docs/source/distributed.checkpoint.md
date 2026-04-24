@@ -116,6 +116,23 @@ The following types define the IO interface used during checkpoint:
   :members:
 ```
 
+The following types define the metadata used during checkpoint:
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.StorageMeta
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.TensorProperties
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.TensorStorageMetadata
+  :members:
+```
+
 The following types define the planner interface used during checkpoint:
 
 ```{eval-rst}
@@ -153,7 +170,27 @@ The following types define the planner interface used during checkpoint:
   :members:
 ```
 
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.planner.TensorWriteData
+  :members:
+```
+
 We provide a filesystem based storage layer:
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystemBase
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystem
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.filesystem.SerializationFormat
+  :members:
+```
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.FileSystemReader

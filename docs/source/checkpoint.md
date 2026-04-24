@@ -39,4 +39,5 @@ output compared to non-checkpointed passes is never guaranteed.
 .. autoclass:: CheckpointPolicy
 .. autoclass:: SelectiveCheckpointContext
 .. autofunction:: create_selective_checkpoint_contexts
+.. autoclass:: GraphExecGroup
 ```

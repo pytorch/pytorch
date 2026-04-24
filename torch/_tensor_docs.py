@@ -3669,7 +3669,7 @@ Keyword args:
         than the total number of non-zero elements. Default is `-1` to represent
         invalid index.
 
-Example:
+Example::
 
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])

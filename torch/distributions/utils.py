@@ -28,10 +28,11 @@ def broadcast_all(*values: Tensor | Number) -> tuple[Tensor, ...]:
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
-      - Number instances (scalars) are upcast to tensors having
-        the same size and type as the first tensor passed to `values`.  If all the
-        values are scalars, then they are upcasted to scalar Tensors.
+
+    - `torch.*Tensor` instances are broadcasted as per :ref:`broadcasting-semantics`.
+    - Number instances (scalars) are upcast to tensors having
+      the same size and type as the first tensor passed to `values`.  If all the
+      values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
         values (list of `Number`, `torch.*Tensor` or objects implementing __torch_function__)

@@ -260,6 +260,10 @@ autosummary_filename_map = {
 coverage_ignore_functions = [
     "main",  # utility script
     "run",  # utility script
+    # TorchVitals (C++ bindings still in torch._C, Python wrappers removed)
+    "read_vitals",
+    "set_vital",
+    "vitals_enabled",
     # torch.hub
     "import_module",
     # torch.jit.unsupported_tensor_ops
@@ -1920,6 +1924,8 @@ coverage_ignore_classes = [
     "PackagingErrorReason",
     # torch.package.package_importer
     "PackageImporter",
+    # torch.autograd.profiler_util
+    "EventMetadata",
     # torch.profiler.profiler
     "ExecutionTraceObserver",
     "profile",
@@ -2341,12 +2347,7 @@ def coverage_post_process(app, exception):
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
-    # Here, we make sure that no module is missing from that list
     modules = app.env.domaindata["py"]["modules"]
-
-    # We go through all the torch submodules and make sure they are
-    # properly tested
-    missing = set()
 
     def is_not_internal(modname):
         split_name = modname.split(".")
@@ -2354,6 +2355,61 @@ def coverage_post_process(app, exception):
             if name[0] == "_":
                 return False
         return True
+
+    # Sphinx's built-in coverage only catches items that pass
+    # inspect.isfunction() or inspect.isclass(), missing decorated/wrapped
+    # callables (e.g. @cache, @lru_cache, @deprecated). Cross-reference
+    # __all__ exports directly against the documented objects dict.
+    objects = app.env.domaindata["py"]["objects"]
+    ignore_names = set(app.config.coverage_ignore_functions) | set(
+        app.config.coverage_ignore_classes
+    )
+    # pybind11 objects from torch._C that are in __all__ but cannot be
+    # documented via autosummary: the first three have .str members that
+    # create ambiguous cross-references with Python's builtin str;
+    # unify_type_list has a C++ arglist Sphinx cannot parse.
+    ignore_names |= {"ErrorReport", "FutureType", "StreamObjType", "unify_type_list"}
+    undocumented = []
+    for mod_name in modules:
+        if not is_not_internal(mod_name):
+            continue
+        try:
+            mod = __import__(mod_name, fromlist=["__all__"])
+        except ImportError:
+            continue
+        for name in getattr(mod, "__all__", []):
+            if name.startswith("_") or name in ignore_names:
+                continue
+            full_name = f"{mod_name}.{name}"
+            obj = getattr(mod, name, None)
+            if obj is None or not callable(obj):
+                continue
+            if getattr(obj, "__module__", mod_name) != mod_name:
+                continue
+            if full_name in objects:
+                continue
+            # Check if documented under a parent module (e.g.
+            # torch.distributed.distributed_c10d.get_rank is documented
+            # as torch.distributed.get_rank via currentmodule).
+            parts = mod_name.split(".")
+            if any(
+                f"{'.'.join(parts[:i])}.{name}" in objects for i in range(1, len(parts))
+            ):
+                continue
+            undocumented.append(full_name)
+
+    if undocumented:
+        items = "\n".join(f"  - {u}" for u in sorted(undocumented))
+        print(
+            f"\nThe following public APIs are in __all__ but not documented:\n{items}\n"
+            "Either add them to the appropriate .rst/.md doc file or "
+            "remove from __all__."
+        )
+        sys.exit(1)
+
+    # We go through all the torch submodules and make sure they are
+    # properly documented
+    missing = set()
 
     # The walk function does not return the top module
     if "torch" not in modules:
