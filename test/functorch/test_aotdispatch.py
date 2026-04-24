@@ -6834,6 +6834,7 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
 
@@ -6920,6 +6921,7 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops_nested_tuple(self):
         """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
 
@@ -7279,6 +7281,220 @@ def forward(self, primals_1, tangents_1):
 
         result = wrapper([10, 20])
         self.assertIsNone(result)
+
+    # --- FunctionalizedRngRuntimeWrapper codegen tests ---
+
+    def _make_rng_wrapper_via_post_compile(
+        self, compiled_fn, *, return_new_outs=True, num_forward_returns=1
+    ):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            FunctionalizedRngRuntimeWrapper,
+        )
+
+        mock_meta = SimpleNamespace(
+            is_rng_op_functionalized=True,
+            num_forward_returns=num_forward_returns,
+            num_outputs_rng_offset=1,
+        )
+        mock_aot_config = SimpleNamespace()
+        return FunctionalizedRngRuntimeWrapper(
+            return_new_outs=return_new_outs
+        ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_emitted(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda")
+                f(x)
+
+        self.assertEqual(
+            len(captured),
+            1,
+            "Expected functionalized_rng_wrapper codegen artifact",
+        )
+        source = captured[0]
+        self.assertIn("_get_rng_state_", source)
+        self.assertIn("_set_offset_", source)
+
+    def test_functionalized_rng_no_codegen(self):
+        with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(
+            len(captured),
+            0,
+            "No codegen should be emitted when RNG is not functionalized",
+        )
+
+    def test_functionalized_rng_no_codegen_returns_same_fn(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            FunctionalizedRngRuntimeWrapper,
+        )
+
+        sentinel = lambda args: args  # noqa: E731
+        mock_meta = SimpleNamespace(
+            is_rng_op_functionalized=False,
+            num_forward_returns=1,
+        )
+        result = FunctionalizedRngRuntimeWrapper().post_compile(
+            sentinel, SimpleNamespace(), runtime_metadata=mock_meta
+        )
+        self.assertIs(result, sentinel)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(8, device="cuda")
+            out = f(x)
+
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.device, x.device)
+        self.assertTrue((out >= 0).all() and (out <= 1).all())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_multi_output(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                noise = torch.rand_like(x)
+                return x + noise, x * 2
+
+            x = torch.randn(4, device="cuda")
+            out1, out2 = f(x)
+
+        self.assertEqual(out2, x * 2)
+        self.assertEqual(out1.shape, x.shape)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_advances_state(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(100, device="cuda")
+            out1 = f(x)
+            out2 = f(x)
+
+        self.assertFalse(
+            torch.allclose(out1, out2),
+            "Successive calls should produce different random outputs",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_source_structure(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x)
+
+                f(torch.randn(4, device="cuda"))
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _functionalized_rng_wrapper", source)
+        self.assertIn("extend", source)
+        self.assertIn("outs[", source)
+
+    def test_functionalized_rng_codegen_unit_return_new_outs(self):
+        set_offset_log = []
+
+        def mock_get_rng_state():
+            return ("seed", "offset")
+
+        def mock_set_offset(val):
+            set_offset_log.append(val)
+
+        def mock_compiled_fn(args):
+            return [f"out_{i}" for i in range(len(args))]
+
+        from unittest.mock import patch as mock_patch
+
+        with (
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                mock_get_rng_state,
+            ),
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                mock_set_offset,
+            ),
+        ):
+            wrapper = self._make_rng_wrapper_via_post_compile(
+                mock_compiled_fn, return_new_outs=True, num_forward_returns=2
+            )
+            result = wrapper(["a", "b"])
+
+        self.assertEqual(set_offset_log, ["out_2"])
+        self.assertEqual(result, ["out_0", "out_1", "out_3"])
+
+    def test_functionalized_rng_codegen_unit_no_return_new_outs(self):
+        set_offset_log = []
+
+        def mock_get_rng_state():
+            return ("seed", "offset")
+
+        def mock_set_offset(val):
+            set_offset_log.append(val)
+
+        def mock_compiled_fn(args):
+            return [f"out_{i}" for i in range(len(args))]
+
+        from unittest.mock import patch as mock_patch
+
+        with (
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                mock_get_rng_state,
+            ),
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                mock_set_offset,
+            ),
+        ):
+            wrapper = self._make_rng_wrapper_via_post_compile(
+                mock_compiled_fn, return_new_outs=False, num_forward_returns=2
+            )
+            result = wrapper(["a", "b"])
+
+        self.assertEqual(set_offset_log, ["out_2"])
+        self.assertEqual(result, ["out_0", "out_1", "out_2", "out_3"])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_training(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x) * x
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+            self.assertEqual(out.shape, x.shape)
+            self.assertIsNotNone(x.grad)
+            self.assertEqual(x.grad.shape, x.shape)
 
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
