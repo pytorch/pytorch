@@ -207,6 +207,37 @@ class NbBoolTests(TestCase):
         with self.assertRaises(TypeError):
             torch.compile(fn, backend="eager")(torch.randn(4), BadBool())
 
+    def test_if_cond_user_defined_object_returns_self(self):
+        class MyObj:
+            def __bool__(self):
+                return self
+
+        def fn(a, obj):
+            if obj:
+                return a + 1
+            return a - 1
+
+        x = torch.rand(4)
+        compiled = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(
+            TypeError, "__bool__ should return bool, returned MyObj"
+        ):
+            compiled(x, MyObj())
+
+    def test_bool_user_defined_object_raises_typeerror(self):
+        class Baz(int):
+            def __bool__(self):
+                return self
+
+        @torch.compile(backend="eager")
+        def fn(obj):
+            return bool(obj)
+
+        with self.assertRaisesRegex(
+            TypeError, "__bool__ should return bool, returned Baz"
+        ):
+            fn(Baz())
+
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
 
     def test_metaclass_bool(self):
