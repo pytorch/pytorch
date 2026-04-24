@@ -19215,7 +19215,9 @@ if RUN_GPU:
                 if sm_major < 9 or sm_major >= 12:
                     self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
                 if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
-                    self.skipTest("cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
+                    self.skipTest(
+                        "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
+                    )
                 os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
             else:
                 os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
