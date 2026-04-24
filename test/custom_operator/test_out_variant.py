@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -49,6 +50,7 @@ _test_lib.impl(
 )
 
 
+@skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestOutVariant(TestCase):
     def setUp(self):
         self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: TOR901

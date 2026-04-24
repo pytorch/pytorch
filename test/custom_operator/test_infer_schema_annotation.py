@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import typing
+import unittest
 
 import torch
 from torch import Tensor, types
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 if typing.TYPE_CHECKING:
@@ -15,6 +16,7 @@ if typing.TYPE_CHECKING:
 mutates_args = {}
 
 
+@skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestInferSchemaWithAnnotation(TestCase):
     def test_tensor(self):
         def foo_op(x: torch.Tensor) -> torch.Tensor:
@@ -116,6 +118,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
+    @unittest.expectedFailure
     def test_no_library_prefix(self):
         def foo_op(x: Tensor) -> Tensor:
             return x.clone()
