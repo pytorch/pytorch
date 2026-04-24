@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUBlas.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
@@ -121,6 +122,25 @@ bool use_blas_gemm(
       (ldc >= std::max(int64_t{1}, m)));
 }
 C10_DIAGNOSTIC_POP()
+
+// Copy a column-major `rows` x `cols` submatrix from `src` (leading dim `src_ld`)
+// to `dst` (leading dim `dst_ld`), converting element type along the way.
+// Parallelized over columns; the inner (row) loop is unit-stride and thus
+// vectorizable (F16C on x86, FCVT on aarch64) when src_t/dst_t are the
+// half/float pair.
+template <typename src_t, typename dst_t>
+void convert_column_major(
+    int64_t rows, int64_t cols,
+    const src_t* src, int64_t src_ld,
+    dst_t* dst, int64_t dst_ld) {
+  at::parallel_for(0, cols, /*grain_size=*/1, [&](int64_t begin, int64_t end) {
+    for (const auto j : c10::irange(begin, end)) {
+      for (const auto i : c10::irange(rows)) {
+        dst[j * dst_ld + i] = c10::convert<dst_t>(src[j * src_ld + i]);
+      }
+    }
+  });
+}
 
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
@@ -407,20 +427,20 @@ void gemm(
    const float beta,
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if AT_MKLDNN_ENABLED()
    // Per https://github.com/pytorch/pytorch/pull/137918#discussion_r1825460179 ,
    // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
    // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default
    // because the avx512fp16 fma would incur accuracy loss".
-#if defined(__powerpc__)
+#if defined(__powerpc__) || defined(__s390x__)
    const bool fp16_gemv_trans_would_be_faster = false;
 #else
    const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
      cpuinfo_has_x86_f16c();
 #endif
-   const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
+   [[maybe_unused]] const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#if AT_MKLDNN_ENABLED()
    if (!use_fp16_gemv_trans &&
        mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
@@ -452,6 +472,36 @@ void gemm(
         }
       }
       return;
+   }
+#endif
+#if AT_BUILD_WITH_BLAS()
+   // CPUs without AVX512_FP16/AMX_FP16 (e.g., pre-Sapphire-Rapids Xeon, client
+   // Intel, most AMD, older Arm) fall through to gemm_stub, whose naive scalar
+   // kernel is ~100x slower than SGEMM for non-trivial sizes (see #146508).
+   // Promoting the operands to FP32 and calling SGEMM is faster at the cost of
+   // ~(m*k + k*n + m*n) transient fp32 storage. Accuracy is strictly at least
+   // as good as the fp16-accumulation kernel we replace.
+   // Skip this path when fp16_gemv_trans applies: for n==1 (matrix-vector), the
+   // dedicated gemv kernel beats a full SGEMM even after conversion.
+   if (!use_fp16_gemv_trans &&
+       use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+     const int64_t a_rows = (transa == TransposeType::NoTranspose) ? m : k;
+     const int64_t a_cols = (transa == TransposeType::NoTranspose) ? k : m;
+     const int64_t b_rows = (transb == TransposeType::NoTranspose) ? k : n;
+     const int64_t b_cols = (transb == TransposeType::NoTranspose) ? n : k;
+     std::vector<float> a_fp32(a_rows * a_cols);
+     std::vector<float> b_fp32(b_rows * b_cols);
+     std::vector<float> c_fp32(m * n);
+     convert_column_major(a_rows, a_cols, a, lda, a_fp32.data(), a_rows);
+     convert_column_major(b_rows, b_cols, b, ldb, b_fp32.data(), b_rows);
+     if (beta != 0.0f) {
+       convert_column_major(m, n, c, ldc, c_fp32.data(), m);
+     }
+     gemm(transa, transb, m, n, k, alpha,
+          a_fp32.data(), a_rows, b_fp32.data(), b_rows,
+          beta, c_fp32.data(), m);
+     convert_column_major(m, n, c_fp32.data(), m, c, ldc);
+     return;
    }
 #endif
    gemm_stub(
@@ -530,6 +580,24 @@ void gemm(
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c, ldc_);
+    return;
+  }
+#endif
+#if AT_BUILD_WITH_BLAS()
+  // Mirror of the fp16->fp32 SGEMM fallback in the HH->H overload (see #146508).
+  // Output is already float, so no post-conversion is required.
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    const int64_t a_rows = (transa == TransposeType::NoTranspose) ? m : k;
+    const int64_t a_cols = (transa == TransposeType::NoTranspose) ? k : m;
+    const int64_t b_rows = (transb == TransposeType::NoTranspose) ? k : n;
+    const int64_t b_cols = (transb == TransposeType::NoTranspose) ? n : k;
+    std::vector<float> a_fp32(a_rows * a_cols);
+    std::vector<float> b_fp32(b_rows * b_cols);
+    convert_column_major(a_rows, a_cols, a, lda, a_fp32.data(), a_rows);
+    convert_column_major(b_rows, b_cols, b, ldb, b_fp32.data(), b_rows);
+    gemm(transa, transb, m, n, k, alpha,
+         a_fp32.data(), a_rows, b_fp32.data(), b_rows,
+         beta, c, ldc);
     return;
   }
 #endif
