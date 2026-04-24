@@ -513,7 +513,10 @@ class FunctionalTensorMode(TorchDispatchMode):
 
             if inductor_config.enable_auto_functionalized_v2 or (
                 isinstance(func, torch._ops.OpOverload)
-                and torch._library.utils.is_out(func)
+                and (
+                    torch._library.utils.is_out(func)
+                    or torch._library.utils.is_inplace(func)
+                )
             ):
                 return do_auto_functionalize_v2(self, func, args, kwargs)
             return do_auto_functionalize(self, func, args, kwargs)

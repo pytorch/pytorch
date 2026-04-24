@@ -464,6 +464,9 @@ def can_auto_functionalize(
             # Out ops have aliased returns (returns alias the mutable args).
             # This is fine because the mutable args are write-only output buffers.
             pass
+        elif torch._library.utils.is_inplace(op):
+            # Inplace ops have aliased returns (return aliases the first mutable arg).
+            pass
         else:
             # The returns of OpOverload must not alias anything
             for ret in schema.returns:
@@ -684,6 +687,10 @@ def do_auto_functionalize_v2(
         return _do_auto_functionalize_v2_for_out_operator(
             ctx, op, schema, normalized_kwargs
         )
+    if isinstance(op, OpOverload) and torch._library.utils.is_inplace(op):
+        return _do_auto_functionalize_v2_for_inplace_operator(
+            ctx, op, schema, normalized_kwargs
+        )
     return _do_auto_functionalize_v2_for_generic_mutable_operator(
         ctx, op, schema, normalized_kwargs
     )
@@ -734,6 +741,54 @@ def _do_auto_functionalize_v2_for_out_operator(
         ctx.sync(orig_arg)
 
     return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+
+
+def _do_auto_functionalize_v2_for_inplace_operator(
+    ctx: Any,
+    op: OpOverload,
+    schema: Any,
+    normalized_kwargs: dict[str, Any],
+) -> Any:
+    """Handle functionalization for inplace operators.
+
+    Inplace operators mutate their first positional argument (self) and return
+    it. Unlike out= operators (write-only), self is read by the operator, so
+    it must be passed as a base for clone analysis during reinplacing.
+    """
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
+
+    self_arg_name = mutable_args_names[0]
+    self_arg = normalized_kwargs[self_arg_name]
+
+    # self is both read and written; pass its base for clone analysis
+    base = self_arg if get_base(self_arg) is None else get_base(self_arg)
+
+    arg_to_base_index: dict[str, Any] = {self_arg_name: 0}
+    write_view_information_to_args(
+        mutable_args_names, mutable_args_types, normalized_kwargs, arg_to_base_index
+    )
+    del normalized_kwargs[self_arg_name]
+
+    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    all_bases_unwrapped = ctx.unwrap_tensors([base])
+    auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_bases_unwrapped)
+
+    with ctx.redispatch_to_next():
+        unwrapped_outs = auto_functionalized_v2(
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
+        )
+
+    # HOP returns (op_result, mutated_self_base).
+    # op_result aliases mutated_self_base (inplace semantics).
+    unwrapped_result = unwrapped_outs[0]
+    unwrapped_mutated_base = unwrapped_outs[1]
+
+    ctx.replace(base, unwrapped_mutated_base)
+    ctx.commit_update(base)
+    ctx.sync(base)
+
+    return ctx.wrap_tensors(unwrapped_result)  # type: ignore[arg-type]
 
 
 def _do_auto_functionalize_v2_for_generic_mutable_operator(
