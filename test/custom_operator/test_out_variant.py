@@ -28,7 +28,6 @@ def _add_out_impl(x: Tensor, y: Tensor, *, out: Tensor) -> Tensor:
 
 
 _test_lib.impl("add.out", _add_out_impl, "CompositeExplicitAutograd")
-_test_lib.impl("add.out", lambda x, y, *, out: out, "Meta")
 
 _test_lib.define(
     "add_mul.out(Tensor x, Tensor y, *, Tensor(a!) add_out, Tensor(b!) mul_out) -> (Tensor(a!), Tensor(b!))",
@@ -45,9 +44,6 @@ def _add_mul_out_impl(
 
 
 _test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
-_test_lib.impl(
-    "add_mul.out", lambda x, y, *, add_out, mul_out: (add_out, mul_out), "Meta"
-)
 
 
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
@@ -330,6 +326,7 @@ class TestOutVariant(TestCase):
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_compile_out(self, backend):
+        # Also exercises the auto-fake kernel path (no manual Meta kernel registered).
         def fn(x, y, out):
             return torch.ops._TestOutVariant.add.out(x, y, out=out)
 
@@ -388,6 +385,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_compile_multi_out(self, backend):
+        # Also exercises the auto-fake kernel path (no manual Meta kernel registered).
         def fn(x, y):
             # Out tensors have different dtype and stride to test that
             # per-tensor properties are handled correctly.
@@ -408,6 +406,52 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(mul_result, (x * y).to(torch.float64))
         self.assertEqual(mul_result.dtype, torch.float64)
         self.assertEqual(mul_result.stride(), (1, 3))
+
+    def test_auto_fake_kernel_single_out(self):
+        self.lib.define("auto_fake_single(Tensor x, Tensor y) -> Tensor")
+        self.lib.define(
+            "auto_fake_single.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=[torch.Tag.out],
+        )
+
+        def impl(x, y, *, out):
+            out.copy_(x + y)
+            return out
+
+        self.lib.impl("auto_fake_single.out", impl, "CompositeExplicitAutograd")
+
+        # No manual Meta kernel — the auto fake kernel should handle it.
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn(3, 4)
+            y = torch.randn(3, 4)
+            out = torch.empty(3, 4)
+            result = torch.ops._TestOutVariant.auto_fake_single.out(x, y, out=out)
+            self.assertIs(result, out)
+
+    def test_auto_fake_kernel_multi_out(self):
+        self.lib.define("auto_fake_multi(Tensor x, Tensor y) -> (Tensor, Tensor)")
+        self.lib.define(
+            "auto_fake_multi.out(Tensor x, Tensor y, *, Tensor(a!) add_out, Tensor(b!) mul_out) -> (Tensor(a!), Tensor(b!))",
+            tags=[torch.Tag.out],
+        )
+
+        def impl(x, y, *, add_out, mul_out):
+            add_out.copy_(x + y)
+            mul_out.copy_(x * y)
+            return add_out, mul_out
+
+        self.lib.impl("auto_fake_multi.out", impl, "CompositeExplicitAutograd")
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn(3, 4)
+            y = torch.randn(3, 4)
+            add_out = torch.empty(3, 4)
+            mul_out = torch.empty(3, 4)
+            r1, r2 = torch.ops._TestOutVariant.auto_fake_multi.out(
+                x, y, add_out=add_out, mul_out=mul_out
+            )
+            self.assertIs(r1, add_out)
+            self.assertIs(r2, mul_out)
 
 
 instantiate_parametrized_tests(TestOutVariant)
