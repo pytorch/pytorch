@@ -8960,7 +8960,7 @@ Expected a .* tangent but got a plain Tensor.""",
         hooks,
         symbolic_tracing=True,
         pre_compile_fn=None,
-        backend="inductor",
+        backend="aot_eager",
     ):
         ctx = torch.autograd.graph.saved_tensors_hooks
         torch._dynamo.reset()
