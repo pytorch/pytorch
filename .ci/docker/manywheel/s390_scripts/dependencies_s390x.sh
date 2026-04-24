@@ -20,8 +20,8 @@ retry dnf install -y \
 
 retry env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
 
-# cmake-3.28.0 from pip for onnxruntime
-retry python3 -mpip install cmake==3.28.0
+# cmake-3.28.4 from pip for onnxruntime
+retry python3 -mpip install cmake==3.28.4
 
 # protobuf with fix from https://github.com/protocolbuffers/protobuf/pull/25363
 retry wget https://files.pythonhosted.org/packages/ba/25/7c72c307aafc96fa87062aa6291d9f7c94836e43214d43722e86037aac02/protobuf-6.33.5.tar.gz
