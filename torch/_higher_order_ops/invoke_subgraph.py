@@ -571,6 +571,44 @@ def trace_joint_graph_as_bwd(
                     )(*joint_operands)
 
 
+def get_non_differentiable_indices(subgraph) -> list[int]:
+    """Inspect a subgraph's output node metadata to find outputs that
+    were non-differentiable (requires_grad=False) during Dynamo tracing.
+
+    This uses the example_value stored on each output node, which reflects
+    the correct requires_grad from the original tracing (where inner
+    autograd.Functions DID run and mark_non_differentiable was called).
+
+    InvokeSubgraphAutogradOp runs the subgraph under
+    _AutoDispatchBelowAutograd, which suppresses the autograd key.  Inner
+    autograd.Functions (e.g. FlexAttentionAutogradOp) therefore never call
+    mark_non_differentiable.  The outer autograd engine then sets
+    requires_grad=True on ALL outputs because the inputs require grad.
+    We use the Dynamo-traced example_value to restore the correct
+    non-differentiable status at the outer level.
+    """
+    if not isinstance(subgraph, torch.fx.GraphModule):
+        return []
+
+    output_nodes = [n for n in subgraph.graph.nodes if n.op == "output"]
+    if not output_nodes:
+        return []
+
+    output_args = output_nodes[0].args[0]
+    if not isinstance(output_args, (tuple, list)):
+        output_args = [output_args]
+
+    non_differentiable: list[int] = []
+    for out_idx, arg in enumerate(output_args):
+        if not isinstance(arg, torch.fx.Node):
+            continue
+        example = arg.meta.get("example_value")
+        if isinstance(example, torch.Tensor) and not example.requires_grad:
+            non_differentiable.append(out_idx)
+
+    return non_differentiable
+
+
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
     Saves the subgraph, i.e. original callable, in the forward method. And then
@@ -616,6 +654,19 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                         f"unexpected int output at index {idx}, not in indexes_with_symint"
                     )
 
+        # Propagate non-differentiable status from the inner subgraph.
+        # See get_non_differentiable_indices for details on why this is needed.
+        non_differentiable_indices = get_non_differentiable_indices(subgraph)
+        if non_differentiable_indices:
+            non_differentiable = [
+                out[i]
+                for i in non_differentiable_indices
+                if isinstance(out[i], torch.Tensor)
+            ]
+            if non_differentiable:
+                ctx.mark_non_differentiable(*non_differentiable)
+        ctx._non_differentiable_indices = non_differentiable_indices
+
         return out
 
     @staticmethod
@@ -632,14 +683,21 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
+        non_differentiable_indices = ctx._non_differentiable_indices
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                if idx not in output_metadata.indexes_with_symint:
+                if (
+                    idx not in output_metadata.indexes_with_symint
+                    and idx not in non_differentiable_indices
+                ):
                     raise AssertionError(
                         f"unexpected None grad_out at index {idx}, not in indexes_with_symint"
                     )
-            elif idx in output_metadata.indexes_with_no_grad:
+            elif (
+                idx in output_metadata.indexes_with_no_grad
+                or idx in non_differentiable_indices
+            ):
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
                 pass
