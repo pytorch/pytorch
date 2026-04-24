@@ -3252,7 +3252,7 @@ def meta_avg_pool3d(
     )
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
+        not divisor_override or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
@@ -3339,7 +3339,7 @@ def meta_avg_pool3d_backward(
     )
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
+        not divisor_override or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
