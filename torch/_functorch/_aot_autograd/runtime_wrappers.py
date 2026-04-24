@@ -1894,45 +1894,71 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             return compiled_fn
 
         is_inference = not self.trace_joint
+        aliased_arg_idx_with_metadata_mutations = (
+            self.aliased_arg_idx_with_metadata_mutations
+        )
+        num_aliased = len(aliased_arg_idx_with_metadata_mutations)
+
+        from .subclass_codegen import _compile_and_exec_source
+
+        lines = [
+            "def _synthetic_base_wrapper("
+            "_compiled_fn_, _merge_view_inputs_, _aot_config_, "
+            "_old_input_info_, args):"
+        ]
+        lines.append(
+            "    args_with_synthetic_bases, _, synthetic_base_info = "
+            "_merge_view_inputs_("
+            "_aot_config_, args, None, _old_input_info_, "
+            f"is_inference={is_inference!r})"
+        )
+        lines.append("    if synthetic_base_info is None:")
+        lines.append(
+            '        raise AssertionError("synthetic_base_info must not be None")'
+        )
+
+        if num_aliased > 0:
+            idx_str = ", ".join(
+                f"args[{i}]" for i in aliased_arg_idx_with_metadata_mutations
+            )
+            lines.append(f"    aliased_args = [{idx_str}]")
+
+        lines.append("    args.clear()")
+        lines.append("    outs = _compiled_fn_(args_with_synthetic_bases)")
+
+        if num_aliased > 0:
+            lines.append(f"    mutated_inps = outs[-{num_aliased}:]")
+            lines.append(f"    user_outs = outs[:-{num_aliased}]")
+            for i in range(num_aliased):
+                lines.append(
+                    f"    aliased_args[{i}].as_strided_("
+                    f"mutated_inps[{i}].size(), "
+                    f"mutated_inps[{i}].stride(), "
+                    f"mutated_inps[{i}].storage_offset())"
+                )
+            lines.append("    return user_outs")
+        else:
+            lines.append("    return outs")
+
+        source = "\n".join(lines)
+        _codegen_fn = _compile_and_exec_source(
+            source,
+            {},
+            "_synthetic_base_wrapper",
+            "synthetic_base_wrapper",
+        )
+        _inner_compiled_fn = compiled_fn
+        _old_input_info = self.old_input_info
 
         @wraps(compiled_fn)
         def wrapped_compiled_fn(args: list[Any]) -> Any:
-            # TODO: this sure seems expensive to run at runtime (which
-            # post_compile seems to imply it does?!)
-            args_with_synthetic_bases, _, synthetic_base_info = merge_view_inputs(
-                aot_config, args, None, self.old_input_info, is_inference=is_inference
+            return _codegen_fn(
+                _inner_compiled_fn,
+                merge_view_inputs,
+                aot_config,
+                _old_input_info,
+                args,
             )
-            if synthetic_base_info is None:
-                raise AssertionError("synthetic_base_info must not be None")
-            aliased_args_w_metadata_mutations = [
-                args[i] for i in self.aliased_arg_idx_with_metadata_mutations
-            ]
-            num_aliased_args_with_metadata_mutations = len(
-                aliased_args_w_metadata_mutations
-            )
-            args.clear()
-            outs = compiled_fn(args_with_synthetic_bases)
-            if num_aliased_args_with_metadata_mutations > 0:
-                # This code does not handle **all** input metadata mutations.
-                # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
-                # (which only happens if at least one aliased input experienced a data mutation).
-                # e.g:
-                # def f(a, b):
-                #     a.mul_(2)
-                #     b.t_(1, 0)
-                # f(x.view(2, 2), x.view(2, 2))
-                mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
-                user_outs = outs[:-num_aliased_args_with_metadata_mutations]
-                for inp, mutated_inp in zip(
-                    aliased_args_w_metadata_mutations, mutated_metadata_inps
-                ):
-                    inp.as_strided_(
-                        mutated_inp.size(),
-                        mutated_inp.stride(),
-                        mutated_inp.storage_offset(),
-                    )
-                return user_outs
-            return outs
 
         return wrapped_compiled_fn
 
