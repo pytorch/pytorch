@@ -314,7 +314,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: false
       python-version: "3.10"
     secrets: inherit
 
