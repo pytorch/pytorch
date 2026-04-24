@@ -1069,66 +1069,87 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
-        if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, args.inductor_compile_mode
-            )
-        elif args.export_nativert:
-            frozen_model_iter_fn = export_nativert(model, example_inputs)
-        elif args.torchscript_jit_trace:
-            frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
-        elif args.aot_precompile:
-            frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    if args.export_aot_inductor:
+        frozen_model_iter_fn = export_aot_inductor(
+            model, example_inputs, args.inductor_compile_mode
+        )
+    elif args.export_nativert:
+        frozen_model_iter_fn = export_nativert(model, example_inputs)
+    elif args.torchscript_jit_trace:
+        frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
+    elif args.aot_precompile:
+        frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    else:
+        if kwargs["hf_llm"]:
+            # If it's an llm, we want to optimize model.forward, and use
+            # the generate function
+            model.forward = torch._dynamo.run(model)
+            frozen_model_iter_fn = model_iter_fn
         else:
-            if kwargs["hf_llm"]:
-                # If it's an llm, we want to optimize model.forward, and use
-                # the generate function
-                model.forward = torch._dynamo.run(model)
-                frozen_model_iter_fn = model_iter_fn
-            else:
-                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
-        for rep in trange(args.repeat, desc="running benchmark"):
-            inputs = (
-                randomize_input(copy.deepcopy(example_inputs))
-                if should_randomize_input
-                else example_inputs
+    for rep in trange(args.repeat, desc="running benchmark"):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+        # need call mark_step to perform the computation
+        # on randomize_input. Otherwise the first call using the
+        # inputs will incur high penalty then the next one.
+        maybe_mark_step(args)
+
+        # interleave the runs to handle frequency scaling and load changes
+        with torch.compiler.set_stance("force_eager"):
+            timings[rep, 0], expected_output = timed(
+                model,
+                model_iter_fn,
+                inputs,
+                return_result=True,
+                times=times,
+                collect_outputs=args.collect_outputs,
+                batch_size=kwargs.get("batch_size"),
             )
-            # need call mark_step to perform the computation
-            # on randomize_input. Otherwise the first call using the
-            # inputs will incur high penalty then the next one.
-            maybe_mark_step(args)
 
-            # interleave the runs to handle frequency scaling and load changes
+        # call mark_step between the 2 calls to make the comparison fair.
+        maybe_mark_step(args)
+
+        timings[rep, 1], actual_output = timed(
+            model,
+            frozen_model_iter_fn,
+            inputs,
+            return_result=True,
+            times=times,
+            collect_outputs=args.collect_outputs,
+        )
+
+    # Collect profiler trace in a separate run so that profiler overhead
+    # does not pollute the wall-clock performance numbers above.
+    if args.export_profiler_trace:
+        inputs = example_inputs
+        with maybe_profile(True, **args.profile_details) as p:
             with (
                 maybe_mark_profile(p=p, mark="expected"),
                 torch.compiler.set_stance("force_eager"),
             ):
-                timings[rep, 0], expected_output = timed(
+                timed(
                     model,
                     model_iter_fn,
                     inputs,
-                    return_result=True,
+                    return_result=False,
                     times=times,
-                    collect_outputs=args.collect_outputs,
-                    batch_size=kwargs.get("batch_size"),
+                    collect_outputs=False,
                 )
-
-            # call mark_step between the 2 calls to make the comparison fair.
-            maybe_mark_step(args)
-
             with maybe_mark_profile(p=p, mark="actual"):
-                timings[rep, 1], actual_output = timed(
+                timed(
                     model,
                     frozen_model_iter_fn,
                     inputs,
-                    return_result=True,
+                    return_result=False,
                     times=times,
-                    collect_outputs=args.collect_outputs,
+                    collect_outputs=False,
                 )
 
-    if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
