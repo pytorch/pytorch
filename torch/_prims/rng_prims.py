@@ -394,26 +394,6 @@ def register_graphsafe_run_with_rng_state_op():
 graphsafe_run_with_rng_state = register_graphsafe_run_with_rng_state_op()
 
 
-# Late-bind OpaqueBaseMeta as Generator's metaclass. This is done here
-# rather than in THPGenerator_init (C++) to avoid making torch._C depend
-# on torch._opaque_base at init time.
-from torch._opaque_base import OpaqueBaseMeta
-
-
-torch._C._set_generator_metaclass(OpaqueBaseMeta)
-
-torch._library.opaque_object.register_opaque_type(
-    torch._C.Generator,
-    typ="reference",
-    guard_fn=lambda gen: [gen.device],
-    members={
-        "device": torch._library.opaque_object.MemberType.USE_REAL,
-        "__eq__": torch._library.opaque_object.MemberType.USE_REAL,
-        "__ne__": torch._library.opaque_object.MemberType.USE_REAL,
-    },
-)
-
-
 def register_run_dtensor_rng_op():
     """
     Register a higher-order operator for DTensor distributed random operations.
