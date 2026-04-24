@@ -9,7 +9,7 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -347,18 +347,19 @@ class DeviceTypeTestBase(TestCase):
 
     # Optional skip mechanism built on top of instantiate_device_type_tests()
     # and DeviceTypeTestBase. A class-level configuration field
-    # (skipped_testcases) is read during instantiation to skip tests.
+    # (test_exclusions) is read during instantiation to skip tests.
     #
     # Format:
-    #   {
-    #       "<TestClassName>": ["test_method", ...] | ["*"]
+    #   test_exclusions = {
+    #       "TestClassA": ["test_a", "test_b"],   # skip specific methods
+    #       "TestClassB": "*",                    # skip entire class
     #   }
     #
     # Behavior:
     #   - If a class is not listed, it is unaffected by this configuration.
     #   - ["test_method", ...]: skip only the specified methods.
-    #   - ["*"]: skip all tests from the class.
-    skipped_testcases: ClassVar[dict[str, Sequence[str]]]
+    #   - "*": skip all tests from the class.
+    test_exclusions: ClassVar[dict[str, Collection[str]]]
 
     @property
     def precision(self):
@@ -404,10 +405,10 @@ class DeviceTypeTestBase(TestCase):
         return cls.device_type
 
     @classmethod
-    def get_skipped_testcases(cls, test_class_name):
-        skipped_testcases = getattr(cls, "skipped_testcases", None)
-        if skipped_testcases is not None and test_class_name in skipped_testcases:
-            return skipped_testcases[test_class_name]
+    def _get_test_exclusions(cls, test_class_name):
+        test_exclusions = getattr(cls, "test_exclusions", None)
+        if test_exclusions is not None and test_class_name in test_exclusions:
+            return test_exclusions[test_class_name]
         return []
 
     @classmethod
@@ -968,7 +969,7 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
-        skipped = base.get_skipped_testcases(generic_test_class.__name__)
+        skipped = base._get_test_exclusions(generic_test_class.__name__)
         # Skip the entire class
         if "*" in skipped:
             continue

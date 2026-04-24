@@ -5,7 +5,6 @@ from collections import defaultdict
 
 import torch
 from torch.testing._internal.common_device_type import (
-    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
@@ -145,65 +144,50 @@ PrivateUse1TestBase.op_overrides = {
     "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
 }
 
-instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
-class TestSkippedTestcases(TestCase):
-    """Covers skipped_testcases lookup and instantiation-time skip behavior."""
 
-    def test_missing_config(self):
-        class NoSkippedConfig(DeviceTypeTestBase):
-            device_type = "dummy"
+class TestSkippedSpecificTestCases(TestCase):
 
-        self.assertEqual(NoSkippedConfig.get_skipped_testcases("AnyTest"), [])
+    executed_count = 0
 
-    def test_configured_mapping(self):
-        class WithSkippedConfig(DeviceTypeTestBase):
-            device_type = "dummy"
-            skipped_testcases = {"SomeTest": ["test_one"]}
-
-        self.assertEqual(
-            WithSkippedConfig.get_skipped_testcases("SomeTest"), ["test_one"]
-        )
-
-    def test_method_skip(self):
-        backend_name = torch._C._get_privateuse1_backend_name()
-        generated_cls = globals()["TestSkippedMethodInstantiationOPENREG"]
-        # The unskipped method is still materialized under the backend-specific
-        # test name, while the configured skipped method is never added.
-        self.assertTrue(hasattr(generated_cls, f"test_runs_{backend_name}"))
-        self.assertFalse(hasattr(generated_cls, f"test_skipped_{backend_name}"))
-
-    def test_class_skip(self):
-        self.assertNotIn("TestSkippedClassInstantiationPRIVATEUSE1", globals())
-
-
-class TestSkippedMethodInstantiation(TestCase):
     def test_runs(self, device):
+        type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
     def test_skipped(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
         self.fail("This test should not be instantiated for openreg")
 
+    def test_vaildate_execution(self, device):
+        expected_runs = 1
+        actual_runs = type(self).executed_count
+        self.assertEqual(
+            actual_runs,
+            expected_runs,
+            f"Skip logic failed! "
+            f"Expected {expected_runs} tests to run, "
+            f"but {actual_runs} executed.",
+        )
 
-class TestSkippedClassInstantiation(TestCase):
+class TestSkippedWholeTestClass(TestCase):
     def test_skipped_class_member(self, device):
         self.fail("This class should not be instantiated for openreg")
 
 
 # PrivateUse1 can skip individual methods or an entire instantiated class.
-PrivateUse1TestBase.skipped_testcases = {
-    "TestSkippedMethodInstantiation": ["test_skipped"],
-    "TestSkippedClassInstantiation": ["*"],
+PrivateUse1TestBase.test_exclusions = {
+    "TestSkippedSpecificTestCases": ["test_skipped"],
+    "TestSkippedWholeTestClass": "*",
 }
 
+instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
 instantiate_device_type_tests(
     TestBypassDeviceRestrictions, globals(), only_for="openreg"
 )
 instantiate_device_type_tests(
-    TestSkippedMethodInstantiation, globals(), only_for="openreg"
+    TestSkippedSpecificTestCases, globals(), only_for="openreg"
 )
-instantiate_device_type_tests(
-    TestSkippedClassInstantiation, globals(), only_for="openreg"
-)
+instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
 if __name__ == "__main__":
     run_tests()
