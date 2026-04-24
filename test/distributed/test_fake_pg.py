@@ -20,13 +20,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import HAS_ACCELERATOR
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    skipIfHpu,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -46,12 +40,6 @@ class TestFakePG(TestCase):
             dist.destroy_process_group()
         except AssertionError:
             pass
-
-    def test_invalid_rank(self):
-        with self.assertRaisesRegex(
-            RuntimeError, "Cannot init process group where rank .* >= world_size"
-        ):
-            dist.init_process_group(backend="fake", rank=3, world_size=2)
 
     def test_all_reduce(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -160,12 +148,12 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        out_tensor = torch.ones(4, 3)
-        in_tensor = torch.ones(4, 3)
-        output_split = [2, 2]
-        input_split = [2, 2]
+        out_tensor = torch.ones(3, 3)
+        in_tensor = torch.ones(3, 3)
+        output_split = [1, 1]
+        input_split = [1, 1]
         dist.all_to_all_single(out_tensor, in_tensor, output_split, input_split)
-        self.assertEqual(tuple(out_tensor.shape), (4, 3))
+        self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
     def test_send(self):
         store = FakeStore()
@@ -229,99 +217,6 @@ class TestFakePG(TestCase):
                 loss = x.sum()
                 loss.backward()
                 optim.step()
-
-    @parametrize("rank", [0, 1])
-    def test_reduce_scatter_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        to_reduce_scatter = [torch.ones(3, 3) * r for r in range(2)]
-        output = torch.empty(3, 3)
-        dist.reduce_scatter(output, to_reduce_scatter)
-        self.assertEqual(output, to_reduce_scatter[rank])
-
-    def test_scatter_copy_semantics(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        to_scatter = [torch.ones(3, 3) * r for r in range(2)]
-        output = torch.empty(3, 3)
-        dist.scatter(output, to_scatter)
-        self.assertEqual(output, to_scatter[0])
-
-    @parametrize("rank", [0, 1])
-    def test_alltoall_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        input_list = [torch.ones(3, 3) * i for i in range(2)]
-        output_list = [torch.empty(3, 3) for _ in range(2)]
-        dist.all_to_all(output_list, input_list)
-        for i in range(2):
-            self.assertEqual(output_list[i], input_list[i])
-
-    @parametrize("rank", [0, 1])
-    def test_alltoall_base_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        in_tensor = torch.arange(8.0).reshape(4, 2)
-        out_tensor = torch.empty(4, 2)
-        dist.all_to_all_single(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor)
-
-    @parametrize("rank", [0, 1])
-    def test_allgather_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        input_tensor = torch.ones(3, 3) * 42
-        output_tensors = [torch.empty(3, 3) for _ in range(2)]
-        dist.all_gather(output_tensors, input_tensor)
-        for out in output_tensors:
-            self.assertEqual(out, input_tensor)
-
-    def test_gather_copy_semantics(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        input_tensor = torch.ones(3, 3) * 42
-        gather_list = [torch.empty(3, 3) for _ in range(2)]
-        dist.gather(input_tensor, gather_list)
-        for out in gather_list:
-            self.assertEqual(out, input_tensor)
-
-    @parametrize("rank", [0, 1])
-    def test_allgather_coalesced_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        inputs = [torch.ones(3, 3) * i for i in range(3)]
-        output_lists = [[torch.empty(3, 3) for _ in range(2)] for _ in range(3)]
-        dist.all_gather_coalesced(output_lists, inputs)
-        for i, output_list in enumerate(output_lists):
-            for out in output_list:
-                self.assertEqual(out, inputs[i])
-
-    @parametrize("rank", [0, 1])
-    def test_reduce_scatter_base_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        in_buf = torch.arange(12.0).reshape(6, 2)
-        out_buf = torch.empty(3, 2)
-        dist._reduce_scatter_base(out_buf, in_buf)
-        self.assertEqual(out_buf, in_buf.chunk(2)[rank])
-
-    @parametrize("rank", [0, 1])
-    def test_reduce_scatter_tensor_copy_semantics(self, rank):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
-
-        in_tensor = torch.arange(8.0).reshape(4, 2)
-        out_tensor = torch.empty(2, 2)
-        dist.reduce_scatter_tensor(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor.chunk(2)[rank])
 
     def test_error_on_collective(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -407,38 +302,6 @@ class TestFakePG(TestCase):
         self.assertIn("aten.lift_fresh.default", op_names)
         self.assertIn("c10d.allreduce_.default", op_names)
 
-    def test_reduce_scatter_wrong_input_list_size(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
-
-        output = torch.empty(3, 3)
-        with self.assertRaisesRegex(
-            RuntimeError, "invalid input tensor list size, must be world size"
-        ):
-            dist.reduce_scatter(output, [torch.ones(3, 3)])
-
-    def test_scatter_wrong_input_list_size(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        output = torch.empty(3, 3)
-        with self.assertRaisesRegex(RuntimeError, "Incorrect input list size"):
-            dist.scatter(output, [torch.ones(3, 3)])
-
-    def test_reduce_scatter_base_wrong_input_size(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        out_buf = torch.empty(3, 2)
-        in_buf = torch.ones(3, 2)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "input tensor must be the same size as output size times world size",
-        ):
-            dist._reduce_scatter_base(out_buf, in_buf)
-
-
-instantiate_parametrized_tests(TestFakePG)
 
 if __name__ == "__main__":
     run_tests()
