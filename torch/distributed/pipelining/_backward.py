@@ -281,6 +281,19 @@ def stage_backward_weight(
                     # pyrefly: ignore [bad-argument-type]
                     valid_grad_outputs.append(grad)
 
+        # prevent shared weights from double counting when
+        # intermediates are ancestor-descendant
+        handles = []
+        if len(param_group["intermediates"]) > 1:
+            for grads_tuple, intermediate in zip(
+                param_group["grads"], param_group["intermediates"]
+            ):
+                handles.append(
+                    intermediate.register_prehook(
+                        lambda grad_outputs, sg=grads_tuple: sg
+                    )
+                )
+
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook
         # The summarized cycle is:
         # `hook` -> cell -> param_group -> intermediates -> `hook`
@@ -307,6 +320,9 @@ def stage_backward_weight(
                     weight.grad = dw
                 else:
                     weight.grad += dw
+
+        for handle in handles:
+            handle.remove()
     # return grads in the original order weights were provided in
     return tuple(weight_grads)
 
