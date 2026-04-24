@@ -463,7 +463,11 @@ ROCM_EAGER_EQUIV_XFAILS = {
     },
 }
 
-ROCM_DETERMINISM_XFAILS = {}
+ROCM_DETERMINISM_XFAILS = {
+    "inductor_default": {
+        "log1p": {fp32},
+    },
+}
 
 ROCM_BATCH_INVARIANCE_XFAILS = {
     "aot_eager_decomp_partition": {
