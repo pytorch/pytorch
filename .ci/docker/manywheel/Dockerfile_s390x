@@ -99,11 +99,11 @@ COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/
 RUN alternatives --set python /usr/bin/python3.12
 RUN alternatives --set python3 /usr/bin/python3.12
 
-ENTRYPOINT []
-CMD ["/bin/bash"]
-
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
 COPY manywheel/s390_scripts/dependencies_s390x.sh dependencies_s390x.sh
 RUN bash ./dependencies_s390x.sh && rm dependencies_s390x.sh
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
