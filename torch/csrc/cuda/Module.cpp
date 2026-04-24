@@ -2393,7 +2393,7 @@ void initNvtxBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
-#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
+#if defined(USE_CUSPARSELT) || (defined(USE_ROCM) && ((HIP_VERSION_MAJOR > 7) || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 12)))
 void initCusparseltBindings(PyObject* module);
 #endif
 
@@ -2408,7 +2408,7 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
-#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
+#if defined(USE_CUSPARSELT) || (defined(USE_ROCM) && ((HIP_VERSION_MAJOR > 7) || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 12)))
   shared::initCusparseltBindings(module);
 #endif
   shared::initGdsBindings(module);
