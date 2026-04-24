@@ -396,8 +396,8 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();
-        auto tensor_metadata = build_tensor_metadata(metadata);
-        parameter_metadata_list.emplace_back(tensor_metadata, arg_idx);
+        parameter_metadata_list.emplace_back(
+            build_tensor_metadata(metadata), arg_idx);
       }
     }
 
