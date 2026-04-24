@@ -119,7 +119,9 @@ _thread_local = threading.local()
 def _should_save_cache(*compiled_fns: Callable[..., Any]) -> bool:
     if should_bundle_autograd_cache():
         return True
-    return all(hasattr(fn, "_fx_graph_cache_key") for fn in compiled_fns)
+    return all(
+        getattr(fn, "_fx_graph_cache_key", None) is not None for fn in compiled_fns
+    )
 
 
 @contextmanager
