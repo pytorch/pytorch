@@ -34,6 +34,7 @@ To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
+import os
 import sys
 import unittest
 
@@ -556,9 +557,10 @@ class TestOpInfoProperties(TestCase):
     ):
         """Run a test with expected failure handling.
 
-        Uses pytest.xfail for clear test output:
+        Uses pytest.xfail when running under pytest for clear test output:
         - If test is expected to fail and does fail: XFAIL (pytest.xfail called)
         - If test is expected to fail but passes: FAILED (strict xpass behavior)
+        - If test is expected to fail and does fail outside pytest: SKIPPED
         - If test is not expected to fail: runs normally (PASSED or FAILED)
 
         Args:
@@ -570,7 +572,10 @@ class TestOpInfoProperties(TestCase):
             try:
                 test_fn()
             except (AssertionError, RuntimeError):
-                pytest.xfail(f"Known failure: {op_name}/{backend}/{dtype}")
+                reason = f"Known failure: {op_name}/{backend}/{dtype}"
+                if "PYTEST_CURRENT_TEST" in os.environ:
+                    pytest.xfail(reason)
+                self.skipTest(reason)
             else:
                 self.fail(
                     f"XPASS: {op_name}/{backend}/{dtype} - remove from {test_type} xfails"
