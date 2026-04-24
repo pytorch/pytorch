@@ -30,7 +30,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex
-import torch._dynamo.test_case
 from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
