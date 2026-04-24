@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
 from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend, 
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
