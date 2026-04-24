@@ -1689,7 +1689,8 @@ class ListIteratorVariable(IteratorVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/listobject.c#L4110-L4133
         assert self.is_mutable()
         old_index = self.index
         if old_index >= len(self.items) or self.is_exhausted:
@@ -1764,17 +1765,6 @@ class RangeIteratorVariable(IteratorVariable):
         """Range iterators are their own iterator."""
         return self
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__next__":
-            return self.next_variable(tx)
-        return super().call_method(tx, name, args, kwargs)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -1783,7 +1773,8 @@ class RangeIteratorVariable(IteratorVariable):
             return VariableTracker.build(tx, hasattr(ri, name))
         return super().call_obj_hasattr(tx, name)
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1072-L1091
         if self.len <= 0:
             raise_observed_exception(StopIteration, tx)
 

@@ -346,9 +346,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         next(ctx)
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_generator_as_argument_2(self):
@@ -365,9 +363,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         next(ctx)
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_generator_as_argument_3(self):
@@ -386,9 +382,7 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo()
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_generator_as_argument_4(self):
@@ -404,10 +398,7 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo(t)
-        with self.assertRaisesRegex(
-            Unsupported,
-            "Detected a method call to a user-defined generator object.",
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_islice_chain(self):

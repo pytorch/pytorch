@@ -13,6 +13,8 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/python_numbers.h>
 
+#include <Python.h>
+
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
@@ -334,13 +336,28 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
   return slots;
 }
 
+// Helper function to check if a type has a specific method defined in its MRO
+static bool type_has_method(PyTypeObject* type, const char* method_name) {
+  // Check if the method is defined in the type or any of its base classes
+  return PyObject_HasAttrString((PyObject*)type, method_name);
+}
+
 int64_t get_pytype_slots(PyTypeObject* type) {
   int64_t slots = 0;
   if (PyType_GetSlot(type, Py_tp_hash) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_HASH));
-  if (PyType_GetSlot(type, Py_tp_iter) != nullptr)
+  // For tp_iter, only set the bit if __iter__ is actually defined in the type's
+  // MRO. CPython automatically fills tp_iter with a slot wrapper even if
+  // __iter__ is not defined.
+  if (PyType_GetSlot(type, Py_tp_iter) != nullptr &&
+      type_has_method(type, "__iter__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITER));
-  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr)
+  // For tp_iternext, only set the bit if __next__ is actually defined in the
+  // type's MRO. CPython automatically fills tp_iternext with a slot wrapper
+  // even if __next__ is not defined, so we need to check if the method is truly
+  // implemented.
+  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr &&
+      type_has_method(type, "__next__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITERNEXT));
   if (PyType_GetSlot(type, Py_tp_call) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_CALL));

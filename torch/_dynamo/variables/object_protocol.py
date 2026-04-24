@@ -147,6 +147,18 @@ def type_implements_tp_iter(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
 
 
+def type_implements_tp_iternext(obj_type: type) -> bool:
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
+
+
+def pyiter_check(obj_type: type) -> bool:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2891-L2897
+    # CPython checks if tp_iternext != _PyObject_NextNotImplemented
+    # Dynamo only sets the bit if __next__ is actually defined
+    return type_implements_tp_iternext(obj_type)
+
+
 def pysequence_check(obj_type: type) -> bool:
     """Implements PySequence_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1714-L1721
@@ -348,8 +360,27 @@ def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> Variable
     )
 
 
+def generic_iternext(
+    tx: "InstructionTranslator", obj: VariableTracker
+) -> "VariableTracker":
+    """
+    Implements PyIter_Next / tp_iternext semantics for VariableTracker objects.
+
+    Calls obj.tp_iternext_impl(tx) if the object is an iterator, otherwise raises
+    TypeError. StopIteration propagation is left to the caller (mirrors
+    CPython's iternext contract where NULL return signals exhaustion).
+    """
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2865
+
+    T = maybe_get_python_type(obj)
+    if not type_implements_tp_iternext(T):
+        raise_type_error(tx, f"expected an iterator, got '{obj.python_type_name()}'")
+
+    return obj.tp_iternext_impl(tx)
+
+
 def generic_getiter(
-    tx: "InstructionTranslator", obj: "VariableTracker"
+    tx: "InstructionTranslator", obj: VariableTracker
 ) -> "VariableTracker":
     """
     Implements PyObject_GetIter semantics for VariableTracker objects.
@@ -366,7 +397,14 @@ def generic_getiter(
 
     T = maybe_get_python_type(obj)
     if type_implements_tp_iter(T):
-        return obj.tp_iter_impl(tx)
+        res = obj.tp_iter_impl(tx)
+        res_T = maybe_get_python_type(res)
+        if not pyiter_check(res_T):
+            raise_type_error(
+                tx,
+                f"{obj.python_type_name()}.__iter__() returned non-iterator {res.python_type_name()}",
+            )
+        return res
     elif pysequence_check(T):
         return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
             tx, [obj], {}

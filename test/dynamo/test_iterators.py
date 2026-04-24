@@ -1260,13 +1260,11 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             iter(42, None)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_iter_bad_iter_return_raises_type_error(self):
         with self.assertRaises(TypeError):
             iter(BadIterReturnsNonIterator())
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_iter_returns_self_without_next_raises_type_error(self):
         with self.assertRaises(TypeError):
