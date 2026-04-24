@@ -3176,6 +3176,16 @@
       ]
     }
   ],
+  "GB0811": [
+    {
+      "Gb_type": "missing tp_iter",
+      "Context": "tp_iter_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to iterate over `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0248": [
     {
       "Gb_type": "improper torch.get_device_module arguments",
