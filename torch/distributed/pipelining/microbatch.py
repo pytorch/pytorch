@@ -374,7 +374,7 @@ def split_args_kwargs_into_chunks(
     # the constituent Tensor values have been sharded/replicated according to the `args_chunk_spec`
     # and `kwargs_chunk_spec` specifications. The steps are as follows:
     #
-    # 1. Use pytree.tree_flatten to flatten each arg and its spec into nto a 1d array of values.
+    # 1. Use pytree.tree_flatten to flatten each arg and its spec into a 1d array of values.
     #    To use a running example: suppose our inputs look like
     #
     #       args = ([A, [B, C]], D) args_spec = ([None, [None, TensorChunkSpec]], None)

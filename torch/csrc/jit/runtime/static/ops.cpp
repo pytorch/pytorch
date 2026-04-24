@@ -44,7 +44,7 @@
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
-    "If on, static runtime may use use optimizations that cause accuracy loss "
+    "If on, static runtime may use optimizations that cause accuracy loss "
     "vs the jit interpreter")
 
 namespace at::native {
