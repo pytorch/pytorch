@@ -118,7 +118,7 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
 
     Returns a negative value on initialization or enumeration failure.
     """
-    from ctypes import byref, c_uint32
+    from ctypes import byref, c_uint32, c_void_p, cast, pointer
 
     try:
         import pyzes  # type: ignore[import]
@@ -165,7 +165,7 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
         return -1
 
     # --- Count visible dGPUs and iGPUs ---
-    ZE_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
+    ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     hierarchy = os.getenv("ZE_FLAT_DEVICE_HIERARCHY")
     expose_sub_devices = hierarchy != "COMPOSITE"
 
@@ -177,13 +177,16 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
     for device in devices:
         props = pyzes.zes_device_properties_t()
         props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
+        ext_props = pyzes.zes_device_ext_properties_t()
+        ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
+        props.pNext = cast(pointer(ext_props), c_void_p)
         if _zes_check(
             pyzes.zesDeviceGetProperties(device, byref(props)),
             "Can't get Level Zero Sysman device properties",
         ):
             return -1
 
-        is_integrated = bool(props.core.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED)
+        is_integrated = bool(ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED)
 
         # Determine how many logical indices this physical device occupies.
         # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device separately;
