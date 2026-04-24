@@ -1399,6 +1399,7 @@ class TestCutlassBackend(TestCase):
         x = torch.randn((128, 128)).to(GPU_TYPE).half()
         a = torch.randn(128, 128).to(GPU_TYPE).half()
         b = torch.randn(128, 128).to(GPU_TYPE).half().t()
+        allowlist_regex = "stream_k" if SM100OrLater else "pingpong"
 
         with fresh_cache():
             with config.patch(
@@ -1406,7 +1407,7 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
                     "cutlass.cutlass_max_profiling_configs": 2,
-                    "cutlass.cutlass_op_allowlist_regex": "pingpong",
+                    "cutlass.cutlass_op_allowlist_regex": allowlist_regex,
                     "cutlass.cutlass_op_denylist_regex": None,
                 }
             ):
@@ -1433,9 +1434,9 @@ class TestCutlassBackend(TestCase):
                                 raise AssertionError(
                                     f"Expected op_conf_name to be str, got {type(op_conf_name)}"
                                 )
-                            if "pingpong" not in op_conf_name:
+                            if allowlist_regex not in op_conf_name:
                                 raise AssertionError(
-                                    "Only pingpong Kernels should have been allowed"
+                                    f"Only {allowlist_regex} kernels should have been allowed"
                                 )
                             cuda_template_count += 1
                     if cuda_template_count <= 0:
