@@ -9,7 +9,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/SparseTensorUtils.h>
 
-#include <ATen/Context.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
