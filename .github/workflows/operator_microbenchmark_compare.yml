@@ -60,7 +60,8 @@ jobs:
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" }
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" }
         ]}
     secrets: inherit
 
@@ -90,7 +91,8 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" }
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.dgx.b200" }
         ]}
       use-arc: true
       python-version: "3.10"
@@ -126,7 +128,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" }
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" }
         ]}
     secrets: inherit
 
@@ -142,7 +145,7 @@ jobs:
       test-matrix: ${{ needs.build-rocm.outputs.test-matrix }}
     secrets: inherit
 
-  # ---- Compare results with latest main and comment on PR ----
+  # ---- Compare PR wheel vs nightly baseline (both run in this workflow) and comment on PR ----
   compare-and-comment:
     if: >-
       always() && (
@@ -186,124 +189,62 @@ jobs:
             MI300X) echo "runner=linux.rocm.gpu.gfx950.1" >> "$GITHUB_OUTPUT" ;;
           esac
 
-      - name: Download branch results from S3
-        id: branch-results
+      - name: Download PR and baseline results from S3
+        id: results
         run: |
           set -euo pipefail
-          mkdir -p /tmp/branch_results
+          mkdir -p /tmp/branch_results /tmp/baseline_results
 
           RUN_ID="${{ github.run_id }}"
           ATTEMPT="${{ github.run_attempt }}"
-          CONFIG="operator_microbenchmark_${OPERATOR}_test"
           RUNNER="${{ steps.runner.outputs.runner }}"
+          BRANCH_CONFIG="operator_microbenchmark_${OPERATOR}_test"
+          BASELINE_CONFIG="operator_microbenchmark_${OPERATOR}_baseline"
 
-          # Find the test job ID from this workflow run
           JOBS=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${ATTEMPT}/jobs" --paginate -q '.jobs[]')
-          # The test job name contains the config and runner in parentheses
-          JOB_ID=$(echo "$JOBS" | jq -r "select(.name | contains(\"${CONFIG}\") and contains(\"${RUNNER}\")) | .id" | head -1)
 
-          if [ -z "$JOB_ID" ] || [ "$JOB_ID" = "null" ]; then
-            echo "::error::Could not find test job for config=${CONFIG} runner=${RUNNER}"
-            exit 1
-          fi
+          download_artifact() {
+            local config="$1" dest="$2" label="$3"
+            local job_id
+            job_id=$(echo "$JOBS" | jq -r "select(.name | contains(\"${config}\") and contains(\"${RUNNER}\")) | .id" | head -1)
+            if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
+              echo "::error::Could not find ${label} test job for config=${config} runner=${RUNNER}"
+              return 1
+            fi
+            local artifact="test-jsons-test-${config}-1-1-${RUNNER}_${job_id}.zip"
+            local url="https://${S3_BUCKET}.s3.amazonaws.com/${REPO}/${RUN_ID}/${ATTEMPT}/artifact/${artifact}"
+            echo "Downloading ${label} results: $url"
+            curl -sfSL "$url" -o "/tmp/${label}.zip"
+            (cd "$dest" && unzip -o "/tmp/${label}.zip")
+          }
 
-          ARTIFACT="test-jsons-test-${CONFIG}-1-1-${RUNNER}_${JOB_ID}.zip"
-          URL="https://${S3_BUCKET}.s3.amazonaws.com/${REPO}/${RUN_ID}/${ATTEMPT}/artifact/${ARTIFACT}"
+          download_artifact "$BRANCH_CONFIG"   /tmp/branch_results   branch
+          download_artifact "$BASELINE_CONFIG" /tmp/baseline_results baseline
 
-          echo "Downloading branch results: $URL"
-          if curl -sfSL "$URL" -o /tmp/branch.zip; then
-            cd /tmp/branch_results && unzip -o /tmp/branch.zip
-            echo "success=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Failed to download branch results from S3"
-            echo "success=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download baseline (main) results from S3
-        id: baseline-results
-        if: steps.branch-results.outputs.success == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/baseline_results
-
-          RUNNER="${{ steps.runner.outputs.runner }}"
-
-          # Find the latest successful operator_microbenchmark run on main
-          BASELINE_RUN_ID=$(gh run list \
-            -w operator_microbenchmark \
-            --branch main \
-            --status success \
-            -L 20 \
-            --repo "$REPO" \
-            --json databaseId,conclusion \
-            -q '[.[] | select(.conclusion == "success")][0].databaseId')
-
-          if [ -z "$BASELINE_RUN_ID" ] || [ "$BASELINE_RUN_ID" = "null" ]; then
-            echo "::warning::No successful operator_microbenchmark run found on main"
-            echo "success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Baseline run ID: $BASELINE_RUN_ID"
-
-          # Get the run attempt
-          BASELINE_ATTEMPT=$(gh api "repos/${REPO}/actions/runs/${BASELINE_RUN_ID}" -q '.run_attempt')
-
-          # Find the matching test job in the baseline run (matches our runner)
-          # The baseline uses config "operator_microbenchmark_test" (all operators)
-          BASELINE_JOBS=$(gh api "repos/${REPO}/actions/runs/${BASELINE_RUN_ID}/attempts/${BASELINE_ATTEMPT}/jobs" --paginate -q '.jobs[]')
-          BASELINE_JOB_ID=$(echo "$BASELINE_JOBS" | jq -r "select(.name | contains(\"operator_microbenchmark_test\") and contains(\"${RUNNER}\")) | .id" | head -1)
-
-          if [ -z "$BASELINE_JOB_ID" ] || [ "$BASELINE_JOB_ID" = "null" ]; then
-            echo "::warning::Could not find baseline test job for runner=${RUNNER}"
-            echo "success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BASELINE_ARTIFACT="test-jsons-test-operator_microbenchmark_test-1-1-${RUNNER}_${BASELINE_JOB_ID}.zip"
-          BASELINE_URL="https://${S3_BUCKET}.s3.amazonaws.com/${REPO}/${BASELINE_RUN_ID}/${BASELINE_ATTEMPT}/artifact/${BASELINE_ARTIFACT}"
-
-          echo "Downloading baseline results: $BASELINE_URL"
-          if curl -sfSL "$BASELINE_URL" -o /tmp/baseline.zip; then
-            cd /tmp/baseline_results && unzip -o /tmp/baseline.zip
-            echo "success=true" >> "$GITHUB_OUTPUT"
-            # Record baseline commit for the comment
-            BASELINE_SHA=$(gh api "repos/${REPO}/actions/runs/${BASELINE_RUN_ID}" -q '.head_sha')
-            echo "sha=${BASELINE_SHA}" >> "$GITHUB_OUTPUT"
-            echo "run_id=${BASELINE_RUN_ID}" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Failed to download baseline results from S3"
-            echo "success=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "success=true" >> "$GITHUB_OUTPUT"
 
       - name: Compare and generate report
         id: compare
-        if: steps.branch-results.outputs.success == 'true' && steps.baseline-results.outputs.success == 'true'
+        if: steps.results.outputs.success == 'true'
         run: |
           COMPARISON=$(python benchmarks/operator_benchmark/compare_with_baseline.py \
             --branch-dir /tmp/branch_results \
             --baseline-dir /tmp/baseline_results)
 
           BRANCH_SHA="${{ github.sha }}"
-          BASELINE_SHA="${{ steps.baseline-results.outputs.sha }}"
-          BASELINE_RUN="${{ steps.baseline-results.outputs.run_id }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          BASELINE_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${BASELINE_RUN}"
 
-          BODY=$(cat <<ENDOFCOMMENT
-## Operator Microbenchmark: \`${OPERATOR}\` on ${GPU}
+          cat > /tmp/pr_comment.md <<ENDOFCOMMENT
+          ## Operator Microbenchmark: \`${OPERATOR}\` on ${GPU}
 
-| | |
-|---|---|
-| **Branch** | \`${{ github.ref_name }}\` (\`${BRANCH_SHA:0:7}\`) |
-| **Baseline** | \`main\` (\`${BASELINE_SHA:0:7}\`) from [daily CI](${BASELINE_RUN_URL}) |
-| **Workflow Run** | [link](${RUN_URL}) |
+          | | |
+          |---|---|
+          | **Branch** | \`${{ github.ref_name }}\` (\`${BRANCH_SHA:0:7}\`) |
+          | **Baseline** | latest \`nightly\` wheel, same runner |
+          | **Workflow Run** | [link](${RUN_URL}) |
 
-${COMPARISON}
-ENDOFCOMMENT
-          )
-
-          # Write to file to avoid shell escaping issues
-          echo "$BODY" > /tmp/pr_comment.md
+          ${COMPARISON}
+          ENDOFCOMMENT
           echo "generated=true" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment

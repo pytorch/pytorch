@@ -2098,6 +2098,12 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  # When running the baseline (nightly wheel), tag outputs so the compare step can distinguish them
+  local suffix=""
+  if [[ "${TEST_CONFIG:-}" == *_baseline ]]; then
+    suffix="_baseline"
+  fi
+
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
@@ -2116,10 +2122,10 @@ test_operator_microbenchmark() {
   local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
   for op in $op_list; do
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile.json" \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}.json" \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
 }
@@ -2210,9 +2216,30 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
 
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
-  # Support single-operator selection via config name: operator_microbenchmark_{op}_test
-  if [[ "${TEST_CONFIG}" =~ operator_microbenchmark_(.+)_test ]] && [[ "${BASH_REMATCH[1]}" != "" ]]; then
+  # Support single-operator selection via config name:
+  #   operator_microbenchmark_{op}_test     — run against the PR-built wheel
+  #   operator_microbenchmark_{op}_baseline — install latest nightly and run against it
+  if [[ "${TEST_CONFIG}" =~ operator_microbenchmark_(.+)_(test|baseline) ]] && [[ "${BASH_REMATCH[1]}" != "" ]]; then
     export OP_BENCHMARK_TESTS="${BASH_REMATCH[1]}"
+  fi
+  if [[ "${TEST_CONFIG}" == *_baseline ]]; then
+    # Derive the nightly wheel channel from BUILD_ENVIRONMENT so baseline matches the PR
+    # build's CUDA/ROCm toolchain. Override by setting BASELINE_INDEX_URL in the workflow.
+    if [[ -z "${BASELINE_INDEX_URL:-}" ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
+      elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+      elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+        # Keep in sync with the ROCm version in the benchmarks docker image
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+      else
+        echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
+        exit 1
+      fi
+    fi
+    echo "Installing nightly torch from ${BASELINE_INDEX_URL} for baseline comparison"
+    pip install --pre --force-reinstall --index-url "${BASELINE_INDEX_URL}" torch
   fi
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
