@@ -75,9 +75,11 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
+    base_exception_methods,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    exception_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -3089,7 +3091,12 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         init_args = kwargs.get("init_args", [])
-        self.exc_vt = variables.ExceptionVariable(self.value_type, init_args)
+        self._base_vt = variables.ExceptionVariable(self.value_type, init_args)
+        self._base_methods = (
+            base_exception_methods
+            if isinstance(value, BaseException)
+            else exception_methods
+        )
 
     @property
     def fn(self) -> Callable[..., object]:
@@ -3116,9 +3123,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
                 "__cause__", "__context__", "__suppress_context__", "__traceback__"
             )
         ):
-            self.exc_vt.call_setattr(tx, args[0], args[1])
+            return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         elif name == "with_traceback":
-            return self.exc_vt.call_method(tx, name, args, kwargs)
+            return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
@@ -3129,35 +3136,34 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             "__suppress_context__",
             "__traceback__",
         ):
-            return self.exc_vt.var_getattr(tx, name)
+            return self._base_vt.var_getattr(tx, name)  # type: ignore[missing-attribute]
         return super().var_getattr(tx, name)
 
     @property
     def __context__(self) -> "ConstantVariable":
-        # type: ignore[return-value]
-        return self.exc_vt.__context__
+        return self._base_vt.__context__  # type: ignore[missing-attribute]
 
     @property
     def args(self) -> list[VariableTracker]:
-        return self.exc_vt.args
+        return self._base_vt.args  # type: ignore[missing-attribute]
 
     def set_context(self, context: "variables.ExceptionVariable") -> None:
-        return self.exc_vt.set_context(context)
+        return self._base_vt.set_context(context)  # type: ignore[missing-attribute]
 
     @property
     def exc_type(self) -> type[BaseException]:
-        return self.exc_vt.exc_type
+        return self._base_vt.exc_type  # type: ignore[missing-attribute]
 
     @property
     def python_stack(self) -> traceback.StackSummary | None:
-        return self.exc_vt.python_stack
+        return self._base_vt.python_stack  # type: ignore[missing-attribute]
 
     def debug_repr(self) -> str:
-        return self.exc_vt.debug_repr()
+        return self._base_vt.debug_repr()  # type: ignore[missing-attribute]
 
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
-        self.exc_vt.python_stack = value
+        self._base_vt.python_stack = value  # type: ignore[missing-attribute]
 
 
 class InspectVariable(UserDefinedObjectVariable):

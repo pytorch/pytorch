@@ -1173,8 +1173,11 @@ class ExceptionStack:
     def clear_current_exception(self) -> None:
         self._current_exception = None
 
-    def set_current_exception(self, val: ExceptionVals) -> None:
-        self._set_context_and_break_context_reference_cycle(val)
+    def set_current_exception(
+        self, val: ExceptionVals, set_context: bool = True
+    ) -> None:
+        if set_context:
+            self._set_context_and_break_context_reference_cycle(val)
         self._current_exception = val
 
     def move_current_exception_to_stack(self) -> None:
@@ -1189,7 +1192,7 @@ class ExceptionStack:
     def _set_context_recursive(
         self, val: ExceptionVals, prev_idx: int
     ) -> ExceptionVals:
-        if (ctx := val.__context__) and type(ctx) is not ConstantVariable:  # type: ignore[union-attr]
+        if (ctx := val.__context__) and not ctx.is_constant_none():  # type: ignore[union-attr]
             return val
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
@@ -1207,7 +1210,7 @@ class ExceptionStack:
         slow_update_toggle = False  # floyd's algorithm for detecting cycle
         while True:
             context = o.__context__  # type: ignore[union-attr]
-            if type(context) is ConstantVariable:  # context not set
+            if context.is_constant_none():
                 break
 
             if context is val:
@@ -2339,14 +2342,20 @@ class InstructionTranslatorBase(
         )  # make pyrefly happy
         new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
         exc.call_method(
-            # pyrefly: ignore [bad-argument-type]
-            self,
+            self,  # type: ignore[bad-argument-type]
             "__setattr__",
             [VariableTracker.build(self, "__traceback__"), new_tb],
             {},
         )
 
-    def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
+    def _raise_exception_variable(
+        self, val: VariableTracker, set_context: bool
+    ) -> NoReturn:
+        # TODO(dynamo-team): Split this function into two separate functions for
+        # the two different ways users can raise exceptions, and clean up the
+        # code accordingly. Right now it's a bit convoluted since we have to
+        # handle both cases in one function.
+
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
         #   2) raise exception instance - raise NotImplementedError("foo")
@@ -2376,8 +2385,11 @@ class InstructionTranslatorBase(
 
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
-            # Save the exception in a global data structure
-            self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
+            # Save the exception in a global data structure.
+            # set_context=False for re-raises (RERAISE, RAISE_VARARGS 0) to
+            # match CPython semantics: __context__ is set only at the original
+            # raise site, so user code in finally blocks can clear it.
+            self.exn_vt_stack.set_current_exception(val, set_context=set_context)  # type: ignore[arg-type]
 
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             # Pass the stored python_stack to preserve the original exception location
@@ -2406,12 +2418,12 @@ class InstructionTranslatorBase(
             assert len(self.exn_vt_stack)
             val = self.exn_vt_stack[-1]
             assert self._isinstance_exception(val), val
-            self._raise_exception_variable(val)
+            self._raise_exception_variable(val, set_context=False)
         elif inst.arg == 1:
             # raise TOS
             val = self.stack[-1]  # type: ignore[assignment]
             try:
-                self._raise_exception_variable(val)
+                self._raise_exception_variable(val, set_context=True)
             finally:
                 # Update __traceback__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
@@ -2421,7 +2433,7 @@ class InstructionTranslatorBase(
             from_vt = self.pop()
             val = self.pop()  # type: ignore[assignment]
             try:
-                self._raise_exception_variable(val)
+                self._raise_exception_variable(val, set_context=True)
             finally:
                 # Update __cause__/__suppress_context__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
@@ -2460,16 +2472,16 @@ class InstructionTranslatorBase(
             if inst.argval:
                 # RERAISE 1
                 _ = self.pop()
-                self._raise_exception_variable(val)
+                self._raise_exception_variable(val, set_context=False)
             else:
                 # RERAISE 0
                 self.push(val)
-                self._raise_exception_variable(val)
+                self._raise_exception_variable(val, set_context=False)
         else:
             _exc = self.pop()
             val = self.pop()
             _tb = self.pop()
-            self._raise_exception_variable(val)
+            self._raise_exception_variable(val, set_context=False)
 
     def _isinstance_exception(self, val: VariableTracker) -> TypeIs[ExceptionVals]:
         return isinstance(val, ExceptionVals)
@@ -3975,8 +3987,15 @@ class InstructionTranslatorBase(
                 [VariableTracker.build(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, VariableTracker.build(self, "__context__"), val)  # type: ignore[attr-defined]
-            new_val.call_setattr(self, VariableTracker.build(self, "__cause__"), val)  # type: ignore[attr-defined]
+            new_val.call_method(
+                self,
+                "__setattr__",
+                [VariableTracker.build(self, "__context__"), val],
+                {},
+            )
+            new_val.call_method(
+                self, "__setattr__", [VariableTracker.build(self, "__cause__"), val], {}
+            )
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst: Instruction) -> None:
