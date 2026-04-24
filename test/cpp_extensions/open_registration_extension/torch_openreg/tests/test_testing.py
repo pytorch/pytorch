@@ -146,7 +146,6 @@ PrivateUse1TestBase.op_overrides = {
 
 
 class TestSkippedSpecificTestCases(TestCase):
-
     executed_count = 0
 
     @classmethod
@@ -167,6 +166,7 @@ class TestSkippedSpecificTestCases(TestCase):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
         self.fail("This test should not be instantiated for openreg")
+
 
 class TestSkippedWholeTestClass(TestCase):
     def test_skipped_class_member(self, device):

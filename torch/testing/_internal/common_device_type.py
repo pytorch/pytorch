@@ -356,7 +356,6 @@ class DeviceTypeTestBase(TestCase):
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
 
-
     @property
     def precision(self):
         return self._tls.precision
