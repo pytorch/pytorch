@@ -4634,6 +4634,72 @@ class TestInvokeSubgraphTrainStepCapture(TestCase):
         loss, aux = compiled(x)
         self.assertFalse(aux.requires_grad)
 
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        enable_invoke_subgraph_regional_compile=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_nested_region_config_propagated_to_backward(self):
+        """When joint tracing creates backward invoke_subgraph nodes,
+        the nested_region_config should be propagated so the regional
+        compiler can compile them.
+        """
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+            invoke_subgraph,
+        )
+
+        config = get_invoke_subgraph_compile_options(
+            decompositions=torch._decomp.core_aten_decompositions()
+        )
+
+        @nested_compile_region(options=config)
+        def nested_fn(x):
+            return x.sin()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach()
+
+        fw_graphs = []
+
+        def recording_compiler(gm, example_inputs, **kwargs):
+            fw_graphs.append(gm)
+            return gm
+
+        backend = aot_autograd(fw_compiler=recording_compiler)
+        model = Model()
+        x = torch.randn(4, 4)
+        opt_model = torch.compile(model, backend=backend, fullgraph=True)
+        opt_model(x)
+
+        # The inference graph should have both fw and bw invoke_subgraph nodes,
+        # each with nested_region_config so regional inductor can compile them.
+        self.assertEqual(len(fw_graphs), 1)
+        gm = fw_graphs[0]
+        invoke_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is invoke_subgraph
+        ]
+        # 2 invoke_subgraph nodes: fw and bw
+        self.assertEqual(len(invoke_nodes), 2)
+        for node in invoke_nodes:
+            self.assertIn("custom", node.meta)
+            self.assertIn("nested_region_config", node.meta["custom"])
+
 
 if __name__ == "__main__":
     run_tests()
