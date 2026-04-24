@@ -62,6 +62,28 @@ def inline_single_use_recursive(gm: GraphModule, global_counts: Counter[str]) ->
     inline_invoke_subgraph_nodes(gm, single_use_nodes)
 
 
+def hoist_submodules(gm: GraphModule, subgraph: GraphModule) -> dict[str, str]:
+    """Move submodules of *subgraph* onto *gm*, returning a name-remap dict.
+
+    For each direct child module of *subgraph* (e.g. ``fwd_body_0``), register
+    it on *gm* under a unique name and return a mapping from the old name to the
+    new name so that ``get_attr`` targets copied from *subgraph*'s graph can be
+    rewritten.
+    """
+    name_map: dict[str, str] = {}
+    existing_names = {name for name, _ in gm.named_children()}
+    for child_name, child_mod in list(subgraph.named_children()):
+        new_name = child_name
+        counter = 0
+        while new_name in existing_names:
+            new_name = f"{child_name}_{counter}"
+            counter += 1
+        gm.add_module(new_name, child_mod)
+        existing_names.add(new_name)
+        name_map[child_name] = new_name
+    return name_map
+
+
 def inline_invoke_subgraph_nodes(gm: GraphModule, invoke_nodes: list["Node"]) -> None:
     """Shared helper that inlines a list of invoke_subgraph nodes."""
     for node in invoke_nodes:
@@ -69,6 +91,10 @@ def inline_invoke_subgraph_nodes(gm: GraphModule, invoke_nodes: list["Node"]) ->
         operands = node.args[2:]
 
         subgraph: GraphModule = getattr(gm, str(get_attr_node.target))
+
+        # Hoist sub-submodules (e.g. fwd_body_0, bwd_body_0) to gm so that
+        # get_attr nodes copied from the subgraph resolve correctly.
+        name_map = hoist_submodules(gm, subgraph)
 
         env: dict[Node, Any] = dict(
             zip(subgraph.graph.find_nodes(op="placeholder"), operands)
@@ -78,7 +104,10 @@ def inline_invoke_subgraph_nodes(gm: GraphModule, invoke_nodes: list["Node"]) ->
             for sub_node in subgraph.graph.nodes:
                 if sub_node.op in ("placeholder", "output"):
                     continue
-                env[sub_node] = gm.graph.node_copy(sub_node, lambda n: env[n])
+                new_node = gm.graph.node_copy(sub_node, lambda n: env[n])
+                if sub_node.op == "get_attr" and sub_node.target in name_map:
+                    new_node.target = name_map[sub_node.target]
+                env[sub_node] = new_node
 
         output_values = subgraph.graph.output_node().args[0]
 

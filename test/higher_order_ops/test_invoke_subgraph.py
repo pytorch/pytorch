@@ -4287,6 +4287,38 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
         )
         self.assertEqual(invoke_count, 2)
 
+    def test_inline_single_use_with_autograd_function(self):
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region
+        def gn(x):
+            return MyOp.apply(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x_clone)
+
+        self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
