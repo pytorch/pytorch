@@ -96,7 +96,9 @@ void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b) {
   TORCH_CHECK(get_overlap_status(a, b) != MemOverlapStatus::Partial,
     "unsupported operation: some elements of the input tensor and "
     "the written-to tensor refer to a single memory location. "
-    "Please clone() the tensor before performing the operation.");
+    "Please clone() the tensor before performing the operation. "
+    "If the tensors are overlapping views of the same base tensor, "
+    "clone() the input tensor before writing through the view.");
 }
 
 void assert_no_overlap(const TensorBase& a, const TensorBase& b) {
@@ -108,7 +110,9 @@ void assert_no_overlap(TensorImpl* a, TensorImpl* b) {
   TORCH_CHECK(lap != MemOverlapStatus::Partial && lap != MemOverlapStatus::Full,
     "unsupported operation: some elements of the input tensor and "
     "the written-to tensor refer to a single memory location. "
-    "Please clone() the tensor before performing the operation.");
+    "Please clone() the tensor before performing the operation. "
+    "If the tensors are overlapping views of the same base tensor, "
+    "clone() the input tensor before writing through the view.");
 }
 
 }
