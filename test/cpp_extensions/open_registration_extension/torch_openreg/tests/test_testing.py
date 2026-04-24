@@ -149,6 +149,16 @@ class TestSkippedSpecificTestCases(TestCase):
 
     executed_count = 0
 
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 1
+        if cls.executed_count != expected_runs:
+            raise AssertionError(
+                f"Skip logic failed! Expected {expected_runs} tests to run, "
+                f"but {cls.executed_count} executed."
+            )
+        super().tearDownClass()
+
     def test_runs(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
@@ -157,17 +167,6 @@ class TestSkippedSpecificTestCases(TestCase):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
         self.fail("This test should not be instantiated for openreg")
-
-    def test_vaildate_execution(self, device):
-        expected_runs = 1
-        actual_runs = type(self).executed_count
-        self.assertEqual(
-            actual_runs,
-            expected_runs,
-            f"Skip logic failed! "
-            f"Expected {expected_runs} tests to run, "
-            f"but {actual_runs} executed.",
-        )
 
 class TestSkippedWholeTestClass(TestCase):
     def test_skipped_class_member(self, device):
