@@ -226,26 +226,45 @@ jobs:
       - name: Compare and generate report
         id: compare
         if: steps.results.outputs.success == 'true'
+        env:
+          BRANCH_REF: ${{ github.ref_name }}
+          BRANCH_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          COMPARISON=$(python benchmarks/operator_benchmark/compare_with_baseline.py \
-            --branch-dir /tmp/branch_results \
-            --baseline-dir /tmp/baseline_results)
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
 
-          BRANCH_SHA="${{ github.sha }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          comparison = subprocess.check_output([
+              sys.executable,
+              "benchmarks/operator_benchmark/compare_with_baseline.py",
+              "--branch-dir", "/tmp/branch_results",
+              "--baseline-dir", "/tmp/baseline_results",
+          ], text=True)
 
-          cat > /tmp/pr_comment.md <<ENDOFCOMMENT
-          ## Operator Microbenchmark: \`${OPERATOR}\` on ${GPU}
+          operator = os.environ["OPERATOR"]
+          gpu = os.environ["GPU"]
+          branch_ref = os.environ["BRANCH_REF"]
+          branch_sha = os.environ["BRANCH_SHA"][:7]
+          run_url = os.environ["RUN_URL"]
 
-          | | |
-          |---|---|
-          | **Branch** | \`${{ github.ref_name }}\` (\`${BRANCH_SHA:0:7}\`) |
-          | **Baseline** | latest \`nightly\` wheel, same runner |
-          | **Workflow Run** | [link](${RUN_URL}) |
+          body = (
+              f"## Operator Microbenchmark: `{operator}` on {gpu}\n\n"
+              "| | |\n"
+              "|---|---|\n"
+              f"| **Branch** | `{branch_ref}` (`{branch_sha}`) |\n"
+              "| **Baseline** | latest `nightly` wheel, same runner |\n"
+              f"| **Workflow Run** | [link]({run_url}) |\n\n"
+              f"{comparison}"
+          )
 
-          ${COMPARISON}
-          ENDOFCOMMENT
-          echo "generated=true" >> "$GITHUB_OUTPUT"
+          with open("/tmp/pr_comment.md", "w") as f:
+              f.write(body)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("generated=true\n")
+          PY
 
       - name: Post PR comment
         if: steps.pr.outputs.found == 'true' && steps.compare.outputs.generated == 'true'
