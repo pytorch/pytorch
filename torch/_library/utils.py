@@ -82,6 +82,12 @@ def is_out(op: OpOverload) -> bool:
     return torch.Tag.out in op.tags
 
 
+def is_inplace(op: OpOverload) -> bool:
+    """Returns True if the operator has inplace semantics: it mutates its first
+    positional argument and returns it."""
+    return torch.Tag.inplace in op.tags
+
+
 def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
