@@ -645,7 +645,7 @@ void Engine::reentrant_thread_init() {
 
 void Engine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const c10::intrusive_ptr<Node>& fn,
+    const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
 }
@@ -780,8 +780,7 @@ void GraphTask::exec_post_processing() {
   }
 }
 
-void GraphTask::set_exception_without_signal(
-    const c10::intrusive_ptr<Node>& fn) {
+void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   if (!has_error_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack(fn->name());
@@ -791,7 +790,7 @@ void GraphTask::set_exception_without_signal(
 
 void GraphTask::set_exception(
     std::exception_ptr eptr,
-    const c10::intrusive_ptr<Node>& fn) {
+    const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
     future_result_->setError(std::move(eptr));
@@ -1337,12 +1336,9 @@ auto Engine::execute(
 
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
-  c10::intrusive_ptr<Node> graph_root;
-  if (skip_dummy_node) {
-    graph_root = root_edges.at(0).function;
-  } else {
-    graph_root = c10::make_intrusive<GraphRoot>(root_edges, inputs);
-  }
+  auto graph_root = skip_dummy_node
+      ? root_edges.at(0).function
+      : std::make_shared<GraphRoot>(root_edges, inputs);
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
@@ -1410,7 +1406,7 @@ void Engine::initialize_device_threads_pool() {
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    c10::intrusive_ptr<Node> graph_root,
+    std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.

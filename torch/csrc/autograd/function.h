@@ -6,8 +6,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <c10/util/intrusive_ptr.h>
-
 namespace torch::autograd {
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -52,7 +50,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// `set_gradient_edge` directly.
 inline void create_gradient_edge(
     Variable& variable,
-    c10::intrusive_ptr<Node> function) {
+    std::shared_ptr<Node> function) {
   // Copy before move.
   const auto input_nr = function->add_input_metadata(variable);
   impl::set_gradient_edge(variable, {std::move(function), input_nr});
