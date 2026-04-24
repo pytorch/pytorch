@@ -4579,5 +4579,61 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
+@unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
+class TestInvokeSubgraphTrainStepCapture(TestCase):
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_mark_non_differentiable_propagation(self):
+        """invoke_subgraph wrapping an autograd.Function that calls
+        mark_non_differentiable should propagate the non-differentiable
+        status to the outer InvokeSubgraphAutogradOp.  Without this,
+        the outer autograd engine sets requires_grad=True on all outputs,
+        causing AOT autograd to take the joint tracing path and hit
+        'backward through graph a second time'.
+        """
+
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.sin()
+                aux = x.max()
+                ctx.mark_non_differentiable(aux)
+                ctx.save_for_backward(x)
+                return out, aux
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_aux):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region()
+        def nested_fn(x):
+            return MyOp.apply(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z, aux = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach(), aux
+
+        model = Model()
+        x = torch.randn(4, 4)
+        compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+        loss, aux = compiled(x)
+        self.assertFalse(aux.requires_grad)
+
+
 if __name__ == "__main__":
     run_tests()
