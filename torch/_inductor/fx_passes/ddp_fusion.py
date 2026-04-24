@@ -169,6 +169,25 @@ def get_all_comm_blocks(
     return blocks
 
 
+def _unwrap_div_inputs(
+    all_input_nodes: list[fx.Node],
+) -> tuple[list[fx.Node], fx.node.Argument | None]:
+    """Return (grad_nodes, divisor); divisor is None when inputs are not divs."""
+    if not all(n.target == aten.div.Tensor for n in all_input_nodes):
+        assert not any(n.target == aten.div.Tensor for n in all_input_nodes), (
+            "bucket has a mix of div and non-div inputs"
+        )
+        return list(all_input_nodes), None
+    grad_nodes = []
+    divisors = []
+    for node in all_input_nodes:
+        assert isinstance(node.args[0], fx.Node)
+        grad_nodes.append(node.args[0])
+        divisors.append(node.args[1])
+    assert all(d == divisors[0] for d in divisors)
+    return grad_nodes, divisors[0]
+
+
 def _fuse_allreduce_by_concat(
     graph: fx.Graph,
     last_input_node: fx.Node,
@@ -176,33 +195,30 @@ def _fuse_allreduce_by_concat(
     last_comm_block: CommBlock,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce using concat."""
-    # Flatten all the inputs to the all_reduce nodes.
-    with graph.inserting_after(last_input_node):
-        cat_inputs = []
-        for input_node in all_input_nodes:
-            assert isinstance(input_node.args[0], fx.Node)
-            input_node = input_node.args[0]
-            cat_inputs.append(
-                call_function(graph, aten.flatten.using_ints, (input_node,))
-            )
+    grad_nodes, divisor = _unwrap_div_inputs(all_input_nodes)
 
-    # Concat all the flattened nodes.
+    with graph.inserting_after(last_input_node):
+        cat_inputs = [
+            call_function(graph, aten.flatten.using_ints, (g,)) for g in grad_nodes
+        ]
+
     with graph.inserting_after(cat_inputs[0]):
         cat_node = call_function(graph, aten.cat, (cat_inputs,))
 
-    # Insert the fused div node and remove the input div nodes.
-    # This is an optimization and is not mandatory for fusion.
-    divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
-    with graph.inserting_after(cat_node):
-        div_node = call_function(graph, last_input_node.target, (cat_node, divisors[0]))
+    if divisor is not None:
+        with graph.inserting_after(cat_node):
+            allreduce_input = call_function(
+                graph, last_input_node.target, (cat_node, divisor)
+            )
+    else:
+        allreduce_input = cat_node
 
     # Create a new Comm/all_reduce node.
     last_comm_node = last_comm_block.comm_node
     last_wait_node = last_comm_block.wait_nodes[0]
-    with graph.inserting_after(div_node):
+    with graph.inserting_after(allreduce_input):
         flatten_args, spec = tree_flatten((last_comm_node.args, last_comm_node.kwargs))
-        flatten_args[0] = div_node
+        flatten_args[0] = allreduce_input
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_comm_node = call_function(graph, last_comm_node.target, args, kwargs)
 
@@ -213,8 +229,11 @@ def _fuse_allreduce_by_concat(
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_wait_node = call_function(graph, last_wait_node.target, args, kwargs)
 
-    # Move the fused all_reduce and its args to right after the input node
-    nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
+    # Move the fused all_reduce and its args to right after the input node.
+    nodes_to_move = cat_inputs + [cat_node]
+    if divisor is not None:
+        nodes_to_move.append(allreduce_input)
+    nodes_to_move.extend([fused_comm_node, fused_wait_node])
     # pyrefly: ignore [bad-argument-type]
     move_block_after(nodes_to_move, last_input_node)
 
@@ -223,7 +242,7 @@ def _fuse_allreduce_by_concat(
         node_list=[fused_comm_node, fused_wait_node],
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
-        inputs=[div_node],
+        inputs=[allreduce_input],
         outputs=OrderedSet([fused_wait_node]),
     )
 
@@ -235,24 +254,27 @@ def _fuse_with_coalesced_op(
     last_comm_block: CommBlock,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce by coalesced."""
+    grad_nodes, divisor = _unwrap_div_inputs(all_input_nodes)
     last_comm_node = last_comm_block.comm_node
     last_wait_node = last_comm_block.wait_nodes[0]
 
-    # Insert the fused div node and remove the input div nodes.
-    # This is an optimization and is not mandatory for fusion.
-    dividends = [div.args[0] for div in all_input_nodes]
-    divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
-    with graph.inserting_before(last_input_node):
-        last_input_node = call_function(
-            graph, aten._foreach_div.Scalar, (dividends, divisors[0])
-        )
-    input_node = last_input_node
+    if divisor is not None:
+        with graph.inserting_before(last_input_node):
+            foreach_div_node = call_function(
+                graph, aten._foreach_div.Scalar, (grad_nodes, divisor)
+            )
+        last_input_node = foreach_div_node
+        allreduce_input: fx.Node | list[fx.Node] = foreach_div_node
+        input_nodes = [foreach_div_node]
+    else:
+        # get_fake_args_kwargs maps each node to its meta["val"].
+        allreduce_input = grad_nodes
+        input_nodes = list(grad_nodes)
 
     # Create a new Comm/all_reduce_coalesced node.
     with graph.inserting_after(last_comm_node):
         flatten_args, spec = tree_flatten((last_comm_node.args, last_comm_node.kwargs))
-        flatten_args[0] = input_node
+        flatten_args[0] = allreduce_input
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_comm_node = call_function(
             graph, torch.ops._c10d_functional.all_reduce_coalesced.default, args, kwargs
@@ -285,7 +307,7 @@ def _fuse_with_coalesced_op(
         node_list=[fused_comm_node] + getitem_nodes + wait_nodes,
         wait_nodes=wait_nodes,
         comm_node=fused_comm_node,
-        inputs=[input_node],
+        inputs=input_nodes,
         outputs=OrderedSet(wait_nodes),
     )
 
@@ -472,10 +494,8 @@ def _fuse_ddp_communication(
             break
 
     def ddp_reducer_filter(block: CommBlock) -> bool:
-        if (
-            not isinstance(block.comm_node.args[0], fx.Node)
-            or block.comm_node.args[0].target != aten.div.Tensor
-        ):
+        # Don't require the input to be aten.div; upstream passes may remove it.
+        if not isinstance(block.comm_node.args[0], fx.Node):
             return False
 
         if len(block.wait_nodes[0].users) != 1:

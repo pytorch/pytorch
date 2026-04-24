@@ -386,6 +386,106 @@ class ReplicateTest(MultiProcessInductorTestCase):
         fc.run(code)
 
 
+def _remove_scalar_div_by_one(graph):
+    """Remove div(x, 1) nodes to simulate upstream no-op elimination."""
+    for node in list(
+        graph.find_nodes(op="call_function", target=torch.ops.aten.div.Tensor)
+    ):
+        if (
+            len(node.args) == 2
+            and not isinstance(node.args[1], torch.fx.Node)
+            and node.args[1] == 1
+            and isinstance(node.args[0], torch.fx.Node)
+        ):
+            node.replace_all_uses_with(node.args[0])
+            node.args[0].meta.update(node.meta)
+            graph.erase_node(node)
+
+
+class ReplicateTestNoDivNode(ReplicateTest):
+    """DDP fusion when upstream passes eliminate div(grad, world_size)."""
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
+            "fuse_ddp_with_coalesced_op",
+            "schedule_comm_wait",
+        ],
+        joint_custom_post_pass=_remove_scalar_div_by_one,
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        pattern_matcher=False,
+    )
+    def test_bucketing_coalesced_op_no_div(self):
+        code = self._test_bucketing()
+        fc = FileCheck()
+        for _ in range(3):
+            fc.check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
+            )
+        for _ in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+        fc.run(code)
+
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
+            "fuse_ddp_with_concat_op",
+            "schedule_comm_wait",
+        ],
+        joint_custom_post_pass=_remove_scalar_div_by_one,
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        pattern_matcher=False,
+    )
+    def test_bucketing_concat_op_no_div(self):
+        code = self._test_bucketing()
+        fc = FileCheck()
+        for _ in range(3):
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_.default("
+            )
+        for _ in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+        fc.run(code)
+
+    def test_numerics_no_div(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+        model = Net()
+        input = torch.randn([1, DIM])
+
+        # Baseline: no compile, no fusion.
+        ref_model = deepcopy(model)
+        replicate(ref_model)
+        ref_model(input).sum().backward()
+        ref_grads = {n: p.grad.clone() for n, p in ref_model.named_parameters()}
+
+        # Fused with div nodes stripped.
+        fused_model = deepcopy(model)
+        with torch._inductor.config.patch(
+            joint_custom_post_pass=_remove_scalar_div_by_one,
+        ):
+            compiled_model = torch.compile(replicate(fused_model), fullgraph=False)
+            loss = compiled_model(input).sum()
+            with compiled_autograd._enable(compiler_fn()):
+                loss.backward()
+
+        for name, param in fused_model.named_parameters():
+            self.assertEqual(
+                param.grad, ref_grads[name], msg=f"grad mismatch for {name}"
+            )
+
+        dist.destroy_process_group()
+
+
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
         # Hmm, why a specific set_device call for rank 0?
