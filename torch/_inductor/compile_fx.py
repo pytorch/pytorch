@@ -2920,6 +2920,12 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
+        # Fake constants mode: disable constant folding (can't fold constants
+        # that have no data). Don't use use_runtime_constant_folding as that
+        # generates runtime folding code requiring unimplemented shim ops.
+        if config.aot_inductor.use_fake_constants:
+            config.joint_graph_constant_folding = False
+
         fake_mode = detect_fake_mode(
             example_inputs_
         ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)

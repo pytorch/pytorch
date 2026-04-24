@@ -819,13 +819,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
                 self.write_input_output_info("inputs_info_", idx, name)
 
-            all_cuda = all(
-                V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants
-                if name not in V.graph.folded_constants
-            )
+            if config.aot_inductor.use_fake_constants:
+                all_cuda = False
+            else:
+                all_cuda = all(
+                    V.graph.get_original_value_of_constant(name).is_cuda
+                    for name in V.graph.constants
+                    if name not in V.graph.folded_constants
+                )
             for idx, name in enumerate(V.graph.constants.keys()):
-                tensor = V.graph.get_original_value_of_constant(name)
+                if config.aot_inductor.use_fake_constants:
+                    tensor = V.graph.constants[name]
+                else:
+                    tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(
@@ -850,11 +856,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # If constants to serialize contain cpu tensors, we always align data_size it to 64.
                 # When loading the constants, the valid data will depends on the size
                 # not the data_size so there won't be correctness issue.
-                data_size = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
+                if config.aot_inductor.use_fake_constants:
+                    data_size = tensor.nelement() * tensor.element_size()
+                elif tensor.is_mkldnn:
+                    data_size = torch.ops.mkldnn._nbytes(tensor)
+                else:
+                    data_size = tensor.untyped_storage().nbytes()
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
                 )

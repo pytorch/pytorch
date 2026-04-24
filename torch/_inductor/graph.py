@@ -1126,7 +1126,10 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
-        if not config.aot_inductor.use_runtime_constant_folding:
+        if (
+            not config.aot_inductor.use_runtime_constant_folding
+            and not config.aot_inductor.use_fake_constants
+        ):
             for constant_name, value in self.constants.items():
                 if is_same_tensor(data, value):
                     return constant_name
@@ -1149,7 +1152,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constant_reprs[name] = (
             f"{data.device!r} {data.dtype!r} "
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
-            f"{hash(data):x}"
+            f"{id(data):x}"
         )
         self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
         return name
@@ -1176,9 +1179,23 @@ class GraphLowering(torch.fx.Interpreter):
         with torch.utils._python_dispatch._disable_current_modes():
             # caller might have OrderedSet fake tensor mode which will create a fake tensor
             # when calling .to, so unset modes here
+            if config.aot_inductor.use_fake_constants:
+                # FakeTensors: create a new FakeTensor with the target device
+                # instead of copying real data
+                from torch._subclasses.fake_tensor import is_fake
+
+                src = self.constants[name]
+                if is_fake(src):
+                    device_copied = src.fake_mode.from_tensor(
+                        src, static_shapes=True
+                    ).to(device_override)
+                else:
+                    device_copied = src.to(device_override)
+            else:
+                device_copied = self.constants[name].to(device_override)
             non_dup_const_name = self.allocate_non_dup_const_name(
                 f"{name}_{device_override.type}{device_override.index or 0}",
-                self.constants[name].to(device_override),
+                device_copied,
             )
 
             assert non_dup_const_name in self.constants, (
@@ -1517,6 +1534,7 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(value, torch.Tensor)
         if (
             config.aot_inductor.use_runtime_constant_folding
+            or config.aot_inductor.use_fake_constants
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
             or target in self.mutated_named_buffers

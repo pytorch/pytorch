@@ -2375,11 +2375,42 @@ end
                 if specified_artifact_name
                 else str(wrapper_path_operator.with_suffix(".so"))
             )
-            all_cuda = all(
-                graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants
-                if name not in graph.folded_constants
-            )
+            if config.aot_inductor.use_fake_constants:
+                # Fake constants mode: skip weight serialization entirely.
+                # The caller serializes real weights externally.
+                # Write a manifest of constant names (in blob order) so the
+                # caller knows which tensors to serialize and in what order.
+                import json as _json
+
+                manifest_path = str(
+                    wrapper_path_operator.with_name(
+                        f"{wrapper_path_operator.stem}_constants_manifest.json"
+                    )
+                )
+                manifest = {
+                    "constants": [
+                        {
+                            "name": name,
+                            "original_fqn": graph.allocated_constant_name.get(
+                                name, name
+                            ),
+                        }
+                        for name in graph.constants
+                        if name not in graph.folded_constants
+                    ]
+                }
+                with open(manifest_path, "w") as f_manifest:
+                    _json.dump(manifest, f_manifest)
+                generated_files.append(manifest_path)
+
+                all_cuda = False
+                serialized_weights = b""
+            else:
+                all_cuda = all(
+                    graph.get_original_value_of_constant(name).is_cuda
+                    for name in graph.constants
+                    if name not in graph.folded_constants
+                )
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes: bytes) -> bytes:
@@ -2412,7 +2443,7 @@ end
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            if (
+            if not config.aot_inductor.use_fake_constants and (
                 config.aot_inductor.package_constants_in_so
                 or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
             ):
@@ -2421,8 +2452,9 @@ end
                     for name in graph.constants
                     if name not in graph.folded_constants
                 )
-            else:
-                serialized_weights = b""
+            elif not config.aot_inductor.use_fake_constants:
+                pass  # serialized_weights already b"" from above
+            # else: use_fake_constants already set serialized_weights = b""
 
             if config.aot_inductor.package_constants_on_disk_format == "pickle_weights":
                 # We need to return a storage key here because the original value tensor might be a clone

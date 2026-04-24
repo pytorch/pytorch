@@ -2062,6 +2062,11 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # When True, model constants in GraphLowering are FakeTensors (metadata
+    # only, no storage). The caller serializes weight data externally.
+    # Enables zero weight memory during AOTI compilation of large models.
+    use_fake_constants: bool = False
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
