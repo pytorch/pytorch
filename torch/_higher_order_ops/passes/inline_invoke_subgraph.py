@@ -54,7 +54,12 @@ def inline_single_use_recursive(gm: GraphModule, global_counts: Counter[str]) ->
         return
 
     single_use_nodes = [
-        node for node in invoke_nodes if global_counts[str(node.args[1])] == 1
+        node
+        for node in invoke_nodes
+        if global_counts[str(node.args[1])] == 1
+        and not getattr(gm, str(node.args[0].target)).meta.get(
+            "nested_region_config", None
+        )
     ]
     if not single_use_nodes:
         return
