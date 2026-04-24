@@ -48,7 +48,6 @@ RUN yum install -y \
   python3.12-test \
   python3.12-setuptools \
   python3.12-pip \
-  python3-virtualenv \
   python3.12-pyyaml \
   python3.12-numpy \
   python3.12-wheel \
