@@ -11,7 +11,7 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 
 LINTER_CODE = "NO_DATA_PTR"
@@ -67,7 +67,7 @@ def _capture_git(args: list[str]) -> str | None:
             text=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as err:
-        logging.debug("Failed to run %s: %s", " ".join(args), err)  # noqa: G200
+        logging.debug("Failed to run %s: %s", " ".join(args), err)
         return None
     return proc.stdout.strip()
 
@@ -93,7 +93,7 @@ def _determine_merge_base() -> str | None:
 
 def _parse_diff_output(output: str) -> set[int]:
     lines: set[int] = set()
-    current: Optional[int] = None
+    current: int | None = None
     for raw in output.splitlines():
         if raw.startswith("@@"):
             match = HUNK_RE.match(raw)
@@ -126,7 +126,7 @@ def _run_git_diff(args: list[str]) -> str | None:
             text=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as err:
-        logging.warning("Failed to run %s: %s", " ".join(args), err)  # noqa: G200
+        logging.warning("Failed to run %s: %s", " ".join(args), err)
         return None
     return proc.stdout
 
