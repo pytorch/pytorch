@@ -1233,7 +1233,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     ) -> bytes | None:
         """Pickle entry, returning None on failure."""
         try:
-            return pickle.dumps(entry)
+            with torch.utils._python_dispatch._disable_current_modes():
+                return pickle.dumps(entry)
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
