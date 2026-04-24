@@ -94,6 +94,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          submodules: "false"
+          fetch-depth: "1"
+          sparse-checkout: |
+            .ci/pytorch/binary_upload.sh
 
       - name: Configure AWS credentials(PyTorch account) for nightly
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
