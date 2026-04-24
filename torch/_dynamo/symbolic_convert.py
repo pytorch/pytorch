@@ -161,11 +161,10 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .variables.iter import MAX_ITERATOR_LIMIT
+from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
-    IteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,

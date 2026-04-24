@@ -4642,6 +4642,16 @@
       ]
     }
   ],
+  "GB4347": [
+    {
+      "Gb_type": "Missing tp_iternext",
+      "Context": "next({self.python_type_name()})",
+      "Explanation": "Dynamo does not support next() on {self.python_type_name()}. Add tp_iternext_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0354": [
     {
       "Gb_type": "failed to find name in frame builtins",
