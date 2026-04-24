@@ -10,6 +10,7 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+retry pip-3.12 install typing_extensions
 
 # install test dependencies:
 # - grpcio requires system openssl, bundled crypto fails to build
