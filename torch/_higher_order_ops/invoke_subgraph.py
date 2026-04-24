@@ -987,6 +987,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                     subgraph, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
 
+        # Propagate nested_region_config from the original subgraph to the
+        # re-traced graph so it's available for regional compilation.
+        if (
+            isinstance(subgraph, torch.fx.GraphModule)
+            and hasattr(subgraph, "meta")
+            and "nested_region_config" in subgraph.meta
+            and "nested_region_config" not in graph.meta
+        ):
+            graph.meta["nested_region_config"] = subgraph.meta["nested_region_config"]
+
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
@@ -1043,6 +1053,30 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
+
+    # Propagate nested_region_config to the node metadata so the regional
+    # inductor compiler can compile backward invoke_subgraph nodes.
+    # Dynamo sets this for forward nodes during tracing.  For backward
+    # nodes created during joint tracing, the config lives on the subgraph
+    # module (set by InvokeSubgraphAutogradOp.backward) but may be wrapped
+    # by FunctionalizeCtxWrapper — unwrap to find it.
+    nested_config = None
+    orig_subgraph = (
+        subgraph.subgraph if isinstance(subgraph, FunctionalizeCtxWrapper) else subgraph
+    )
+    for gm in (graph, orig_subgraph):
+        if (
+            isinstance(gm, torch.fx.GraphModule)
+            and hasattr(gm, "meta")
+            and "nested_region_config" in gm.meta
+        ):
+            nested_config = gm.meta["nested_region_config"]
+            break
+    if nested_config is not None:
+        node = out_proxy.node
+        if "custom" not in node.meta:
+            node.meta["custom"] = {}
+        node.meta["custom"]["nested_region_config"] = nested_config
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
