@@ -28,7 +28,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
@@ -1042,11 +1042,14 @@ class DistMatrixOpsTest(DTensorTestBase):
         ],
     )
     def test_grouped_mm(self, backend, kwargs):
-        if backend == "cublaslt" and torch.cuda.get_device_capability()[0] not in [
-            10,
-            11,
-        ]:
-            self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
+        if backend == "cublaslt":
+            if _get_torch_cuda_version() < (13, 2):
+                self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+            sm_major = torch.cuda.get_device_capability()[0]
+            if sm_major < 9 or sm_major >= 12:
+                self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
+            if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
+                self.skipTest("cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
         # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()

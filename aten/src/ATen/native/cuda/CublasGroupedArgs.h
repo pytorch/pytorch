@@ -35,6 +35,8 @@ struct cublasGroupedArgs {
   int64_t* DPtrArray;
   int64_t* alphaPtrArray;
   int64_t* betaPtrArray;
+  float* alphaScalar;
+  float* betaScalar;
 };
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
 

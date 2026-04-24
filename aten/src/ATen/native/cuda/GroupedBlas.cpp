@@ -453,10 +453,10 @@ std::optional<c10::ScalarType> out_dtype) {
                                args.mArray, args.avgM,
                                args.nArray, args.avgN,
                                args.kArray, args.avgK,
-                               args.alphaPtrArray, args.A_dtype,
+                               args.alphaPtrArray, args.alphaScalar, args.A_dtype,
                                args.APtrArray, args.ldaArray,
                                args.BPtrArray, args.ldbArray,
-                               args.betaPtrArray, args.result_dtype,
+                               args.betaPtrArray, args.betaScalar, args.result_dtype,
                                args.DPtrArray, args.lddArray,
                                args.DPtrArray, args.lddArray, args.batchCount);
   return out;

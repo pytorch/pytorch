@@ -220,6 +220,8 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   float* alpha_scalar = reinterpret_cast<float*>(betaPtrArray + batchCount);
   float* beta_scalar  = alpha_scalar + 1;
+  alphaScalar = alpha_scalar;
+  betaScalar = beta_scalar;
 
   const int64_t base_A = reinterpret_cast<int64_t>(mat2.data_ptr());
   const int64_t base_B = reinterpret_cast<int64_t>(mat1.data_ptr());
