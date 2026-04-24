@@ -167,6 +167,19 @@ dtype_precisions = {
     torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
 }
+
+# PrivateUse1 backends may override default tolerances (e.g. for float64→float32
+# downcast). Merge with any overrides, taking the loosest tolerance per dtype.
+try:
+    torch._C._get_privateuse1_backend_name()
+    import torch.testing._comparison as _cmp
+    for _dt in dtype_precisions:
+        if _dt in _cmp._DTYPE_PRECISIONS:
+            _r0, _a0 = dtype_precisions[_dt]
+            _r1, _a1 = _cmp._DTYPE_PRECISIONS[_dt]
+            dtype_precisions[_dt] = (max(_r0, _r1), max(_a0, _a1))
+except RuntimeError:
+    pass
 # Returns the "default" rtol and atol for comparing scalars or
 # tensors of the given dtypes.
 
