@@ -1,4 +1,5 @@
 #include <torch/extension.h>
+#include <torch/headeronly/core/Layout.h>
 
 // test include_dirs in setuptools.setup with relative path
 #include <tmp.h>
@@ -58,4 +59,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_symintarrayref", []() { return at::SymIntArrayRef({1, 2, 3}); });
   m.def("get_tensor", []() { return random_tensor(); });
   m.def("get_math_type", &get_math_type);
+  m.def("roundtrip_layout", [](c10::Layout layout) -> c10::Layout { return layout; });
 }
