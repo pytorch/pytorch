@@ -505,7 +505,7 @@ class GuardManagerWrapper:
                 )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # Assumption: callers will not reassignthe attributes
+                # Assumption: callers will not reassign the attributes
                 #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
                 # Mutating the objects those attributes point to is fine;
                 # rebinding the attribute itself is not.
