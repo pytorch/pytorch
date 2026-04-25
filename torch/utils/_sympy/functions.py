@@ -615,10 +615,7 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift.is_number:
-            if shift < 0:
-                raise ValueError("negative shift count")
-        elif shift.is_nonnegative is False:
+        if shift.is_negative:
             raise ValueError("negative shift count")
         return base * PowByNatural(sympy.Integer(2), shift)
 
@@ -628,10 +625,7 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift.is_number:
-            if shift < 0:
-                raise ValueError("negative shift count")
-        elif shift.is_nonnegative is False:
+        if shift.is_negative:
             raise ValueError("negative shift count")
         return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
