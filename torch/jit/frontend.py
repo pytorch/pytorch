@@ -707,7 +707,12 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        lhs = [build_expr(ctx, x) for x in stmt.targets]
+        new_targets = []
+        for x in stmt.targets:
+            if isinstance(x, ast.List):
+                x = ast.Tuple(elts=x.elts, ctx=x.ctx)
+            new_targets.append(x)
+        lhs = [build_expr(ctx, x) for x in new_targets]
         return Assign(lhs, rhs)
 
     @staticmethod
