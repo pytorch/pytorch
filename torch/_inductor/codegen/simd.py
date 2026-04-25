@@ -379,7 +379,6 @@ class NodeInfo(NamedTuple):
 
     node_schedule: list
     tiling: dict
-    tiling_scores: dict | None
     numel: Any
     rnumel: Any
     features: SIMDKernelFeatures
@@ -2331,22 +2330,8 @@ class SIMDScheduling(BaseScheduling):
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            if torch._inductor.config.triton.coalesce_tiling_analysis:
-                assert isinstance(
-                    pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
-                )
-                coalesce_analysis = analyze_memory_coalescing(pn)
-            else:
-                coalesce_analysis = None
-            features = SIMDKernelFeatures(
-                node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
-            )
-            tiling, tiling_scores = self.get_tiling_and_scores(
-                node_schedule,
-                numel,
-                rnumel,
-                features.coalesce_analysis,
-            )
+            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            features = SIMDKernelFeatures(node_schedule, numel, rnumel)
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
@@ -2356,7 +2341,6 @@ class SIMDScheduling(BaseScheduling):
             node_schedule_map[pn] = NodeInfo(
                 node_schedule=node_schedule,
                 tiling=tiling,
-                tiling_scores=tiling_scores,
                 numel=numel,
                 rnumel=rnumel,
                 features=features,
@@ -2412,7 +2396,6 @@ class SIMDScheduling(BaseScheduling):
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
                         triton_kernel_cls=self.kernel_type,
-                        tiling_scores=node_info.tiling_scores,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
