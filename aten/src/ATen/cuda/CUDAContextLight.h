@@ -3,7 +3,8 @@
 
 #include <cstdint>
 #include <map>
-#include <shared_mutex>
+#include <unordered_map>
+#include <utility>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -27,6 +28,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/hash.h>
 
 namespace c10 {
 struct Allocator;
@@ -90,16 +92,18 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
-struct WorkspaceMapWithMutex {
-  std::map<std::tuple<void*, void*>, std::pair<at::DataPtr, size_t>> map;
-  std::shared_mutex mutex;
-};
 
-TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublas_handle_stream_to_workspace();
-TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
-TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
+// Thread-local workspace map keyed by (device, stream).
+// No mutex is needed because cuBLAS handles are unique per thread
+// (guaranteed by DeviceThreadHandlePool), so each thread's workspace
+// map is only ever accessed by that thread.
+using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>, c10::hash<std::pair<int, void*>>>;
+
+TORCH_CUDA_CPP_API WorkspaceMap& cublas_stream_to_workspace();
+TORCH_CUDA_CPP_API WorkspaceMap& cublaslt_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
+TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API void setChosenWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void setCUDABlasLtWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void resetChosenWorkspaceSize();
