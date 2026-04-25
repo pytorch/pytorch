@@ -4554,7 +4554,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @runOnRocmArch(MI300_ARCH)
-    def test_intra_node_comm_all_reduce(self):
+    @parametrize(
+        "custom_group_name",
+        [True, False],
+    )
+    def test_intra_node_comm_all_reduce(self, custom_group_name):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
 
@@ -4567,12 +4571,20 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if not SM80OrLater:
             raise SkipTest("Test requires sm>=80")
 
+        group_name = ""
+        if custom_group_name:
+            group_name = "a_custom_group_name"
+
         store = c10d.FileStore(self.file_name, self.world_size)
         os.environ["ENABLE_INTRA_NODE_COMM"] = "1"
         os.environ["TEST_INTRA_NODE_COMM"] = "1"
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            group_name=group_name,
         )
         expect = self.world_size * (self.world_size - 1) // 2
 
@@ -4926,6 +4938,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             for i in range(self.world_size):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
+
+instantiate_parametrized_tests(CommTest)
 
 
 class SetDeviceMethod(Enum):
