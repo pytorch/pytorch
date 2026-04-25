@@ -433,6 +433,30 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 28), "NCCL Symmetric Memory device API support from nccl 2.28")
+    @skip_if_lt_x_gpu(2)
+    def test_get(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group = c10d.group.WORLD
+
+        dtype = torch.float
+        numel = 1024
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        dst = torch.empty_like(src)
+        symm_mem.rendezvous(src, group=group)
+        c10d.barrier()
+
+        if self.rank == 0:
+            ret = symm_mem.get(dst, src, group, peer=1)
+            self.assertIs(ret, dst)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
         (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
     )
