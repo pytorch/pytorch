@@ -113,6 +113,180 @@ class AutotuneCacheArtifact(CacheArtifact):
 
 
 @dataclasses.dataclass
+class CachedConfig:
+    """Serialize and validate a single autotune cache entry."""
+
+    config: Config
+    configs_hash: str
+    found_by_coordesc: bool = False
+    time_taken_ms: int | None = None
+    triton_cache_hash: str | None = None
+
+    class Invalid(ValueError):
+        pass
+
+    def to_dict(self) -> dict[str, JsonDataTy]:
+        data: dict[str, JsonDataTy] = {
+            # pyrefly: ignore [missing-attribute]
+            **self.config.kwargs,
+            # pyrefly: ignore [missing-attribute]
+            "num_warps": self.config.num_warps,
+            # pyrefly: ignore [missing-attribute]
+            "num_stages": self.config.num_stages,
+            "configs_hash": self.configs_hash,
+            "found_by_coordesc": self.found_by_coordesc,
+            "time_taken_ms": self.time_taken_ms,
+            "triton_cache_hash": self.triton_cache_hash,
+        }
+        # Save extra_options if present on the config. This allows third-party
+        # backends to store custom tuned options alongside the standard config.
+        if extra_options := getattr(self.config, "extra_options", None):
+            data["extra_options"] = extra_options
+        if HAS_WARP_SPEC:
+            data.update(
+                {
+                    "num_consumer_groups": getattr(
+                        self.config, "num_consumer_groups", 0
+                    ),
+                    "num_buffers_warp_spec": getattr(
+                        self.config, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+        return data
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, JsonDataTy],
+        expected_configs_hash: str,
+        configs: list[Config],
+        inductor_meta: _InductorMetaTy,
+    ) -> CachedConfig | None:
+        if "configs_hash" not in data:
+            log.warning(
+                "Ignoring corrupt autotune cache entry for configs_hash %s: "
+                "missing configs_hash",
+                expected_configs_hash,
+            )
+            return None
+        if data["configs_hash"] != expected_configs_hash:
+            return None
+
+        try:
+            return cls._from_dict(data, expected_configs_hash, configs, inductor_meta)
+        except CachedConfig.Invalid as exc:
+            log.warning(
+                "Ignoring corrupt autotune cache entry for configs_hash %s: %s",
+                expected_configs_hash,
+                exc,
+            )
+            return None
+
+    @classmethod
+    def _from_dict(
+        cls,
+        data: dict[str, JsonDataTy],
+        expected_configs_hash: str,
+        configs: list[Config],
+        inductor_meta: _InductorMetaTy,
+    ) -> CachedConfig:
+        remaining = dict(data)
+        remaining.pop("configs_hash")
+        time_taken_ms = remaining.pop("time_taken_ms", None)
+        triton_cache_hash = remaining.pop("triton_cache_hash", None)
+        extra_options = remaining.pop("extra_options", None)
+        found_by_coordesc = cls._pop_bool(remaining, "found_by_coordesc", False)
+
+        num_warps = cls._pop_int(remaining, "num_warps")
+        num_stages = cls._pop_int(remaining, "num_stages")
+        config_args = {
+            "num_warps": num_warps,
+            "num_stages": num_stages,
+        }
+
+        if HAS_WARP_SPEC:
+            config_args.update(
+                {
+                    "num_consumer_groups": cls._pop_int(
+                        remaining, "num_consumer_groups", 0
+                    ),
+                    "num_buffers_warp_spec": cls._pop_int(
+                        remaining, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+
+        if inductor_meta.get("coordinate_descent_tuning") and found_by_coordesc:
+            # pyrefly: ignore [bad-argument-count, unexpected-keyword]
+            triton_config = Config(remaining, **config_args)
+            # pyrefly: ignore [missing-attribute]
+            triton_config.found_by_coordesc = True
+        else:
+            triton_config = cls._match_config(configs, remaining, num_warps, num_stages)
+
+        # Restore extra_options (may be None if not used by backend).
+        # pyrefly: ignore [missing-attribute]
+        triton_config.extra_options = extra_options
+        return cls(
+            config=triton_config,
+            configs_hash=expected_configs_hash,
+            found_by_coordesc=found_by_coordesc,
+            time_taken_ms=time_taken_ms if isinstance(time_taken_ms, int) else None,
+            triton_cache_hash=(
+                triton_cache_hash if isinstance(triton_cache_hash, str) else None
+            ),
+        )
+
+    @staticmethod
+    def _match_config(
+        configs: list[Config],
+        kwargs: dict[str, JsonDataTy],
+        num_warps: int,
+        num_stages: int,
+    ) -> Config:
+        matching_configs = [
+            cfg
+            for cfg in configs
+            # pyrefly: ignore [missing-attribute]
+            if all(val == kwargs.get(key) for key, val in cfg.kwargs.items())
+            # pyrefly: ignore [missing-attribute]
+            and cfg.num_warps == num_warps
+            # pyrefly: ignore [missing-attribute]
+            and cfg.num_stages == num_stages
+        ]
+        if len(matching_configs) == 1:
+            return matching_configs[0]
+        if not matching_configs:
+            raise CachedConfig.Invalid("cached config did not match any config")
+        raise CachedConfig.Invalid("cached config matched multiple configs")
+
+    @staticmethod
+    def _pop_int(
+        data: dict[str, JsonDataTy], key: str, default: int | None = None
+    ) -> int:
+        if key in data:
+            value = data.pop(key)
+        elif default is not None:
+            return default
+        else:
+            raise CachedConfig.Invalid(f"missing {key}")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise CachedConfig.Invalid(f"{key} must be an int")
+        return value
+
+    @staticmethod
+    def _pop_bool(data: dict[str, JsonDataTy], key: str, default: bool = False) -> bool:
+        if key in data:
+            value = data.pop(key)
+        else:
+            return default
+        if not isinstance(value, bool):
+            raise CachedConfig.Invalid(f"{key} must be a bool")
+        return value
+
+
+@dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
     local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
@@ -272,31 +446,13 @@ class AutotuneCache:
         found_by_coordesc: bool = False,
         triton_cache_hash: str | None = None,
     ) -> None:
-        data = {
-            # pyrefly: ignore [missing-attribute]
-            **config.kwargs,
-            # pyrefly: ignore [missing-attribute]
-            "num_warps": config.num_warps,
-            # pyrefly: ignore [missing-attribute]
-            "num_stages": config.num_stages,
-            "configs_hash": self.configs_hash,
-            "found_by_coordesc": found_by_coordesc,
-            "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            "triton_cache_hash": triton_cache_hash,
-        }
-        # Save extra_options if present on the config. This allows third-party
-        # backends to store custom tuned options alongside the standard config.
-        if extra_options := getattr(config, "extra_options", None):
-            data["extra_options"] = extra_options
-        if HAS_WARP_SPEC:
-            data.update(
-                {
-                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
-                    "num_buffers_warp_spec": getattr(
-                        config, "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
+        data = CachedConfig(
+            config=config,
+            configs_hash=self.configs_hash,
+            found_by_coordesc=found_by_coordesc,
+            time_taken_ms=time_taken_ns // 1000000,  # Convert from NS to MS
+            triton_cache_hash=triton_cache_hash,
+        ).to_dict()
 
         if local_cache := self.local_cache:
             cache, key = local_cache
@@ -539,75 +695,19 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 
 
 def _load_cached_autotuning(
-    best_config: dict[str, JsonDataTy],
+    best_config: dict[str, JsonDataTy] | None,
     configs_hash: str,
     configs: list[Config],
     inductor_meta: _InductorMetaTy,
 ) -> Config | None:
     if best_config is None:
         return None
-    if best_config.pop("configs_hash", None) != configs_hash:
+    cached_config = CachedConfig.from_dict(
+        best_config, configs_hash, configs, inductor_meta
+    )
+    if cached_config is None:
         return None
-
-    # Remove time taken for comparison
-    best_config.pop("time_taken_ms", None)
-
-    best_config.pop("triton_cache_hash", None)
-
-    # Extract extra_options if present. This allows third-party backends
-    # to restore custom tuned options from the cache.
-    extra_options = best_config.pop("extra_options", None)
-
-    if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
-        "found_by_coordesc", False
-    ):
-        num_warps = best_config.pop("num_warps")
-        num_stages = best_config.pop("num_stages")
-
-        # Extract common arguments
-        config_args = {
-            "num_warps": num_warps,
-            "num_stages": num_stages,
-        }
-
-        if HAS_WARP_SPEC:
-            config_args.update(
-                {
-                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
-                    "num_buffers_warp_spec": best_config.pop(
-                        "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
-
-        # Create the triton_config with the appropriate arguments
-        # pyrefly: ignore [bad-argument-count, unexpected-keyword]
-        triton_config = Config(best_config, **config_args)
-        # pyrefly: ignore [missing-attribute]
-        triton_config.found_by_coordesc = True
-        # Restore extra_options (may be None if not used by backend)
-        # pyrefly: ignore [missing-attribute]
-        triton_config.extra_options = extra_options
-        return triton_config
-
-    matching_configs = [
-        cfg
-        for cfg in configs
-        # pyrefly: ignore [missing-attribute]
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-        # pyrefly: ignore [missing-attribute]
-        and cfg.num_warps == best_config.get("num_warps")
-        # pyrefly: ignore [missing-attribute]
-        and cfg.num_stages == best_config.get("num_stages")
-    ]
-    if len(matching_configs) != 1:
-        return None
-
-    matched_config = matching_configs[0]
-    # Restore extra_options (may be None if not used by backend)
-    # pyrefly: ignore [missing-attribute]
-    matched_config.extra_options = extra_options
-    return matched_config
+    return cached_config.config
 
 
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
