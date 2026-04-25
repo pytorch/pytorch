@@ -32,6 +32,7 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
+    DispatchCache,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -2447,6 +2448,36 @@ class FakeTensorDispatchCache(TestCase):
         else:
             self.assertNotIn(reason, info.bypasses)
 
+    def test_tensor_metadata_flatten_keeps_default_cache(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            metadata = extract_tensor_metadata(x)
+            result: list[object] = []
+
+            metadata._flatten_into(result, fm, _CacheKeyState(fm.shape_env))
+            self.assertGreater(len(result), 0)
+
+    def test_dispatch_cache_instances_are_isolated(self):
+        with FakeTensorMode(allow_non_fake_inputs=True) as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            cache1 = DispatchCache()
+            cache2 = DispatchCache()
+
+            with unset_fake_temporarily():
+                cache1.dispatch(fm, aten.add.Tensor, (), (x, y), {})
+                self.assertEqual(cache1.info().misses, 1)
+                self.assertEqual(cache2.info().misses, 0)
+
+                cache1.dispatch(fm, aten.add.Tensor, (), (x, y), {})
+                self.assertEqual(cache1.info().hits, 1)
+                self.assertEqual(cache2.info().hits, 0)
+
+                real = torch.randn(4, 3)
+                cache1.dispatch(fm, aten.neg.default, (), (real,), {})
+                self.assertEqual(cache1.info().bypasses["non-fake tensor"], 1)
+                self.assertNotIn("non-fake tensor", cache2.info().bypasses)
+
     def test_cache_hit(self):
         """
         Test that cache hit/miss counters are updated correctly.
@@ -2885,7 +2916,7 @@ class FakeTensorDispatchCache(TestCase):
 
         def count_invoke_subgraph_keys():
             invoke_subgraph_keys = 0
-            for cache_key in FakeTensorMode.cache:
+            for cache_key in FakeTensorMode.dispatch_cache.cache:
                 if isinstance(cache_key.key[0], torch._ops.HigherOrderOperator):
                     invoke_subgraph_keys += 1
             return invoke_subgraph_keys
