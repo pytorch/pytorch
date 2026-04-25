@@ -8098,7 +8098,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device=device, dtype=torch.float64))
 
-    @requires_cuda
     def test_norm_dtype(self, device):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -8114,7 +8113,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         ]
 
         torch.compile(foo, backend="aot_eager_decomp_partition")
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.amp.autocast(device_type=device.split(":")[0], enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
             self.assertEqual(ref.dtype, res.dtype)
@@ -8230,20 +8229,21 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
-    @requires_cuda
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
+        device_mod = torch.get_device_module(device)
+
         @torch.compile(backend="eager")
         def f(x):
             x.add_(1)
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
 
         x = torch.ones(2, device=device)
         x.foo = torch.zeros(2, device=device)
         f(x)
         del x.foo
         del x
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
         # check when non-tensor data structure attribute contains a tensor
@@ -8251,13 +8251,13 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         def f(x):
             x.add_(1)
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
         x = torch.ones(2, device=device)
         x.foo = [torch.zeros(2, device=device) for _ in range(5)]
         f(x)
         del x.foo
         del x
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
         # check with tensor refcycle
@@ -8265,7 +8265,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         def g(x, y):
             return x + y
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = device_mod.memory_allocated()
         x = torch.ones(2, device=device)
         y = torch.zeros(2, device=device)
         x.foo = [y]
@@ -8275,7 +8275,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         del y.foo
         del x
         del y
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
     def test_udf_class_source(self):
@@ -8309,7 +8309,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -8598,9 +8597,8 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    @requires_cuda
-    def test_zero_dim_param_mixed_device_grad(self):
-        # cpu 0-dim params with cuda grads
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with accelerator grads
         # https://github.com/pytorch/pytorch/issues/160084
         class RegressionModel(torch.nn.Module):
             def __init__(self, a=0, b=0):
@@ -8615,7 +8613,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         model.forward = torch.compile(
             model.forward, backend="aot_eager", fullgraph=True
         )
-        inputs = torch.randn(4, 10).to("cuda")
+        inputs = torch.randn(4, 10).to(device)
         out = model(inputs)
         out.sum().backward()
         self.assertIsNotNone(model.a.grad)
@@ -8623,14 +8621,13 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_cuda_sync(self):
+    def test_accelerator_sync(self, device):
         def fn(x):
             y = x + 1
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
             return y * 2
 
-        x = torch.ones(2, device="cuda")
+        x = torch.ones(2, device=device)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
@@ -9063,7 +9060,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @skipIfHpu
-    @requires_cuda
     def test_deterministic_pad_replicate_compile(self, device):
         from torch.testing._internal.common_utils import DeterministicGuard
 
@@ -9165,8 +9161,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
