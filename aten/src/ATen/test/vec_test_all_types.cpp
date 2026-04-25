@@ -232,7 +232,7 @@ namespace {
       auto half_precision_ut = [&](SignOpType op_type) {
         constexpr auto N = vec::size();
         CACHE_ALIGN RT x_fp[N];
-        CACHE_ALIGN VT x_hp[N];
+        CACHE_ALIGN VT x_hp[N] = {};
         auto seed = TestSeed();
         ValueGen<RT> generator(RT(-1), RT(1), seed);
         for (const auto i : c10::irange(N)) {
