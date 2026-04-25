@@ -9,7 +9,7 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -337,6 +337,17 @@ class DeviceTypeTestBase(TestCase):
     # in the future.
     op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
+    # An optional skip mechanism built upon instantiate_device_type_tests(),
+    # designed to facilitate skipping either an entire class or specific test cases
+    # within a class.
+    #
+    # Format:
+    #   test_exclusions = {
+    #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
+    #       "TestClassB": "*",                    # Global: Skips the entire class
+    #   }
+    test_exclusions: ClassVar[dict[str, Collection[str]]]
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -387,6 +398,13 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def _get_test_exclusions(cls, test_class_name):
+        test_exclusions = getattr(cls, "test_exclusions", None)
+        if test_exclusions is not None and test_class_name in test_exclusions:
+            return test_exclusions[test_class_name]
+        return []
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -946,6 +964,11 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
+        skipped = base._get_test_exclusions(generic_test_class.__name__)
+        # Skip the entire class
+        if "*" in skipped:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupported runtime class:
@@ -977,6 +1000,9 @@ def instantiate_device_type_tests(
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
+                # Skip the specified methods.
+                if name in skipped:
+                    continue
                 test = getattr(generic_test_class, name)
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)

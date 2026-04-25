@@ -144,10 +144,49 @@ PrivateUse1TestBase.op_overrides = {
     "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
 }
 
+
+class TestSkippedSpecificTestCases(TestCase):
+    executed_count = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 1
+        if cls.executed_count != expected_runs:
+            raise AssertionError(
+                f"Skip logic failed! Expected {expected_runs} tests to run, "
+                f"but {cls.executed_count} executed."
+            )
+        super().tearDownClass()
+
+    def test_runs(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+
+    def test_skipped(self, device):
+        type(self).executed_count += 1
+        self.assertEqual(torch.device(device).type, "openreg")
+        self.fail("This test should not be instantiated for openreg")
+
+
+class TestSkippedWholeTestClass(TestCase):
+    def test_skipped_class_member(self, device):
+        self.fail("This class should not be instantiated for openreg")
+
+
+# PrivateUse1 can skip individual methods or an entire instantiated class.
+PrivateUse1TestBase.test_exclusions = {
+    "TestSkippedSpecificTestCases": ["test_skipped"],
+    "TestSkippedWholeTestClass": "*",
+}
+
 instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
 instantiate_device_type_tests(
     TestBypassDeviceRestrictions, globals(), only_for="openreg"
 )
+instantiate_device_type_tests(
+    TestSkippedSpecificTestCases, globals(), only_for="openreg"
+)
+instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
 if __name__ == "__main__":
     run_tests()
