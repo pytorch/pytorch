@@ -761,16 +761,22 @@ def foreach_reduce(
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
             if to_accumulate_grad:
-                if not isinstance(fsdp_param.sharded_param.grad, DTensor):
-                    raise AssertionError(
-                        f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
-                    )
-                fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
+                if fsdp_param.is_spmd_types:
+                    fsdp_param.sharded_param.grad += new_sharded_grad  # pyrefly: ignore
+                else:
+                    if not isinstance(fsdp_param.sharded_param.grad, DTensor):
+                        raise AssertionError(
+                            f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
+                        )
+                    fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
-                    new_sharded_grad
-                )
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+                if fsdp_param.is_spmd_types:
+                    fsdp_param.sharded_param.grad = new_sharded_grad
+                else:
+                    new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
+                        new_sharded_grad
+                    )
+                    fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             for hook in (
                 getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                 or {}
