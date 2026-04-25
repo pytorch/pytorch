@@ -16,6 +16,7 @@
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
@@ -751,7 +752,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     reinterpret_cast<torch::Library*>(self)->set_python_module(
         pymodule, context);
   });
-
+}
 
 AOTI_TORCH_EXPORT thread_local std::string torch_exception_what;
 AOTI_TORCH_EXPORT thread_local std::string
@@ -761,20 +762,22 @@ AOTI_TORCH_EXPORT thread_local std::string
 AOTI_TORCH_EXPORT thread_local bool torch_exception_printing_enabled = true;
 
 AOTI_TORCH_EXPORT const char* torch_exception_get_what() {
-  return torch_exception_what.c_str();
+  return torch::csrc::shim::details ::get_torch_exception_what().c_str();
 }
 
 AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
-  return torch_exception_what_without_backtrace.c_str();
+  return torch::csrc::shim::details ::
+      get_torch_exception_what_without_backtrace()
+          .c_str();
 }
 
 AOTI_TORCH_EXPORT bool torch_exception_set_exception_printing(
     bool should_print) {
-  const bool previous = torch_exception_printing_enabled;
-  torch_exception_printing_enabled = should_print;
-  return previous;
+  return torch::csrc::shim::details ::
+      torch_exception_state_set_exception_printing(should_print);
 }
 
 AOTI_TORCH_EXPORT bool torch_exception_get_exception_printing() {
-  return torch_exception_printing_enabled;
+  return torch::csrc::shim::details ::
+      torch_exception_state_get_exception_printing();
 }
