@@ -1976,6 +1976,16 @@ def empty(  # type: ignore[misc]
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
+def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(group, str):
+        return c10d.GroupName(group)
+    if isinstance(group, ProcessGroup):
+        return group.group_name
+    raise TypeError(f"unsupported group type: {type(group)}")
+
+
 def rendezvous(
     tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
@@ -1992,15 +2002,7 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
-    from torch._C._distributed_c10d import ProcessGroup
-
-    if isinstance(group, str):
-        group_name = c10d.GroupName(group)
-    elif isinstance(group, ProcessGroup):
-        group_name = group.group_name
-    else:
-        raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
-
+    group_name = _resolve_group_name(group)
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2154,6 +2156,62 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
 
 
 # One-sided communication APIs.
+def get(
+    dst: torch.Tensor,
+    src: torch.Tensor,
+    group: c10d.GroupName | ProcessGroup,
+    peer: int,
+) -> torch.Tensor:
+    r"""
+    get(dst, src, group, peer) -> Tensor
+
+    Copy ``src`` from ``peer`` into local ``dst`` using one-sided symmetric
+    memory access.
+
+    ``src`` must be a contiguous tensor allocated with
+    :func:`torch.distributed._symmetric_memory.empty` and rendezvoused with
+    ``group``. ``dst`` can be a regular CUDA tensor or a symmetric-memory
+    tensor. The tensors must be contiguous, have the same dtype, be on the same
+    device, and contain the same number of elements. The copy is issued on the
+    current CUDA stream and the returned tensor is ``dst``.
+
+    Args:
+        dst (Tensor): local destination tensor.
+        src (Tensor): local symmetric-memory tensor whose peer allocation is
+            the remote source.
+        group (Union[str, ProcessGroup]): process group identifying peers.
+        peer (int): rank in ``group`` to copy from.
+    """
+    if dst.device != src.device:
+        raise ValueError("get: dst and src must be on the same device")
+    if dst.dtype != src.dtype:
+        raise ValueError("get: dst and src must have the same dtype")
+    if dst.numel() != src.numel():
+        raise ValueError("get: dst and src must have the same number of elements")
+    if not dst.is_contiguous() or not src.is_contiguous():
+        raise ValueError("get: dst and src must be contiguous")
+
+    group_name = _resolve_group_name(group)
+    backend = get_backend(src.device)
+    if backend == "NVSHMEM":
+        return torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group_name)
+    if backend == "NCCL":
+        return torch.ops.symm_mem.nccl_get_out(dst, src, peer, group_name)
+    if backend == "CUDA":
+        hdl = rendezvous(src, group_name)
+        if hdl is None:
+            raise RuntimeError("get: src must be allocated from symmetric memory")
+        if peer < 0 or peer >= hdl.world_size:
+            raise ValueError("get: invalid peer")
+        if hdl.offset % src.element_size() != 0:
+            raise RuntimeError("get: source storage offset is not element-aligned")
+        storage_offset = hdl.offset // src.element_size() + src.storage_offset()
+        remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
+        dst.copy_(remote_src)
+        return dst
+    raise ValueError(f"get: unsupported backend: {backend}")
+
+
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     r"""
     put_signal(src, hdl, peer) -> None
@@ -2295,6 +2353,7 @@ __all__ = [
     "is_nvshmem_available",
     "set_backend",
     "get_backend",
+    "get",
     "set_signal_pad_size",
     "get_signal_pad_size",
     "get_mem_pool",
