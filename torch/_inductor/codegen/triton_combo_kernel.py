@@ -777,16 +777,6 @@ class ComboKernel(Kernel):
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
-        # Sum per-sub-kernel bandwidth / FLOP estimates for the combo launch.
-        sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
-        self._kernel_num_gb = sum(m.get("kernel_num_gb") or 0 for m in sub_metas)
-        if config.benchmark_kernel or config.profile_bandwidth:
-            inductor_meta["kernel_num_gb"] = self._kernel_num_gb
-        if config.benchmark_kernel:
-            inductor_meta["kernel_flop"] = sum(
-                m.get("kernel_flop") or 0 for m in sub_metas
-            )
-
         sub_kernel = selected_kernel
         if heuristics == "foreach":
             heuristics_line = f"""
@@ -999,7 +989,7 @@ class ComboKernel(Kernel):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb=self._kernel_num_gb))
+            code.splice(self.codegen_kernel_benchmark(num_gb=0))
 
         return code.getvalue()
 

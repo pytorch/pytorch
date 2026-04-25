@@ -1718,68 +1718,6 @@ class ComboKernelMetadataTests(TestCase):
         ]
         self.assertEqual(standalone, combo)
 
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch({"benchmark_kernel": True})
-    def test_combo_kernel_num_gb_and_flop_match_standalone_sum(self):
-        kernel_num_gb_re = re.compile(r"'kernel_num_gb'\s*:\s*([\d.eE+-]+)")
-        kernel_flop_re = re.compile(r"'kernel_flop'\s*:\s*([\d.eE+-]+)")
-
-        def fn(a, b):
-            return torch.relu(a), torch.sigmoid(b)
-
-        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-
-        with torch._inductor.config.patch({"combo_kernels": False}):
-            torch._dynamo.reset()
-            _, sa_codes = run_and_get_code(torch.compile(fn), *inps)
-        sa_text = " ".join(sa_codes)
-        sa_gb_sum = sum(float(m.group(1)) for m in kernel_num_gb_re.finditer(sa_text))
-        sa_flop_sum = sum(float(m.group(1)) for m in kernel_flop_re.finditer(sa_text))
-
-        combo_code = self._combo_code(fn, inps)
-        # Combo source contains kernel_num_gb both inside each per-sub-kernel
-        # inductor_meta_{i} sub-dict and at the combo-level (the sum). The
-        # outer combo-level value is inserted AFTER combo_grid_meta in dict
-        # order, so the last match is the combo-level sum.
-        combo_gb_matches = kernel_num_gb_re.findall(combo_code)
-        combo_flop_matches = kernel_flop_re.findall(combo_code)
-        self.assertTrue(combo_gb_matches, "combo source missing kernel_num_gb")
-        self.assertTrue(combo_flop_matches, "combo source missing kernel_flop")
-
-        self.assertAlmostEqual(float(combo_gb_matches[-1]), sa_gb_sum, places=6)
-        self.assertAlmostEqual(float(combo_flop_matches[-1]), sa_flop_sum, places=6)
-
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch({"profile_bandwidth": True})
-    def test_combo_inductor_meta_has_kernel_num_gb_under_profile_bandwidth(self):
-        def fn(a, b):
-            return torch.relu(a), torch.sigmoid(b)
-
-        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
-        self.assertIn("'kernel_num_gb'", code)
-        self.assertNotIn("'kernel_flop'", code)
-
-    @requires_gpu_and_triton
-    def test_combo_inductor_meta_no_kernel_num_gb_without_profile(self):
-        def fn(a, b):
-            return torch.relu(a), torch.sigmoid(b)
-
-        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
-        self.assertNotIn("'kernel_num_gb'", code)
-        self.assertNotIn("'kernel_flop'", code)
-
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch({"benchmark_combo_kernel": True})
-    def test_benchmark_combo_kernel_emits_real_num_gb(self):
-        def fn(a, b):
-            return torch.relu(a), torch.sigmoid(b)
-
-        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
-        self.assertRegex(code, r"num_gb = \d*\.\d+")
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
