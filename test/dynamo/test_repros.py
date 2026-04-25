@@ -4905,35 +4905,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
 
-    def test_preserve_stride_with_clone(self) -> None:
-        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
-        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
-
-        def fn(
-            src: torch.Tensor, count: torch.Tensor
-        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-            Q, R = torch.linalg.qr(src)
-            rhs = torch.ones(Q.shape[0], 1, device=src.device)
-            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
-            cloned = a.clone(memory_format=torch.preserve_format)
-            return a.stride(), cloned.stride()
-
-        a_stride, cloned_stride = fn(A, torch.zeros(1))
-        self.assertEqual(
-            a_stride,
-            cloned_stride,
-            f"Strides should match in eager: {a_stride} against {cloned_stride}",
-        )
-
-        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
-            B, torch.zeros(1)
-        )
-        self.assertEqual(
-            compiled_a_stride,
-            compiled_cloned_stride,
-            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
-        )
-
     # Extension of https://github.com/pytorch/pytorch/issues/161010
     # in the non memory dense case
     def test_clone_not_memory_dense(self):
@@ -7888,13 +7859,6 @@ SavedForBackwardsAOTOutput(idx=5)""",
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
-    def test_sub_alpha_scalar_repro(self, device):
-        @torch.compile(backend="aot_eager")
-        def f(x):
-            return x.sub(1, alpha=2)
-
-        f(torch.ones(2, device=device, dtype=torch.float64))
-
     def test_norm_dtype(self, device):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -7991,28 +7955,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out3_ref.shape, out3_test.shape)
         self.assertEqual(out3_ref.stride(), out3_test.stride())
 
-    def test_megablocks_moe(self, device):
-        try:
-            from megablocks.layers import moe
-            from megablocks.layers.arguments import Arguments
-        except ImportError as e:
-            raise unittest.SkipTest("requires megablocks") from e
-        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
-        args = Arguments(
-            hidden_size=hs,
-            ffn_hidden_size=hs * 2,
-            moe_num_experts=num_experts,
-            moe_capacity_factor=1,
-            moe_top_k=top_k,
-        )
-        moe_mlp = moe.MoE(args)
-        # moe_mlp.cuda(torch.cuda.current_device()).half()
-        moe_mlp.device(torch.device.current_device()).half()
-        x = torch.randn(sl, bs, hs).device().half()
-        out1, _ = moe_mlp(x)
-        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
-        self.assertEqual(out1, out2)
-
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
         device_mod = torch.get_device_module(device)
 
@@ -8061,24 +8003,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         del y
         mem_after = device_mod.memory_allocated()
         self.assertEqual(mem_before, mem_after)
-
-    def test_truthiness_of_symints_no_recompiles(self, device):
-        def f(x):
-            numel = x.numel()
-            if numel:
-                return x + 1
-            else:
-                return x + 2
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
-
-        x1 = torch.randn(4)
-        _ = f_compiled(x1)
-        x2 = torch.randn(5)
-        _ = f_compiled(x2)
-
-        self.assertEqual(cnt.frame_count, 1)
 
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
@@ -9124,11 +9048,89 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         )
 
 
+class ReproTestsAllDevices(torch._dynamo.test_case.TestCase):
+    def test_preserve_stride_with_clone(self, device) -> None:
+        A = torch.rand(5, 5, device=device)
+        B = torch.rand(5, 5, device=device)
+
+        def fn(
+            src: torch.Tensor, count: torch.Tensor
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            Q, R = torch.linalg.qr(src)
+            rhs = torch.ones(Q.shape[0], 1, device=src.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            cloned = a.clone(memory_format=torch.preserve_format)
+            return a.stride(), cloned.stride()
+
+        a_stride, cloned_stride = fn(A, torch.zeros(1))
+        self.assertEqual(
+            a_stride,
+            cloned_stride,
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+        )
+
+        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
+            B, torch.zeros(1)
+        )
+        self.assertEqual(
+            compiled_a_stride,
+            compiled_cloned_stride,
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+        )
+
+    def test_sub_alpha_scalar_repro(self, device):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device=device, dtype=torch.float64))
+
+    def test_truthiness_of_symints_no_recompiles(self, device):
+        def f(x):
+            numel = x.numel()
+            if numel:
+                return x + 1
+            else:
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
+
+        x1 = torch.randn(4, device=device)
+        _ = f_compiled(x1)
+        x2 = torch.randn(5, device=device)
+        _ = f_compiled(x2)
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_megablocks_moe(self, device):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.to(device).half()
+        x = torch.randn(sl, bs, hs, device=device).half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
+
 instantiate_parametrized_tests(ReproTests)
 
 instantiate_device_type_tests(
     ReproTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
+instantiate_device_type_tests(ReproTestsAllDevices, globals(), allow_xpu=True)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
