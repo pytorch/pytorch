@@ -28,6 +28,7 @@ import atexit
 import contextlib
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -56,9 +57,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    get_eval_frame_isolate_recompiles_id,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_eval_frame_isolate_recompiles_id,
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
@@ -134,6 +137,8 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_next_isolate_recompiles_id = itertools.count()
 
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -278,11 +283,9 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    # pyrefly: ignore [bad-argument-type]
-                    cache_entries[0],
+                    cache_entries,
                     frame,
-                    # pyrefly: ignore [bad-argument-type]
-                    innermost_fn(callback),
+                    innermost_fn(callback),  # pyrefly: ignore [bad-argument-type]
                     skip_logging=True,
                 )
                 if reasons:
@@ -387,6 +390,39 @@ def _debug_get_cache_entry_list(
     if callable(code):
         code = code.__code__
     return torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+
+
+def _get_cache_entries_for_region(
+    code: types.CodeType | Callable[..., Any],
+    isolate_recompiles_id: int,
+) -> list[CacheEntry]:
+    """
+    Return the cache entries for a specific isolate_recompiles region on
+    ``code``, in LRU order (most-recently-used first).
+
+    Pass ``isolate_recompiles_id=-1`` to get the default (non-isolated)
+    bucket; pass a region's id (as exposed via
+    ``opt._isolate_recompiles_id``) to get that region's bucket.
+
+    Returns only entries owned by the requested bucket. During an actual
+    lookup, isolated regions also fall back read-only to the default
+    bucket for BC-friendly reuse — this helper does not include those
+    fallback entries.
+    """
+    if callable(code):
+        code = code.__code__
+    return torch._C._dynamo.eval_frame._get_cache_entries_for_region(
+        code, isolate_recompiles_id
+    )
+
+
+def _get_total_cache_entry_count(
+    code: types.CodeType | Callable[..., Any],
+) -> int:
+    """Total cache entries across all isolate_recompiles regions for a code object."""
+    if callable(code):
+        code = code.__code__
+    return torch._C._dynamo.eval_frame._get_total_cache_entry_count(code)
 
 
 class OptimizedModule(torch.nn.Module):
@@ -744,6 +780,7 @@ class _TorchDynamoContext:
         compiler_config: Any | None = None,
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
+        isolate_recompiles: bool = False,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -760,6 +797,9 @@ class _TorchDynamoContext:
         self.enter_exit_hooks = []
         self._package = package
         self._hooks = hooks
+        self._isolate_recompiles_id = (
+            next(_next_isolate_recompiles_id) if isolate_recompiles else -1
+        )
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -1025,6 +1065,9 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
+                prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
+                    self._isolate_recompiles_id
+                )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     prior_error_on_graph_break = _get_error_on_graph_break()
@@ -1089,6 +1132,9 @@ class _TorchDynamoContext:
                         )
 
                         set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                        set_eval_frame_isolate_recompiles_id(
+                            prior_isolate_recompiles_id
+                        )
                         for cleanup in cleanups:
                             cleanup()
                 return result
@@ -1111,6 +1157,7 @@ class _TorchDynamoContext:
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
         compile_wrapper._torchdynamo_wrapper_id = id(compile_wrapper)  # type: ignore[attr-defined]
+        compile_wrapper._isolate_recompiles_id = self._isolate_recompiles_id  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -1176,6 +1223,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
+        isolate_recompiles: bool = False,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1193,6 +1241,7 @@ class OptimizeContext(_TorchDynamoContext):
             compiler_config=compiler_config,
             package=package,
             hooks=hooks,
+            isolate_recompiles=isolate_recompiles,
         )
 
         if config.compiled_autograd:
@@ -1344,6 +1393,7 @@ def _optimize_catch_errors(
     compiler_config: Any | None = None,
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
+    isolate_recompiles: bool = False,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1357,6 +1407,7 @@ def _optimize_catch_errors(
         rebuild_ctx=rebuild_ctx,
         package=package,
         hooks=hooks,
+        isolate_recompiles=isolate_recompiles,
     )
 
 
@@ -1543,6 +1594,7 @@ def _optimize(
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
+    isolate_recompiles: bool = False,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1568,6 +1620,11 @@ def _optimize(
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
             detect when sizes vary and generate dynamic kernels upon recompile.
+        recompile_limit: Maximum number of recompilations for this region.
+            If None, uses ``torch._dynamo.config.recompile_limit``.
+        isolate_recompiles: If True, this compile call gets its own isolated
+            cache so recompilations are tracked independently from other
+            compile calls on the same function.
 
     Example Usage::
 
@@ -1602,6 +1659,7 @@ def _optimize(
             rebuild_ctx=rebuild_ctx,
             package=package,
             recompile_limit=recompile_limit,
+            isolate_recompiles=isolate_recompiles,
         )
 
     backend = get_compiler_fn(backend)
@@ -1640,6 +1698,7 @@ def _optimize(
         ),
         rebuild_ctx=rebuild_ctx,
         package=package,
+        isolate_recompiles=isolate_recompiles,
     )
 
 
@@ -2479,6 +2538,7 @@ def _optimize_assert(
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
+    isolate_recompiles: bool = False,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2518,6 +2578,7 @@ def _optimize_assert(
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        isolate_recompiles=isolate_recompiles,
     )
 
 
