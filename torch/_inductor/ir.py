@@ -6387,6 +6387,19 @@ class ExternKernel(InputsKernel):
                     if kernel._overloadname == "default"
                     else kernel.__name__.replace(".", "_")
                 )
+                # If the op has a versioned c_shim entry, call the latest _v{N}
+                # variant so new AOTI artifacts match the current op schema. The
+                # unversioned shim is retained solely for BC with existing
+                # already-compiled artifacts.
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                version_info = inductor_fallback_ops.get(f"aten.{kernel.__name__}", {})
+                latest_version = max(
+                    (int(v[1:]) for v in version_info if v.startswith("v")),
+                    default=1,
+                )
+                if latest_version > 1:
+                    opname = f"{opname}_v{latest_version}"
                 self.cpp_kernel_name = f"at::_ops::{opname}::call"
             else:
                 self.cpp_kernel_name = kernel._schema.name
