@@ -297,7 +297,8 @@ jobs:
       - get-label-type
       - job-filter
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # Only set the prefix when use-arc is set to true, they go together
+      runner_prefix: ""
       build-environment: linux-jammy-rocm-py3.10-mi355
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       # TODO (huydhn): Add this back once other workflow migrates
@@ -314,7 +315,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: false
       python-version: "3.10"
     secrets: inherit
 
