@@ -5408,6 +5408,26 @@ print(value, end="")
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
         self.assertTrue(x)
 
+    @serialTest()
+    def test_expandable_segment_map_oom_stat(self):
+        torch.cuda.empty_cache()
+        device = torch._C._cuda_getDevice()
+        torch._C._cuda_resetAccumulatedMemoryStats(device)
+        prev_settings = torch._C._accelerator_getAllocatorSettings()
+
+        try:
+            torch._C._accelerator_setAllocatorSettings(
+                "expandable_segments:True"
+            )
+            with self.assertRaises(torch.cuda.OutOfMemoryError):
+                torch.empty(1024 * 1024 * 1024 * 1024, dtype=torch.int8, device="cuda")
+
+            stats = torch.cuda.memory_stats()
+            self.assertGreater(stats["num_expandable_segment_map_oom"], 0)
+        finally:
+            torch.cuda.empty_cache()
+            torch._C._accelerator_setAllocatorSettings(prev_settings)
+
     def test_allocator_fuzz(self):
         # fuzz
         if (

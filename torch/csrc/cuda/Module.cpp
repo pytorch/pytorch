@@ -613,6 +613,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["num_device_alloc"] = stats.num_device_alloc;
   result["num_device_free"] = stats.num_device_free;
   result["num_oom_rejections"] = stats.num_oom_rejections;
+  result["num_expandable_segment_map_oom"] = stats.num_expandable_segment_map_oom;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);

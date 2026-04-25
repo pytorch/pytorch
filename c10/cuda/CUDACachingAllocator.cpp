@@ -381,12 +381,14 @@ struct ExpandableSegment {
       c10::DeviceIndex device,
       std::optional<cudaStream_t> stream,
       size_t segment_size,
-      std::vector<c10::DeviceIndex> peers)
+      std::vector<c10::DeviceIndex> peers,
+      int64_t* num_map_oom = nullptr)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
         segment_size_(segment_size),
-        peers_(std::move(peers)) {
+        peers_(std::move(peers)),
+        num_map_oom_(num_map_oom) {
     cudaDeviceProp prop{};
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
     mapped_size_ = 0;
@@ -494,6 +496,15 @@ struct ExpandableSegment {
 #endif
       if (status != CUDA_SUCCESS) {
         if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+          if (num_map_oom_) {
+            ++(*num_map_oom_);
+          }
+          LOG(WARNING)
+              << "expandable_segments: cuMemCreate failed with OOM on device "
+              << device_ << " while trying to map " << segment_size_
+              << " bytes (OOM count: "
+              << (num_map_oom_ ? *num_map_oom_ : 0)
+              << "). GPU memory may be exhausted.";
 #ifdef USE_ROCM
           // hipMemCreate above returned hipErrorOutOfMemory and treated it
           // like a sticky runtime error. Which means we need to clear it.
@@ -922,6 +933,7 @@ struct ExpandableSegment {
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
+  int64_t* num_map_oom_;
 };
 #else
 struct ExpandableSegment {
@@ -929,7 +941,8 @@ struct ExpandableSegment {
       c10::DeviceIndex device,
       std::optional<cudaStream_t> stream,
       size_t segment_size,
-      std::vector<c10::DeviceIndex> peers) {
+      std::vector<c10::DeviceIndex> peers,
+      int64_t* /*num_map_oom*/ = nullptr) {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
   SegmentRange map(SegmentRange range) {
@@ -2386,6 +2399,7 @@ class DeviceCachingAllocator {
     stats.num_device_alloc = 0;
     stats.num_device_free = 0;
     stats.num_oom_rejections = 0;
+    stats.num_expandable_segment_map_oom = 0;
     stats.oversize_allocations.reset_accumulated();
     stats.oversize_segments.reset_accumulated();
   }
@@ -3098,7 +3112,8 @@ class DeviceCachingAllocator {
         ? kSmallBuffer
         : AcceleratorAllocatorConfig::large_segment_size();
     expandable_segments_.emplace_back(new ExpandableSegment(
-        device, stream, segment_size, devices_with_peer_access_));
+        device, stream, segment_size, devices_with_peer_access_,
+        &stats.num_expandable_segment_map_oom));
 
     ExpandableSegment* es = expandable_segments_.back();
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
