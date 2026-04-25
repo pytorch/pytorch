@@ -28,6 +28,7 @@ typedef struct {
 // static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+static int64_t current_isolate_recompiles_id = -1;
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -40,6 +41,36 @@ static PyObject* eval_frame_callback_get(void) {
 
 void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
+}
+
+int64_t get_current_isolate_recompiles_id(void) {
+  return current_isolate_recompiles_id;
+}
+
+static void set_current_isolate_recompiles_id(int64_t id) {
+  current_isolate_recompiles_id = id;
+}
+
+static PyObject* get_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyLong_FromLongLong(get_current_isolate_recompiles_id());
+}
+
+static PyObject* set_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  if (!PyLong_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected an int");
+    return NULL;
+  }
+  int64_t new_id = PyLong_AsLongLong(arg);
+  if (new_id == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int64_t old_id = get_current_isolate_recompiles_id();
+  set_current_isolate_recompiles_id(new_id);
+  return PyLong_FromLongLong(old_id);
 }
 
 // 3.15 Not supported at all. See cpython_defs.c for hints
@@ -790,6 +821,8 @@ static PyMethodDef _methods[] = {
      set_fullgraph_error_on_nested_compile_py,
      METH_O,
      NULL},
+    {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
+    {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

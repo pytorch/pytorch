@@ -101,9 +101,12 @@ from .cache_size import (
 )
 from .code_context import code_context
 from .eval_frame import (
+    _get_cache_entries_for_region,
+    _get_total_cache_entry_count,
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    get_eval_frame_isolate_recompiles_id,
     innermost_backend,
     innermost_fn,
     skip_code,
@@ -642,7 +645,19 @@ class ConvertFrameAssert:
         increment_frame()
         code = frame.f_code
 
-        cache_size = compute_cache_size(frame, cache_entry)
+        isolate_recompiles_id = get_eval_frame_isolate_recompiles_id()
+        cache_entries = _get_cache_entries_for_region(code, isolate_recompiles_id)
+        # For recompile-reason logging: lookup() also checks the default (-1)
+        # bucket for isolated regions, so include those entries here to avoid
+        # dropping their guard-failure reasons.
+        if isolate_recompiles_id >= 0:
+            cache_entries_for_reasons = cache_entries + _get_cache_entries_for_region(
+                code, -1
+            )
+        else:
+            cache_entries_for_reasons = cache_entries
+        total_count = _get_total_cache_entry_count(code)
+        cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
             return ConvertFrameReturn()
@@ -767,6 +782,8 @@ class ConvertFrameAssert:
                     self._export_constraints,
                     hooks,
                     cache_entry,
+                    cache_entries,
+                    cache_entries_for_reasons,
                     cache_size,
                     frame,
                     frame_state=frame_state,
@@ -966,7 +983,7 @@ class DynamoOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
@@ -974,7 +991,7 @@ class DynamoOutput:
         return CheckFunctionManager(
             code,
             output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -1113,13 +1130,13 @@ class GraphCaptureOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             self.output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -1558,6 +1575,8 @@ def _compile(
     export_constraints: Any | None,
     hooks: Hooks,
     cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
+    cache_entries_for_reasons: list[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: DynamoFrameType | None = None,
     frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
@@ -1786,7 +1805,7 @@ def _compile(
                 code,
                 hooks=hooks,
                 save=package is not None,
-                cache_entry=cache_entry,
+                cache_entries=cache_entries,
             )
 
         if package is not None:
@@ -1843,7 +1862,7 @@ def _compile(
         recompile_reason: str | None = None
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, innermost_fn(compiler_fn)
+                cache_entries_for_reasons, frame, innermost_fn(compiler_fn)
             )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
@@ -2178,6 +2197,7 @@ class ConvertFrame:
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        # Used by DDPOptimizer to swap in its own backend.
         return lambda backend: convert_frame(
             backend,
             self._hooks,
@@ -2297,7 +2317,9 @@ class ConvertFrame:
                 isinstance(e, exc.TorchDynamoException)
                 and e.frame_exec_strategy is not None
             ):
-                return ConvertFrameReturn(frame_exec_strategy=e.frame_exec_strategy)
+                return ConvertFrameReturn(
+                    frame_exec_strategy=e.frame_exec_strategy,
+                )
 
         return ConvertFrameReturn()
 
@@ -2310,7 +2332,10 @@ def convert_frame(
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(
-        compiler_fn, hooks, package=package, recompile_limit=recompile_limit
+        compiler_fn,
+        hooks,
+        package=package,
+        recompile_limit=recompile_limit,
     )
 
 
@@ -2337,8 +2362,10 @@ def replay(filename: str) -> None:
                 export=False,
                 export_constraints=None,
                 hooks=Hooks(),
-                cache_size=CacheSizeRelevantForFrame(0, 0),
                 cache_entry=None,
+                cache_entries=[],
+                cache_entries_for_reasons=[],
+                cache_size=CacheSizeRelevantForFrame(0, 0),
                 frame=None,
                 frame_state={},
                 compile_id=CompileId(frame_id=42, frame_compile_id=999),
