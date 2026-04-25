@@ -1554,7 +1554,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         # Architecture-aware default kpack for flex configs
         default_kpack = get_default_kpack()
 
-        self.default_flex_config = {
+        self.gfx950_default_flex_config = {
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
@@ -1564,6 +1564,18 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
+        }
+
+        self.gfx942_default_flex_config = {
+            (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
+            (torch.bfloat16, 64): ROCmFlexConfig(64, 64, 2, 8, kpack=default_kpack),
+            (torch.bfloat16, 128): ROCmFlexConfig(64, 64, 2, 8, kpack=default_kpack),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(64, 32, 1, 8, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(64, 32, 1, 8, kpack=default_kpack),
+            (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1748,20 +1760,27 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
+        capability = torch.cuda.get_device_capability()
         default_kpack = get_default_kpack()
+
         if head_dim <= 256:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack)
-            default_config = self.default_flex_config.get(
-                (dtype, head_dim), default_config
-            )
+                default_config = ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack)
+            if capability >= (9, 5):  # gfx950 (MI350X/MI355X)
+                default_config = self.gfx950_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability >= (9, 4):  # gfx942 (MI300X/MI325X)
+                default_config = self.gfx942_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(64, 32, 2, 4, kpack=default_kpack)
+                default_config = ROCmFlexConfig(64, 32, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
