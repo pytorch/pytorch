@@ -93,6 +93,25 @@ pointer (if supported), and signal pads.
 The `empty` and `rendezvous` functions must be called in the same order on all
 ranks in the group.
 
+## One-sided get
+
+Symmetric memory also exposes a small one-sided `get` API for copying data from
+a peer's symmetric allocation into a local tensor:
+
+```python
+src = symm_mem.empty(1024, device=device)
+hdl = symm_mem.rendezvous(src, group)
+
+dst = torch.empty_like(src)
+symm_mem.get(dst, src, group, peer=1)
+```
+
+`src` identifies the symmetric allocation to read from on the peer rank.
+`dst` may be a regular CUDA tensor or another symmetric tensor. Both tensors
+must be contiguous, have the same dtype, be on the same device, and contain the
+same number of elements. The copy is issued on the current CUDA stream and
+returns `dst`.
+
 Then, collectives can be called on these tensors. For example, to perform a
 one-shot all-reduce:
 
@@ -390,6 +409,10 @@ inter-node communication are not affected.
 
 ```{eval-rst}
 .. autofunction:: rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: get
 ```
 
 ```{eval-rst}

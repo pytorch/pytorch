@@ -290,6 +290,24 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             # TODO: remove after we have wait_signal
             dist.barrier()
 
+    def test_get(self) -> None:
+        self._init_device()
+        group = dist.group.WORLD
+
+        dtype = torch.float
+        numel = 1024
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        dst = torch.empty_like(src)
+        symm_mem.rendezvous(src, group=group)
+        dist.barrier()
+
+        if self.rank == 0:
+            ret = symm_mem.get(dst, src, group, peer=1)
+            self.assertIs(ret, dst)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        dist.barrier()
+
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
