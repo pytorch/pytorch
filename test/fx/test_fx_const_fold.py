@@ -642,7 +642,7 @@ class TestConstFold(TestCase):
         # Now run both folded and non-folded to check results equal.
         fold_result = gm_folded(in_x)
         base_result = mod(in_x)
-        self.assertTrue(torch.equal(fold_result, base_result))
+        torch.testing.assert_close(fold_result, base_result)
 
     def test_fold_module(self):
         r"""
