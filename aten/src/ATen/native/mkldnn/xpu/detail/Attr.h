@@ -1,6 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
+
+#include <cstdint>
+#include <cstring>
+#include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -129,10 +133,91 @@ struct PostOpParam {
   kind_t kind_ = kind_t::eltwise;
 };
 
+namespace detail {
+
+struct PostOpsMatmulKeySink {
+  dnnl::memory::dims& key;
+
+  void push_op_kind(kind_t kind) {
+    key.push_back(static_cast<dnnl::memory::dim>(kind));
+  }
+
+  static void push_f32(dnnl::memory::dims& d, float f) {
+    uint32_t u = 0;
+    static_assert(sizeof(float) == sizeof(uint32_t));
+    std::memcpy(&u, &f, sizeof(float));
+    d.push_back(static_cast<dnnl::memory::dim>(u));
+  }
+
+  void append_eltwise(
+      dnnl::algorithm aalgorithm, float alpha, float beta) {
+    push_f32(key, alpha);
+    push_f32(key, beta);
+    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
+  }
+
+  void append_sum(float scale, std::int32_t zero_point) {
+    push_f32(key, scale);
+    key.push_back(static_cast<dnnl::memory::dim>(zero_point));
+  }
+
+  void append_binary(
+      dnnl::algorithm aalgorithm, const dnnl::memory::desc& src1_desc) {
+    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
+    dnnl::memory::desc md = src1_desc;
+    const std::vector<uint8_t> blob = md.get_blob();
+    key.push_back(static_cast<dnnl::memory::dim>(blob.size()));
+    constexpr size_t kPack = sizeof(dnnl::memory::dim);
+    size_t off = 0;
+    while (off < blob.size()) {
+      const size_t rest = blob.size() - off;
+      const size_t chunk = rest < kPack ? rest : kPack;
+      dnnl::memory::dim packed = 0;
+      std::memcpy(&packed, blob.data() + off, chunk);
+      key.push_back(packed);
+      off += chunk;
+    }
+  }
+
+  void append_prelu(int mask) {
+    key.push_back(static_cast<dnnl::memory::dim>(mask));
+  }
+};
+
+constexpr std::size_t kExtractPostOpsLruCapacity = 512;
+
+inline lru_cache<dnnl::memory::dims, dnnl::post_ops>&
+get_extract_post_ops_lru_cache() {
+  static thread_local lru_cache<dnnl::memory::dims, dnnl::post_ops> cache;
+  if (cache.max_size() == 0) {
+    cache.resize(kExtractPostOpsLruCapacity);
+  }
+  return cache;
+}
+
+} // namespace detail
+
+inline void fp_matmul_post_sink_push_kind(
+    dnnl::post_ops& /*sink*/,
+    kind_t /*kind*/) noexcept {}
+
+inline void fp_matmul_post_sink_push_kind(
+    detail::PostOpsMatmulKeySink& sink,
+    kind_t kind) {
+  sink.push_op_kind(kind);
+}
+
 class Attr {
  public:
   Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
+
+  float q_scale() const noexcept {
+    return q_scale_;
+  }
+  int64_t q_zero_point() const noexcept {
+    return q_zero_point_;
+  }
 
   /***** eltwise *****/
   dnnl::algorithm kind_with_relu = dnnl::algorithm::eltwise_relu;
@@ -269,46 +354,26 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
-    // this function is used to extract post ops params from the ops_params_
-    // and put them into onednn post ops
-    for (size_t i = 0; i < ops_params_.size(); ++i) {
-      kind_t kind = ops_params_[i].kind_;
-      switch (kind) {
-        case kind_t::eltwise: {
-          dnnl::algorithm algo = ops_params_[i].algo_;
-          float alpha = ops_params_[i].alpha_;
-          float beta = ops_params_[i].beta_;
-          dnnl_post_ops_.append_eltwise(algo, alpha, beta);
-          break;
-        }
-        case kind_t::sum: {
-          float scale = ops_params_[i].scale_;
-          int64_t zero_point = ops_params_[i].zero_point_;
-          // TODO [Asymmetric]:
-          // Post-sum zp for gpu is not supported currently
-          dnnl_post_ops_.append_sum(scale, zero_point);
-          break;
-        }
-        case kind_t::binary: {
-          dnnl::algorithm algo = ops_params_[i].algo_;
-          auto expected_md = ops_params_[i].expected_meta_;
-          // In this case user may create src1 memory descriptor with
-          // format_tag::any or set a specific tag. However, in later case if
-          // tags mismatch with dst, it would result in suboptimal performance.
-          // So here we use format_tag::any to make sure the fast can be
-          // selected.
-          // Thus we use expected_md (with format_any) here to create pd instead
-          // of original md
-          dnnl_post_ops_.append_binary(algo, expected_md);
-          break;
-        }
-        default:
-          break;
-      }
-    }
+  dnnl::memory::dims get_post_ops_key() const {
+    dnnl::memory::dims key;
+    detail::PostOpsMatmulKeySink key_sink{key};
+    emit_post_ops_for_matmul_cache_and_dnnl(key_sink);
+    return key;
+  }
 
-    return dnnl_post_ops_;
+  dnnl::post_ops extract_post_ops() {
+    dnnl::memory::dims cache_key = get_post_ops_key();
+    auto& cache = detail::get_extract_post_ops_lru_cache();
+    auto pos = cache.find(cache_key);
+    if (pos != cache.end()) {
+      return pos->second;
+    }
+    dnnl::post_ops po;
+    emit_post_ops_for_matmul_cache_and_dnnl(po);
+    auto [it, inserted] =
+        cache.insert({std::move(cache_key), std::move(po)});
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+    return it->second;
   }
 
   bool with_sum() {
@@ -330,7 +395,7 @@ class Attr {
   }
 
   void construct_post_binary(
-      dnnl::primitive_desc& pd,
+      const dnnl::primitive_desc& pd,
       std::unordered_map<int, dnnl::memory>& args) {
     // This function is used to construct binary memory desc in binary post ops.
     // According to oneDNN doc, the binary tensor can be in shape of
@@ -359,11 +424,35 @@ class Attr {
     }
   }
 
+ private:
+  template <typename PostOpsSink>
+  void emit_post_ops_for_matmul_cache_and_dnnl(PostOpsSink&& sink) const {
+    for (const auto& op : ops_params_) {
+      fp_matmul_post_sink_push_kind(sink, op.kind_);
+      switch (op.kind_) {
+        case kind_t::eltwise:
+          sink.append_eltwise(op.algo_, op.alpha_, op.beta_);
+          break;
+        case kind_t::sum:
+          sink.append_sum(
+              op.scale_, static_cast<std::int32_t>(op.zero_point_));
+          break;
+        case kind_t::binary:
+          sink.append_binary(op.algo_, op.expected_meta_);
+          break;
+        case kind_t::prelu:
+          sink.append_prelu(op.mask_);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
   float q_scale_ = 1.0; // the scale used to quantize the fused result from fp32
                         // to int8, only works for int8 case
   int64_t q_zero_point_ = 0;
   std::vector<PostOpParam> ops_params_; // series of post ops
-  dnnl::post_ops dnnl_post_ops_;
 };
 
 static inline void construct_attr_for_unary(
