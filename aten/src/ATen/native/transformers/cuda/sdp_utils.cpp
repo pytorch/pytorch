@@ -988,6 +988,32 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
         break;
       case SDPBackend::math:
         if (ctx.userEnabledMathSDP()) {
+          // Diagnose the GQA fast-path footgun: if the user opted into GQA
+          // (enable_gqa=true) and at least one fused backend was eligible
+          // (i.e. not explicitly disabled), but landed here on MATH despite
+          // mismatched q/kv head counts, then every fused kernel rejected
+          // their config. The most common cause is fp32 inputs: FLASH
+          // requires fp16/bf16, while mem_efficient and cuDNN do not accept
+          // mismatched q/kv head counts. The MATH backend is correct but
+          // unfused, often 2x+ slower than pre-expanding K/V and using a
+          // fused kernel. Today this fallback is silent — see
+          // https://github.com/pytorch/pytorch/issues/154363.
+          if (kernel_params.enable_gqa &&
+              kernel_params.query.sym_size(-3) != kernel_params.key.sym_size(-3) &&
+              (ctx.userEnabledFlashSDP() ||
+               ctx.userEnabledMemEfficientSDP() ||
+               ctx.userEnabledCuDNNSDP())) {
+            TORCH_WARN_ONCE(
+                "scaled_dot_product_attention(enable_gqa=True) dispatched to "
+                "the MATH backend: no fused kernel accepted the GQA "
+                "configuration. The MATH backend is unfused and often "
+                "significantly slower than the fused path. Common cause: "
+                "fp32 inputs (FLASH requires fp16/bf16; mem_efficient and "
+                "cuDNN do not support GQA broadcast). To get the fused path: "
+                "cast Q/K/V to bf16/fp16, or pre-expand K/V via "
+                "repeat_interleave and pass enable_gqa=False. "
+                "(This warning is shown once.)");
+          }
           return SDPBackend::math;
         }
         break;
