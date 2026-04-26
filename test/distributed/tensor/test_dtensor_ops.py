@@ -410,7 +410,6 @@ dtensor_fails_no_strategy = {
     xfail("masked_scatter"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
-    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
