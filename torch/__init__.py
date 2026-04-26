@@ -96,7 +96,7 @@ __all__ = [
     "cond",
     "enable_grad",
     "export",
-    "from_numpy",
+    "from_numpy",  # https://github.com/pytorch/pytorch/issues/131765
     "get_default_device",
     "get_deterministic_debug_mode",
     "get_device_module",
@@ -134,7 +134,7 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
-    "tensor",
+    "tensor",  # https://github.com/pytorch/pytorch/issues/131765
     "thread_safe_generator",
     "typename",
     "unravel_index",
