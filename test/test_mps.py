@@ -7865,6 +7865,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_strided_looped(self, dtype):
+        x = torch.randn(16, 30576, dtype=dtype)[:, 1:]
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_softmax_mps_strided_outer(self, dtype):
         x = torch.randn(4, 32, 1024, dtype=dtype)
         self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
