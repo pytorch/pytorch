@@ -722,6 +722,10 @@ class AOTInductorModelBase {
     return std::move(constant_blob_);
   }
 
+  RAIIDataPtr&& release_secondary_cpu_constant_blob() {
+    return std::move(secondary_cpu_constant_blob_);
+  }
+
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
     return constants_;
   }

@@ -76,6 +76,7 @@ class AOTInductorModelContainer {
     }
     model->load_constants();
     constant_blob_ = model->release_constant_blob();
+    secondary_cpu_constant_blob_ = model->release_secondary_cpu_constant_blob();
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
     secondary_cpu_constants_internal_offset_.resize(
@@ -456,21 +457,33 @@ class AOTInductorModelContainer {
       assert_all_constants(constants_map);
     }
 
-    // update_constant_buffer does not support mixed CPU/CUDA constants
-    int32_t model_device_type = models_[0]->get_device_type();
-    for (const auto& kv : constants_map) {
+    auto num_constants = models_[0]->num_constants();
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
+        continue;
+      }
+      auto constant_name =
+          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
+      auto it = constants_map.find(constant_name);
+      if (it == constants_map.end()) {
+        continue;
+      }
+      int32_t expected_const_device_type =
+          models_[0]->constant_device_type(static_cast<int64_t>(idx));
       int32_t tensor_device_type = 0;
-      aoti_torch_get_device_type(kv.second, &tensor_device_type);
-      if (tensor_device_type != model_device_type) {
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_device_type(it->second, &tensor_device_type));
+      if (tensor_device_type != expected_const_device_type) {
         throw std::runtime_error(
-            "update_constant_buffer does not support mixed device constants. "
-            "Constant '" +
-            kv.first + "' has device type " +
-            std::to_string(tensor_device_type) +
-            " but model expects device type " +
-            std::to_string(model_device_type));
+            "update_constant_buffer: constant '" + constant_name +
+            "' is on device type " + std::to_string(tensor_device_type) +
+            " but expected device type " +
+            std::to_string(expected_const_device_type));
       }
     }
+
+    int32_t model_device_type = models_[0]->get_device_type();
+    int32_t cpu_device_type = aoti_torch_device_type_cpu();
 
     ConstantState& const_folded = use_inactive == use_secondary_
         ? constant_folded_
@@ -480,20 +493,35 @@ class AOTInductorModelContainer {
     auto original_constants_map = get_constants_map(!use_inactive);
     auto constants_map_to_update = get_constants_map(use_inactive);
 
-    auto num_constants = models_[0]->num_constants();
-    size_t non_folded_idx = 0;
+    // Running indices into constants_internal_offset_ and
+    // secondary_cpu_constants_internal_offset_, which hold per-blob offsets
+    // only for non-folded constants (mirrors compute_constant_blob's
+    // bookkeeping in model_base.h). Advance per-blob for every non-folded
+    // constant as we walk.
+    size_t main_blob_idx = 0;
+    size_t secondary_cpu_blob_idx = 0;
     for (size_t idx = 0; idx < num_constants; idx++) {
-      bool from_folded = models_[0]->constant_from_folded(idx);
-      if (from_folded) {
+      if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
       }
+      int32_t const_device_type =
+          models_[0]->constant_device_type(static_cast<int64_t>(idx));
+      bool is_secondary_cpu = const_device_type != model_device_type;
+
+      size_t this_main_idx = main_blob_idx;
+      size_t this_secondary_cpu_idx = secondary_cpu_blob_idx;
+      if (is_secondary_cpu) {
+        secondary_cpu_blob_idx++;
+      } else {
+        main_blob_idx++;
+      }
+
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
           !(use_inactive &&
             _is_tensor_constant_or_buffer_type_or_empty_parameter(idx))) {
-        non_folded_idx++;
         continue;
       }
 
@@ -510,16 +538,9 @@ class AOTInductorModelContainer {
         constants_map_to_update->insert_or_assign(
             constant_name,
             MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
-        non_folded_idx++;
         continue;
       }
 
-      auto* constants_blob_ptr =
-          static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
-
-      // Move the data to container handled blob.
-      uint8_t* internal_constants_ptr =
-          constants_blob_ptr + constants_internal_offset_[non_folded_idx];
       void* user_constant_ptr;
       int64_t constant_size;
       int64_t* stride;
@@ -531,57 +552,84 @@ class AOTInductorModelContainer {
           aoti_torch_get_storage_offset(tensor, &offset));
       auto dtype = models_[0]->constant_dtype(idx);
 
+      AtenTensorHandle tensor_handle = nullptr;
+
+      if (is_secondary_cpu) {
+        // CPU constant in a mixed-device model. Write into the container's
+        // secondary CPU blob at the pre-computed offset, mirroring how the
+        // primary blob is managed.
+        auto* secondary_blob_ptr = static_cast<uint8_t*>(
+            get_secondary_cpu_constant_blob_ptr(use_inactive));
+        uint8_t* internal_constants_ptr = secondary_blob_ptr +
+            secondary_cpu_constants_internal_offset_[this_secondary_cpu_idx];
+        memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+            internal_constants_ptr,
+            models_[0]->constant_ndim(idx),
+            models_[0]->constant_shape(idx),
+            stride,
+            offset,
+            dtype,
+            cpu_device_type,
+            /* device_index = */ 0,
+            &tensor_handle));
+      } else {
+        auto* constants_blob_ptr =
+            static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
+
+        // Move the data to container handled blob.
+        uint8_t* internal_constants_ptr =
+            constants_blob_ptr + constants_internal_offset_[this_main_idx];
+
 #ifdef USE_XPU
-      sycl::queue* queue_ptr = nullptr;
-      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
-      queue_ptr
-          ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
-          .wait();
+        sycl::queue* queue_ptr = nullptr;
+        aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+        queue_ptr
+            ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
+            .wait();
 #elif USE_MPS
-      internal_constants_ptr = constants_blob_ptr;
-      aoti_torch_mps_copy_buffer(
-          user_constant_ptr,
-          constants_blob_ptr,
-          constant_size,
-          offset,
-          constants_internal_offset_[non_folded_idx]);
-      // For mps tensors, all constants are stored in one buffer, with the
-      // offset being where the constant starts. So we want to change the
-      // constant tensor's offset to point to
-      // constants_internal_offset_[non_folded_idx]
-      offset = constants_internal_offset_[non_folded_idx] /
-          aoti_torch_dtype_element_size(dtype);
+        internal_constants_ptr = constants_blob_ptr;
+        aoti_torch_mps_copy_buffer(
+            user_constant_ptr,
+            constants_blob_ptr,
+            constant_size,
+            offset,
+            constants_internal_offset_[this_main_idx]);
+        // For mps tensors, all constants are stored in one buffer, with the
+        // offset being where the constant starts. So we want to change the
+        // constant tensor's offset to point to
+        // constants_internal_offset_[this_main_idx]
+        offset = constants_internal_offset_[this_main_idx] /
+            aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
-      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
-          internal_constants_ptr,
-          user_constant_ptr,
-          constant_size,
-          cudaMemcpyDefault));
+        AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+            internal_constants_ptr,
+            user_constant_ptr,
+            constant_size,
+            cudaMemcpyDefault));
 #else
-      memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
+        memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
-      // Generate Tensor from container handled blob.
-      // We extract stride and offset from provided Tensor since we do not
-      // guarantee that the tensor is contiguous.
-      AtenTensorHandle tensor_handle;
-      int device_type = models_[0]->get_device_type();
-      int device_idx = models_[0]->get_device_idx();
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-          internal_constants_ptr,
-          models_[0]->constant_ndim(idx),
-          models_[0]->constant_shape(idx),
-          stride,
-          offset,
-          dtype,
-          device_type,
-          device_idx,
-          &tensor_handle));
+        // Generate Tensor from container handled blob.
+        // We extract stride and offset from provided Tensor since we do not
+        // guarantee that the tensor is contiguous.
+        int device_idx = models_[0]->get_device_idx();
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+            internal_constants_ptr,
+            models_[0]->constant_ndim(idx),
+            models_[0]->constant_shape(idx),
+            stride,
+            offset,
+            dtype,
+            model_device_type,
+            device_idx,
+            &tensor_handle));
+      }
 
       // Now place the tensor to constants_map. Note at this point the
       // ownership of the tensor_handle will be taken over.
       constants_map_to_update->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
-      non_folded_idx++;
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -622,9 +670,11 @@ class AOTInductorModelContainer {
     if (use_secondary_) {
       constant_folded_ = ConstantState::NONE;
       constant_blob_.reset();
+      secondary_cpu_constant_blob_.reset();
     } else {
       constant_folded_secondary_ = ConstantState::NONE;
       constant_blob_secondary_.reset();
+      secondary_cpu_constant_blob_secondary_.reset();
     }
     // Free the internally held constants
     int num_constants = static_cast<int>(models_[0]->num_constants());
@@ -679,6 +729,12 @@ class AOTInductorModelContainer {
   // This blob of memory will be managed by the container.
   RAIIDataPtr constant_blob_;
   RAIIDataPtr constant_blob_secondary_;
+
+  // Separate CPU-only blob used for constants whose device_type differs from
+  // the model's primary device (only supported when the secondary device is
+  // CPU). Parallels constant_blob_{,_secondary_} for double-buffering.
+  RAIIDataPtr secondary_cpu_constant_blob_;
+  RAIIDataPtr secondary_cpu_constant_blob_secondary_;
 
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
@@ -759,6 +815,22 @@ class AOTInductorModelContainer {
         constant_blob_secondary_ = allocate_constant_blob();
       }
       return constant_blob_secondary_.get();
+    }
+  }
+
+  void* get_secondary_cpu_constant_blob_ptr(bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
+      if (!secondary_cpu_constant_blob_) {
+        secondary_cpu_constant_blob_ = RAII_cpuMalloc(secondary_cpu_blob_size_);
+      }
+      return secondary_cpu_constant_blob_.get();
+    } else {
+      if (!secondary_cpu_constant_blob_secondary_) {
+        secondary_cpu_constant_blob_secondary_ =
+            RAII_cpuMalloc(secondary_cpu_blob_size_);
+      }
+      return secondary_cpu_constant_blob_secondary_.get();
     }
   }
 
