@@ -562,6 +562,93 @@ kernel void softmax_strided_inner(
   }
 }
 
+template <typename T>
+kernel void softmax_strided_looped(
+    constant T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant uint2& params [[buffer(2)]],
+    constant uint* sizes_other [[buffer(3)]],
+    constant uint* input_strides_other [[buffer(4)]],
+    constant uint* output_strides_other [[buffer(5)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]]) {
+  uint dim_size = params.x;
+  uint ndim_other = params.y;
+  uint input_row_base = 0;
+  uint output_row_base = 0;
+  uint r = tg_id;
+  for (int j = (int)ndim_other - 1; j >= 0; j--) {
+    uint axis_idx = r % sizes_other[j];
+    r /= sizes_other[j];
+    input_row_base += axis_idx * input_strides_other[j];
+    output_row_base += axis_idx * output_strides_other[j];
+  }
+
+  threadgroup float scratch[simdgroup_size + 1];
+
+  float thread_max = -INFINITY;
+  float thread_sum = 0.0f;
+  for (uint i = tid; i < dim_size; i += tptg) {
+    float xi = static_cast<float>(input[input_row_base + i]);
+    float new_max = max(thread_max, xi);
+    float correction = safe_exp_diff(thread_max, new_max);
+    thread_sum = thread_sum * correction + safe_exp_diff(xi, new_max);
+    thread_max = new_max;
+  }
+
+  if (simd_gid == 0) {
+    scratch[simd_lane] = -INFINITY;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float lane_max = simd_max(thread_max);
+  if (simd_lane == 0) {
+    scratch[simd_gid] = lane_max;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (simd_gid == 0) {
+    float row_max = simd_max(scratch[simd_lane]);
+    if (simd_lane == 0) {
+      scratch[simdgroup_size] = row_max;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float row_max = scratch[simdgroup_size];
+
+  float sum_adj = thread_sum * safe_exp_diff(thread_max, row_max);
+
+  if (simd_gid == 0) {
+    scratch[simd_lane] = 0.0f;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float lane_s = simd_sum(sum_adj);
+  if (simd_lane == 0) {
+    scratch[simd_gid] = lane_s;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (simd_gid == 0) {
+    float row_sum = simd_sum(scratch[simd_lane]);
+    if (simd_lane == 0) {
+      scratch[simdgroup_size] = row_sum;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float row_sum = scratch[simdgroup_size];
+
+  float inv_s = 1.0f / row_sum;
+  for (uint i = tid; i < dim_size; i += tptg) {
+    output[output_row_base + i] = static_cast<T>(
+        safe_exp_diff(static_cast<float>(input[input_row_base + i]), row_max) *
+        inv_s);
+  }
+}
+
 template <typename T, int CHUNK_CAP>
 kernel void softmax_strided_chunked(
     constant T* input [[buffer(0)]],
@@ -848,6 +935,21 @@ kernel void softmax_strided_outer(
           uint simd_lane [[thread_index_in_simdgroup]],                     \
           uint simd_gid [[simdgroup_index_in_threadgroup]]);
 
+#define INSTANTIATE_SOFTMAX_STRIDED_LOOPED(DTYPE)                          \
+  template [[host_name("softmax_strided_looped_" #DTYPE)]] [[kernel]] void \
+  softmax_strided_looped<DTYPE>(                                           \
+      constant DTYPE * input [[buffer(0)]],                                \
+      device DTYPE * output [[buffer(1)]],                                 \
+      constant uint2 & params [[buffer(2)]],                               \
+      constant uint * sizes_other [[buffer(3)]],                           \
+      constant uint * input_strides_other [[buffer(4)]],                   \
+      constant uint * output_strides_other [[buffer(5)]],                  \
+      uint tg_id [[threadgroup_position_in_grid]],                         \
+      uint tid [[thread_position_in_threadgroup]],                         \
+      uint tptg [[threads_per_threadgroup]],                               \
+      uint simd_lane [[thread_index_in_simdgroup]],                        \
+      uint simd_gid [[simdgroup_index_in_threadgroup]]);
+
 #define INSTANTIATE_SOFTMAX_STRIDED_CHUNKED(DTYPE, CAP)   \
   template [[host_name("softmax_strided_chunked_" #DTYPE  \
                        "_" #CAP)]] [[kernel]] void        \
@@ -915,6 +1017,9 @@ INSTANTIATE_SOFTMAX_STRIDED_INNER(bfloat, 8);
 INSTANTIATE_SOFTMAX_STRIDED_INNER(float, 16);
 INSTANTIATE_SOFTMAX_STRIDED_INNER(half, 16);
 INSTANTIATE_SOFTMAX_STRIDED_INNER(bfloat, 16);
+INSTANTIATE_SOFTMAX_STRIDED_LOOPED(float);
+INSTANTIATE_SOFTMAX_STRIDED_LOOPED(half);
+INSTANTIATE_SOFTMAX_STRIDED_LOOPED(bfloat);
 INSTANTIATE_SOFTMAX_STRIDED_CHUNKED(float, 32);
 INSTANTIATE_SOFTMAX_STRIDED_CHUNKED(half, 32);
 INSTANTIATE_SOFTMAX_STRIDED_CHUNKED(bfloat, 32);

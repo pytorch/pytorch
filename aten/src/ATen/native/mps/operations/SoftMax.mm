@@ -66,7 +66,8 @@ struct SoftmaxKernelChoice {
     Looped, // one TG/row, loops within TG when dim_size exceeds one TG worth of threads.
     General, // last-dim-contig fallback when dim_size doesn't divide cleanly.
     StridedInnerVec, // stride[dim]==1, dim_size%4==0: vec4 loads for memory throughput.
-    StridedInner, // stride[dim]==1: scalar loads.
+    StridedInner, // stride[dim]==1: scalar loads, dim_size <= N_LOCAL_max*tptg.
+    StridedLooped, // stride[dim]==1, dim_size > N_LOCAL_max*tptg: 2-pass online merge, unbounded dim_size.
     StridedOuter, // tiny dim_size (≤64): one thread per row, no shmem reduction.
     StridedChunked, // stride[dim]>1: 32-row TG, multi-warp split-row + shmem partial-reduce combine.
   };
@@ -74,7 +75,7 @@ struct SoftmaxKernelChoice {
   int n_reads = 0; // SingleRow
   int n_local = 0; // StridedInner{,Vec}
   int chunk_cap = 0; // StridedChunked
-  uint tptg = 0; // SingleRow / Looped / General / StridedInner{,Vec}
+  uint tptg = 0; // SingleRow / Looped / General / StridedInner{,Vec} / StridedLooped
 };
 
 SoftmaxKernelChoice choose_softmax_kernel(const Tensor& input, const Tensor& output, int64_t dim) {
@@ -127,6 +128,11 @@ SoftmaxKernelChoice choose_softmax_kernel(const Tensor& input, const Tensor& out
     }
     auto inner_tptg = std::min<uint>(static_cast<uint>(((dim_size + 31) / 32) * 32), 1024);
     auto n = (dim_size + inner_tptg - 1) / inner_tptg;
+    if (n > 16) {
+      auto c = SoftmaxKernelChoice{V::StridedLooped};
+      c.tptg = inner_tptg;
+      return c;
+    }
     auto c = SoftmaxKernelChoice{V::StridedInner};
     c.n_local = n <= 1 ? 1 : (n <= 2 ? 2 : (n <= 4 ? 4 : (n <= 8 ? 8 : 16)));
     c.tptg = inner_tptg;
@@ -201,6 +207,7 @@ void launch_softmax_kernel(const Tensor& input, int64_t dim, const Tensor& outpu
 
     case V::StridedInnerVec:
     case V::StridedInner:
+    case V::StridedLooped:
     case V::StridedOuter:
     case V::StridedChunked: {
       auto input_dim_stride = static_cast<uint>(input.stride(dim));
@@ -215,6 +222,9 @@ void launch_softmax_kernel(const Tensor& input, int64_t dim, const Tensor& outpu
           break;
         case V::StridedInner:
           name = fmt::format("softmax_strided_inner_{}_{}", type_str, choice.n_local);
+          break;
+        case V::StridedLooped:
+          name = fmt::format("softmax_strided_looped_{}", type_str);
           break;
         case V::StridedOuter:
           name = fmt::format("softmax_strided_outer_{}", type_str);
@@ -231,7 +241,7 @@ void launch_softmax_kernel(const Tensor& input, int64_t dim, const Tensor& outpu
           auto enc = stream->commandEncoder();
           auto pso = lib.getPipelineStateForFunc(name);
           [enc setComputePipelineState:pso];
-          if (choice.variant == V::StridedInnerVec) {
+          if (choice.variant == V::StridedInnerVec || choice.variant == V::StridedLooped) {
             auto params = std::array<uint32_t, 2>{dim_size, ndim_other};
             mtl_setArgs(enc, input, output, params, axes.sizes, axes.in_strides, axes.out_strides);
             [enc dispatchThreadgroups:MTLSizeMake(num_rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(choice.tptg, 1, 1)];
