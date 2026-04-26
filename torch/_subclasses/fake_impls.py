@@ -927,7 +927,7 @@ def _padded_dense_to_jagged_forward(
             f"Only one jagged dim is supported, got {len(offsets)} offsets"
         )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
