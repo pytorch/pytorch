@@ -331,6 +331,49 @@ using {ref}`automatic memory pinning <memory-pinning>` (i.e., setting
 GPUs.
 :::
 
+(choosing-num-workers)=
+### Choosing the right num_workers
+
+Increasing {attr}`num_workers` does not always improve performance. Use this
+decision guide before tuning it.
+
+**Use `num_workers=0` (default) when:**
+
+- Your dataset is already in CPU memory as a `torch.Tensor` or `numpy` array.
+  Worker IPC overhead exceeds any parallelism benefit when data is in RAM.
+- You are debugging: single-process mode gives cleaner error traces.
+
+**Use `num_workers > 0` when:**
+
+- Each {meth}`__getitem__` call reads from disk, network, or a database.
+  Multiple workers overlap I/O with GPU computation, hiding per-sample latency.
+- CPU-heavy transforms (image decoding, augmentation) can run in parallel.
+
+For in-memory tensors, DataLoader calls `__getitem__` once per sample index
+and then runs `collate_fn` to assemble the batch — even with `num_workers=0`.
+Direct slicing bypasses both:
+
+```python
+# Faster for in-memory data
+for i in range(0, len(X), batch_size):
+    batch = X[i : i + batch_size].to(device)
+
+# Slower — per-sample __getitem__ + collation overhead applies
+for batch in DataLoader(X, batch_size=batch_size):
+    batch = batch.to(device)
+```
+
+The gap widens on fast GPUs (including Apple MPS) because the GPU finishes
+each batch before DataLoader finishes preparing the next one. See
+[GitHub issue #154318](https://github.com/pytorch/pytorch/issues/154318)
+for benchmarks across tensor, numpy, CSV, HDF5, and image-like datasets.
+
+:::{note}
+{attr}`pin_memory=True` only benefits discrete GPU setups (NVIDIA, AMD) where
+tensors travel from CPU RAM to GPU DRAM across the PCIe bus. It is silently
+ignored on MPS (Apple Silicon unified memory) and CPU-only machines.
+:::
+
 (platform-specific-behaviors)=
 #### Platform-specific behaviors
 

@@ -164,7 +164,12 @@ class DataLoader(Generic[_T_co]):
             and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
-            (default: ``0``)
+            (default: ``0``). For datasets already in CPU memory (e.g.,
+            ``torch.Tensor``, ``numpy`` arrays), increasing ``num_workers``
+            typically *hurts* performance due to inter-process communication and
+            memory-copying costs. Use multiple workers only when ``__getitem__``
+            performs real I/O (disk reads, network requests, etc.). See the
+            ``Performance Tips`` section below.
         collate_fn (Callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
@@ -231,6 +236,50 @@ class DataLoader(Generic[_T_co]):
 
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
+
+    .. rubric:: Performance Tips
+
+    **Use** ``num_workers=0`` **(the default) when:**
+
+    - The dataset is already in CPU memory as a ``torch.Tensor`` or ``numpy``
+      array. Worker processes add IPC overhead that exceeds any parallelism
+      benefit when data is already in RAM.
+    - Debugging: single-process mode gives cleaner tracebacks.
+
+    **Use** ``num_workers > 0`` **when:**
+
+    - Each ``__getitem__`` call does real disk or network I/O (reading image
+      files, HDF5 rows, database queries). Workers overlap I/O with GPU
+      computation, hiding latency.
+    - CPU-heavy transforms (decoding, augmentation) can run in parallel.
+
+    **For in-memory tensors, direct slicing is much faster than DataLoader:**
+
+    .. code-block:: python
+
+        # Recommended for in-memory data (3-100x faster depending on hardware)
+        for i in range(0, len(X), batch_size):
+            batch = X[i : i + batch_size].to(device)
+            model(batch)
+
+        # DataLoader adds per-sample __getitem__ + collation overhead
+        # even at num_workers=0
+        for batch in DataLoader(X, batch_size=batch_size):
+            model(batch.to(device))
+
+    The performance gap grows on fast GPUs: the GPU finishes each batch before
+    DataLoader has collated the next one, leaving the GPU idle. See
+    `GitHub issue #154318 <https://github.com/pytorch/pytorch/issues/154318>`_
+    for detailed benchmarks across tensor, numpy, CSV, HDF5, and image datasets.
+
+    **pin_memory=True** only benefits discrete GPU setups (NVIDIA, AMD) where
+    data travels across the PCIe bus. It is silently ignored on MPS (Apple
+    Silicon unified memory) and CPU-only machines.
+
+    **Higher num_workers can hurt for in-memory data.** ``numpy`` arrays are
+    fully copied per worker (total RAM: ``num_workers × dataset size``).
+    ``torch.Tensor`` uses shared memory, but IPC overhead still applies.
+    Always benchmark before increasing ``num_workers``.
     """
 
     dataset: Dataset[_T_co]
