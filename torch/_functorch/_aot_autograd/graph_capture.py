@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput, BackwardTokenAOTInput
+from .descriptors import BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -32,7 +32,14 @@ from .graph_capture_wrappers import (
     fn_prepped_for_autograd,
     handle_effect_tokens_fn,
 )
-from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
+from .schemas import (
+    AOTConfig,
+    AOTInputList,
+    FlatFxValues,
+    SubclassMeta,
+    TraceFn,
+    ViewAndMutationMeta,
+)
 from .streams import (
     assign_backward_streams,
     assign_epilogue_copy_streams,
@@ -92,7 +99,7 @@ def _extract_tangent_source_stack_traces(
 def _create_graph(
     f: Callable[..., Any],
     args: list[torch.Tensor],
-    args_descs: list[AOTInput]
+    args_descs: AOTInputList
     | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
     aot_config: AOTConfig,
@@ -283,12 +290,12 @@ def _create_graph_and_save_traced_inputs(
 
 def aot_dispatch_base_graph(
     flat_fn: TraceFn,
-    flat_args: list[FxValue],
-    flat_args_descs: list[AOTInput],
+    flat_args: FlatFxValues,
+    flat_args_descs: AOTInputList,
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], SubclassMeta | None]:
+) -> tuple[torch.fx.GraphModule, FlatFxValues, AOTInputList, SubclassMeta | None]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -468,14 +475,14 @@ def aot_dispatch_base_graph(
 def aot_dispatch_autograd_graph(
     flat_fn: TraceFn,
     flat_args: list[Any],
-    flat_args_descs: list[AOTInput],
+    flat_args_descs: AOTInputList,
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
 ) -> tuple[
     torch.fx.GraphModule,
     tuple[list[Any], list[Any]],
-    tuple[list[AOTInput], list[AOTInput]],
+    tuple[AOTInputList, AOTInputList],
     SubclassMeta | None,
 ]:
     # NB: flat_fn here is the original user function (as far as

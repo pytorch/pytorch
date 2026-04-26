@@ -25,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import py_sym_types
 
 
 _T = TypeVar("_T")
+_F = TypeVar("_F", bound=Callable[..., Any])
 if TYPE_CHECKING:
     from .schemas import AOTConfig, ViewAndMutationMeta
 
@@ -766,7 +767,7 @@ _Ts = TypeVarTuple("_Ts")
 
 
 def call_and_expect_output_descs(
-    fn: Callable[[*_Ts], tuple[Any, Any]], args: tuple[Unpack[_Ts]]
+    fn: Callable[[Unpack[_Ts]], tuple[Any, Any]], args: tuple[Unpack[_Ts]]
 ) -> tuple[Any, Any]:
     from .descriptors import AOTOutput
 
@@ -801,7 +802,7 @@ def call_and_expect_output_descs(
     return outs_pair
 
 
-def fn_wrappers(fn: Callable[..., Any]) -> list[Callable[..., Any]]:
+def fn_wrappers(fn: _F) -> list[_F]:
     fns = [fn]
     f = fn
     while hasattr(f, "__wrapped__"):

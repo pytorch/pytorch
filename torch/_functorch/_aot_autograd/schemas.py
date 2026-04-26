@@ -9,8 +9,8 @@ import collections
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -22,6 +22,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
+from .descriptors import AOTInput, AOTOutput
 from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
 from .utils import strict_zip
 
@@ -36,12 +37,14 @@ if TYPE_CHECKING:
     from torch._ops import OpOverload
     from torch.types import IntLikeType
 
-    from .descriptors import AOTInput, AOTOutput
     from .graph_capture_wrappers import JointFnHandle
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+AOTInputList: TypeAlias = list[AOTInput]
+AOTOutputList: TypeAlias = list[AOTOutput]
 
 
 OutputType = Enum(
@@ -434,7 +437,7 @@ class ViewAndMutationMeta:
     traced_tangents: list[Any]
 
     # TODO doc
-    traced_tangents_descs: list[AOTInput]
+    traced_tangents_descs: AOTInputList
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
@@ -1180,10 +1183,10 @@ class AOTState:
     #
     # (By the way, this is NEVER the joint inputs!  Those only ever go in
     # AOTGraphCapture)
-    flat_args: list[FxValue]
+    flat_args: FlatFxValues
 
     # The descriptor for each argument in flat_args.
-    flat_args_descs: list[AOTInput]
+    flat_args_descs: AOTInputList
 
     # This contains view and mutation information about the function, which we
     # detected by doing an initial trace when we created this state.
@@ -1214,6 +1217,20 @@ class AOTState:
 
 
 FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+FlatFxValues: TypeAlias = list[FxValue]
+FlatTensorList: TypeAlias = list[Tensor]
+OptionalTensorList: TypeAlias = list[Tensor | None]
+OptionalAOTOutputList: TypeAlias = list[AOTOutput | None]
+TraceFnResult: TypeAlias = tuple[FlatFxValues, AOTOutputList]
+PreppedForAutogradTraceResult: TypeAlias = tuple[
+    tuple[FlatFxValues, list[bool]], AOTOutputList
+]
+JointTraceFnResult: TypeAlias = tuple[
+    tuple[FlatFxValues, OptionalTensorList],
+    tuple[AOTOutputList, OptionalAOTOutputList],
+]
+UpdatedFlatArgs: TypeAlias = list[Any] | tuple[list[Any], list[Any]]
+UpdatedFlatArgsDescs: TypeAlias = AOTInputList | tuple[AOTInputList, AOTInputList]
 
 
 class CompilerWrapper:
@@ -1246,12 +1263,12 @@ class CompilerWrapper:
     def pre_compile(
         self,
         flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
+        flat_args: FlatFxValues,
+        flat_args_descs: AOTInputList,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[TraceFn, FlatFxValues, AOTInputList, ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1308,7 +1325,7 @@ class InductorWrapper:
     def pre_compile(
         self,
         fw_module: torch.fx.GraphModule,
-        flat_args: list[Tensor],
+        flat_args: FlatTensorList,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
@@ -1368,9 +1385,9 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # larger than the original flat_args as all tangents get inputs.  The
     # tuple organizes into primals and tangents.  When not autograd it's just
     # a plain list.
-    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+    updated_flat_args: UpdatedFlatArgs
 
-    updated_flat_args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]]
+    updated_flat_args_descs: UpdatedFlatArgsDescs
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
@@ -1423,29 +1440,26 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
 
 
 class FlatFn(Protocol):
-    def __call__(self, *args: FxValue) -> list[FxValue]: ...
+    def __call__(self, *args: FxValue) -> FlatFxValues: ...
 
 
 class TraceFn(Protocol):
-    def __call__(self, *args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]: ...
+    def __call__(self, *args: FxValue) -> TraceFnResult: ...
 
 
 class PreppedForAutogradTraceFn(Protocol):
     def __call__(
         self,
         *args: FxValue,
-    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]: ...
+    ) -> PreppedForAutogradTraceResult: ...
 
 
 class JointTraceFn(Protocol):
     handle: JointFnHandle
 
     def __call__(
-        self, primals: list[FxValue], tangents: list[FxValue]
-    ) -> tuple[
-        tuple[list[FxValue], list[Tensor | None]],
-        tuple[list[AOTOutput], list[AOTOutput | None]],
-    ]: ...
+        self, primals: FlatFxValues, tangents: FlatFxValues
+    ) -> JointTraceFnResult: ...
 
 
 @dataclass

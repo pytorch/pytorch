@@ -6,7 +6,8 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 
 import collections
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TypeGuard, TypeVar
+from typing import Any, TypeGuard
+from typing_extensions import TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,6 +35,7 @@ from .descriptors import (
 )
 from .schemas import (
     FakifiedFlatArgs,
+    FlatFxValues,
     FxValue,
     MutationType,
     OpaqueMeta,
@@ -254,11 +256,11 @@ AOTDescriptor = TypeVar("AOTDescriptor", AOTInput, AOTOutput)
 # primals (but not tangents) on entry to the forward. See the runtime version of
 # this function below.
 def unwrap_tensor_subclasses(
-    wrapped_args: list[FxValue],
+    wrapped_args: FlatFxValues,
     wrapped_args_descs: Sequence[AOTDescriptor],
     *,
     append_symints: bool,
-) -> tuple[list[FxValue], list[AOTDescriptor]]:
+) -> tuple[FlatFxValues, list[AOTDescriptor]]:
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
@@ -276,7 +278,7 @@ def unwrap_tensor_subclasses(
         t: FxValue,
         desc: AOTDescriptor,
         *,
-        out: tuple[list[FxValue], list[AOTDescriptor]],
+        out: tuple[FlatFxValues, list[AOTDescriptor]],
     ) -> None:
         # unwrap a subclass into plain tensors and their size/stride if "append_symint"
         # is True
@@ -312,7 +314,7 @@ def unwrap_tensor_subclasses(
             out[1].extend(SubclassSize(desc, i) for i, _ in sizes)
             out[1].extend(SubclassStride(desc, i) for i, _ in strides)
 
-    xs_inner: list[FxValue] = []
+    xs_inner: FlatFxValues = []
     descs_inner: list[AOTDescriptor] = []
 
     for x, desc in zip(wrapped_args, wrapped_args_descs):

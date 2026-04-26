@@ -1,5 +1,6 @@
 from collections.abc import Iterator, MutableMapping
-from typing import Generic, TypeVar
+from typing import Generic
+from typing_extensions import TypeVar
 
 
 K = TypeVar("K")

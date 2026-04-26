@@ -19,7 +19,7 @@ import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
-from typing import Any
+from typing import Any, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -55,7 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, PlainAOTOutput
+from .descriptors import PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -79,11 +79,14 @@ from .runtime_wrappers import (
 from .schemas import (
     AOTConfig,
     AOTGraphCapture,
+    AOTOutputList,
     AOTState,
     FlatFn,
+    FlatFxValues,
     FxValue,
     MutationType,
     SubclassMeta,
+    UpdatedFlatArgs,
     ViewAndMutationMeta,
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
@@ -95,6 +98,9 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+
+
+DispatchReturn: TypeAlias = tuple[Callable[..., Any], ViewAndMutationMeta]
 
 
 def is_opaque_node(node: Any) -> bool:
@@ -177,11 +183,6 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 aten = torch.ops.aten
 
-# Returns a Callable and a ViewAndMutationMeta.
-# Currently, only export needs the ViewAndMutationMeta after this function.
-# TODO: Refactor this
-DispatchReturn = tuple[Callable[..., Any], ViewAndMutationMeta]
-
 
 def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
     """
@@ -196,15 +197,15 @@ def aot_stage1_graph_capture(
 ) -> AOTGraphCapture:
     # NB: flat_fn at this point coincides with the initial info from forward
     # metadata collection returning a list[Tensor].  We are now going to
-    # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
+    # augment the output to return a tuple[list[Tensor], AOTOutputList] and
     # then preserve this convention through the rest of the passes.
 
     # TODO: We could test for consistency with fw_metadata, but this is not a
     # big deal
     @simple_wraps(orig_flat_fn)
-    def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
+    def orig_flat_fn2(*args: FxValue) -> tuple[FlatFxValues, AOTOutputList]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
+        out_descs: AOTOutputList = type(out)(  # type: ignore[assignment]
             PlainAOTOutput(i)  # type: ignore[misc]
             for i in range(len(out))  # type: ignore[misc]
         )
@@ -227,7 +228,7 @@ def aot_stage1_graph_capture(
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+    updated_flat_args: UpdatedFlatArgs
 
     with maybe_skip_decompose(aot_config):
         # if config.selective_decompose, skip decomposition and apply selective_decompose
@@ -1734,7 +1735,7 @@ def _log_fw_bw_graphs(
 
 def _partition_joint_graph_into_fw_bw(
     fx_g: torch.fx.GraphModule,
-    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    joint_inputs: UpdatedFlatArgs,
     inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
@@ -1782,7 +1783,7 @@ def _partition_joint_graph_into_fw_bw(
 
 
 def _joint_inputs_for_forward(
-    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    joint_inputs: UpdatedFlatArgs,
 ) -> list[Any]:
     return joint_inputs[0] if isinstance(joint_inputs, tuple) else joint_inputs
 
@@ -1790,11 +1791,11 @@ def _joint_inputs_for_forward(
 def _maybe_unlift_partitioned_effect_tokens(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
-    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    joint_inputs: UpdatedFlatArgs,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     num_inner_fwd_outputs: int,
-) -> tuple[int, list[Any] | tuple[list[Any], list[Any]]]:
+) -> tuple[int, UpdatedFlatArgs]:
     num_tokens = len(fw_metadata.tokens)
 
     # See Note [Side-Effectful Tokens in AOTAutograd]
@@ -1993,7 +1994,7 @@ def _compute_indices_of_inps_to_detach(
 
 def _aot_stage2a_partition(
     fx_g: torch.fx.GraphModule,
-    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    joint_inputs: UpdatedFlatArgs,
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,

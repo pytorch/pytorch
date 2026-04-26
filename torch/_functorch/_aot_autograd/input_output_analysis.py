@@ -23,9 +23,10 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
-from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
+from .descriptors import InputMutationAOTOutput, TangentAOTInput
 from .schemas import (
     AOTConfig,
+    AOTInputList,
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
@@ -129,7 +130,7 @@ def create_synthetic_base_metadata(
     synthetic_base_info: list[int | tuple[int, torch.Tensor]],
     outer_args: list[Any],
     inner_args: list[Any],
-    inner_args_desc: list[AOTInput],
+    inner_args_desc: AOTInputList,
 ) -> tuple[ViewAndMutationMeta, list[int]]:
     # maps inner arg indices to outer arg indices
     synthetic_base_to_indices: dict[int, list[int]] = {}

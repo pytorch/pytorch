@@ -32,7 +32,6 @@ from torch.utils._python_dispatch import (
 )
 
 from .descriptors import (
-    AOTInput,
     AOTOutput,
     InputMutationAOTOutput,
     IntermediateBaseAOTOutput,
@@ -51,6 +50,7 @@ from .functional_utils import (
     was_inductor_storage_resized,
 )
 from .schemas import (
+    AOTInputList,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -166,7 +166,7 @@ def coerce_tangent_and_suggest_memory_format(
 def run_functionalized_fw_and_collect_metadata(
     f: Callable[..., Any],
     *,
-    flat_args_descs: list[AOTInput],
+    flat_args_descs: AOTInputList,
     keep_input_mutations: bool,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: list[int] | None = None,
@@ -425,7 +425,7 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
-        intermediate_bases_descs: list[AOTInput] = []
+        intermediate_bases_descs: AOTInputList = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #

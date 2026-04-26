@@ -18,7 +18,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any
+from typing import Any, TypeAlias
 
 import torch
 import torch.fx as fx
@@ -57,7 +57,6 @@ from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .descriptors import (
     AOTInput,
-    AOTOutput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
     SyntheticBaseAOTInput,
@@ -73,7 +72,10 @@ from .input_output_analysis import (
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
 from .schemas import (
     AOTConfig,
+    AOTInputList,
+    AOTOutputList,
     CompilerWrapper,
+    FlatFxValues,
     FxValue,
     InductorWrapper,
     InputAliasInfo,
@@ -113,6 +115,10 @@ def _unwrap_tensor_subclasses_no_symints(
 zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+OutputHandler: TypeAlias = Callable[[dict[int, Any], list[Any], Any], Any]
+OutputStrideMetadata: TypeAlias = list[list[int] | None]
+UpdatedInputStorageIndices: TypeAlias = list[int | tuple[int, torch.Tensor]]
 
 
 def _unwrap_no_symints(args: list[Any]) -> list[Any]:
@@ -201,7 +207,9 @@ class NoopAliasHandler:
     ) -> None:
         pass
 
-    def __call__(self, orig_inputs: list[Any], fw_outs: list[Any], out: Any) -> Any:
+    def __call__(
+        self, orig_inputs: dict[int, Any], fw_outs: list[Any], out: Any
+    ) -> Any:
         return out
 
 
@@ -226,7 +234,7 @@ class AliasOfInputHandler:
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Any], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
         return gen_alias_from_base(
@@ -246,7 +254,7 @@ class IsInputHandler:
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Any], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
         return aliased_base_tensor
@@ -274,7 +282,7 @@ class AliasOfIntermediateHandler:
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+        self, orig_inputs: dict[int, Any], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
@@ -300,7 +308,7 @@ _HANDLER_MAP = {
 
 def make_output_handler(
     info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-) -> Any:
+) -> OutputHandler:
     handler_type = _HANDLER_MAP[info.output_type]
     return handler_type(info, runtime_metadata, trace_joint)
 
@@ -536,7 +544,7 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
-    output_handlers: tuple[Any, ...] = field(init=False)
+    output_handlers: tuple[OutputHandler, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         epilogue_args_idx = list(self.runtime_metadata.mutated_inp_runtime_indices)
@@ -1049,7 +1057,7 @@ class FakifiedOutWrapper(InductorWrapper):
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
     # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: list[list[int] | None] | None = None
+    fwd_output_strides: OutputStrideMetadata | None = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -1099,9 +1107,7 @@ class FakifiedOutWrapper(InductorWrapper):
         return out
 
     # To be called post compile
-    def set_fwd_output_strides(
-        self, fwd_output_strides: list[list[int] | None]
-    ) -> None:
+    def set_fwd_output_strides(self, fwd_output_strides: OutputStrideMetadata) -> None:
         self.fwd_output_strides = fwd_output_strides
 
     def post_compile(
@@ -1146,12 +1152,12 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
     def pre_compile(
         self,
         flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
+        flat_args: FlatFxValues,
+        flat_args_descs: AOTInputList,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[TraceFn, FlatFxValues, AOTInputList, ViewAndMutationMeta]:
         (new_flat_fn, new_flat_args, new_flat_args_descs, subclass_meta) = (
             aot_dispatch_subclass(
                 flat_fn,
@@ -1334,19 +1340,19 @@ class AOTDedupeWrapper(CompilerWrapper):
     def pre_compile(
         self,
         flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
+        flat_args: FlatFxValues,
+        flat_args_descs: AOTInputList,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[TraceFn, FlatFxValues, AOTInputList, ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
         # Strategy 1: For any input that is not mutated, we can leafify it if we
         # need to remove a duplicate.
-        leaf_flat_args: list[FxValue] = []
-        leaf_flat_args_descs: list[AOTInput] = []
+        leaf_flat_args: FlatFxValues = []
+        leaf_flat_args_descs: AOTInputList = []
         args_set = set()
         ok = True
 
@@ -1473,7 +1479,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         @simple_wraps(flat_fn)
         def wrapped_flat_fn(
             *args: FxValue,
-        ) -> tuple[list[FxValue], list[AOTOutput]]:
+        ) -> tuple[FlatFxValues, AOTOutputList]:
             outs, out_descs = call_and_expect_output_descs(
                 flat_fn,
                 self.add_dupe_args(args),  # type: ignore[arg-type]
@@ -1588,12 +1594,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     def pre_compile(
         self,
         flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
+        flat_args: FlatFxValues,
+        flat_args_descs: AOTInputList,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[Callable[..., Any], FlatFxValues, AOTInputList, ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         (
             flat_args_with_synthetic_bases,
@@ -1858,12 +1864,12 @@ def merge_view_inputs(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
     # This is None when called at runtime from post_compile closure
-    fwd_inputs_descs: list[AOTInput] | None,
+    fwd_inputs_descs: AOTInputList | None,
     mutated_input_info: list[InputAliasInfo],
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
-) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None]:
+) -> tuple[list[Any], AOTInputList, UpdatedInputStorageIndices | None]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
 
@@ -2079,7 +2085,7 @@ def merge_view_inputs(
             inner_calling_convention_meta[old_idx] = new_idx
 
         # post process into a list
-        post_processed_calling_convention_meta: list[int | tuple[int, torch.Tensor]] = [
+        post_processed_calling_convention_meta: UpdatedInputStorageIndices = [
             -1 for _ in range(len(inner_calling_convention_meta))
         ]
         for k, v in inner_calling_convention_meta.items():
@@ -3499,12 +3505,12 @@ class DebugAssertWrapper(CompilerWrapper):
 def pre_compile(
     wrappers: list[CompilerWrapper],
     flat_fn: TraceFn,
-    flat_args: list[FxValue],
-    flat_args_descs: list[AOTInput],
+    flat_args: FlatFxValues,
+    flat_args_descs: AOTInputList,
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+) -> tuple[TraceFn, FlatFxValues, AOTInputList, ViewAndMutationMeta]:
     """
     Runs a sequence of wrappers on the given function and arguments.
     Mutates wrappers in place.
