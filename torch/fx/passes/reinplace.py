@@ -308,9 +308,7 @@ def _get_view_inverse_node_usages(
 
 
 @compatibility(is_backward_compatible=True)
-def reinplace(
-    gm, *sample_args
-):  # pyrefly: ignore[unannotated-parameter, unannotated-return]
+def reinplace(gm: torch.fx.GraphModule, *sample_args: Any) -> torch.fx.GraphModule:
     r"""
     Given an fx.GraphModule, modifies it to perform "reinplacing",
     mutating the nodes of the graph.

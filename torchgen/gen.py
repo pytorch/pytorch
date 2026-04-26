@@ -2101,6 +2101,7 @@ def gen_headers(
     static_dispatch_idx: list[BackendIndex],
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
+    headeronly_fm: FileManager,
     core_fm: FileManager,
     cpu_fm: FileManager,
     device_fms: dict[str, FileManager],
@@ -2227,7 +2228,7 @@ def gen_headers(
     def gen_tags_enum() -> dict[str, str]:
         return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
-    core_fm.write("enum_tag.h", gen_tags_enum)
+    headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
 
 def gen_source_files(
@@ -2783,6 +2784,12 @@ def main() -> None:
         default="torch/csrc/inductor/aoti_torch/generated",
     )
     parser.add_argument(
+        "--headeronly-install-dir",
+        "--headeronly_install_dir",
+        help="output directory for header-only generated files (e.g. enum_tag.h)",
+        default="build/torch/headeronly/core",
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2979,12 +2986,18 @@ def main() -> None:
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
+    headeronly_install_dir = f"{options.headeronly_install_dir}"
+    Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
+
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    headeronly_fm = make_file_manager(
+        options=options, install_dir=headeronly_install_dir
+    )
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
@@ -3034,6 +3047,7 @@ def main() -> None:
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
+            headeronly_fm=headeronly_fm,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             device_fms=device_fms,

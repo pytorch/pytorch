@@ -505,7 +505,7 @@ class GuardManagerWrapper:
                 )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # Assumption: callers will not reassignthe attributes
+                # Assumption: callers will not reassign the attributes
                 #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
                 # Mutating the objects those attributes point to is fine;
                 # rebinding the attribute itself is not.
@@ -583,7 +583,7 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that that C++ side points to the updated diff guard manager.
+        # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
         # cache_entry attribute, so it relies on the CacheEntry constructor to
         # set the diff_guard_root in C++.  But once it is saved in the Dynamo

@@ -2,6 +2,7 @@
 
 import torch
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -374,7 +375,7 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(
             BufferError, r"Can't export tensors on a different CUDA device"
         ):
-            with torch.device(dev1):
+            with torch.accelerator.device_index(torch.device(dev1).index):
                 x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
@@ -577,6 +578,7 @@ class TestTorchDlPack(TestCase):
         ):
             from_dlpack(inp)
 
+    @xfailCUDAIfSM89OrLaterOnWindows
     @skipMeta
     @onlyNativeDeviceTypes
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")

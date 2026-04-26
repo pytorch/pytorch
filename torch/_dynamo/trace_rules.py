@@ -193,6 +193,7 @@ manual_torch_name_rule_map: dict[
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
+    "torch._dynamo.decorators.override_optimization_hint": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state`, `torch.set_rng_state`, and
     # `torch.Generator.manual_seed`. These functions are not aten
@@ -342,6 +343,13 @@ manual_torch_name_rule_map: dict[
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
     "torch._functorch.predispatch._vmap_increment_nesting": TorchInGraphFunctionVariable,
     "torch._functorch.predispatch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._jvp_increment_nesting": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._jvp_decrement_nesting": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._unwrap_for_grad": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._make_dual": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._unpack_dual": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._enter_dual_level": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._exit_dual_level": TorchInGraphFunctionVariable,
     # everything else
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
@@ -2416,6 +2424,13 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.predispatch._vmap_decrement_nesting",
         "torch._functorch.predispatch._add_batch_dim",
         "torch._functorch.predispatch._remove_batch_dim",
+        "torch._functorch.predispatch._jvp_increment_nesting",
+        "torch._functorch.predispatch._jvp_decrement_nesting",
+        "torch._functorch.predispatch._unwrap_for_grad",
+        "torch._functorch.predispatch._make_dual",
+        "torch._functorch.predispatch._unpack_dual",
+        "torch._functorch.predispatch._enter_dual_level",
+        "torch._functorch.predispatch._exit_dual_level",
         "torch._guards.compile_context",
         "torch._guards.detect_fake_mode",
         "torch._guards.tracing",
@@ -3340,6 +3355,7 @@ def is_numpy_type_info(obj: Any) -> bool:
 BUILTIN_SKIPLIST = (
     abc,
     copy,
+    importlib,
     random,
     linecache,
 )

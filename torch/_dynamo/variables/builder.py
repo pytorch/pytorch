@@ -24,6 +24,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import importlib.machinery
 import inspect
 import itertools
 import logging
@@ -45,6 +46,7 @@ import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
     get_external_object_by_index,
     register_user_object,
 )
@@ -117,6 +119,7 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
+    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -160,6 +163,7 @@ from ..utils import (
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
+    is_pybind11_enum_member,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -195,12 +199,7 @@ from .ctx_manager import (
     NullContextVariable,
     PreserveVersionContextVariable,
 )
-from .dicts import (
-    ConstDictVariable,
-    DefaultDictVariable,
-    MappingProxyVariable,
-    SetVariable,
-)
+from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
@@ -292,6 +291,7 @@ from .torch_function import (
     TorchFunctionModeVariable,
 )
 from .user_defined import (
+    DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     IntWrapperVariable,
@@ -882,14 +882,20 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
-                result = DefaultDictVariable(
+                dict_vt = ConstDictVariable(
                     result,  # type: ignore[arg-type]
-                    type(value),
+                    mutation_type=ValueMutationExisting(),
+                    source=self.source,
+                )
+                result = DefaultDictVariable(
+                    value,
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
+                    dict_vt=dict_vt,
                     source=self.source,
                 )
+                return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
                 dict_vt = ConstDictVariable(
                     result,  # type: ignore[arg-type]
@@ -979,7 +985,7 @@ class VariableBuilder:
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
-        ):
+        ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -1194,7 +1200,11 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            index = register_user_object(value, self.source)
+            if isinstance(self.source, CurrentStreamSource):
+                # Reuse the index pre-allocated in SymbolicStreamState.__init__
+                index = CURRENT_STREAM_INDEX
+            else:
+                index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function", get_external_object_by_index, (index,), {}
             )
@@ -1554,6 +1564,18 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif type(value) is torch._C.Generator:
+            # Generator is registered as an opaque reference type for make_fx
+            # tracing, but in dynamo we handle it as a regular object so that
+            # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
+            # work gracefully — allowing dynamo to compile code before and
+            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # and call_method are decorated with @_raise_hard_error_if_graph_break,
+            # which turns any graph break into a hard error that falls back to
+            # eager for the entire function. Generator methods intentionally
+            # graph-break (they mutate/read RNG state), so they need the
+            # UserDefinedObjectVariable path which supports graceful graph breaks.
+            return self.wrap_user_defined(value)
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
@@ -3589,7 +3611,7 @@ def infer_subclass_type(value: T) -> type[T] | None:
         # Ordinarily, we would fakeify a tensor so that it can get dynamic
         # shapes and be computed on without triggering actual operations.
         # However, how can we fakeify a tensor subclass?  Ordinary
-        # inheritance (nor multiple inheritance) won't work work.
+        # inheritance (nor multiple inheritance) won't work.
         #
         # Instead, our plan is to *manually simulate* the tensor subclass
         # inheriting from a fake tensor with dynamo.  This means our
@@ -4267,7 +4289,11 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)) and not isinstance(value, enum.Enum):
+        elif (
+            is_opaque_value_type(type(value))
+            and not isinstance(value, enum.Enum)
+            and not is_pybind11_enum_member(value)
+        ):
             return TorchScriptObjectVariable.create(value, value)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
@@ -4301,7 +4327,7 @@ class SourcelessBuilder:
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
-        ):
+        ) or is_pybind11_enum_member(value):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             if issubclass(type(value), type) and issubclass(value, BaseException):
@@ -4328,7 +4354,9 @@ class SourcelessBuilder:
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(value, torch.utils._pytree.TreeSpec):
+        elif isinstance(
+            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+        ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)

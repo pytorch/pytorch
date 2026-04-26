@@ -50,7 +50,7 @@ base_types = typing.get_args(BaseArgumentTypes)
 Target: TypeAlias = Callable[..., Any] | str
 
 Argument = Optional[  # noqa: UP045
-    Union[  # noqa: UP007
+    Union[
         tuple["Argument", ...],
         Sequence["Argument"],
         Mapping[str, "Argument"],
@@ -758,6 +758,10 @@ class Node(_NodeBase):
             if self.graph.owning_module is None:
                 raise AssertionError(
                     "self.graph.owning_module not set for purity check"
+                )
+            if not isinstance(self.target, str):
+                raise AssertionError(
+                    f"Expected str target for call_module, got {type(self.target)}"
                 )
             target_mod = self.graph.owning_module.get_submodule(self.target)
             if target_mod is None:

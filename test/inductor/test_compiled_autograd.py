@@ -1082,8 +1082,20 @@ main()
                 call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
+            # Find the CALL that invokes the compiled graph function
+            # (not an earlier CALL from e.g. store_user_object_weakrefs).
+            # The compiled fn is loaded via LOAD_GLOBAL __compiled_fn_*.
+            load_graph_idx = next(
+                i
+                for i, inst in enumerate(insts)
+                if inst.opname == "LOAD_GLOBAL"
+                and isinstance(inst.argval, str)
+                and inst.argval.startswith("__compiled_fn")
+            )
             call_graph_idx = next(
-                i for i, inst in enumerate(insts) if inst.opname == call_op
+                i
+                for i, inst in enumerate(insts)
+                if i > load_graph_idx and inst.opname == call_op
             )
             # pre-graph should alias: inputs_ref_0 = inputs[0]
             matches = [
@@ -1155,8 +1167,19 @@ main()
                     call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
+                # Find the CALL that invokes the compiled graph function
+                # (not an earlier CALL from e.g. store_user_object_weakrefs).
+                load_graph_idx = next(
+                    i
+                    for i, inst in enumerate(insts)
+                    if inst.opname == "LOAD_GLOBAL"
+                    and isinstance(inst.argval, str)
+                    and inst.argval.startswith("__compiled_fn")
+                )
                 call_graph_idx = next(
-                    i for i, inst in enumerate(insts) if inst.opname == call_op
+                    i
+                    for i, inst in enumerate(insts)
+                    if i > load_graph_idx and inst.opname == call_op
                 )
                 # pre-graph should alias: inputs_ref_0 = inputs[0]
                 matches = [

@@ -720,27 +720,21 @@ class ComboKernel(Kernel):
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
-        triton_meta = {
+        triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
             ),
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
+            # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
+            # compile with the same Triton options as standalone kernels.
+            **TritonKernel.triton_meta_common(),
         }
-        triton_meta["enable_fp_fusion"] = (
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            not config.emulate_precision_casts
-        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
-
-        if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-            triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
@@ -753,20 +747,29 @@ class ComboKernel(Kernel):
         # The max_persistent_rblock mirrors how R0_BLOCK is computed in
         # codegen_static_numels_sub_kernel() for persistent reductions.
         max_persistent_rblock = 0
-        for sub in self.sub_kernels:
-            if sub.persistent_reduction:
-                for tree in sub.range_trees:
-                    if tree.is_reduction:
-                        simplified_numel = V.graph.sizevars.simplify(tree.numel)
-                        if isinstance(simplified_numel, (Integer, int)):
-                            val = next_power_of_2(int(simplified_numel))
-                            max_persistent_rblock = max(max_persistent_rblock, val)
+        if not config.combo_kernel_per_subkernel_blocks:
+            max_persistent_rblock = max(
+                (
+                    next_power_of_2(int(simplified))
+                    for sub in self.sub_kernels
+                    if sub.persistent_reduction
+                    for tree in sub.range_trees
+                    if tree.is_reduction
+                    for simplified in [V.graph.sizevars.simplify(tree.numel)]
+                    if isinstance(simplified, (Integer, int))
+                ),
+                default=0,
+            )
 
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
+            # Matches triton.py:codegen_kernel(): inference/backward graphs skip
+            # CPU-copy of mutated args during autotune retries; training-forward
+            # graphs must keep it to preserve benchmark inputs across retries.
+            "optimize_mem": V.graph.is_inference or V.graph.is_backward,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
         if max_persistent_rblock > 0:

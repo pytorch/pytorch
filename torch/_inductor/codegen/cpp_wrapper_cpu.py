@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 import sympy
 
@@ -24,7 +24,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, normalize_name
+from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -33,7 +33,6 @@ from .wrapper import (
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
-    HasWriteLine,
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
@@ -48,6 +47,10 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
+
+
+class HasWriteLine(Protocol):
+    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -120,15 +123,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        # MSVC does not support implicitly converting a const iterator to a const pointer.
-        ptr_call = (
-            "data()"
-            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
-            else "cbegin()"
-        )
-        return (
-            f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
-        )
+        array_expr = f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}"
+        if force_mutable or c_type.endswith("*"):
+            return f"{array_expr}.data()"
+
+        # MSVC does not support implicitly converting a const iterator to a const
+        # pointer, so use data() and cast to keep const qualification.
+        if cpp_builder.is_msvc_cl():
+            return f"static_cast<const {c_type}*>({array_expr}.data())"
+
+        return f"{array_expr}.cbegin()"
 
     def _generate_kernel_call_helper(
         self,
@@ -292,8 +296,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
-        if not V.graph.is_const_graph:
-            self.codegen_input_size_and_nan_asserts()
 
     def write_input_output_info(
         self,
@@ -1696,15 +1698,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # TODO: Add buf name directly into check_inf_and_nan.
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan({buf}));"
-            )
-
-    def codegen_input_nan_asserts(self) -> None:
-        self.wrapper_call.writeline("// make sure graph inputs are not nan/inf")
-        for name, buf in self.get_graph_inputs().items():
-            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
-                continue
-            self.wrapper_call.writeline(
-                f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
     def codegen_device(self, device):

@@ -947,8 +947,6 @@ if torch.backends.mps.is_available():
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
-            # derivative for aten::nextafter is not implemented on CPU
-            "nextafter": None,
             # derivative for aten::floor_divide is not implemented on CPU
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU

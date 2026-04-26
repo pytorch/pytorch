@@ -575,6 +575,57 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(torch.add, backend="eager")(a, b)
         self.assertEqual(eager, compiled)
 
+    def test_tensorify_under_disabled_torch_function(self):
+        # Fixes #180906
+        # The checks tensorify_python_scalars works under dispatch
+        # as it relies on MetaProxy's __torch_function__ to intercept calls
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
+
+        # Build a minimal graph containing _local_scalar_dense (i.e. .item())
+        # on a floating-point placeholder — just enough for tensorify to act.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(4)
+
+            scale_ph = graph.placeholder("scale")
+            scale_ph.meta["val"] = torch.tensor(1.0)
+
+            item_node = graph.call_function(
+                torch.ops.aten._local_scalar_dense.default, (scale_ph,)
+            )
+            # tensorify needs a backed SymFloat with a sympy expression
+            item_node.meta["val"] = shape_env.create_unbacked_symfloat()
+
+            mul_node = graph.call_function(torch.ops.aten.mul.Tensor, (x, item_node))
+            mul_node.meta["val"] = torch.randn(4)
+            graph.output(mul_node)
+
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+            # Run tensorify_python_scalars with __torch_function__
+            # disabled — without the _EnableTorchFunction fix, this raises:
+            #   RuntimeError: prims::convert_element_type() Expected
+            #   a value of type 'Tensor' ... found type 'MetaProxy'.
+            with torch._C.DisableTorchFunctionSubclass():
+                tensorify_python_scalars(gm, shape_env, fake_mode)
+
+            # The pass should have inserted a convert_element_type node
+            # that upcasts the scale placeholder to float64.
+            convert_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target is torch.ops.prims.convert_element_type.default
+            ]
+            self.assertTrue(len(convert_nodes) > 0)
+            # The first convert_element_type is the float64 upcast;
+            # verify it carries correct metadata.
+            self.assertEqual(convert_nodes[0].meta["val"].dtype, torch.float64)
+
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")
         def fn(x):

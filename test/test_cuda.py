@@ -20,6 +20,7 @@ from collections import defaultdict
 from copy import deepcopy
 from itertools import product
 from random import randint
+from unittest.mock import patch
 
 import psutil
 
@@ -45,6 +46,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     TEST_MULTIGPU,
     tf32_on_and_off,
+    xfailCUDAIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -111,7 +113,7 @@ load_tests = load_tests  # noqa: PLW0127
 try:
     import torchvision.models  # noqa: F401
 
-    # from torchvision.models import resnet18  # noqa: F401
+    # from torchvision.models import resnet18
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -1879,6 +1881,13 @@ if __name__ == '__main__':
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    @serialTest()
+    def test_cuda_opaque_type(self):
+        x = torch.ones(600_000_000, dtype=torch.int32, device="cuda")
+        y = torch.where(x > 0, x, x)
+        self.assertEqual(y, x)
+
     def test_cuda_memory_leak_detection_propagates_errors(self):
         with self.assertRaisesRegex(
             RuntimeError, r"The size of tensor a \(3\) must match"
@@ -2189,7 +2198,7 @@ torch.cuda.synchronize()
                     # thread 1 calls cublasSetStream()
                     # thread 0 launches its raw gemm, which it thinks is in
                     #          its own stream, but is actually in thread 1's stream.
-                    # thread 0 enqueues its div_, which IS is its own stream,
+                    # thread 0 enqueues its div_, which IS in its own stream,
                     #          but actually now races with its gemm.
                     results[t] = torch.mm(results[t], weight)
                     results[t].div_(float(size))
@@ -2245,7 +2254,7 @@ torch.cuda.synchronize()
                         # thread 1 calls setCuDNNStreamToCurrent()
                         # thread 0 launches its raw convolution, which it thinks is in
                         #          its own stream, but is actually in thread 1's stream.
-                        # thread 0 enqueues its div_, which IS is its own stream,
+                        # thread 0 enqueues its div_, which IS in its own stream,
                         #          but now races with its convolution.
                         results[t] = torch.nn.functional.conv2d(
                             results[t], weight, padding=0
@@ -2305,7 +2314,7 @@ torch.cuda.synchronize()
                     # thread 1 calls cublasSetStream()
                     # thread 0 launches its raw gemm, which it thinks is in
                     #          its own stream, but is actually in thread 1's stream.
-                    # thread 0 enqueues its div_, which IS is its own stream,
+                    # thread 0 enqueues its div_, which IS in its own stream,
                     #          but actually now races with its gemm.
                     results[t] = weight.mm(results[t])
                     results[t].div_(float(size))
@@ -2455,6 +2464,7 @@ torch.cuda.synchronize()
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+    @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -9295,6 +9305,19 @@ class TestCudaGreenContexts(TestCase):
         limited_time = t3 - t2
 
         self.assertGreater(limited_time, baseline_time)
+
+
+class TestCudaArchList(TestCase):
+    def test_get_arch_list_empty_when_cuda_not_compiled(self):
+        if torch.cuda._is_compiled():
+            self.skipTest("CUDA is compiled")
+        self.assertEqual(torch.cuda.get_arch_list(), [])
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "CUDA not compiled")
+    def test_get_arch_list_does_not_require_cuda_is_available(self):
+        expected = (torch._C._cuda_getArchFlags() or "").split()
+        with patch("torch.cuda.is_available", return_value=False):
+            self.assertEqual(torch.cuda.get_arch_list(), expected)
 
 
 instantiate_parametrized_tests(TestCuda)

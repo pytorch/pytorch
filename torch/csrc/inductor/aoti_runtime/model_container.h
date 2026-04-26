@@ -481,13 +481,19 @@ class AOTInductorModelContainer {
     auto constants_map_to_update = get_constants_map(use_inactive);
 
     auto num_constants = models_[0]->num_constants();
+    size_t non_folded_idx = 0;
     for (size_t idx = 0; idx < num_constants; idx++) {
+      bool from_folded = models_[0]->constant_from_folded(idx);
+      if (from_folded) {
+        continue;
+      }
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
           !(use_inactive &&
             _is_tensor_constant_or_buffer_type_or_empty_parameter(idx))) {
+        non_folded_idx++;
         continue;
       }
 
@@ -504,6 +510,7 @@ class AOTInductorModelContainer {
         constants_map_to_update->insert_or_assign(
             constant_name,
             MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
+        non_folded_idx++;
         continue;
       }
 
@@ -512,7 +519,7 @@ class AOTInductorModelContainer {
 
       // Move the data to container handled blob.
       uint8_t* internal_constants_ptr =
-          constants_blob_ptr + constants_internal_offset_[idx];
+          constants_blob_ptr + constants_internal_offset_[non_folded_idx];
       void* user_constant_ptr;
       int64_t constant_size;
       int64_t* stride;
@@ -537,11 +544,12 @@ class AOTInductorModelContainer {
           constants_blob_ptr,
           constant_size,
           offset,
-          constants_internal_offset_[idx]);
+          constants_internal_offset_[non_folded_idx]);
       // For mps tensors, all constants are stored in one buffer, with the
       // offset being where the constant starts. So we want to change the
-      // constant tensor's offset to point to constants_internal_offset_[idx]
-      offset = constants_internal_offset_[idx] /
+      // constant tensor's offset to point to
+      // constants_internal_offset_[non_folded_idx]
+      offset = constants_internal_offset_[non_folded_idx] /
           aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
       AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
@@ -573,6 +581,7 @@ class AOTInductorModelContainer {
       // ownership of the tensor_handle will be taken over.
       constants_map_to_update->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
+      non_folded_idx++;
     }
     // Update the inactive constant array.
     update_array_from_map(

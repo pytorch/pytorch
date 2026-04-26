@@ -681,7 +681,9 @@ use_pre_grad_passes: bool = True
 #   requires custom passes to implement uuid() for the cache key.
 # "default": resolves to "late" when possible (no custom pass, or custom pass
 #   with uuid), falls back to "early" otherwise.
-pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+pre_grad_pass_timing: Literal["early", "late", "default"] = (
+    "late" if is_fbcode() else "default"
+)
 
 
 use_joint_graph_passes: bool = True
@@ -767,8 +769,8 @@ class autoheuristic_use:
     Config for which autoheuristic optimizations should use learned heuristics.
     """
 
-    pad_mm = "pad_mm" in _parse_autoheuristic_use_env()
-    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
+    pad_mm = True if "pad_mm" in _parse_autoheuristic_use_env() else None
+    mixed_mm = True if "mixed_mm" in _parse_autoheuristic_use_env() else None
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
@@ -782,20 +784,19 @@ def run_autoheuristic(name: str) -> bool:
 
 
 def collect_autoheuristic(name: str) -> bool:
-    if name == "pad_mm":
-        return autoheuristic_collect.pad_mm
-    elif name == "mixed_mm":
-        return autoheuristic_collect.mixed_mm
+    if hasattr(autoheuristic_collect, name):
+        return getattr(autoheuristic_collect, name)
     else:
         # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
         return name in _parse_autoheuristic_collect_env()
 
 
 def use_autoheuristic(name: str) -> bool:
-    if name == "pad_mm":
-        return autoheuristic_use.pad_mm
-    elif name == "mixed_mm":
-        return autoheuristic_use.mixed_mm
+    if hasattr(autoheuristic_use, name):
+        attr = getattr(autoheuristic_use, name)
+        if attr is None:
+            return torch._inductor.config.deterministic
+        return attr
     else:
         # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
         return name in _parse_autoheuristic_use_env()
@@ -970,6 +971,9 @@ split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
+
+# Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
+batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -1172,6 +1176,9 @@ class aten_distributed_optimizations:
     # In deterministic mode, this setting is ignored and "analytical" is used.
     compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
 
+    # Chrome Trace JSON path for profile-guided runtime estimation.
+    profile_guided_estimations_profile_path: str | None = None
+
     # Maximum memory increase above baseline for prefetch operations
     # Uses minimum of absolute cap and ratio of baseline
     max_memory_increase_gb: float | None = None  # Absolute cap in GB
@@ -1321,6 +1328,15 @@ strict_static_cuda_launcher: bool = (
 # Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
 strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
+)
+
+# Use _FastCudaLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
+# and cuCtxGetCurrent.
+use_fast_triton_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
 
 # gemm autotuning global cache dir
@@ -1985,9 +2001,14 @@ class triton:
     # this could be helpful to avoid recompilations in some cases
     mix_order_reduction_non_strict_mode = False
 
+    # Maximum external read buffers (loads) in a mix-order reduction
+    # kernel. Set to 0 to disable the check.
+    mix_order_reduction_max_reads = 10
+
     # Don't allow multi-stages by default to avoid out of shared memory
     mix_order_reduction_allow_multi_stages = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
+        == "1"
     )
 
     # Map for storing the amount of kernel runs with dumped input tensors
@@ -2019,6 +2040,8 @@ class triton:
     proton_per_cta_occupancy: bool = (
         os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PER_CTA_OCCUPANCY", "1") == "1"
     )
+
+    dynamic_disable_pipelining = True
 
 
 class aot_inductor:

@@ -281,7 +281,7 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters

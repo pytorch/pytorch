@@ -1485,6 +1485,31 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_max_pool3d(self, device):
+        test_cases = [
+            # size, kernel_size, stride, padding, dilation, ceil_mode
+            [(2, 3, 8, 8, 8), 3, 1, 1, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, False],
+            [(2, 3, 8, 8, 8), 2, 2, 0, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, True],
+            [(3, 8, 8, 8), 3, 1, 1, 1, False],  # unbatched
+        ]
+
+        for size, ks, st, pa, di, cm in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res, _ = torch.nn.functional.max_pool3d(
+                        input, ks, st, pa, di, cm, return_indices=True)
+                    res.backward(torch.ones_like(res))
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding
@@ -10582,31 +10607,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del a
 
         self.assertTrue(called)
-
-    def test_storage_thread_safety(self):
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        NUM_ITERS = 10
-        NUM_THREADS = 4
-
-        # Concurrent calls to tensor.untyped_storage()
-        def access_untyped_storage(tensor, barrier):
-            barrier.wait()
-            return weakref.ref(tensor.untyped_storage())
-
-        for i in range(NUM_ITERS):
-            tensor = torch.tensor([1.0, 2.0, 3.0])
-            barrier = threading.Barrier(NUM_THREADS)
-            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-                futures = [
-                    executor.submit(access_untyped_storage, tensor, barrier)
-                    for _ in range(NUM_THREADS)
-                ]
-
-                # Check that all the storages returned were the same
-                for future in futures:
-                    self.assertEqual(future.result()(), tensor.untyped_storage())
 
     # FIXME: move to test_linalg
     @torch.inference_mode()

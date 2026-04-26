@@ -258,7 +258,8 @@ else()
   set(_USE_CUDA_EXPLICITLY_SET FALSE)
 endif()
 
-option(USE_CUDA "Use CUDA" ON)
+# CUDA is incompatible with TSAN
+cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)

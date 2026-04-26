@@ -493,7 +493,7 @@ class DDPOptimizer:
         **compiler_configs: Any,
     ) -> CompiledFn:
         """
-        Implements graph splitting, first determining a set of of buckets by counting
+        Implements graph splitting, first determining a set of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
         to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.

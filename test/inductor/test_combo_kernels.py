@@ -1262,6 +1262,7 @@ class ComboKernelPDLTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
 
+@instantiate_parametrized_tests
 class ComboKernelTestsMaxAutotune(TestCase):
     def setUp(self):
         super().setUp()
@@ -1483,6 +1484,35 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual([[0], [1]], [g["member_indices"] for g in groups])
 
     @requires_gpu_and_triton
+    @parametrize("per_subkernel", [True, False])
+    def test_combo_max_persistent_rblock_gated_on_per_subkernel(self, per_subkernel):
+        """The combo-only HIP filter (XBLOCK * max_persistent_rblock <= 4096)
+        from PR #175671 guards a shared-XBLOCK blowup that only exists in
+        the legacy combo path. Under per_subkernel_blocks=True each sub has
+        its own XBLOCK_n so the filter must be skipped (key absent). Under
+        per_subkernel_blocks=False the combo-max value must be set as before.
+        """
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.rand(32, 256, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+        ]
+        with torch._inductor.config.patch(
+            {"combo_kernel_per_subkernel_blocks": per_subkernel}
+        ):
+            out_eager = fn(*inps)
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        joined = " ".join(code)
+        if per_subkernel:
+            self.assertNotIn("'max_persistent_rblock'", joined)
+        else:
+            self.assertIn("'max_persistent_rblock': 1024", joined)
+
+    @requires_gpu_and_triton
     def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self):
         def fn(a, b, c):
             return (
@@ -1540,6 +1570,63 @@ class ComboKernelTestsMaxAutotune(TestCase):
             {"XBLOCK_1"},
             f"Expected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
         )
+
+
+@instantiate_parametrized_tests
+class ComboKernelMetadataTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_per_subkernel_blocks": True,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._test_stack.close()
+        torch._inductor.metrics.reset()
+        super().tearDown()
+
+    def _combo_code(self, fn, inps):
+        out_eager = fn(*inps)
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        return " ".join(code)
+
+    @requires_gpu_and_triton
+    def test_combo_inductor_meta_has_optimize_mem(self):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+        self.assertIn("'optimize_mem': True", code)
+
+    @requires_gpu_and_triton
+    def test_combo_inductor_meta_optimize_mem_false_in_training_forward(self):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE, requires_grad=True) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+        self.assertIn("'optimize_mem': False", code)
+
+    @requires_gpu_and_triton
+    @parametrize("disable_ftz", [False, True])
+    def test_combo_triton_meta_has_disable_ftz(self, disable_ftz):
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+        with torch._inductor.config.patch({"eager_numerics.disable_ftz": disable_ftz}):
+            code = self._combo_code(fn, inps)
+        self.assertIn(f"'disable_ftz': {disable_ftz}", code)
 
 
 if __name__ == "__main__":

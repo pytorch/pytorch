@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -51,7 +51,6 @@ from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_T
 from ..stream_utils import get_stream_name
 from ..utils import (
     cache_on_self,
-    DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
     get_dtype_size,
@@ -478,10 +477,6 @@ class MemoryPlanningState:
         self.comm_buffer_reuse_pool[key].append(item)
 
 
-class HasWriteLine(Protocol):
-    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
-
-
 class WrapperLine:
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
@@ -795,9 +790,6 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
 
             if self.num_streams > 1:
-                code.writeline(
-                    "from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index"
-                )
                 for i in range(1, self.num_streams):
                     user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                     code.writeline(
@@ -1212,15 +1204,12 @@ class UnbackedSymbolDefsLine(WrapperLine):
 
 @dataclasses.dataclass
 class AssertSizeStrideLine(WrapperLine):
-    wrapper: PythonWrapperCodegen
     name: str
     size: str
     stride: str
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper.write_assert_size_stride(
-            self.name, self.size, self.stride, "input"
-        )
+        code.writeline(f"assert_size_stride({self.name}, {self.size}, {self.stride})")
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
@@ -1588,8 +1577,8 @@ class PythonWrapperCodegen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_shape_tuple(buf.get_size())
-            stride = self.codegen_shape_tuple(buf.get_stride())
+            size = self.codegen_python_shape_tuple(buf.get_size())
+            stride = self.codegen_python_shape_tuple(buf.get_stride())
             self._pending_input_asserts[name] = (size, stride)
 
     def codegen_input_nan_asserts(self) -> None:
@@ -1690,23 +1679,7 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(self, name, size, stride))
-
-    def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
-    ) -> None:
-        if V.graph.cpp_wrapper:
-            stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
-            if V.graph.aot_mode:
-                if V.graph.is_const_graph:
-                    return
-                self.writeline(
-                    f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-                )
-            else:
-                self.writeline(stmt)
-        else:
-            self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+                self.writeline(AssertSizeStrideLine(name, size, stride))
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1783,6 +1756,12 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
+            import_line = (
+                "from torch._dynamo.graph_bytecode_inputs import "
+                "get_external_object_by_index"
+            )
+            if not self.imports.contains(import_line):
+                self.imports.writeline(import_line)
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
