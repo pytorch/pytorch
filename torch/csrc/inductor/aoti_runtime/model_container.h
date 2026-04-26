@@ -76,16 +76,16 @@ class AOTInductorModelContainer {
     }
     model->load_constants();
     constant_blob_ = model->release_constant_blob();
-    secondary_cpu_constant_blob_ = model->release_secondary_cpu_constant_blob();
+    aux_cpu_constant_blob_ = model->release_aux_cpu_constant_blob();
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
-    secondary_cpu_constants_internal_offset_.resize(
+    aux_cpu_constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
     model->compute_constant_blob(
         blob_size_,
         constants_internal_offset_,
-        secondary_cpu_blob_size_,
-        secondary_cpu_constants_internal_offset_);
+        aux_cpu_blob_size_,
+        aux_cpu_constants_internal_offset_);
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
@@ -494,24 +494,24 @@ class AOTInductorModelContainer {
     auto constants_map_to_update = get_constants_map(use_inactive);
 
     // Running indices into constants_internal_offset_ and
-    // secondary_cpu_constants_internal_offset_, which hold per-blob offsets
+    // aux_cpu_constants_internal_offset_, which hold per-blob offsets
     // only for non-folded constants (mirrors compute_constant_blob's
     // bookkeeping in model_base.h). Advance per-blob for every non-folded
     // constant as we walk.
     size_t main_blob_idx = 0;
-    size_t secondary_cpu_blob_idx = 0;
+    size_t aux_cpu_blob_idx = 0;
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
       }
       int32_t const_device_type =
           models_[0]->constant_device_type(static_cast<int64_t>(idx));
-      bool is_secondary_cpu = const_device_type != model_device_type;
+      bool is_aux_cpu = const_device_type != model_device_type;
 
       size_t this_main_idx = main_blob_idx;
-      size_t this_secondary_cpu_idx = secondary_cpu_blob_idx;
-      if (is_secondary_cpu) {
-        secondary_cpu_blob_idx++;
+      size_t this_aux_cpu_idx = aux_cpu_blob_idx;
+      if (is_aux_cpu) {
+        aux_cpu_blob_idx++;
       } else {
         main_blob_idx++;
       }
@@ -554,14 +554,14 @@ class AOTInductorModelContainer {
 
       AtenTensorHandle tensor_handle = nullptr;
 
-      if (is_secondary_cpu) {
+      if (is_aux_cpu) {
         // CPU constant in a mixed-device model. Write into the container's
-        // secondary CPU blob at the pre-computed offset, mirroring how the
+        // auxiliary CPU blob at the pre-computed offset, mirroring how the
         // primary blob is managed.
-        auto* secondary_blob_ptr = static_cast<uint8_t*>(
-            get_secondary_cpu_constant_blob_ptr(use_inactive));
-        uint8_t* internal_constants_ptr = secondary_blob_ptr +
-            secondary_cpu_constants_internal_offset_[this_secondary_cpu_idx];
+        auto* aux_blob_ptr =
+            static_cast<uint8_t*>(get_aux_cpu_constant_blob_ptr(use_inactive));
+        uint8_t* internal_constants_ptr =
+            aux_blob_ptr + aux_cpu_constants_internal_offset_[this_aux_cpu_idx];
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
             internal_constants_ptr,
@@ -670,11 +670,11 @@ class AOTInductorModelContainer {
     if (use_secondary_) {
       constant_folded_ = ConstantState::NONE;
       constant_blob_.reset();
-      secondary_cpu_constant_blob_.reset();
+      aux_cpu_constant_blob_.reset();
     } else {
       constant_folded_secondary_ = ConstantState::NONE;
       constant_blob_secondary_.reset();
-      secondary_cpu_constant_blob_secondary_.reset();
+      aux_cpu_constant_blob_secondary_.reset();
     }
     // Free the internally held constants
     int num_constants = static_cast<int>(models_[0]->num_constants());
@@ -730,16 +730,18 @@ class AOTInductorModelContainer {
   RAIIDataPtr constant_blob_;
   RAIIDataPtr constant_blob_secondary_;
 
-  // Separate CPU-only blob used for constants whose device_type differs from
-  // the model's primary device (only supported when the secondary device is
-  // CPU). Parallels constant_blob_{,_secondary_} for double-buffering.
-  RAIIDataPtr secondary_cpu_constant_blob_;
-  RAIIDataPtr secondary_cpu_constant_blob_secondary_;
+  // Auxiliary CPU blob used for constants whose device_type differs from the
+  // model's primary device (only populated in mixed-device models, e.g. a
+  // CUDA model with some CPU-pinned constants). Unused when the model's
+  // primary device is already CPU. Parallels constant_blob_{,_secondary_}
+  // for double-buffering.
+  RAIIDataPtr aux_cpu_constant_blob_;
+  RAIIDataPtr aux_cpu_constant_blob_secondary_;
 
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
-  size_t secondary_cpu_blob_size_;
-  std::vector<size_t> secondary_cpu_constants_internal_offset_;
+  size_t aux_cpu_blob_size_;
+  std::vector<size_t> aux_cpu_constants_internal_offset_;
 
   // Determine which constants is being used for the model.
   // If true,
@@ -818,19 +820,18 @@ class AOTInductorModelContainer {
     }
   }
 
-  void* get_secondary_cpu_constant_blob_ptr(bool get_inactive) {
+  void* get_aux_cpu_constant_blob_ptr(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
-      if (!secondary_cpu_constant_blob_) {
-        secondary_cpu_constant_blob_ = RAII_cpuMalloc(secondary_cpu_blob_size_);
+      if (!aux_cpu_constant_blob_) {
+        aux_cpu_constant_blob_ = RAII_cpuMalloc(aux_cpu_blob_size_);
       }
-      return secondary_cpu_constant_blob_.get();
+      return aux_cpu_constant_blob_.get();
     } else {
-      if (!secondary_cpu_constant_blob_secondary_) {
-        secondary_cpu_constant_blob_secondary_ =
-            RAII_cpuMalloc(secondary_cpu_blob_size_);
+      if (!aux_cpu_constant_blob_secondary_) {
+        aux_cpu_constant_blob_secondary_ = RAII_cpuMalloc(aux_cpu_blob_size_);
       }
-      return secondary_cpu_constant_blob_secondary_.get();
+      return aux_cpu_constant_blob_secondary_.get();
     }
   }
 

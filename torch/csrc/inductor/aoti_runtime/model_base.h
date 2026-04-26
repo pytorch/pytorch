@@ -599,15 +599,15 @@ class AOTInductorModelBase {
     // so we need a separate secondary blob for them.
     std::vector<size_t> constants_internal_offset(
         num_constants - num_folded_constants);
-    std::vector<size_t> secondary_cpu_constants_internal_offset(
+    std::vector<size_t> aux_cpu_constants_internal_offset(
         num_constants - num_folded_constants);
     size_t blob_size = 0;
-    size_t secondary_cpu_blob_size = 0;
+    size_t aux_cpu_blob_size = 0;
     compute_constant_blob(
         blob_size,
         constants_internal_offset,
-        secondary_cpu_blob_size,
-        secondary_cpu_constants_internal_offset);
+        aux_cpu_blob_size,
+        aux_cpu_constants_internal_offset);
 
     if (!force && !include_weights) {
       return;
@@ -623,13 +623,13 @@ class AOTInductorModelBase {
     }
 
     // Allocate secondary blob on CPU
-    if (secondary_cpu_blob_size > 0) {
-      secondary_cpu_constant_blob_ = RAII_cpuMalloc(secondary_cpu_blob_size);
+    if (aux_cpu_blob_size > 0) {
+      aux_cpu_constant_blob_ = RAII_cpuMalloc(aux_cpu_blob_size);
     }
 
     size_t bytes_read = 0;
     size_t main_blob_idx = 0;
-    size_t secondary_cpu_blob_idx = 0;
+    size_t aux_cpu_blob_idx = 0;
 
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
@@ -664,10 +664,10 @@ class AOTInductorModelBase {
               data_size,
               /* skip_copy = */ false);
         } else {
-          auto* secondary_cpu_constants_ptr =
-              static_cast<uint8_t*>(secondary_cpu_constant_blob_.get());
-          internal_ptr = secondary_cpu_constants_ptr +
-              secondary_cpu_constants_internal_offset[secondary_cpu_blob_idx];
+          auto* aux_cpu_constants_ptr =
+              static_cast<uint8_t*>(aux_cpu_constant_blob_.get());
+          internal_ptr = aux_cpu_constants_ptr +
+              aux_cpu_constants_internal_offset[aux_cpu_blob_idx];
           memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
         }
       }
@@ -677,7 +677,7 @@ class AOTInductorModelBase {
       if (device_type_matches) {
         main_blob_idx++;
       } else {
-        secondary_cpu_blob_idx++;
+        aux_cpu_blob_idx++;
       }
 
       bytes_read += data_size;
@@ -722,8 +722,8 @@ class AOTInductorModelBase {
     return std::move(constant_blob_);
   }
 
-  RAIIDataPtr&& release_secondary_cpu_constant_blob() {
-    return std::move(secondary_cpu_constant_blob_);
+  RAIIDataPtr&& release_aux_cpu_constant_blob() {
+    return std::move(aux_cpu_constant_blob_);
   }
 
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
@@ -777,13 +777,13 @@ class AOTInductorModelBase {
   void compute_constant_blob(
       size_t& blob_size,
       std::vector<size_t>& constants_internal_offset,
-      size_t& secondary_cpu_blob_size,
-      std::vector<size_t>& secondary_cpu_constants_internal_offset) {
+      size_t& aux_cpu_blob_size,
+      std::vector<size_t>& aux_cpu_constants_internal_offset) {
     size_t num_constants = this->num_constants();
     blob_size = 0;
-    secondary_cpu_blob_size = 0;
+    aux_cpu_blob_size = 0;
     size_t main_idx = 0;
-    size_t secondary_idx = 0;
+    size_t aux_idx = 0;
 
     for (size_t i = 0; i < num_constants; i++) {
       if (this->constant_from_folded(i)) {
@@ -791,7 +791,7 @@ class AOTInductorModelBase {
       }
 
       size_t data_size = this->constant_data_size(i);
-      // ok to use same AOTI_CONST_ALIGNMENT for both main and secondary blobs
+      // ok to use same AOTI_CONST_ALIGNMENT for both main and auxiliary blobs
       if (data_size % AOTI_CONST_ALIGNMENT) {
         data_size = AOTI_CONST_ALIGNMENT +
             (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
@@ -801,9 +801,8 @@ class AOTInductorModelBase {
         constants_internal_offset[main_idx++] = blob_size;
         blob_size += data_size;
       } else {
-        secondary_cpu_constants_internal_offset[secondary_idx++] =
-            secondary_cpu_blob_size;
-        secondary_cpu_blob_size += data_size;
+        aux_cpu_constants_internal_offset[aux_idx++] = aux_cpu_blob_size;
+        aux_cpu_blob_size += data_size;
       }
     }
   }
@@ -1080,8 +1079,8 @@ class AOTInductorModelBase {
 
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
-  // For mixed-device models, secondary_cpu_constant_blob_ holds CPU constants
-  RAIIDataPtr secondary_cpu_constant_blob_;
+  // For mixed-device models, aux_cpu_constant_blob_ holds CPU constants
+  RAIIDataPtr aux_cpu_constant_blob_;
 
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights
