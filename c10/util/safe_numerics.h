@@ -10,6 +10,7 @@
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
 #include <c10/util/llvmMathExtras.h>
 #include <intrin.h>
+#include <bit>
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
@@ -68,9 +69,7 @@ C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
     // This test isn't exact, but avoids doing integer division
     *out = a * b;
     constexpr int bits = sizeof(T) * 8;
-    return (
-        (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
-        bits);
+    return ((std::countl_zero(a) + std::countl_zero(b)) < bits);
   }
 #endif
 }

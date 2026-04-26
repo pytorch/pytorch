@@ -388,6 +388,11 @@ function(torch_compile_options libname)
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
         list(APPEND private_compile_options -Wno-interference-size)
       endif()
+      # GCC 13 has a false positive -Wfree-nonheap-object warning in
+      # std::optional and other standard library types with C++20.
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+        list(APPEND private_compile_options -Wno-free-nonheap-object)
+      endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)
