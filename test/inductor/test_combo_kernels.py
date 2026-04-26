@@ -1458,8 +1458,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 "size_hints_1": {"x": 256, "y": 256},
                 "tile_hint_0": "TileHint.SQUARE",
                 "tile_hint_1": "TileHint.SQUARE",
-                "tiling_scores_0": {"x": 8, "y": 1},
-                "tiling_scores_1": {"x": 1, "y": 8},
+                "inductor_meta_0": {"tiling_scores": {"x": 8, "y": 1}},
+                "inductor_meta_1": {"tiling_scores": {"x": 1, "y": 8}},
             }
         }
 
@@ -1627,6 +1627,96 @@ class ComboKernelMetadataTests(TestCase):
         with torch._inductor.config.patch({"eager_numerics.disable_ftz": disable_ftz}):
             code = self._combo_code(fn, inps)
         self.assertIn(f"'disable_ftz': {disable_ftz}", code)
+
+    @requires_gpu_and_triton
+    def test_combo_pointwise_combo_grid_meta_has_per_subkernel_fields(self):
+        def fn(a, b, c):
+            return torch.relu(a), torch.sigmoid(b), torch.tanh(c)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(3)]
+        code = self._combo_code(fn, inps)
+
+        # Each sub-kernel's inductor_meta_{n} sub-dict must contain the
+        # per-kernel autotune fields.
+        fc = FileCheck()
+        for num in range(3):
+            fc = fc.check(f"'inductor_meta_{num}'")
+            for field in (
+                "num_load",
+                "num_store",
+                "num_reduction",
+                "autotune_hints",
+                "atomic_add_found",
+            ):
+                fc = fc.check_dag(f"'{field}'")
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    def test_combo_reduction_combo_grid_meta_has_per_subkernel_fields(self):
+        def fn(a, b):
+            return a.sum(-1), b.mean(-1)
+
+        inps = [torch.rand(32, 1024, device=GPU_TYPE) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+
+        fc = FileCheck()
+        for num in range(2):
+            fc = fc.check(f"'inductor_meta_{num}'")
+            for field in ("num_load", "num_store", "num_reduction"):
+                fc = fc.check_dag(f"'{field}'")
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch({"deterministic": True})
+    def test_combo_reduction_deterministic_has_contiguous_rdim_per_subkernel(self):
+        def fn(a, b):
+            return a.sum(-1), b.mean(-1)
+
+        inps = [torch.rand(32, 1024, device=GPU_TYPE) for _ in range(2)]
+        code = self._combo_code(fn, inps)
+
+        fc = FileCheck()
+        for num in range(2):
+            fc = fc.check(f"'inductor_meta_{num}'").check(
+                "'has_loadstore_with_contiguous_rdim'"
+            )
+        fc.run(code)
+
+    @requires_gpu_and_triton
+    def test_combo_per_kernel_inductor_meta_matches_standalone(self):
+        per_kernel_fields = re.compile(
+            r"'(num_load|num_store|num_reduction|"
+            r"atomic_add_found|no_x_dim|"
+            r"autotune_hints|tiling_scores)'\s*:\s*"
+            r"(\d+|True|False|None|\{[^{}]*\}|set\([^)]*\))"
+        )
+
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
+
+        # Standalone: one wrapper source can contain multiple kernels; split
+        # by "inductor_meta=" so each chunk represents one kernel.
+        with torch._inductor.config.patch({"combo_kernels": False}):
+            torch._dynamo.reset()
+            _, standalone_codes = run_and_get_code(torch.compile(fn), *inps)
+        standalone = [
+            dict(per_kernel_fields.findall(chunk))
+            for c in standalone_codes
+            for chunk in c.split("inductor_meta=")[1:]
+        ]
+
+        # Combo: per-sub-kernel inductor_meta_{i} sub-dicts inside combo_grid_meta.
+        # The inner regex allows one level of `{...}` nesting (for tiling_scores).
+        code = self._combo_code(fn, inps)
+        combo = [
+            dict(per_kernel_fields.findall(s))
+            for s in re.findall(
+                r"'inductor_meta_\d+': (\{(?:[^{}]|\{[^{}]*\})*\})", code
+            )
+        ]
+        self.assertEqual(standalone, combo)
 
 
 if __name__ == "__main__":
