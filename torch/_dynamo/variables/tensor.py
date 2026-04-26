@@ -1343,11 +1343,12 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            provided_vars = (
-                inputs.items
-                if isinstance(inputs, variables.BaseListVariable)
-                else [inputs]
-            )
+            if isinstance(inputs, variables.BaseListVariable):
+                provided_vars = inputs.items
+            elif isinstance(inputs, variables.ConstDictVariable):
+                provided_vars = list(inputs.items.values())
+            else:
+                provided_vars = [inputs]
             input_vars = self._collect_backward_inputs(
                 provided_vars, error_on_non_leaf=True
             )
