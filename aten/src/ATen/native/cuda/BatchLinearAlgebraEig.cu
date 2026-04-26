@@ -44,10 +44,32 @@ __global__ void linalg_eig_make_complex_eigenvectors_kernel(
         batch_vectors[col * n + row],
         scalar_t(0));
   } else if (eigenvalue.imag() > scalar_t(0)) {
+    // Complex eigenvalue with positive imag must be the first of a conjugate
+    // pair, so a partner column col+1 must exist. A positive-imag eigenvalue
+    // at col == n-1 is a structural inconsistency in the LAPACK/MAGMA output
+    // (see pytorch/pytorch#162358). Refuse rather than reading past the end
+    // of the vectors buffer.
+    CUDA_KERNEL_ASSERT_PRINTF(
+        col + 1 < n,
+        "torch.linalg.eig: complex eigenvalue with positive imag reported at "
+        "the trailing column (col=%lld, n=%lld) with no partner column in the "
+        "packed real-eigenvector output. Input is likely subnormal or "
+        "ill-conditioned; try a higher-precision dtype or perturb the input.\n",
+        static_cast<long long>(col), static_cast<long long>(n));
     batch_result[col * n + row] = c10::complex<scalar_t>(
         batch_vectors[col * n + row],
         batch_vectors[(col + 1) * n + row]);
   } else {
+    // eigenvalue.imag() < 0: second of a conjugate pair, so a preceding
+    // column col-1 must exist. imag < 0 at col == 0 is the leading-boundary
+    // analogue of the same structural inconsistency.
+    CUDA_KERNEL_ASSERT_PRINTF(
+        col > 0,
+        "torch.linalg.eig: complex eigenvalue with negative imag reported at "
+        "the leading column (col=0, n=%lld) with no partner column in the "
+        "packed real-eigenvector output. Input is likely subnormal or "
+        "ill-conditioned; try a higher-precision dtype or perturb the input.\n",
+        static_cast<long long>(n));
     batch_result[col * n + row] = c10::complex<scalar_t>(
         batch_vectors[(col - 1) * n + row],
         -batch_vectors[col * n + row]);

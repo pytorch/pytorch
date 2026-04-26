@@ -2513,6 +2513,41 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
+    @dtypes(torch.float64)
+    def test_eig_subnormal_input_no_overflow(self, device, dtype):
+        # Regression smoke test for pytorch/pytorch#162358: subnormal inputs
+        # could trigger a heap-buffer-overflow in
+        # linalg_eig_make_complex_eigenvectors when LAPACK's eigenvalue array
+        # reported a complex eigenvalue at the trailing index with no partner
+        # column in the packed real-eigenvector layout.
+        #
+        # Whether the code path is exercised depends on the linked LAPACK: MKL
+        # (PyTorch CI) raises "algorithm failed to converge" before the
+        # unpacker; Apple Accelerate classifies the trailing pair as a valid
+        # conjugate pair; only netlib on the OP's environment reaches the
+        # buggy branch. The deterministic regression test lives in
+        # aten/src/ATen/test/linalg_eig_test.cpp; this test just ensures no
+        # OOB/segfault regression on any backend by accepting either success
+        # or a clean RuntimeError.
+        v = 9.01285756841503997614390621177016e-188
+        a = torch.full((9, 9), v, dtype=dtype, device=device)
+        a[0, 0] = 6.92733286357142009759300753973877e-310
+        a[0, 1] = 4.87107170610649251002689828257271e-310
+        a[0, 2] = 9.01272004312255329946307405656429e-188
+        a[8, 7] = 3.09700932956638653566522653421558e-312
+        a[8, 8] = -1.09006211749085692498734985786208e-277
+
+        try:
+            L, V = torch.linalg.eig(a)
+        except RuntimeError:
+            return
+        self.assertEqual(a.to(L.dtype) @ V, V @ torch.diag(L), atol=1e-6, rtol=1e-6)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)

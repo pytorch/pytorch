@@ -167,6 +167,22 @@ static void linalg_eig_make_complex_eigenvectors_cpu_impl(const Tensor& result, 
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
         }
       } else {
+        // LAPACK's GEEV contract: a complex eigenvalue at index j is the
+        // first of a conjugate pair and uses VR column j+1 as the imaginary
+        // part. A complex eigenvalue at j == n-1 would require the
+        // non-existent column n and is a structural inconsistency in
+        // LAPACK's output (observed on subnormal inputs with some netlib
+        // builds; pytorch/pytorch#162358). Refuse rather than read past
+        // the end of VR.
+        TORCH_CHECK(
+            j + 1 < n,
+            "torch.linalg.eig: LAPACK returned a complex eigenvalue at index ",
+            j, " (the final index of an n=", n, " problem) with no partner ",
+            "column in the packed real-eigenvector output. This indicates the ",
+            "underlying LAPACK produced an inconsistent classification of ",
+            "eigenvalues for this input, typically due to subnormal or ",
+            "otherwise ill-conditioned values. Consider using a ",
+            "higher-precision dtype or perturbing the input.");
         for (auto i = decltype(n){0}; i < n; i++) {
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
           res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
