@@ -5,6 +5,7 @@
 #include <metal_stdlib>
 
 using namespace metal;
+#include <ATen/native/mps/kernels/PrefillAttention.h>
 
 template <typename T, int D, int V = D>
 [[kernel]] void sdpa_vector(
