@@ -43,14 +43,24 @@ __global__ void linalg_eig_make_complex_eigenvectors_kernel(
     batch_result[col * n + row] = c10::complex<scalar_t>(
         batch_vectors[col * n + row],
         scalar_t(0));
-  } else if (eigenvalue.imag() > scalar_t(0)) {
+  } else if (eigenvalue.imag() > scalar_t(0) && col + 1 < n) {
     batch_result[col * n + row] = c10::complex<scalar_t>(
         batch_vectors[col * n + row],
         batch_vectors[(col + 1) * n + row]);
-  } else {
+  } else if (eigenvalue.imag() < scalar_t(0) && col > 0) {
     batch_result[col * n + row] = c10::complex<scalar_t>(
         batch_vectors[(col - 1) * n + row],
         -batch_vectors[col * n + row]);
+  } else {
+    // Lone complex eigenvalue at a boundary column with no partner column in the
+    // packed real-eigenvector layout. The vectors buffer has only n columns, so a
+    // complex pair at col 0 (would need col -1) or col n-1 (would need col n)
+    // requires non-existent data; the only interpretation consistent with the
+    // buffer dimensions treats this column as a real eigenvector and discards
+    // the inconsistent imag(lambda).
+    batch_result[col * n + row] = c10::complex<scalar_t>(
+        batch_vectors[col * n + row],
+        scalar_t(0));
   }
 }
 
