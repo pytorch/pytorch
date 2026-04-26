@@ -1001,7 +1001,14 @@ class _TorchDynamoContext:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
             (
-                filename is None
+                # filename is None covers C-level callables (builtins, slot
+                # wrappers, methods of C objects) that Dynamo cannot trace
+                # without an extra Python frame. Python functions defined via
+                # exec/eval also report no source file, but they have a real
+                # code object Dynamo can trace; wrapping them collapses every
+                # such function onto wrap_inline's shared `inner` code object
+                # and hits the recompile limit (#124269).
+                (filename is None and not inspect.isfunction(fn))
                 or trace_rules.check(fn)
                 or top_level_in_graph
                 or has_polyfill
