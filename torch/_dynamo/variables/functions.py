@@ -23,6 +23,8 @@ accurate graph capture while handling Python's various function-related behavior
 
 import builtins
 import functools
+import importlib.metadata
+import importlib.util
 import inspect
 import itertools
 import logging
@@ -756,7 +758,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
                 unimplemented(
                     gb_type="Limitation of `nonstrict_trace",
                     context=f"{self}",
@@ -1196,6 +1198,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
+        return self
+
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False
 
@@ -1249,9 +1255,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__next__":
             return self.next_variable(tx)
-        elif name == "__iter__":
-            # iter(gen) returns itself
-            return self
         elif name == "send":
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator
@@ -2167,6 +2170,16 @@ class SkipFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # importlib functions are frozen builtins that Dynamo cannot trace
+        # into.  They are deterministic for a given package name, so
+        # constant-fold them when all args are constants.
+        if self.value in (importlib.util.find_spec, importlib.metadata.version) and all(
+            a.is_python_constant() for a in args
+        ):
+            return VariableTracker.build(
+                tx, self.value(*(a.as_python_constant() for a in args))
+            )
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
@@ -3248,6 +3261,9 @@ class TritonKernelVariable(VariableTracker):
         self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
+
+    def python_type(self) -> type:
+        return type(self.kernel)
 
     def call_function(
         self,

@@ -28,7 +28,7 @@ from torch.testing._internal.inductor_utils import (
 
 
 try:
-    import triton  # noqa: F401  # @manual
+    import triton  # @manual
     import triton.language as tl  # @manual
 except ImportError:
     if __name__ == "__main__":

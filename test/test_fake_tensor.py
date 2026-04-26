@@ -1633,6 +1633,62 @@ class FakeTensorConverterTest(TestCase):
         if y_weak() is not None:
             raise AssertionError("expected y_weak() is None")
 
+    def test_grad_dtype_preserved(self):
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+
+    def test_grad_dtype_none_preserved(self):
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = None
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertIsNone(fake_t.grad_dtype)
+
+    def test_grad_dtype_functional_tensor_no_crash(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+
+        with FunctionalTensorMode():
+            func_t = FunctionalTensor.to_functional(fake_t)
+            # Re-fakifying a FunctionalTensor should not crash even though
+            # the inner tensor has a custom grad_dtype.
+            re_faked = mode.from_tensor(func_t)
+        self.assertTrue(re_faked.requires_grad)
+
+    @skipIfTorchDynamo("make_fx tracing is incompatible with dynamo")
+    def test_grad_dtype_make_fx(self):
+        def train_step(w):
+            y = (w.float() * 2).sum()
+            (g,) = torch.autograd.grad(y, w)
+            return g
+
+        w = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        w.grad_dtype = torch.float32
+
+        g_eager = train_step(w)
+
+        fake_mode = FakeTensorMode()
+        w_fake = fake_mode.from_tensor(w)
+        with fake_mode:
+            gm = make_fx(train_step)(w_fake)
+        g_traced = gm(w)
+
+        self.assertEqual(g_eager.dtype, g_traced.dtype)
+
 
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
 

@@ -1360,10 +1360,23 @@ class Reduction(Loops):
         if not V.graph.sizevars.all_unbacked_explicitly_hinted(exprs):
             return ReductionHint.DEFAULT, 1
         reduction_numel_hint = V.graph.sizevars.optimization_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
+        numel = sympy_product(ranges)
+        numel_hint = V.graph.sizevars.optimization_hint(numel)
+
+        # The Triton backend adds REDUCE_TO_SINGLE_ELEMENT unconditionally if the
+        # cooperative_reductions feature flag is enabled, but we should still use a
+        # split scan if we don't actually do a cooperative reduction.
+        should_reduce_to_single_element = V.graph.has_feature(
+            device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT
+        ) and (
+            not is_triton(device)
+            or V.choices.should_use_cooperative_reduction(
+                device, numel, reduction_numel
+            )
+        )
 
         should_split = reduction_type == "scan" or (
-            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
+            not should_reduce_to_single_element
             and reduction_type
             not in (
                 "argmax",
@@ -2806,8 +2819,28 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            layout.pad_strides()
+            assert isinstance(layout, FlexibleLayout), type(layout)
+            layout = FixedLayout(
+                layout.device,
+                layout.dtype,
+                layout.size,
+                layout._pad_strides(layout.stride, layout.size, layout.dtype),
+                layout.offset,
+                layout.is_pinned,
+            )
         return layout.is_contiguous()
+    except NotImplementedError:
+        return False
+
+
+def is_dense_contiguous_storage_and_layout(x: IRNode) -> bool:
+    try:
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
+        if not layout.is_contiguous():
+            return False
+        return V.graph.sizevars.statically_known_equals(
+            layout.storage_size(), layout.offset + sympy_product(layout.size)
+        )
     except NotImplementedError:
         return False
 
@@ -3278,12 +3311,15 @@ class View(GenericView):
             len(free_unbacked_symbols(old_size)) > 0
             or len(free_unbacked_symbols(new_size)) > 0
         )
-        is_contiguous = is_contiguous_storage_and_layout(x)
+        is_contiguous = is_dense_contiguous_storage_and_layout(x)
 
         def create_reinterpret_view(
             inp: IRNode, new_size: Sequence[Expr], new_stride: Sequence[Expr]
         ) -> ReinterpretView:
-            storage, old_layout = as_storage_and_layout(inp, want_contiguous=True)
+            inp = ExternKernel.require_exact_strides(
+                inp, FlexibleLayout.contiguous_strides(inp.get_size())
+            )
+            storage, old_layout = as_storage_and_layout(inp)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -6693,6 +6729,7 @@ class ExternKernel(InputsKernel):
         exact_strides: Sequence[_IntLike] | None = None,
         allow_padding: bool = False,
     ) -> IRNode:
+        """Ensure x has the requested stride order or exact strides, inserting a copy if needed."""
         assert order is not None or exact_strides is not None
         # Layout generally doesn't matter, but some consuming external ops might have requirements
         if x.get_numel() in (0, 1) and not exact_strides:
@@ -6741,7 +6778,17 @@ class ExternKernel(InputsKernel):
                         exact_strides=exact_strides,
                     )
                     return x
-            elif isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
+
+            # When padding is allowed, check if the buffer's existing strides
+            # match padded versions of the requested strides (e.g. concat graph
+            # outputs that were already padded by ConcatKernel).
+            padded_exact_strides = None
+            if allow_padding and exact_strides:
+                padded_exact_strides = list(
+                    Layout._pad_strides(exact_strides, x.get_size(), x.get_dtype())
+                )
+
+            if isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
@@ -6755,6 +6802,15 @@ class ExternKernel(InputsKernel):
                     if exact_strides is not None
                     else x
                 )
+            # Accept already-padded buffers when padding is allowed
+            elif (
+                padded_exact_strides is not None
+                and isinstance(x.get_layout(), (FixedLayout, NonOwningLayout))
+                and significant_strides_equal(
+                    padded_exact_strides, x.get_layout().stride, x.get_size()
+                )
+            ):
+                return try_match_insignificant_strides(x, padded_exact_strides)
             elif isinstance(
                 (mutation_layout := x.get_layout()), MutationLayoutSHOULDREMOVE
             ):
@@ -8837,8 +8893,10 @@ class FallbackKernel(ExternKernelAlloc):
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         # Try to lower single output functional custom ops to their out-variant.
-        if isinstance(kernel, torch._ops.OpOverload) and isinstance(
-            example_output, torch.Tensor
+        if (
+            isinstance(kernel, torch._ops.OpOverload)
+            and not torch._library.utils.is_builtin(kernel)
+            and isinstance(example_output, torch.Tensor)
         ):
             from torch._library._out_variant import (
                 _is_functional,
@@ -8882,9 +8940,10 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
-        # Try multi-output .out() lowering for ops with out_variant tag.
+        # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
+            and not torch._library.utils.is_builtin(kernel)
             and not V.graph.cpp_wrapper
             and device
         ):
@@ -10456,7 +10515,7 @@ class _CollectiveKernel(FallbackKernel):
     # Between the initiation and completion of an in-place collective, the
     # input buffers are subject to both volatile reads and volatile writes.
     # They must not be read, written to or reused by another kernel. To ensure
-    # the constraints, we model collective -> wait_tensor as as two-step
+    # the constraints, we model collective -> wait_tensor as a two-step
     # mutation of the input buffers.
     @classmethod
     def create_inplace(

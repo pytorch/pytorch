@@ -1430,6 +1430,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1437,7 +1438,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
@@ -1712,7 +1712,7 @@ def _check_with(
     error_type,
     cond: builtins.bool | SymBool,
     message: _Callable[[], str],
-):  # noqa: F811
+):
     if not isinstance(cond, (builtins.bool, SymBool)):
         raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
@@ -1743,7 +1743,7 @@ def _check_with(
     raise error_type(message_evaluated)
 
 
-def _check(cond, message=None):  # noqa: F811
+def _check(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1797,7 +1797,7 @@ def _check_is_size(i, message=None, *, max=None):
         _advise_is_bounded(i, max)
 
 
-def _check_index(cond, message=None):  # noqa: F811
+def _check_index(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1815,7 +1815,7 @@ def _check_index(cond, message=None):  # noqa: F811
     _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_value(cond, message=None):  # noqa: F811
+def _check_value(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1833,7 +1833,7 @@ def _check_value(cond, message=None):  # noqa: F811
     _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_type(cond, message=None):  # noqa: F811
+def _check_type(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1851,7 +1851,7 @@ def _check_type(cond, message=None):  # noqa: F811
     _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-def _check_not_implemented(cond, message=None):  # noqa: F811
+def _check_not_implemented(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1874,7 +1874,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     )
 
 
-def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
+def _check_tensor_all_with(error_type, cond, message=None):
     if not is_tensor(cond):
         raise TypeError(f"cond must be a tensor, but got {type(cond)}")
 
@@ -1885,7 +1885,7 @@ def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
 
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
-def _check_tensor_all(cond, message=None):  # noqa: F811
+def _check_tensor_all(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -2602,7 +2602,7 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: builtins.bool | None = None,
-    backend: str | _Callable = "inductor",
+    backend: str | _Callable | None = None,
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
@@ -2722,6 +2722,11 @@ def compile(
             "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
             "Please use Python 3.13.3+."
         )
+
+    if backend is None:
+        from torch._dynamo.backends.registry import get_default_backend
+
+        backend = get_default_backend()
 
     # Decorator mode
     if model is None:

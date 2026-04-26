@@ -329,7 +329,15 @@ def mark_nodes_dislike_padding(
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in extended_user_visible_nodes:
-            cur.meta["dislike_padding"] = True
+            # Reductions (ops_like_padding) produce new output buffers with
+            # fresh strides, so their output stride constraint is already
+            # enforced by allow_padding=False in as_exact_strides. Setting
+            # dislike_padding here would suppress input padding during
+            # freeze, causing a stride mismatch when an earlier lowering
+            # step (e.g. is_contiguous_storage_and_layout) already mutated
+            # the input layout to padded strides.
+            if op not in ops_like_padding:
+                cur.meta["dislike_padding"] = True
 
 
 def is_mkldnn_conv(node: Node) -> bool:
@@ -427,6 +435,10 @@ class GraphLowering(torch.fx.Interpreter):
             OrderedSet
         )
         self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
+        # Maps control_deps FX node to operation names created when lowering it,
+        # for void ops (e.g. record_event) that return None and therefore cannot
+        # be referenced by name in subsequent control_deps ordering constraints.
+        self._void_ctrl_dep_op_names: dict[torch.fx.Node, list[str]] = {}
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -1618,7 +1630,7 @@ class GraphLowering(torch.fx.Interpreter):
                 value,
                 (
                     TorchBindObject,
-                    sympy.Expr,
+                    sympy.Basic,
                     torch._inductor.ir.GeneratorState,
                     torch._inductor.ir.OpaqueObjectState,
                 ),

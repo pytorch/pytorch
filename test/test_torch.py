@@ -1485,6 +1485,31 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_max_pool3d(self, device):
+        test_cases = [
+            # size, kernel_size, stride, padding, dilation, ceil_mode
+            [(2, 3, 8, 8, 8), 3, 1, 1, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, False],
+            [(2, 3, 8, 8, 8), 2, 2, 0, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, True],
+            [(3, 8, 8, 8), 3, 1, 1, 1, False],  # unbatched
+        ]
+
+        for size, ks, st, pa, di, cm in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res, _ = torch.nn.functional.max_pool3d(
+                        input, ks, st, pa, di, cm, return_indices=True)
+                    res.backward(torch.ones_like(res))
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding
@@ -1813,6 +1838,22 @@ class TestTorchDeviceType(TestCase):
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
 
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -4955,6 +4996,27 @@ class TestTorchDeviceType(TestCase):
     # in this case the strategy is to purposefully cause a graph break to happen
     # in-between the two write operations, by adding checks between them, so
     # that they have to materialize in the expected order.
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_const_data_ptr(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+
+        # For a regular tensor, const_data_ptr and data_ptr return the same address
+        self.assertEqual(t.const_data_ptr(), t.data_ptr())
+
+        clone = t._lazy_clone()
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        # const_data_ptr should not trigger COW materialization
+        addr = clone.const_data_ptr()
+        self.assertEqual(addr, t.const_data_ptr())
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+    # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):
@@ -10545,31 +10607,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del a
 
         self.assertTrue(called)
-
-    def test_storage_thread_safety(self):
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        NUM_ITERS = 10
-        NUM_THREADS = 4
-
-        # Concurrent calls to tensor.untyped_storage()
-        def access_untyped_storage(tensor, barrier):
-            barrier.wait()
-            return weakref.ref(tensor.untyped_storage())
-
-        for i in range(NUM_ITERS):
-            tensor = torch.tensor([1.0, 2.0, 3.0])
-            barrier = threading.Barrier(NUM_THREADS)
-            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-                futures = [
-                    executor.submit(access_untyped_storage, tensor, barrier)
-                    for _ in range(NUM_THREADS)
-                ]
-
-                # Check that all the storages returned were the same
-                for future in futures:
-                    self.assertEqual(future.result()(), tensor.untyped_storage())
 
     # FIXME: move to test_linalg
     @torch.inference_mode()

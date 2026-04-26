@@ -157,7 +157,7 @@ void lookup(
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
-    bool valid = backend == Py_False ||
+    bool valid = Py_IsFalse(backend) ||
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {

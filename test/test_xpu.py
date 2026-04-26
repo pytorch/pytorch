@@ -6,6 +6,7 @@ import contextlib
 import ctypes
 import gc
 import json
+import os
 import random
 import re
 import subprocess
@@ -17,6 +18,7 @@ import unittest
 import warnings
 from copy import deepcopy
 from itertools import product
+from unittest.mock import patch
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
@@ -247,6 +249,81 @@ if __name__ == "__main__":
         rc = check_output(test_script).splitlines()[-1]
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
+    def test_parse_visible_devices(self):
+        def _parse_visible_devices(val):
+            with patch.dict(os.environ, {"ZE_AFFINITY_MASK": val}, clear=True):
+                return torch.xpu._parse_visible_devices()
+
+        # Tokens with trailing non-numeric characters are invalid; entire list is rejected
+        self.assertEqual(_parse_visible_devices("1a, 2b"), [])
+        # Negative indices are silently skipped; valid indices before and after are kept
+        self.assertEqual(_parse_visible_devices("0, 1, 2, -1, 3"), [0, 1, 2, 3])
+        # Duplicate indices are silently ignored; each ordinal appears at most once
+        self.assertEqual(_parse_visible_devices("0, 1, 2, 1"), [0, 1, 2])
+        # Leading '+'/'-' on an integer are accepted; '-0' is treated as 0
+        self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
+        # Purely alphabetic tokens make the entire list invalid
+        self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
+
+    def test_device_count_respects_affinity_mask(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        def _run(mask: str) -> str:
+            script = f"""\
+import torch
+import os
+os.environ['ZE_AFFINITY_MASK'] = {mask!r}
+r1 = torch.xpu._device_count_zes()
+r2 = torch._C._xpu_getDeviceCount()
+print(f"{{r1}}, {{r2}}")
+"""
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+                .splitlines()[-1]
+            )
+
+        # Index 128 is out of range → both return 0
+        self.assertEqual(_run("128"), "0, 0")
+        # COMPOSITE-style mask → _device_count_zes returns -1
+        self.assertEqual(_run("0.0").split(",")[0].strip(), "-1")
+        # Valid mask selecting device 0 on a single-GPU system → both return 1
+        self.assertEqual(_run("0"), "1, 1")
+        if TEST_MULTIXPU:
+            # Valid mask selecting device 1 on a multi-GPU system → both return 1
+            self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_device_count_not_cached_pre_init(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        test_script = """\
+import torch
+import os
+r1 = torch.xpu.device_count()
+os.environ['ZE_AFFINITY_MASK'] = '0'
+r2 = torch.xpu.device_count()
+torch.empty(10, device='xpu')
+print(f"{r1}, {r2}")
+"""
+
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+
+        x = torch.xpu.device_count()
+        self.assertEqual(f"{x}, 1", r)
+
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
     )
@@ -280,12 +357,12 @@ print(torch.xpu.is_initialized())
 """
         rc = check_output(test_script).splitlines()
         self.assertEqual(
-            rc[0],
+            rc[-2],
             "0",
             "Importing torch._inductor.lowering should not query XPU device count",
         )
         self.assertEqual(
-            rc[1],
+            rc[-1],
             "False",
             "Importing torch._inductor.lowering should not initialize XPU",
         )
@@ -551,7 +628,7 @@ print(torch.xpu.is_initialized())
     def test_out_of_memory(self):
         if self.expandable_segments:
             self.skipTest("Skipping OOM test for expandable segments allocator.")
-        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
+        tensor = torch.zeros(1024, device="xpu")
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
@@ -1158,6 +1235,8 @@ print(torch.xpu.is_initialized())
         return allocator, dummy_allocator
 
     def test_xpu_pluggable_allocator(self):
+        from torch.utils.cpp_extension import load_inline
+
         torch.xpu.init()
         allocator, dummy_allocator = self.get_dummy_allocator(True)
         alloc_lib = ctypes.CDLL(dummy_allocator)
@@ -1231,6 +1310,40 @@ if __name__ == "__main__":
         called_dummy_alloc_value, called_dummy_free_value = rc.split()
         self.assertEqual(called_dummy_alloc_value, "123")
         self.assertEqual(called_dummy_free_value, "321")
+
+        cpp_source = r"""
+        #include <torch/extension.h>
+        #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+        // Mimics what torchcomms' get_mem_allocator("xccl") does:
+        // creates an XPUPluggableAllocator and returns it as c10::Allocator*.
+        std::shared_ptr<c10::Allocator> get_xpu_allocator() {
+            auto allocator =
+                torch::xpu::XPUPluggableAllocator::createCustomAllocator(
+                    // alloc_fn
+                    [](size_t size, int device, sycl::queue* queue) -> void* {
+                        void* ptr = sycl::malloc_device(size, *queue);
+                        return ptr;
+                    },
+                    // free_fn
+                    [](void* ptr, size_t size, int device, sycl::queue* queue) {
+                        sycl::free(ptr, *queue);
+                    });
+            return allocator;
+        }
+        """
+        ext = load_inline(
+            name="repro_xpu_alloc",
+            cpp_sources=[cpp_source],
+            functions=["get_xpu_allocator"],
+            verbose=True,
+            is_python_module=True,
+            with_sycl=True,
+        )
+        # Verify that the XPUPluggableAllocator returned as
+        # std::shared_ptr<c10::Allocator> is correctly recognized as Python type.
+        # A TypeError here would mean the custom allocator lacks proper
+        # c10::Allocator pybind11 bindings.
+        allocator = ext.get_xpu_allocator()
 
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
@@ -1971,7 +2084,7 @@ if __name__ == "__main__":
         g = torch.xpu.XPUGraph()
         with self.assertRaisesRegex(
             RuntimeError,
-            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",
         ):
             with torch.xpu.graph(g):
                 torch.xpu.manual_seed(1)
@@ -2327,14 +2440,14 @@ if __name__ == "__main__":
             try:
                 with torch.xpu.stream(stream):
                     mem = torch.xpu.caching_allocator_alloc(1024)
-            except BaseException:  # noqa: B036
+            except BaseException:
                 if mem is None:
                     return
             try:
                 torch.xpu.caching_allocator_delete(mem)
                 mem = None
                 return None
-            except BaseException:  # noqa: B036
+            except BaseException:
                 pass
 
         def throws_on_xpu_event():
