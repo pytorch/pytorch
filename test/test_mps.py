@@ -7829,6 +7829,51 @@ class TestMPS(TestCaseMPS):
                 for dim in [0, 1, 2, 3, -1, -2, -3]:
                     helper(shape, dim, channels_last)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_splitk(self, dtype):
+        x = torch.randn(1, 32000, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_looped(self, dtype):
+        x = torch.randn(2, 8192, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_single_row_n4(self, dtype):
+        x = torch.randn(1, 1024, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_single_row_n1(self, dtype):
+        x = torch.randn(1, 64, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_general(self, dtype):
+        x = torch.randn(4, 7000, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=-1).cpu(), F.softmax(x, dim=-1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_strided_inner_vec(self, dtype):
+        x = torch.randn(4, 32, 8, dtype=dtype).permute(0, 2, 1)
+        self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_strided_inner(self, dtype):
+        x = torch.randn(4, 32, 7, dtype=dtype).permute(0, 2, 1)
+        self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_strided_outer(self, dtype):
+        x = torch.randn(4, 32, 1024, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_softmax_mps_strided_chunked(self, dtype):
+        x = torch.randn(4, 4096, 8, dtype=dtype)
+        self.assertEqual(F.softmax(x.to('mps'), dim=1).cpu(), F.softmax(x, dim=1))
+
     def test_nan_to_num(self):
         inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
         inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()

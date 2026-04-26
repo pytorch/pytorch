@@ -13,122 +13,271 @@
 #else
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at::native {
 
-static void get_shapes(MPSShape* input_shape_readonly,
-                       NSMutableArray<NSNumber*>*& input_shape,
-                       int num_input_dims,
-                       c10::MemoryFormat memory_format) {
-  // Modify the shape
-  if (memory_format == at::MemoryFormat::Contiguous) {
-    for (int i = 0; i < num_input_dims; i++)
-      input_shape[i] = input_shape_readonly[i];
-  } else { // ChannelsLast
-    auto num_channels = input_shape_readonly[1];
-    input_shape[0] = input_shape_readonly[0];
-    for (int i = 1; i < num_input_dims - 1; i++)
-      input_shape[i] = input_shape_readonly[i + 1];
-    input_shape[num_input_dims - 1] = num_channels;
+using namespace mps;
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Softmax_metallib.h>
+#endif
+
+namespace {
+
+struct StridedAxes {
+  std::vector<uint> sizes, in_strides, out_strides;
+};
+StridedAxes collect_strided_axes(const Tensor& in, const Tensor& out, int64_t dim) {
+  StridedAxes a;
+  for (int64_t i = 0; i < in.dim(); ++i) {
+    if (i == dim)
+      continue;
+    a.sizes.push_back(static_cast<uint>(in.size(i)));
+    a.in_strides.push_back(static_cast<uint>(in.stride(i)));
+    a.out_strides.push_back(static_cast<uint>(out.stride(i)));
+  }
+  std::vector<size_t> perm(a.sizes.size());
+  std::iota(perm.begin(), perm.end(), size_t{0});
+  std::sort(perm.begin(), perm.end(), [&](size_t x, size_t y) { return a.in_strides[x] > a.in_strides[y]; });
+  StridedAxes s;
+  for (auto p : perm) {
+    s.sizes.push_back(a.sizes[p]);
+    s.in_strides.push_back(a.in_strides[p]);
+    s.out_strides.push_back(a.out_strides[p]);
+  }
+  if (s.sizes.empty()) {
+    s.sizes.push_back(1);
+    s.in_strides.push_back(0);
+    s.out_strides.push_back(0);
+  }
+  return s;
+}
+
+// choose_softmax_kernel picks a variant, launch_softmax_kernel dispatches it.
+// Variants describe what each kernel does differently and why it exists.
+struct SoftmaxKernelChoice {
+  enum class Variant {
+    SplitK, // 2-pass online merge: K× more TGs in flight when num_rows is too small to fill the GPU.
+    SingleRow, // one TG/row, in-shmem parallel reduce, dim_size fits within one TG.
+    Looped, // one TG/row, loops within TG when dim_size exceeds one TG worth of threads.
+    General, // last-dim-contig fallback when dim_size doesn't divide cleanly.
+    StridedInnerVec, // stride[dim]==1, dim_size%4==0: vec4 loads for memory throughput.
+    StridedInner, // stride[dim]==1: scalar loads.
+    StridedOuter, // tiny dim_size (≤64): one thread per row, no shmem reduction.
+    StridedChunked, // stride[dim]>1: 32-row TG, multi-warp split-row + shmem partial-reduce combine.
+  };
+  Variant variant;
+  int n_reads = 0; // SingleRow
+  int n_local = 0; // StridedInner{,Vec}
+  int chunk_cap = 0; // StridedChunked
+  uint tptg = 0; // SingleRow / Looped / General / StridedInner{,Vec}
+};
+
+SoftmaxKernelChoice choose_softmax_kernel(const Tensor& input, const Tensor& output, int64_t dim) {
+  using V = SoftmaxKernelChoice::Variant;
+  int64_t dim_size = input.size(dim);
+  int64_t num_rows = input.numel() / dim_size;
+  bool last_dim_contig = (dim == input.dim() - 1) && input.is_contiguous() && output.is_contiguous();
+  if (last_dim_contig) {
+    bool starves_general = (num_rows < 4 && dim_size > 16384) || (num_rows <= 8 && dim_size > 65536);
+    if (starves_general) {
+      return {V::SplitK};
+    }
+    if (dim_size > 4096 && dim_size % 4096 == 0) {
+      SoftmaxKernelChoice c{V::Looped};
+      c.tptg = 1024;
+      return c;
+    }
+    if (dim_size <= 4096 && dim_size % 128 == 0) {
+      int64_t warps_per_group = dim_size / 128;
+      if (warps_per_group >= 8 || num_rows >= 16) {
+        SoftmaxKernelChoice c{V::SingleRow};
+        c.n_reads = 4;
+        c.tptg = static_cast<uint>(dim_size / 4);
+        return c;
+      }
+    }
+    if (dim_size <= 1024 && dim_size % 32 == 0) {
+      SoftmaxKernelChoice c{V::SingleRow};
+      c.n_reads = 1;
+      c.tptg = static_cast<uint>(dim_size);
+      return c;
+    }
+    SoftmaxKernelChoice c{V::General};
+    c.tptg = std::min<uint>(static_cast<uint>(((dim_size + 31) / 32) * 32), 1024);
+    return c;
+  }
+
+  uint input_dim_stride = static_cast<uint>(input.stride(dim));
+  uint output_dim_stride = static_cast<uint>(output.stride(dim));
+  if (input_dim_stride == 1 && output_dim_stride == 1) {
+    bool can_vec4 = (dim_size % 4 == 0) && (dim_size <= 16384);
+    if (can_vec4) {
+      uint elems_per_thread_vec = 4;
+      uint inner_tptg = std::min<uint>(static_cast<uint>(((dim_size / elems_per_thread_vec + 31) / 32) * 32), 1024);
+      int64_t n = (dim_size + inner_tptg * elems_per_thread_vec - 1) / (inner_tptg * elems_per_thread_vec);
+      SoftmaxKernelChoice c{V::StridedInnerVec};
+      c.n_local = n <= 1 ? 1 : (n <= 2 ? 2 : 4);
+      c.tptg = inner_tptg;
+      return c;
+    }
+    uint inner_tptg = std::min<uint>(static_cast<uint>(((dim_size + 31) / 32) * 32), 1024);
+    int64_t n = (dim_size + inner_tptg - 1) / inner_tptg;
+    SoftmaxKernelChoice c{V::StridedInner};
+    c.n_local = n <= 1 ? 1 : (n <= 2 ? 2 : (n <= 4 ? 4 : (n <= 8 ? 8 : 16)));
+    c.tptg = inner_tptg;
+    return c;
+  }
+  if (dim_size <= 64) {
+    return {V::StridedOuter};
+  }
+  uint num_chunks_dispatch = std::clamp<uint>((dim_size + 31) / 32, 1, 32);
+  SoftmaxKernelChoice c{V::StridedChunked};
+  c.chunk_cap = (dim_size <= 1024 && num_chunks_dispatch <= 16) ? 32 : 0;
+  return c;
+}
+
+void launch_softmax_kernel(const Tensor& input, int64_t dim, const Tensor& output, const SoftmaxKernelChoice& choice) {
+  using V = SoftmaxKernelChoice::Variant;
+  std::string type_str = scalarToMetalTypeString(input);
+  uint dim_size = static_cast<uint>(input.size(dim));
+  uint num_rows = static_cast<uint>(input.numel() / dim_size);
+  MPSStream* stream = getCurrentMPSStream();
+
+  switch (choice.variant) {
+    case V::SplitK: {
+      constexpr uint num_chunks = 32;
+      constexpr uint tptg = 256;
+      Tensor partials = at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(num_chunks), 2},
+                                  input.options().dtype(kFloat));
+      std::string p1 = "softmax_split_k_pass1_" + type_str;
+      std::string p2 = "softmax_split_k_pass2_" + type_str;
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+          id<MTLComputePipelineState> pso1 = lib.getPipelineStateForFunc(p1);
+          [enc setComputePipelineState:pso1];
+          auto dim_size_num_chunks = std::array<uint32_t, 2>{dim_size, num_chunks};
+          mtl_setArgs(enc, input, partials, dim_size_num_chunks);
+          [enc dispatchThreadgroups:MTLSizeMake(num_chunks * num_rows, 1, 1)
+              threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
+          [enc memoryBarrierWithScope:MTLBarrierScopeBuffers];
+          id<MTLComputePipelineState> pso2 = lib.getPipelineStateForFunc(p2);
+          [enc setComputePipelineState:pso2];
+          mtl_setArgs(enc, input, output, partials, dim_size_num_chunks);
+          [enc dispatchThreadgroups:MTLSizeMake(num_chunks * num_rows, 1, 1)
+              threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
+        }
+      });
+      return;
+    }
+
+    case V::SingleRow:
+    case V::Looped:
+    case V::General: {
+      std::string name;
+      if (choice.variant == V::SingleRow) {
+        name = "softmax_single_pass_" + type_str + "_" + std::to_string(choice.n_reads);
+      } else if (choice.variant == V::Looped) {
+        name = "softmax_looped_" + type_str;
+      } else {
+        name = "softmax_general_" + type_str;
+      }
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+          id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(name);
+          [enc setComputePipelineState:pso];
+          mtl_setArgs(enc, input, output, dim_size);
+          [enc dispatchThreadgroups:MTLSizeMake(num_rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(choice.tptg, 1, 1)];
+        }
+      });
+      return;
+    }
+
+    case V::StridedInnerVec:
+    case V::StridedInner:
+    case V::StridedOuter:
+    case V::StridedChunked: {
+      uint input_dim_stride = static_cast<uint>(input.stride(dim));
+      uint output_dim_stride = static_cast<uint>(output.stride(dim));
+      auto axes = collect_strided_axes(input, output, dim);
+      uint ndim_other = static_cast<uint>(axes.sizes.size());
+
+      std::string name;
+      switch (choice.variant) {
+        case V::StridedInnerVec:
+          name = "softmax_strided_inner_vec_" + type_str + "_" + std::to_string(choice.n_local) + "_4";
+          break;
+        case V::StridedInner:
+          name = "softmax_strided_inner_" + type_str + "_" + std::to_string(choice.n_local);
+          break;
+        case V::StridedOuter:
+          name = "softmax_strided_outer_" + type_str;
+          break;
+        case V::StridedChunked:
+          name = "softmax_strided_chunked_" + type_str + "_" + std::to_string(choice.chunk_cap);
+          break;
+        default:
+          break;
+      }
+
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+          id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(name);
+          [enc setComputePipelineState:pso];
+          if (choice.variant == V::StridedInnerVec) {
+            auto params = std::array<uint32_t, 2>{dim_size, ndim_other};
+            mtl_setArgs(enc, input, output, params, axes.sizes, axes.in_strides, axes.out_strides);
+            [enc dispatchThreadgroups:MTLSizeMake(num_rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(choice.tptg, 1, 1)];
+          } else if (choice.variant == V::StridedInner) {
+            auto params = std::array<uint32_t, 4>{dim_size, input_dim_stride, output_dim_stride, ndim_other};
+            mtl_setArgs(enc, input, output, params, axes.sizes, axes.in_strides, axes.out_strides);
+            [enc dispatchThreadgroups:MTLSizeMake(num_rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(choice.tptg, 1, 1)];
+          } else if (choice.variant == V::StridedOuter) {
+            auto params = std::array<uint32_t, 4>{dim_size, input_dim_stride, output_dim_stride, num_rows};
+            mtl_setArgs(enc, input, output, params, ndim_other, axes.sizes, axes.in_strides, axes.out_strides);
+            uint tptg = std::min<uint>(num_rows, 256);
+            [enc dispatchThreads:MTLSizeMake(num_rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
+          } else {
+            uint num_chunks = std::clamp<uint>((dim_size + 31) / 32, 1, 32);
+            uint tptg = num_chunks * 32;
+            uint num_tgs = (num_rows + 31) / 32;
+            auto params = std::array<uint32_t, 4>{dim_size, input_dim_stride, output_dim_stride, num_rows};
+            mtl_setArgs(enc, input, output, params, ndim_other, axes.sizes, axes.in_strides, axes.out_strides);
+            [enc dispatchThreadgroups:MTLSizeMake(num_tgs, 1, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
+          }
+        }
+      });
+      return;
+    }
   }
 }
 
-// Note - Currently only supported for 4D image tensors
+} // namespace
 
 TORCH_IMPL_FUNC(softmax_mps_out)
 (const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
   TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "softmax only supported for floating types");
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   if (input_.numel() == 0) {
     return;
   }
 
-  Tensor input;
-  if (input_.dim() == 0) {
-    input = input_.view(1);
-  } else
-    input = input_;
+  Tensor input = input_.dim() == 0 ? input_.view(1) : input_;
+  Tensor out = output.dim() == 0 ? output.view(1) : output;
 
   int64_t dim_ = maybe_wrap_dim(dim, input.dim());
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(), "Softmax:dim must be non-negative and less than input dimensions");
 
-  const auto memory_format = input.suggest_memory_format();
-  // TORCH_CHECK(input.suggest_memory_format() == output.suggest_memory_format(), "Input and output memory format should
-  // match")
-
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string mem_format_key = get_mem_format_string(memory_format);
-    MPSShape* input_shape_readonly = mps::getMPSShape(input);
-    int num_input_dims = [input_shape_readonly count];
-    // Check - Channels last implies 4d
-    TORCH_CHECK(memory_format != at::MemoryFormat::ChannelsLast || num_input_dims == 4,
-                "ChannelsLast implies 4d tensor")
-    // Input shape changes based on memory format
-    NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-
-    get_shapes(input_shape_readonly, input_shape, num_input_dims, memory_format);
-
-    // Change dim
-    if (memory_format == at::MemoryFormat::ChannelsLast && dim_ > 0 && !is_macOS_15_0_or_newer) {
-      switch (dim_) {
-        case 1:
-          dim_ = 3;
-          break;
-        case 2:
-          dim_ = 1;
-          break;
-        case 3:
-          dim_ = 2;
-          break;
-        default:
-          assert(0 && "Invalid dim\n");
-      }
-    }
-
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    std::string key = "softmax_mps_out" + getTensorsStringKey(input, true, /*exclude_shape*/ true) + ":" +
-        mem_format_key + ":" + std::to_string(dim_);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()));
-
-      // passing selector of softMaxWithTensor on the mpsGraph object
-      MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor axis:(NSInteger)dim_ name:nil];
-
-      // Output needs to be contiguous format
-      if (memory_format == at::MemoryFormat::ChannelsLast && !is_macOS_15_0_or_newer) {
-        auto N = input_shape[0];
-        auto H = input_shape[1];
-        auto W = input_shape[2];
-        auto C = input_shape[3];
-
-        outputTensor = [mpsGraph reshapeTensor:outputTensor
-                                     withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
-                                          name:nil];
-        outputTensor = [mpsGraph transposeTensor:outputTensor dimension:1 withDimension:2 name:nil];
-        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:@[ N, C, H, W ] name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, input, is_macOS_15_0_or_newer ? nil : input_shape);
-    // This must be the Contiguous shape
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  auto choice = choose_softmax_kernel(input, out, dim_);
+  launch_softmax_kernel(input, dim_, out, choice);
 }
 
 TORCH_IMPL_FUNC(softmax_backward_mps_out)
