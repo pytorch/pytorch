@@ -32,7 +32,7 @@ from torch.utils.data.datapipes.datapipe import (
     IterDataPipe,
     MapDataPipe,
 )
-from torch.utils.data.dataset import Dataset, IterableDataset
+from torch.utils.data.dataset import Dataset, IterableDataset, TensorDataset
 from torch.utils.data.sampler import (
     BatchSampler,
     RandomSampler,
@@ -420,6 +420,32 @@ class DataLoader(Generic[_T_co]):
         )
 
         self._iterator = None
+
+        # Performance warning for in-memory datasets with num_workers > 0
+        if self.num_workers > 0:
+            _is_in_memory = isinstance(self.dataset, (torch.Tensor, TensorDataset))
+            if not _is_in_memory:
+                try:
+                    import numpy as np
+                    _is_in_memory = isinstance(self.dataset, np.ndarray)
+                except ImportError:
+                    pass
+            if _is_in_memory:
+                warnings.warn(
+                    f"DataLoader received an in-memory dataset "
+                    f"({type(self.dataset).__name__}) with "
+                    f"num_workers={self.num_workers}. For in-memory "
+                    f"datasets, worker processes add IPC and collation "
+                    f"overhead that typically makes DataLoader 3-10x "
+                    f"slower than direct indexing. Consider using "
+                    f"num_workers=0, or for torch.Tensor datasets use "
+                    f"a manual loop: "
+                    f"`for i in range(0, len(X), batch_size): "
+                    f"model(X[i:i+batch_size].to(device))`. "
+                    f"See https://github.com/pytorch/pytorch/issues/154318",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         self.check_worker_number_rationality()
 

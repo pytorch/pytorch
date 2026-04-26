@@ -3058,6 +3058,42 @@ except RuntimeError as e:
         ):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+    def test_perf_warning_tensor(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"in-memory dataset \(Tensor\)",
+        ):
+            DataLoader(torch.randn(10, 2), batch_size=2, num_workers=1)
+
+    def test_perf_warning_tensor_dataset(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"in-memory dataset \(TensorDataset\)",
+        ):
+            DataLoader(self.dataset, batch_size=2, num_workers=1)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_perf_warning_numpy(self):
+        import numpy as np
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"in-memory dataset \(ndarray\)",
+        ):
+            DataLoader(np.arange(10), batch_size=2, num_workers=1)
+
+    def test_no_perf_warning_num_workers_zero(self):
+        self.assertNotWarn(
+            lambda: DataLoader(torch.randn(10, 2), batch_size=2, num_workers=0),
+            "Should not warn for in-memory dataset when num_workers=0",
+        )
+
+    def test_no_perf_warning_custom_dataset(self):
+        self.assertNotWarn(
+            lambda: DataLoader(CountingDataset(10), batch_size=2, num_workers=1),
+            "Should not warn for a custom Dataset subclass with num_workers=1",
+        )
+
 
 class TestDataLoaderDeviceType(TestCase):
     @parametrize(
