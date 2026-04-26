@@ -36,8 +36,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       cuda-arch-list: '8.9'
       test-matrix: |
         { include: [
