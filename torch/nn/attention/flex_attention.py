@@ -1486,6 +1486,7 @@ def create_block_mask(
     device: DeviceLikeType | None = None,
     BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
+    separate_full_blocks: bool = True,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
 
@@ -1501,6 +1502,10 @@ def create_block_mask(
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
         BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        separate_full_blocks (bool): If True, fully unmasked blocks are stored
+            separately so kernels can skip mask_mod on those blocks. If False,
+            all non-empty blocks are stored as partial blocks and mask_mod is
+            applied to every block.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -1542,7 +1547,15 @@ def create_block_mask(
             stacklevel=2,
         )
         return torch.compile(create_block_mask)(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
+            mask_mod,
+            B,
+            H,
+            Q_LEN,
+            KV_LEN,
+            device,
+            BLOCK_SIZE,
+            False,
+            separate_full_blocks,
         )
 
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
@@ -1550,7 +1563,7 @@ def create_block_mask(
         mask_tensor,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        separate_full_blocks=True,
+        separate_full_blocks=separate_full_blocks,
     )
     block_mask = _create_sparse_block_from_block_mask(
         (partial_block_mask, full_block_mask),

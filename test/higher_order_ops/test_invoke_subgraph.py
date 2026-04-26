@@ -4287,6 +4287,38 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
         )
         self.assertEqual(invoke_count, 2)
 
+    def test_inline_single_use_with_autograd_function(self):
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region
+        def gn(x):
+            return MyOp.apply(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x_clone)
+
+        self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
@@ -4545,6 +4577,128 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
             RuntimeError, "reuse_hash_fn was provided but the subgraph is not eligible"
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+@unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
+class TestInvokeSubgraphTrainStepCapture(TestCase):
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_mark_non_differentiable_propagation(self):
+        """invoke_subgraph wrapping an autograd.Function that calls
+        mark_non_differentiable should propagate the non-differentiable
+        status to the outer InvokeSubgraphAutogradOp.  Without this,
+        the outer autograd engine sets requires_grad=True on all outputs,
+        causing AOT autograd to take the joint tracing path and hit
+        'backward through graph a second time'.
+        """
+
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.sin()
+                aux = x.max()
+                ctx.mark_non_differentiable(aux)
+                ctx.save_for_backward(x)
+                return out, aux
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_aux):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region()
+        def nested_fn(x):
+            return MyOp.apply(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z, aux = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach(), aux
+
+        model = Model()
+        x = torch.randn(4, 4)
+        compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+        loss, aux = compiled(x)
+        self.assertFalse(aux.requires_grad)
+
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        enable_invoke_subgraph_regional_compile=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_nested_region_config_propagated_to_backward(self):
+        """When joint tracing creates backward invoke_subgraph nodes,
+        the nested_region_config should be propagated so the regional
+        compiler can compile them.
+        """
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+            invoke_subgraph,
+        )
+
+        config = get_invoke_subgraph_compile_options(
+            decompositions=torch._decomp.core_aten_decompositions()
+        )
+
+        @nested_compile_region(options=config)
+        def nested_fn(x):
+            return x.sin()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach()
+
+        fw_graphs = []
+
+        def recording_compiler(gm, example_inputs, **kwargs):
+            fw_graphs.append(gm)
+            return gm
+
+        backend = aot_autograd(fw_compiler=recording_compiler)
+        model = Model()
+        x = torch.randn(4, 4)
+        opt_model = torch.compile(model, backend=backend, fullgraph=True)
+        opt_model(x)
+
+        # The inference graph should have both fw and bw invoke_subgraph nodes,
+        # each with nested_region_config so regional inductor can compile them.
+        self.assertEqual(len(fw_graphs), 1)
+        gm = fw_graphs[0]
+        invoke_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is invoke_subgraph
+        ]
+        # 2 invoke_subgraph nodes: fw and bw
+        self.assertEqual(len(invoke_nodes), 2)
+        for node in invoke_nodes:
+            self.assertIn("custom", node.meta)
+            self.assertIn("nested_region_config", node.meta["custom"])
 
 
 if __name__ == "__main__":

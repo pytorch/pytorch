@@ -65,12 +65,7 @@ inline PyObject* THPUtils_packString(const std::string& str) {
 }
 
 inline PyObject* THPUtils_internString(const std::string& str) {
-  PyObject* obj = PyUnicode_FromStringAndSize(
-      str.data(), static_cast<Py_ssize_t>(str.size()));
-  if (obj == nullptr)
-    return nullptr;
-  PyUnicode_InternInPlace(&obj);
-  return obj;
+  return PyUnicode_InternFromString(str.c_str());
 }
 
 // Precondition: THPUtils_checkString(obj) must be true

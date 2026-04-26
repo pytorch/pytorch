@@ -2786,8 +2786,10 @@ def main() -> None:
     parser.add_argument(
         "--headeronly-install-dir",
         "--headeronly_install_dir",
-        help="output directory for header-only generated files (e.g. enum_tag.h)",
-        default="build/torch/headeronly/core",
+        help="output directory for header-only generated files (e.g. enum_tag.h). "
+        "Defaults to `<install-dir>/core` when --install-dir is set, otherwise "
+        "`build/torch/headeronly/core`.",
+        default=None,
     )
     parser.add_argument(
         "--rocm",
@@ -2986,7 +2988,12 @@ def main() -> None:
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
-    headeronly_install_dir = f"{options.headeronly_install_dir}"
+    if options.headeronly_install_dir is not None:
+        headeronly_install_dir = options.headeronly_install_dir
+    elif options.install_dir is not None:
+        headeronly_install_dir = f"{options.install_dir}/core"
+    else:
+        headeronly_install_dir = "build/torch/headeronly/core"
     Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)

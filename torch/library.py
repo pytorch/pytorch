@@ -137,6 +137,70 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             )
 
 
+def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
+    """Validate that a schema has valid inplace semantics, i.e., it can be tagged with torch.Tag.inplace.
+
+    Requirements:
+    - The first positional argument must be a mutable Tensor (Tensor(a!))
+    - Must return exactly that Tensor
+    - Only the first positional argument may be mutable
+
+    Native inplace ops (defined in native_functions.yaml) have relaxed requirements:
+    they may have Tensor[] self and multiple mutable arguments. This validation is
+    stricter because it is only used for custom ops defined via torch.library.
+    """
+    if isinstance(schema, str):
+        schema = torch._C.parse_schema(schema)
+    args = schema.arguments
+    if not args or args[0].kwarg_only:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must have at least one positional argument. "
+            f"Got: {schema}"
+        )
+    first_arg = args[0]
+    if first_arg.alias_info is None or not first_arg.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be mutable (e.g., Tensor(a!)). Got: {schema}"
+        )
+    if not isinstance(first_arg.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be a Tensor. Got type '{first_arg.type}' for arg '{first_arg.name}'. "
+            f"Got: {schema}"
+        )
+    # Must return exactly one Tensor aliasing the first arg
+    returns = schema.returns
+    if len(returns) != 1:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return exactly one value "
+            f"(the first argument). Got {len(returns)} returns. Got: {schema}"
+        )
+    ret = returns[0]
+    if ret.alias_info is None:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must alias the first argument). Got: {schema}"
+        )
+    if ret.alias_info.before_set != first_arg.alias_info.before_set:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return aliases {ret.alias_info.before_set} but first arg aliases "
+            f"{first_arg.alias_info.before_set}). Got: {schema}"
+        )
+    other_mutable = [
+        arg
+        for arg in args[1:]
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    if other_mutable:
+        names = [a.name for a in other_mutable]
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must only mutate the first positional argument. "
+            f"Found additional mutable args: {names}. Got: {schema}"
+        )
+
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -235,6 +299,8 @@ class Library:
 
         if torch.Tag.out in tags:
             _validate_out_schema(schema)
+        if torch.Tag.inplace in tags:
+            _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]

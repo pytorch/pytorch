@@ -305,28 +305,13 @@ def make_output_handler(
     return handler_type(info, runtime_metadata, trace_joint)
 
 
-# _dynamo_propagated_dynamic_indices: A guardless attribute for cross-graph-break
-# dynamism propagation. When AOTAutograd traces a graph and discovers that output
-# dimensions are symbolic (dynamic), it stamps this attribute on the output tensors
-# at runtime. This tells Dynamo to treat those dims as weakly dynamic when the tensor
-# appears as input to a subsequent graph (e.g., after a graph break), avoiding
-# unnecessary specialization and recompilation.
-#
-# Unlike _dynamo_weak_dynamic_indices (which is user-facing, set via maybe_mark_dynamic(),
-# and guarded on), this attribute is compiler-internal and NOT guarded on. This avoids
-# the problem where the compiler mutating an input tensor's attributes (through an
-# input-aliased output) would cause a spurious guard failure and recompilation.
-#
-# Note: this is best-effort. Eager code does not propagate
-# _dynamo_propagated_dynamic_indices, so there is no guarantee that the next graph
-# will have proper dynamism information. It only helps when the output of one compiled
-# graph feeds directly into the next.
-def mark_dynamo_propagated_dynamic_indices(t: torch.Tensor, dims: set[int]) -> None:
-    if hasattr(t, "_dynamo_propagated_dynamic_indices"):
+# not sure why AOTDispatcher needs to manually set this
+def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]) -> None:
+    if hasattr(t, "_dynamo_weak_dynamic_indices"):
         # pyrefly: ignore [missing-attribute]
-        t._dynamo_propagated_dynamic_indices |= dims
+        t._dynamo_weak_dynamic_indices |= dims
     else:
-        t._dynamo_propagated_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
+        t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
 
 
 def _should_disable_saved_tensors_hooks() -> bool:
@@ -604,7 +589,7 @@ class _RuntimeForwardEpilogue:
             for t, o in zip(ret_outs, self.runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                mark_dynamo_propagated_dynamic_indices(t, o.dynamic_dims)
+                maybe_mark_dynamic_helper(t, o.dynamic_dims)
         if self.runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(self.runtime_metadata.grad_enabled_mutation)
         return ret_outs
@@ -995,24 +980,43 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        @wraps(compiled_fn)
-        def wrapper(runtime_args: list[Any]) -> Any:
-            if runtime_metadata.is_rng_op_functionalized:
-                # Add the seed and offset to args
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                runtime_args.extend([seed, offset])
-                out = compiled_fn(runtime_args)
-                out = self._functionalized_rng_runtime_epilogue(
-                    runtime_metadata,
-                    out,
-                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
-                    runtime_metadata.num_forward_returns,
-                )
-                return out
-            return compiled_fn(runtime_args)
+        if not runtime_metadata.is_rng_op_functionalized:
+            return compiled_fn
 
-        wrapper._boxed_call = True  # type: ignore[attr-defined]
-        return wrapper
+        if runtime_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {runtime_metadata.num_outputs_rng_offset}"
+            )
+
+        from .subclass_codegen import _compile_and_exec_source
+
+        offset_index = runtime_metadata.num_forward_returns
+        lines = ["def _functionalized_rng_wrapper(runtime_args):"]
+        lines.append("    seed, offset = _get_rng_state_()")
+        lines.append("    runtime_args.extend([seed, offset])")
+        lines.append("    outs = _compiled_fn_(runtime_args)")
+        lines.append(f"    _set_offset_(outs[{offset_index}])")
+        if self.return_new_outs:
+            lines.append(
+                f"    return outs[:{offset_index}] + outs[{offset_index + 1}:]"
+            )
+        else:
+            lines.append("    return outs")
+        source = "\n".join(lines)
+
+        inner_fn = _compile_and_exec_source(
+            source,
+            {
+                "_compiled_fn_": compiled_fn,
+                "_get_rng_state_": CUDARngStateHelper.get_torch_state_as_tuple,
+                "_set_offset_": CUDARngStateHelper.set_new_offset,
+            },
+            "_functionalized_rng_wrapper",
+            "functionalized_rng_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
     # Calling convention: If we are running functionalized RNG, then outs consists
     # of (user_outs, rng_offset)
@@ -2608,11 +2612,9 @@ class _AutogradSavedState:
         # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
         for idx, dims in self.metadata.dynamic_saved_tensors_idxs.items():
             if idx < num_vc_check:
-                mark_dynamo_propagated_dynamic_indices(tensors_to_save[idx], dims)
+                maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
             else:
-                mark_dynamo_propagated_dynamic_indices(
-                    tensors_no_vc_check[idx - num_vc_check], dims
-                )
+                maybe_mark_dynamic_helper(tensors_no_vc_check[idx - num_vc_check], dims)
 
         ctx.save_for_backward(*tensors_to_save)
         ctx._tensors_no_vc_check = tensors_no_vc_check
