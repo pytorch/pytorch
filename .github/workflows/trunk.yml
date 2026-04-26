@@ -62,16 +62,16 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: arc,lf
 
-  libtorch-linux-jammy-cuda12_8-py3_10-gcc11-debug-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda12.8-py3.10-gcc11-debug ') }}
-    name: libtorch-linux-jammy-cuda12.8-py3.10-gcc11-debug
+  libtorch-linux-jammy-cuda13_0-py3_10-gcc11-debug-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug ') }}
+    name: libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
-      build-environment: libtorch-linux-jammy-cuda12.8-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: libtorch-linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.r7i.4xlarge"
@@ -82,43 +82,8 @@ jobs:
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
-      cuda-version: "12.8"
+      cuda-version: "13.0"
     secrets: inherit
-
-  linux-jammy-cuda12_8-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') }}
-    name: linux-jammy-cuda12.8-py3.10-gcc11
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      cuda-arch-list: '7.5 8.9'
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
-        ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      python-version: "3.10"
-      compiler: gcc11
-      cuda-version: "12.8"
-    secrets: inherit
-
-  # CUDA 12.8 GPU tests moved to periodic.yml to reduce per-commit compute.
-  # CUDA 13.0 (the newer shipping version) remains per-commit for forward-looking coverage.
-  # The 12.8 build job is kept because cross-compile-linux-test depends on it.
-  # See P2188981399 for the full CI workflow analysis.
 
   linux-jammy-cuda13_0-py3_10-gcc11-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test-cuda13 ') }}
@@ -175,7 +140,6 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  # CUDA 12.8 no-ops build moved to periodic (only 13.0 remains per-commit)
   linux-jammy-cuda13_0-py3_10-gcc11-no-ops-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11-no-ops ') }}
     name: linux-jammy-cuda13.0-py3.10-gcc11-no-ops
