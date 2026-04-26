@@ -1390,6 +1390,47 @@ def permute(x, dims):
 
 # Note: logic in this function need to be always synchronized with
 # slice_forward in fake implementation.
+def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
+    """Register DynamicSliceSize for any unbacked size bindings on the current FX node.
+
+    Unbacked symbols may have been allocated at trace time of the slice
+    that inductor must define so the assertion
+    new_unbacked_defs >= renamed_unbacked_bindings passes in run_node.
+
+    Returns (sym_size, sym_storage) parsed from the bindings, or (None, None).
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
+    # current_node may be None when slice_ is called from template rendering
+    # (e.g. cpp_template_kernel.slice_nd) rather than FX graph lowering.
+    current_node = V.graph.current_node
+    node_unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env,
+        current_node.meta.get("unbacked_bindings", {})
+        if current_node is not None
+        else {},
+    )
+    sym_size, sym_storage = None, None
+    if node_unbacked_bindings:
+        assert len(node_unbacked_bindings) <= 2, node_unbacked_bindings
+        for sym, keypath in node_unbacked_bindings.items():
+            if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+                sym_size = sym
+            elif keypath == (CallMethodKey("storage_offset"),):
+                sym_storage = sym
+        if sym_size is not None:
+            b_size = ir.DynamicSliceSize(sym_size, start, end, step, size)
+            b_size.name = V.graph.register_buffer(b_size)
+            V.graph.register_operation(b_size)
+        # NOTE: storage_offset registration is not handled here — it is only
+        # needed in the ambiguous (unbacked start/end) path, where it is
+        # handled via DynamicSelectStorageOffset after this helper returns.
+    return sym_size, sym_storage
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1397,11 +1438,6 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     if the indices are unbacked and appropriate semantics aren't known.
     If they are known (indices are static/backed/unbacked with info), a SliceView is created.
     """
-
-    from torch.fx.experimental.symbolic_shapes import (
-        CallMethodKey,
-        resolve_unbacked_bindings,
-    )
 
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
@@ -1416,6 +1452,12 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             and V.graph.sizevars.statically_known_leq(size, end)
             and step == 1
         ):
+            _, sym_storage = _register_unbacked_slice_size_bindings(
+                dim, start, end, step, size
+            )
+            assert sym_storage is None, (
+                "Unexpected storage_offset unbacked binding for no-op slice"
+            )
             return x
     except TypeError:
         pass
@@ -1465,71 +1507,25 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             ambiguous_slice = False
 
     if not ambiguous_slice:
-        # Even though the bounds are resolvable now, the FX node may have
-        # allocated unbacked symbols for the slice output size because dynamo
-        # couldn't prove the bounds at trace time (constraints may have been
-        # learned after tracing the slice). We still need to define those
-        # symbols so the assertion new_unbacked_defs >= renamed_unbacked_bindings
-        # passes. Register a DynamicSliceSize operation to define the size symbol.
-        # Note: storage_offset bindings should not appear here because
-        # a resolved start_index means the offset is computable directly
-        # (base_offset + start * stride), so dynamo wouldn't allocate an
-        # unbacked symbol for it.
-        # Note: current_node may be None when slice_ is called from template
-        # rendering (e.g. cpp_template_kernel.slice_nd) rather than FX graph
-        # lowering, so we handle that.
-        current_node = V.graph.current_node
-        node_unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env,
-            current_node.meta.get("unbacked_bindings", {})
-            if current_node is not None
-            else {},
+        _, sym_storage = _register_unbacked_slice_size_bindings(
+            dim, start, end, step, size
         )
-        if node_unbacked_bindings:
-            for sym, keypath in node_unbacked_bindings.items():
-                if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
-                    b_size = ir.DynamicSliceSize(sym, start, end, step, size)
-                    b_size.name = V.graph.register_buffer(b_size)
-                    V.graph.register_operation(b_size)
-                elif keypath == (CallMethodKey("storage_offset"),):
-                    # Not handled yet — would require materializing the
-                    # tensor layout. Unlikely to be hit because a resolved
-                    # start_index means the offset is computable directly.
-                    raise AssertionError(
-                        "Unexpected storage_offset unbacked binding when both "
-                        "start and end indices are resolved"
-                    )
+        assert sym_storage is None, (
+            "Unexpected storage_offset unbacked binding when both "
+            "start and end indices are resolved"
+        )
 
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
         )  # go to SliceView/ReinterpretView
 
-    # unbacked territory: create DynamicSlice ExternKernel
-    # clamp is True, unbacked start / end
+    # unbacked territory: unbacked start / end
     assert clamp
-    unbacked_bindings = resolve_unbacked_bindings(
-        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
-    )
-    assert unbacked_bindings is not None
-    assert len(unbacked_bindings) <= 2, unbacked_bindings
-    sym_size, sym_storage = None, None
-    for sym, keypath in unbacked_bindings.items():
-        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
-            sym_size = sym
-        elif keypath == (CallMethodKey("storage_offset"),):
-            sym_storage = sym
-
     assert start_index is None or end_index is None
-    b_size = ir.DynamicSliceSize(
-        sym_size,
-        start,
-        end,
-        step,
-        x.get_size()[dim],
+    sym_size, sym_storage = _register_unbacked_slice_size_bindings(
+        dim, start, end, step, x.get_size()[dim]
     )
-    b_size.name = V.graph.register_buffer(b_size)
-    V.graph.register_operation(b_size)
-    new_size = sym_size
+    assert sym_size is not None
 
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
@@ -1554,7 +1550,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
 
     new_sizes = list(x.get_size())
     new_strides = list(x.get_stride())
-    new_sizes[dim] = new_size
+    new_sizes[dim] = sym_size
     new_strides[dim] *= step
     return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
