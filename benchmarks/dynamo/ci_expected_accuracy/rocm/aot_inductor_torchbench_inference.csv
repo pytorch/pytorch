@@ -18,7 +18,7 @@ Super_SloMo,pass,0
 
 
 
-alexnet,pass,0
+alexnet,eager_two_runs_differ,0
 
 
 
@@ -233,7 +233,7 @@ tts_angular,pass,0
 
 
 
-vgg16,eager_two_runs_differ,0
+vgg16,pass,0
 
 
 

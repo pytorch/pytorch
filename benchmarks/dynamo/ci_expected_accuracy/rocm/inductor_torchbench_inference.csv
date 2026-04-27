@@ -82,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,22
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
@@ -142,7 +142,7 @@ llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
-llava,model_fail_to_load,0
+llava,eager_two_runs_differ,0
 
 
 
@@ -151,6 +151,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+microbench_unbacked_tolist_sum,pass,2
 
 
 
@@ -174,7 +178,7 @@ moco,pass,7
 
 
 
-moondream,model_fail_to_load,0
+moondream,pass,0
 
 
 
@@ -281,11 +285,11 @@ tts_angular,pass,2
 
 
 
-vgg16,pass,0
+vgg16,eager_two_runs_differ,0
 
 
 
-vision_maskrcnn,pass,20
+vision_maskrcnn,fail_to_run,18
 
 
 
