@@ -1372,6 +1372,10 @@ if __name__ == "__main__":
             z = torch.from_dlpack(torch.to_dlpack(x))
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
+            cpu = make_tensor((5,), dtype=torch.float32, device="cpu")
+            z = torch.from_dlpack(cpu, device="xpu")
+            self.assertTrue(z.is_xpu)
+            self.assertEqual(z.cpu(), cpu)
 
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
