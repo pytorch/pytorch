@@ -726,6 +726,7 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
 
 @register_complex(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     if self.is_conj():
         raise RuntimeError(
             "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate"
@@ -813,6 +814,7 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(
         aten.alias(self._re),
         aten.alias(self._im),
@@ -823,6 +825,7 @@ def _conj_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(
         aten.alias(self._re),
         aten.alias(self._im),
@@ -833,6 +836,7 @@ def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten.resolve_conj)
 def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     if not self.is_conj():
         return self
     return ComplexTensor(aten.alias(self._re), -self._im, neg_flag=self.is_neg())
@@ -840,6 +844,7 @@ def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     if not self.is_neg():
         return self
     return ComplexTensor(-self._re, -self._im, conj_flag=self.is_conj())
