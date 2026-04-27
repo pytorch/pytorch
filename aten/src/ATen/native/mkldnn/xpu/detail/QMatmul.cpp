@@ -365,6 +365,8 @@ struct ScaleSpec {
     //     This gives outer_dim scales (M for SRC, N for WEI)
     // For blockwise 1x128: groups = {1, 128} for SRC, {128, 1} for WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 128)]
+    // For blockwise 1x32 (MXFP8/MXFP4): groups = {1, 32} for SRC, {32, 1} for WEI
+    //     scale shape: [outer_dim, ceil_div(inner_dim, 32)]
     if (group_m == 1 && group_k > 1) {
       return outer_dim * at::ceil_div(inner_dim, group_k);
     } else if (group_m > 1 && group_k == 1) {
@@ -459,12 +461,24 @@ inline ScaleSpec make_scale_spec(
           dnnl::memory::data_type::f32};
     }
 
+    case at::blas::ScalingType::BlockWise1x32: {
+      // Blockwise 1x32 scaling (MXFP8/MXFP4 microscaling)
+      // For SRC (A): scale shape [M, ceil_div(K, 32)], groups = {1, 32}
+      // For WEI (B): scale shape [ceil_div(K, 32), N], groups = {32, 1}
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      // Scale dtype is e8m0
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, 32} : dnnl::memory::dims{32, 1},
+          dnnl::memory::data_type::e8m0};
+    }
+
     default:
       TORCH_INTERNAL_ASSERT(
           false,
           "Unsupported scaling_type: ",
           static_cast<int>(scaling_type),
-          ". Currently only support TensorWise, RowWise, BlockWise1x128, and BlockWise128x128");
+          ". Currently only support TensorWise, RowWise, BlockWise1x128, BlockWise128x128, and BlockWise1x32");
   }
 }
 
@@ -488,12 +502,34 @@ sycl::event scaled_matmul(
   // 3. execute
 
   const int64_t M = mat1.size(0);
-  const int64_t K = mat1.size(1);
+  bool is_fp4 = (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  if (is_fp4) {
+    TORCH_INTERNAL_ASSERT(
+        mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2,
+        "Both mat1 and mat2 must be Float4_e2m1fn_x2 when FP4 path is used");
+  }
+  // Packed FP4 format means actual-K = 2 * reported-K -- adjust
+  const int64_t K_multiplier = is_fp4 ? 2 : 1;
+  const int64_t K = mat1.size(1) * K_multiplier;
   const int64_t N = mat2.size(1);
 
   // 1.1 Create memory descriptors
-  dnnl::memory::desc src_md = get_onednn_md(mat1);
-  dnnl::memory::desc weights_md = get_onednn_md(mat2);
+  // For FP4 types, the logical K dimension differs from the tensor dimension
+  // due to 2-element packing, so we must use format tags with the logical
+  // shape. For all other types, use get_onednn_md() to respect actual tensor
+  // strides (fixes stride mismatch for non-contiguous inputs).
+  dnnl::memory::desc src_md, weights_md;
+  if (is_fp4) {
+    src_md = dnnl::memory::desc(
+        {M, K}, get_onednn_dtype_include_double(mat1),
+        dnnl::memory::format_tag::ab);
+    weights_md = dnnl::memory::desc(
+        {K, N}, get_onednn_dtype_include_double(mat2),
+        dnnl::memory::format_tag::ba);
+  } else {
+    src_md = get_onednn_md(mat1);
+    weights_md = get_onednn_md(mat2);
+  }
   dnnl::memory::desc dst_md = get_onednn_md(result);
 
   dnnl::memory::desc bias_md;
