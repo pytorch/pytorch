@@ -116,7 +116,7 @@ class SymNode:
         self.pytype = pytype
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
-        self._expr_cache: object | None = None
+        self._expr_cache = None
 
         # What's the difference between hint and constant?
         #
@@ -690,9 +690,7 @@ class DynamicInt(_DynamicScalar, int):
     def __rfloordiv__(self, other: int) -> DynamicInt:
         return DynamicInt(other // self.real)
 
-    def __pow__(  # pyrefly: ignore[bad-override]
-        self, other: int, modulo: int | None = None
-    ) -> DynamicInt | float:
+    def __pow__(self, other, modulo=None):
         if modulo is not None:
             result = pow(self.real, other, modulo)
         else:
@@ -703,7 +701,7 @@ class DynamicInt(_DynamicScalar, int):
             return DynamicInt(result)
         return result
 
-    def __rpow__(self, other: int, modulo: int | None = None) -> DynamicInt | float:
+    def __rpow__(self, other, modulo=None):
         if modulo is not None:
             result = pow(other, self.real, modulo)
         else:

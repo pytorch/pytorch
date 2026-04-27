@@ -674,10 +674,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     # i.e. they neither have other users nor have other inputs
 
     # original graph and module
-    graph = inner_mm.graph
-    module = graph.owning_module
-    if module is None:
-        raise AssertionError("graph.owning_module must not be None")
+    graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
     subgraph_node_list: list[

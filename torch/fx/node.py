@@ -759,10 +759,6 @@ class Node(_NodeBase):
                 raise AssertionError(
                     "self.graph.owning_module not set for purity check"
                 )
-            if not isinstance(self.target, str):
-                raise AssertionError(
-                    f"Expected str target for call_module, got {type(self.target)}"
-                )
             target_mod = self.graph.owning_module.get_submodule(self.target)
             if target_mod is None:
                 raise AssertionError(
