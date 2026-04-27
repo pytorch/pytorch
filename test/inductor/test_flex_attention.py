@@ -2127,9 +2127,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         gc.collect()
         if torch.cuda.is_available():
             torch._C._cuda_clearCublasWorkspaces()
-            torch.cuda.empty_cache()
-        elif torch.xpu.is_available():
-            torch.xpu.empty_cache()
+        torch.accelerator.empty_cache()
         torch._dynamo.reset()
         gc.collect()
         if torch.cuda.is_available():
