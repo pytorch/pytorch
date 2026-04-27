@@ -599,8 +599,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps(
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      constexpr uint32_t BQ = 64;
-      const MTLSize tg   = MTLSizeMake(BQ, 1, 1);
+      constexpr uint32_t BQ = 32;
+      const MTLSize tg   = MTLSizeMake(32, BQ, 1);
       const MTLSize grid = MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1);
 
       auto pso = lib.getPipelineStateForFunc(kname);
@@ -704,7 +704,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      constexpr uint32_t BQ = 64;
+      constexpr uint32_t BQ = 32;
       auto pso = lib.getPipelineStateForFunc(pre_kname);
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(computeEncoder,
@@ -712,7 +712,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
                   (uint32_t)qL, num_heads,
                   do_str, o_str);
       [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1)
-                     threadsPerThreadgroup:MTLSizeMake(BQ, 1, 1)];
+                     threadsPerThreadgroup:MTLSizeMake(32, BQ, 1)];
     }
   });
 
@@ -720,7 +720,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      constexpr uint32_t BQ = 64;
+      constexpr uint32_t BQ = 32;
       auto pso = lib.getPipelineStateForFunc(dq_kname);
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(computeEncoder,
@@ -730,7 +730,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
                   scale_value, is_causal,
                   q_str, k_str, v_str, o_str, do_str, dq_str);
       [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1)
-                     threadsPerThreadgroup:MTLSizeMake(BQ, 1, 1)];
+                     threadsPerThreadgroup:MTLSizeMake(32, BQ, 1)];
     }
   });
 
@@ -738,7 +738,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      constexpr uint32_t BK = 64;
+      constexpr uint32_t BK = 32;
       auto pso = lib.getPipelineStateForFunc(dkdv_kname);
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(computeEncoder,
@@ -748,7 +748,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
                   scale_value, is_causal,
                   q_str, k_str, v_str, o_str, do_str, dk_str, dv_str);
       [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (kL + BK - 1) / BK, 1)
-                     threadsPerThreadgroup:MTLSizeMake(BK, 1, 1)];
+                     threadsPerThreadgroup:MTLSizeMake(32, BK, 1)];
     }
   });
 

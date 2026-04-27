@@ -639,473 +639,509 @@ INSTANTIATE_ATTN_SHAPES_HELPER(float);
 INSTANTIATE_ATTN_SHAPES_HELPER(half);
 INSTANTIATE_ATTN_SHAPES_HELPER(bfloat);
 // FlashAttention-2 Metal kernels for MPS backend
-// Forward + Backward (dQ kernel, dKdV kernel)
+// Forward + Backward (preprocess, dQ, dK+dV)
 // Reference: Dao et al. 2022 (https://arxiv.org/abs/2205.14135)
 //
-// Thread organization:
-//   Forward / dQ:  one thread per query row,  grid=(B*H, ceil(qL/BQ), 1)
-//   dKdV:          one thread per key row,     grid=(B*H, ceil(kL/BQ), 1)
+// Thread organization (all kernels):
+//   TG   = (32, BQ, 1)  —  32 SIMD lanes × BQ Q-rows (or K-rows) per TG
+//   Grid = (B*H, ceil(qL/BQ), 1)
 //
-// D is a compile-time template parameter (64, 128).
-// BK = key-tile rows loaded into threadgroup memory per inner-loop iteration.
+// Each SIMD group (row 0..BQ-1, 32 lanes) owns one Q-row.
+// 32 threads collaborate via simd_sum() on every dot-product.
+// Each thread holds EPL = D/32 elements of its row in registers (float).
+//
+// Threadgroup memory budget (32 KB guaranteed on all Apple Silicon):
+//   K_smem + V_smem  =  BKV * D * sizeof(float) * 2  ≤  32 KB
+//   → BKV = (D == 64) ? 64 : 32
+//
+//   D=64  : BKV=64  → ≤8 outer loop iterations for S=512  (was 32)
+//   D=128 : BKV=32  → ≤16 outer loop iterations for S=512 (was 32)
+//
+// Note: BKV is sized for float32 (worst case); half/bfloat get the same
+// BKV but only use half the smem budget — safe on all Apple GPUs.
+//
+// Stage-parameter convention: Metal rejects mixing uint3 + uint2 in
+// explicit [[host_name]] instantiations, so all kernels use a single
+// flat uint [[thread_index_in_threadgroup]]; lane and row are derived
+// as (tid % 32) and (tid / 32) respectively.
 
-#include <metal_stdlib>
-using namespace metal;
+// ── forward ──────────────────────────────────────────────────────────────────
 
-// ---------------------------------------------------------------------------
-// Forward pass
-// ---------------------------------------------------------------------------
-
-template <typename T, int D, int BQ = 64, int BK = 32>
+template<typename T, int D>
 [[kernel]] void flash_attn_fwd(
-    const device T*      Q          [[buffer(0)]],
-    const device T*      K          [[buffer(1)]],
-    const device T*      V          [[buffer(2)]],
-    device       T*      O          [[buffer(3)]],
-    device       float*  LSE        [[buffer(4)]],   // (B*H, qL)
-    const constant uint& qL         [[buffer(5)]],
-    const constant uint& kL         [[buffer(6)]],
-    const constant uint& gqa_factor [[buffer(7)]],
-    const constant uint& num_heads  [[buffer(8)]],
-    const constant float& scale     [[buffer(9)]],
-    const constant bool&  is_causal [[buffer(10)]],
-    const constant uint4& Q_str     [[buffer(11)]],  // (batch, head, seq, 1)
-    const constant uint4& K_str     [[buffer(12)]],
-    const constant uint4& V_str     [[buffer(13)]],
-    const constant uint4& O_str     [[buffer(14)]],
+    const device T*       Q   [[buffer(0)]],
+    const device T*       K   [[buffer(1)]],
+    const device T*       V   [[buffer(2)]],
+    device       T*       O   [[buffer(3)]],
+    device       float*   LSE [[buffer(4)]],
+    const constant uint&  qL  [[buffer(5)]],
+    const constant uint&  kL  [[buffer(6)]],
+    const constant uint&  gqa [[buffer(7)]],
+    const constant uint&  nh  [[buffer(8)]],
+    const constant float& sc  [[buffer(9)]],
+    const constant bool&  ic  [[buffer(10)]],
+    const constant uint4& qs  [[buffer(11)]],
+    const constant uint4& ks  [[buffer(12)]],
+    const constant uint4& vs  [[buffer(13)]],
+    const constant uint4& os  [[buffer(14)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint  tid  [[thread_index_in_threadgroup]])
 {
-    const uint bh  = tgid.x;
-    const uint q_tile = tgid.y;
-    const uint q_row  = q_tile * BQ + tid;
-    if (q_row >= qL) return;
+    constexpr int EPL = D / 32;
+    constexpr int BQ  = 32;
+    constexpr int BKV = (D == 64) ? 64 : 32;
 
-    const uint batch    = bh / num_heads;
-    const uint head     = bh % num_heads;
-    const uint kv_head  = head / gqa_factor;
+    threadgroup float K_smem[BKV * D];
+    threadgroup float V_smem[BKV * D];
 
-    const device T* Q_ptr = Q + batch * Q_str[0] + head    * Q_str[1];
-    const device T* K_ptr = K + batch * K_str[0] + kv_head * K_str[1];
-    const device T* V_ptr = V + batch * V_str[0] + kv_head * V_str[1];
-    device       T* O_ptr = O + batch * O_str[0] + head    * O_str[1];
+    const uint lane    = tid % 32;
+    const uint q_local = tid / 32;
+    const uint bh      = tgid.x;
+    const uint q_row   = tgid.y * BQ + q_local;
+    const uint q_max   = tgid.y * BQ + BQ - 1;
 
-    // Load query row into registers
-    float q[D];
-    for (uint d = 0; d < D; d++)
-        q[d] = float(Q_ptr[q_row * Q_str[2] + d]);
+    const uint b    = bh / nh;
+    const uint h    = bh % nh;
+    const uint kv_h = h / gqa;
 
-    // Threadgroup memory for K/V tiles
-    threadgroup float K_smem[BK * D];
-    threadgroup float V_smem[BK * D];
+    const device T* Q_ptr = Q + b * qs[0] + h    * qs[1];
+    const device T* K_ptr = K + b * ks[0] + kv_h * ks[1];
+    const device T* V_ptr = V + b * vs[0] + kv_h * vs[1];
+    device       T* O_ptr = O + b * os[0] + h    * os[1];
 
-    // Per-row online-softmax state
-    float m   = -INFINITY;
-    float l   = 0.0f;
-    float acc[D];
-    for (uint d = 0; d < D; d++) acc[d] = 0.0f;
+    const bool valid_q = (q_row < qL);
 
-    for (uint kb = 0; kb < kL; kb += BK) {
-        // Cooperative load of K and V tiles
-        for (uint i = tid; i < BK * D; i += BQ) {
-            const uint r = kb + i / D;
-            const uint d = i % D;
-            K_smem[i] = (r < kL) ? float(K_ptr[r * K_str[2] + d]) : 0.0f;
-            V_smem[i] = (r < kL) ? float(V_ptr[r * V_str[2] + d]) : 0.0f;
+    float q_reg[EPL];
+    for (int e = 0; e < EPL; e++)
+        q_reg[e] = valid_q ? float(Q_ptr[q_row * qs[2] + lane * EPL + e]) : 0.0f;
+
+    float acc[EPL] = {};
+    float m = -INFINITY, l = 0.0f;
+
+    const uint tg_size = 32 * BQ;  // 1024
+
+    for (uint kb = 0; kb < kL; kb += BKV) {
+        if (ic && kb > q_max) break;
+
+        for (uint i = tid; i < (uint)(BKV * D); i += tg_size) {
+            uint r = kb + i / D;
+            uint d = i % D;
+            bool in = (r < kL);
+            K_smem[i] = in ? float(K_ptr[r * ks[2] + d]) : 0.0f;
+            V_smem[i] = in ? float(V_ptr[r * vs[2] + d]) : 0.0f;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        // Compute scores and apply causal mask
-        float scores[BK];
-        for (uint j = 0; j < BK; j++) {
-            const uint k_row = kb + j;
-            if (k_row >= kL || (is_causal && k_row > q_row)) {
-                scores[j] = -INFINITY;
-                continue;
-            }
-            float dot = 0.0f;
-            for (uint d = 0; d < D; d++)
-                dot += q[d] * K_smem[j * D + d];
-            scores[j] = dot * scale;
+        const uint tile_end = min(kb + (uint)BKV, kL);
+
+        for (uint k_row = kb; k_row < tile_end; ++k_row) {
+            const bool cv = !ic || (k_row <= q_row);
+            int j = (int)(k_row - kb);
+
+            float partial = 0.0f;
+            for (int e = 0; e < EPL; e++)
+                partial += q_reg[e] * K_smem[j * D + lane * EPL + e];
+            float score = cv ? (simd_sum(partial) * sc) : -INFINITY;
+
+            float m_new = max(m, score);
+            float alpha = metal::precise::exp(m - m_new);
+            float p_j   = metal::precise::exp(score - m_new);
+            m = m_new;
+            l = l * alpha + p_j;
+
+            for (int e = 0; e < EPL; e++)
+                acc[e] = acc[e] * alpha + p_j * V_smem[j * D + lane * EPL + e];
         }
 
-        // Online softmax update
-        float m_new = m;
-        for (uint j = 0; j < BK; j++) m_new = max(m_new, scores[j]);
-
-        const float alpha = metal::precise::exp(m - m_new);
-        float l_new = l * alpha;
-
-        float p[BK];
-        for (uint j = 0; j < BK; j++) {
-            p[j] = (scores[j] == -INFINITY) ? 0.0f
-                                             : metal::precise::exp(scores[j] - m_new);
-            l_new += p[j];
-        }
-
-        // Rescale and accumulate
-        for (uint d = 0; d < D; d++) acc[d] *= alpha;
-        for (uint j = 0; j < BK; j++)
-            for (uint d = 0; d < D; d++)
-                acc[d] += p[j] * V_smem[j * D + d];
-
-        m = m_new;
-        l = l_new;
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
-    // Write output
-    const float l_safe = (l == 0.0f) ? 1.0f : l;
-    for (uint d = 0; d < D; d++)
-        O_ptr[q_row * O_str[2] + d] = T(acc[d] / l_safe);
+    if (!valid_q) return;
 
-    // Write log-sum-exp for backward
-    LSE[bh * qL + q_row] = m + metal::precise::log(l_safe);
+    float inv_l = (l > 0.0f) ? (1.0f / l) : 0.0f;
+    for (int e = 0; e < EPL; e++)
+        O_ptr[q_row * os[2] + lane * EPL + e] = T(acc[e] * inv_l);
+    if (lane == 0)
+        LSE[bh * qL + q_row] = m + log(l);
 }
 
-// ---------------------------------------------------------------------------
-// Backward preprocess: D_vec[i] = rowsum(dO[i] * O[i])
-// One thread per query row.
-// ---------------------------------------------------------------------------
+// ── backward preprocess ───────────────────────────────────────────────────────
+// D_vec[i] = rowsum(dO_i * O_i).  Pure register reduction via simd_sum().
+// Grid  : (B*H, ceil(qL/BQ), 1),  TG : (32, BQ, 1)
 
-template <typename T, int D, int BQ = 64>
+template<typename T, int D>
 [[kernel]] void flash_attn_bwd_preprocess(
-    const device T*      dO         [[buffer(0)]],
-    const device T*      O          [[buffer(1)]],
-    device       float*  D_vec      [[buffer(2)]],   // (B*H, qL)
-    const constant uint& qL         [[buffer(3)]],
-    const constant uint& num_heads  [[buffer(4)]],
-    const constant uint4& dO_str    [[buffer(5)]],
-    const constant uint4& O_str     [[buffer(6)]],
+    const device T*       dO  [[buffer(0)]],
+    const device T*       O   [[buffer(1)]],
+    device       float*   Dv  [[buffer(2)]],
+    const constant uint&  qL  [[buffer(3)]],
+    const constant uint&  nh  [[buffer(4)]],
+    const constant uint4& dos [[buffer(5)]],
+    const constant uint4& os  [[buffer(6)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint  tid  [[thread_index_in_threadgroup]])
 {
-    const uint bh    = tgid.x;
-    const uint q_row = tgid.y * BQ + tid;
+    constexpr int EPL = D / 32;
+    constexpr int BQ  = 32;
+
+    const uint lane    = tid % 32;
+    const uint q_local = tid / 32;
+    const uint bh      = tgid.x;
+    const uint q_row   = tgid.y * BQ + q_local;
+
     if (q_row >= qL) return;
 
-    const uint batch = bh / num_heads;
-    const uint head  = bh % num_heads;
+    const uint b = bh / nh;
+    const uint h = bh % nh;
 
-    const device T* dO_ptr = dO + batch * dO_str[0] + head * dO_str[1];
-    const device T* O_ptr  = O  + batch * O_str[0]  + head * O_str[1];
+    const device T* dO_ptr = dO + b * dos[0] + h * dos[1];
+    const device T* O_ptr  = O  + b * os[0]  + h * os[1];
 
-    float d = 0.0f;
-    for (uint k = 0; k < D; k++)
-        d += float(dO_ptr[q_row * dO_str[2] + k])
-           * float(O_ptr [q_row * O_str[2]  + k]);
-    D_vec[bh * qL + q_row] = d;
+    float partial = 0.0f;
+    for (int e = 0; e < EPL; e++)
+        partial += float(dO_ptr[q_row * dos[2] + lane * EPL + e])
+                 * float(O_ptr[q_row *  os[2]  + lane * EPL + e]);
+
+    if (lane == 0)
+        Dv[bh * qL + q_row] = simd_sum(partial);
 }
 
-// ---------------------------------------------------------------------------
-// Backward dQ kernel
-// Outer loop over Q-tiles; inner loop over K-tiles.
-// No atomics needed — each thread owns its own dQ row.
-// ---------------------------------------------------------------------------
+// ── backward dQ ──────────────────────────────────────────────────────────────
+// Recomputes attention weights from saved LSE; accumulates dQ.
+// Same smem strategy as forward: K+V both in threadgroup memory.
+// Grid  : (B*H, ceil(qL/BQ), 1),  TG : (32, BQ, 1)
 
-template <typename T, int D, int BQ = 64, int BK = 32>
+template<typename T, int D>
 [[kernel]] void flash_attn_bwd_dq(
-    const device T*      Q          [[buffer(0)]],
-    const device T*      K          [[buffer(1)]],
-    const device T*      V          [[buffer(2)]],
-    const device T*      O          [[buffer(3)]],
-    const device T*      dO         [[buffer(4)]],
-    const device float*  LSE        [[buffer(5)]],
-    const device float*  D_vec      [[buffer(6)]],
-    device       T*      dQ         [[buffer(7)]],
-    const constant uint& qL         [[buffer(8)]],
-    const constant uint& kL         [[buffer(9)]],
-    const constant uint& gqa_factor [[buffer(10)]],
-    const constant uint& num_heads  [[buffer(11)]],
-    const constant float& scale     [[buffer(12)]],
-    const constant bool&  is_causal [[buffer(13)]],
-    const constant uint4& Q_str     [[buffer(14)]],
-    const constant uint4& K_str     [[buffer(15)]],
-    const constant uint4& V_str     [[buffer(16)]],
-    const constant uint4& O_str     [[buffer(17)]],
-    const constant uint4& dO_str    [[buffer(18)]],
-    const constant uint4& dQ_str    [[buffer(19)]],
+    const device T*       Q   [[buffer(0)]],
+    const device T*       K   [[buffer(1)]],
+    const device T*       V   [[buffer(2)]],
+    const device T*       O   [[buffer(3)]],
+    const device T*       dO  [[buffer(4)]],
+    const device float*   LSE [[buffer(5)]],
+    const device float*   Dv  [[buffer(6)]],
+    device       T*       dQ  [[buffer(7)]],
+    const constant uint&  qL  [[buffer(8)]],
+    const constant uint&  kL  [[buffer(9)]],
+    const constant uint&  gqa [[buffer(10)]],
+    const constant uint&  nh  [[buffer(11)]],
+    const constant float& sc  [[buffer(12)]],
+    const constant bool&  ic  [[buffer(13)]],
+    const constant uint4& qs  [[buffer(14)]],
+    const constant uint4& ks  [[buffer(15)]],
+    const constant uint4& vs  [[buffer(16)]],
+    const constant uint4& os  [[buffer(17)]],
+    const constant uint4& dos [[buffer(18)]],
+    const constant uint4& dqs [[buffer(19)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint  tid  [[thread_index_in_threadgroup]])
 {
-    const uint bh    = tgid.x;
-    const uint q_row = tgid.y * BQ + tid;
-    if (q_row >= qL) return;
+    constexpr int EPL = D / 32;
+    constexpr int BQ  = 32;
+    constexpr int BKV = (D == 64) ? 64 : 32;
 
-    const uint batch   = bh / num_heads;
-    const uint head    = bh % num_heads;
-    const uint kv_head = head / gqa_factor;
+    threadgroup float K_smem[BKV * D];
+    threadgroup float V_smem[BKV * D];
 
-    const device T* Q_ptr  = Q  + batch * Q_str[0]  + head    * Q_str[1];
-    const device T* K_ptr  = K  + batch * K_str[0]  + kv_head * K_str[1];
-    const device T* V_ptr  = V  + batch * V_str[0]  + kv_head * V_str[1];
-    const device T* dO_ptr = dO + batch * dO_str[0] + head    * dO_str[1];
-    device       T* dQ_ptr = dQ + batch * dQ_str[0] + head    * dQ_str[1];
+    const uint lane    = tid % 32;
+    const uint q_local = tid / 32;
+    const uint bh      = tgid.x;
+    const uint q_row   = tgid.y * BQ + q_local;
+    const uint q_max   = tgid.y * BQ + BQ - 1;
 
-    // Load my query row and dO row
-    float q[D], do_row[D];
-    for (uint d = 0; d < D; d++) {
-        q[d]      = float(Q_ptr [q_row * Q_str[2]  + d]);
-        do_row[d] = float(dO_ptr[q_row * dO_str[2] + d]);
+    const uint b    = bh / nh;
+    const uint h    = bh % nh;
+    const uint kv_h = h;  // gqa=1 enforced in C++ for backward
+
+    const device T*  Q_ptr  = Q  + b * qs[0]  + h    * qs[1];
+    const device T*  K_ptr  = K  + b * ks[0]  + kv_h * ks[1];
+    const device T*  V_ptr  = V  + b * vs[0]  + kv_h * vs[1];
+    const device T*  dO_ptr = dO + b * dos[0] + h    * dos[1];
+    device       T*  dQ_ptr = dQ + b * dqs[0] + h    * dqs[1];
+
+    const bool valid_q = (q_row < qL);
+
+    float q_reg[EPL]  = {};
+    float do_reg[EPL] = {};
+    float dq_acc[EPL] = {};
+    float lse_val = 0.0f, d_vec = 0.0f;
+
+    if (valid_q) {
+        for (int e = 0; e < EPL; e++) {
+            q_reg[e]  = float(Q_ptr[q_row  * qs[2]  + lane * EPL + e]);
+            do_reg[e] = float(dO_ptr[q_row * dos[2] + lane * EPL + e]);
+        }
+        lse_val = LSE[bh * qL + q_row];
+        d_vec   = Dv[bh * qL + q_row];
     }
 
-    const float lse_i = LSE[bh * qL + q_row];
-    const float di    = D_vec[bh * qL + q_row];
+    const uint tg_size = 32 * BQ;
 
-    threadgroup float K_smem[BK * D];
-    threadgroup float V_smem[BK * D];
+    for (uint kb = 0; kb < kL; kb += BKV) {
+        if (ic && kb > q_max) break;
 
-    float dq[D];
-    for (uint d = 0; d < D; d++) dq[d] = 0.0f;
-
-    for (uint kb = 0; kb < kL; kb += BK) {
-        for (uint i = tid; i < BK * D; i += BQ) {
-            const uint r = kb + i / D;
-            const uint d = i % D;
-            K_smem[i] = (r < kL) ? float(K_ptr[r * K_str[2] + d]) : 0.0f;
-            V_smem[i] = (r < kL) ? float(V_ptr[r * V_str[2] + d]) : 0.0f;
+        for (uint i = tid; i < (uint)(BKV * D); i += tg_size) {
+            uint r = kb + i / D;
+            uint d = i % D;
+            bool in = (r < kL);
+            K_smem[i] = in ? float(K_ptr[r * ks[2] + d]) : 0.0f;
+            V_smem[i] = in ? float(V_ptr[r * vs[2] + d]) : 0.0f;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        for (uint j = 0; j < BK; j++) {
-            const uint k_row = kb + j;
-            if (k_row >= kL) break;
-            if (is_causal && k_row > q_row) break;
+        const uint tile_end = min(kb + (uint)BKV, kL);
 
-            // Recompute S_ij = dot(q, K[j]) * scale
-            float S = 0.0f;
-            for (uint d = 0; d < D; d++) S += q[d] * K_smem[j * D + d];
-            S *= scale;
+        for (uint k_row = kb; k_row < tile_end; ++k_row) {
+            const bool cv = !ic || (k_row <= q_row);
+            int j = (int)(k_row - kb);
 
-            // P_ij = exp(S_ij - LSE_i)
-            const float P = metal::precise::exp(S - lse_i);
+            float partial = 0.0f;
+            for (int e = 0; e < EPL; e++)
+                partial += q_reg[e] * K_smem[j * D + lane * EPL + e];
+            float score = cv ? (simd_sum(partial) * sc) : -INFINITY;
+            float p_ij  = metal::precise::exp(score - lse_val);
+            if (!valid_q) p_ij = 0.0f;
 
-            // dP_ij = dot(dO_i, V[j])
-            float dP = 0.0f;
-            for (uint d = 0; d < D; d++) dP += do_row[d] * V_smem[j * D + d];
+            float dov = 0.0f;
+            for (int e = 0; e < EPL; e++)
+                dov += do_reg[e] * V_smem[j * D + lane * EPL + e];
+            float ds_ij = p_ij * (simd_sum(dov) - d_vec);
 
-            // dS_ij = P_ij * (dP_ij - D_i)
-            const float dS = P * (dP - di) * scale;
-
-            // dQ_i += dS_ij * K[j]
-            for (uint d = 0; d < D; d++) dq[d] += dS * K_smem[j * D + d];
+            for (int e = 0; e < EPL; e++)
+                dq_acc[e] += ds_ij * K_smem[j * D + lane * EPL + e];
         }
+
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
-    for (uint d = 0; d < D; d++)
-        dQ_ptr[q_row * dQ_str[2] + d] = T(dq[d]);
+    if (!valid_q) return;
+
+    for (int e = 0; e < EPL; e++)
+        dQ_ptr[q_row * dqs[2] + lane * EPL + e] = T(dq_acc[e] * sc);
 }
 
-// ---------------------------------------------------------------------------
-// Backward dK + dV kernel
-// Outer loop over K-tiles; inner loop over Q-tiles.
-// No atomics needed — each thread owns its own dK / dV row.
-// ---------------------------------------------------------------------------
+// ── backward dK + dV ─────────────────────────────────────────────────────────
+// K and V live in per-simdgroup registers.  Q and dO are tiled through smem.
+// Grid  : (B*H, ceil(kL/BK), 1),  TG : (32, BK, 1)
+//
+// Smem budget: Q_smem + dO_smem = BQS * D * sizeof(float) * 2 ≤ 32 KB
+// → BQS = (D == 64) ? 64 : 32
 
-template <typename T, int D, int BQ = 32, int BK = 64>
+template<typename T, int D>
 [[kernel]] void flash_attn_bwd_dkdv(
-    const device T*      Q          [[buffer(0)]],
-    const device T*      K          [[buffer(1)]],
-    const device T*      V          [[buffer(2)]],
-    const device T*      O          [[buffer(3)]],
-    const device T*      dO         [[buffer(4)]],
-    const device float*  LSE        [[buffer(5)]],
-    const device float*  D_vec      [[buffer(6)]],
-    device       T*      dK         [[buffer(7)]],
-    device       T*      dV         [[buffer(8)]],
-    const constant uint& qL         [[buffer(9)]],
-    const constant uint& kL         [[buffer(10)]],
-    const constant uint& gqa_factor [[buffer(11)]],
-    const constant uint& num_heads  [[buffer(12)]],
-    const constant float& scale     [[buffer(13)]],
-    const constant bool&  is_causal [[buffer(14)]],
-    const constant uint4& Q_str     [[buffer(15)]],
-    const constant uint4& K_str     [[buffer(16)]],
-    const constant uint4& V_str     [[buffer(17)]],
-    const constant uint4& O_str     [[buffer(18)]],
-    const constant uint4& dO_str    [[buffer(19)]],
-    const constant uint4& dK_str    [[buffer(20)]],
-    const constant uint4& dV_str    [[buffer(21)]],
+    const device T*       Q   [[buffer(0)]],
+    const device T*       K   [[buffer(1)]],
+    const device T*       V   [[buffer(2)]],
+    const device T*       O   [[buffer(3)]],   // unused, kept for dispatch compat
+    const device T*       dO  [[buffer(4)]],
+    const device float*   LSE [[buffer(5)]],
+    const device float*   Dv  [[buffer(6)]],
+    device       T*       dK  [[buffer(7)]],
+    device       T*       dV  [[buffer(8)]],
+    const constant uint&  qL  [[buffer(9)]],
+    const constant uint&  kL  [[buffer(10)]],
+    const constant uint&  gqa [[buffer(11)]],
+    const constant uint&  nh  [[buffer(12)]],
+    const constant float& sc  [[buffer(13)]],
+    const constant bool&  ic  [[buffer(14)]],
+    const constant uint4& qs  [[buffer(15)]],
+    const constant uint4& ks  [[buffer(16)]],
+    const constant uint4& vs  [[buffer(17)]],
+    const constant uint4& os  [[buffer(18)]],
+    const constant uint4& dos [[buffer(19)]],
+    const constant uint4& dks [[buffer(20)]],
+    const constant uint4& dvs [[buffer(21)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint  tid  [[thread_index_in_threadgroup]])
 {
-    const uint bh    = tgid.x;
-    const uint k_row = tgid.y * BK + tid;
-    if (k_row >= kL) return;
+    constexpr int EPL  = D / 32;
+    constexpr int BK   = 32;
+    constexpr int BQS  = (D == 64) ? 64 : 32;
 
-    const uint batch   = bh / num_heads;
-    const uint head    = bh % num_heads;
-    const uint kv_head = head / gqa_factor;
+    threadgroup float  Q_smem[BQS * D];
+    threadgroup float dO_smem[BQS * D];
 
-    const device T* Q_ptr  = Q  + batch * Q_str[0]  + head    * Q_str[1];
-    const device T* K_ptr  = K  + batch * K_str[0]  + kv_head * K_str[1];
-    const device T* V_ptr  = V  + batch * V_str[0]  + kv_head * V_str[1];
-    const device T* dO_ptr = dO + batch * dO_str[0] + head    * dO_str[1];
-    device       T* dK_ptr = dK + batch * dK_str[0] + kv_head * dK_str[1];
-    device       T* dV_ptr = dV + batch * dV_str[0] + kv_head * dV_str[1];
+    const uint lane    = tid % 32;
+    const uint k_local = tid / 32;
+    const uint bh      = tgid.x;
+    const uint k_row   = tgid.y * BK + k_local;
+    const uint k_min   = tgid.y * BK;
 
-    // Load my key and value rows
-    float k[D], v[D];
-    for (uint d = 0; d < D; d++) {
-        k[d] = float(K_ptr[k_row * K_str[2] + d]);
-        v[d] = float(V_ptr[k_row * V_str[2] + d]);
+    const uint b    = bh / nh;
+    const uint h    = bh % nh;
+    const uint kv_h = h;  // gqa=1 enforced in C++ for backward
+
+    const device T*  Q_ptr  = Q  + b * qs[0]  + h    * qs[1];
+    const device T*  K_ptr  = K  + b * ks[0]  + kv_h * ks[1];
+    const device T*  V_ptr  = V  + b * vs[0]  + kv_h * vs[1];
+    const device T*  dO_ptr = dO + b * dos[0] + h    * dos[1];
+    device       T*  dK_ptr = dK + b * dks[0] + kv_h * dks[1];
+    device       T*  dV_ptr = dV + b * dvs[0] + kv_h * dvs[1];
+
+    const bool valid_k = (k_row < kL);
+
+    float k_reg[EPL] = {};
+    float v_reg[EPL] = {};
+    if (valid_k) {
+        for (int e = 0; e < EPL; e++) {
+            k_reg[e] = float(K_ptr[k_row * ks[2] + lane * EPL + e]);
+            v_reg[e] = float(V_ptr[k_row * vs[2] + lane * EPL + e]);
+        }
     }
 
-    threadgroup float Q_smem [BQ * D];
-    threadgroup float dO_smem[BQ * D];
+    float dk_acc[EPL] = {};
+    float dv_acc[EPL] = {};
 
-    float dk[D], dv[D];
-    for (uint d = 0; d < D; d++) { dk[d] = 0.0f; dv[d] = 0.0f; }
+    const uint tg_size = 32 * BK;
 
-    for (uint qb = 0; qb < qL; qb += BQ) {
-        for (uint i = tid; i < BQ * D; i += BK) {
-            const uint r = qb + i / D;
-            const uint d = i % D;
-            Q_smem [i] = (r < qL) ? float(Q_ptr [r * Q_str[2]  + d]) : 0.0f;
-            dO_smem[i] = (r < qL) ? float(dO_ptr[r * dO_str[2] + d]) : 0.0f;
+    for (uint qb = 0; qb < qL; qb += BQS) {
+        if (ic && qb + (uint)BQS - 1 < k_min) continue;
+
+        for (uint i = tid; i < (uint)(BQS * D); i += tg_size) {
+            uint r = qb + i / D;
+            uint d = i % D;
+            bool in = (r < qL);
+            Q_smem[i]  = in ? float( Q_ptr[r * qs[2]  + d]) : 0.0f;
+            dO_smem[i] = in ? float(dO_ptr[r * dos[2] + d]) : 0.0f;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        for (uint i = 0; i < BQ; i++) {
-            const uint q_row = qb + i;
-            if (q_row >= qL) break;
-            if (is_causal && q_row < k_row) {
-                // causal: query can only attend to earlier/same keys
-                continue;
-            }
+        const uint tile_end = min(qb + (uint)BQS, qL);
 
-            // Recompute S_ij = dot(Q[q_row], k) * scale
-            float S = 0.0f;
-            for (uint d = 0; d < D; d++) S += Q_smem[i * D + d] * k[d];
-            S *= scale;
+        for (uint q_row = qb; q_row < tile_end; ++q_row) {
+            if (ic && k_row > q_row) continue;
 
-            const float lse_i = LSE[bh * qL + q_row];
-            const float P     = metal::precise::exp(S - lse_i);
-            const float di    = D_vec[bh * qL + q_row];
+            float lse_i   = LSE[bh * qL + q_row];
+            float d_vec_i = Dv[bh * qL + q_row];
+            int i = (int)(q_row - qb);
 
-            // dV_j += P_ij * dO_i
-            for (uint d = 0; d < D; d++) dv[d] += P * dO_smem[i * D + d];
+            float qk = 0.0f;
+            for (int e = 0; e < EPL; e++)
+                qk += Q_smem[i * D + lane * EPL + e] * k_reg[e];
+            float p_ij = metal::precise::exp(simd_sum(qk) * sc - lse_i);
+            if (!valid_k) p_ij = 0.0f;
 
-            // dP_ij = dot(dO_i, v_j)
-            float dP = 0.0f;
-            for (uint d = 0; d < D; d++) dP += dO_smem[i * D + d] * v[d];
+            float dov = 0.0f;
+            for (int e = 0; e < EPL; e++)
+                dov += dO_smem[i * D + lane * EPL + e] * v_reg[e];
+            float ds_ij = p_ij * (simd_sum(dov) - d_vec_i);
 
-            // dS_ij = P_ij * (dP_ij - D_i) * scale
-            const float dS = P * (dP - di) * scale;
+            for (int e = 0; e < EPL; e++)
+                dv_acc[e] += p_ij * dO_smem[i * D + lane * EPL + e];
 
-            // dK_j += dS_ij * Q_i
-            for (uint d = 0; d < D; d++) dk[d] += dS * Q_smem[i * D + d];
+            for (int e = 0; e < EPL; e++)
+                dk_acc[e] += ds_ij * Q_smem[i * D + lane * EPL + e];
         }
+
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
-    for (uint d = 0; d < D; d++) {
-        dK_ptr[k_row * dK_str[2] + d] = T(dk[d]);
-        dV_ptr[k_row * dV_str[2] + d] = T(dv[d]);
+    if (!valid_k) return;
+
+    for (int e = 0; e < EPL; e++) {
+        dK_ptr[k_row * dks[2] + lane * EPL + e] = T(dk_acc[e] * sc);
+        dV_ptr[k_row * dvs[2] + lane * EPL + e] = T(dv_acc[e]);
     }
 }
 
-// ---------------------------------------------------------------------------
-// Instantiations
-// ---------------------------------------------------------------------------
+// ── explicit instantiation macros ────────────────────────────────────────────
 
 #define INST_FLASH_FWD(T, D) \
   template [[host_name("flash_attn_fwd_" #T "_" #D)]] [[kernel]] \
-  void flash_attn_fwd<T, D>(                                       \
-      const device T*       Q   [[buffer(0)]],                     \
-      const device T*       K   [[buffer(1)]],                     \
-      const device T*       V   [[buffer(2)]],                     \
-      device       T*       O   [[buffer(3)]],                     \
-      device       float*   LSE [[buffer(4)]],                     \
-      const constant uint&  qL  [[buffer(5)]],                     \
-      const constant uint&  kL  [[buffer(6)]],                     \
-      const constant uint&  gqa [[buffer(7)]],                     \
-      const constant uint&  nh  [[buffer(8)]],                     \
-      const constant float& sc  [[buffer(9)]],                     \
-      const constant bool&  ic  [[buffer(10)]],                    \
-      const constant uint4& qs  [[buffer(11)]],                    \
-      const constant uint4& ks  [[buffer(12)]],                    \
-      const constant uint4& vs  [[buffer(13)]],                    \
-      const constant uint4& os  [[buffer(14)]],                    \
-      uint3 tgid [[threadgroup_position_in_grid]],                 \
+  void flash_attn_fwd<T, D>( \
+      const device T*        Q   [[buffer(0)]],  \
+      const device T*        K   [[buffer(1)]],  \
+      const device T*        V   [[buffer(2)]],  \
+      device       T*        O   [[buffer(3)]],  \
+      device       float*    LSE [[buffer(4)]],  \
+      const constant uint&   qL  [[buffer(5)]],  \
+      const constant uint&   kL  [[buffer(6)]],  \
+      const constant uint&   gqa [[buffer(7)]],  \
+      const constant uint&   nh  [[buffer(8)]],  \
+      const constant float&  sc  [[buffer(9)]],  \
+      const constant bool&   ic  [[buffer(10)]], \
+      const constant uint4&  qs  [[buffer(11)]], \
+      const constant uint4&  ks  [[buffer(12)]], \
+      const constant uint4&  vs  [[buffer(13)]], \
+      const constant uint4&  os  [[buffer(14)]], \
+      uint3 tgid [[threadgroup_position_in_grid]], \
       uint  tid  [[thread_index_in_threadgroup]]);
 
 #define INST_FLASH_BWD_PRE(T, D) \
   template [[host_name("flash_attn_bwd_pre_" #T "_" #D)]] [[kernel]] \
-  void flash_attn_bwd_preprocess<T, D>(                            \
-      const device T*       dO   [[buffer(0)]],                    \
-      const device T*       O    [[buffer(1)]],                    \
-      device       float*   Dv   [[buffer(2)]],                    \
-      const constant uint&  qL   [[buffer(3)]],                    \
-      const constant uint&  nh   [[buffer(4)]],                    \
-      const constant uint4& dos  [[buffer(5)]],                    \
-      const constant uint4& os   [[buffer(6)]],                    \
-      uint3 tgid [[threadgroup_position_in_grid]],                 \
+  void flash_attn_bwd_preprocess<T, D>( \
+      const device T*        dO  [[buffer(0)]], \
+      const device T*        O   [[buffer(1)]], \
+      device       float*    Dv  [[buffer(2)]], \
+      const constant uint&   qL  [[buffer(3)]], \
+      const constant uint&   nh  [[buffer(4)]], \
+      const constant uint4&  dos [[buffer(5)]], \
+      const constant uint4&  os  [[buffer(6)]], \
+      uint3 tgid [[threadgroup_position_in_grid]], \
       uint  tid  [[thread_index_in_threadgroup]]);
 
 #define INST_FLASH_BWD_DQ(T, D) \
   template [[host_name("flash_attn_bwd_dq_" #T "_" #D)]] [[kernel]] \
-  void flash_attn_bwd_dq<T, D>(                                    \
-      const device T*       Q    [[buffer(0)]],                    \
-      const device T*       K    [[buffer(1)]],                    \
-      const device T*       V    [[buffer(2)]],                    \
-      const device T*       O    [[buffer(3)]],                    \
-      const device T*       dO   [[buffer(4)]],                    \
-      const device float*   LSE  [[buffer(5)]],                    \
-      const device float*   Dv   [[buffer(6)]],                    \
-      device       T*       dQ   [[buffer(7)]],                    \
-      const constant uint&  qL   [[buffer(8)]],                    \
-      const constant uint&  kL   [[buffer(9)]],                    \
-      const constant uint&  gqa  [[buffer(10)]],                   \
-      const constant uint&  nh   [[buffer(11)]],                   \
-      const constant float& sc   [[buffer(12)]],                   \
-      const constant bool&  ic   [[buffer(13)]],                   \
-      const constant uint4& qs   [[buffer(14)]],                   \
-      const constant uint4& ks   [[buffer(15)]],                   \
-      const constant uint4& vs   [[buffer(16)]],                   \
-      const constant uint4& os   [[buffer(17)]],                   \
-      const constant uint4& dos  [[buffer(18)]],                   \
-      const constant uint4& dqs  [[buffer(19)]],                   \
-      uint3 tgid [[threadgroup_position_in_grid]],                 \
+  void flash_attn_bwd_dq<T, D>( \
+      const device T*        Q   [[buffer(0)]],  \
+      const device T*        K   [[buffer(1)]],  \
+      const device T*        V   [[buffer(2)]],  \
+      const device T*        O   [[buffer(3)]],  \
+      const device T*        dO  [[buffer(4)]],  \
+      const device float*    LSE [[buffer(5)]],  \
+      const device float*    Dv  [[buffer(6)]],  \
+      device       T*        dQ  [[buffer(7)]],  \
+      const constant uint&   qL  [[buffer(8)]],  \
+      const constant uint&   kL  [[buffer(9)]],  \
+      const constant uint&   gqa [[buffer(10)]], \
+      const constant uint&   nh  [[buffer(11)]], \
+      const constant float&  sc  [[buffer(12)]], \
+      const constant bool&   ic  [[buffer(13)]], \
+      const constant uint4&  qs  [[buffer(14)]], \
+      const constant uint4&  ks  [[buffer(15)]], \
+      const constant uint4&  vs  [[buffer(16)]], \
+      const constant uint4&  os  [[buffer(17)]], \
+      const constant uint4&  dos [[buffer(18)]], \
+      const constant uint4&  dqs [[buffer(19)]], \
+      uint3 tgid [[threadgroup_position_in_grid]], \
       uint  tid  [[thread_index_in_threadgroup]]);
 
 #define INST_FLASH_BWD_DKDV(T, D) \
   template [[host_name("flash_attn_bwd_dkdv_" #T "_" #D)]] [[kernel]] \
-  void flash_attn_bwd_dkdv<T, D>(                                  \
-      const device T*       Q    [[buffer(0)]],                    \
-      const device T*       K    [[buffer(1)]],                    \
-      const device T*       V    [[buffer(2)]],                    \
-      const device T*       O    [[buffer(3)]],                    \
-      const device T*       dO   [[buffer(4)]],                    \
-      const device float*   LSE  [[buffer(5)]],                    \
-      const device float*   Dv   [[buffer(6)]],                    \
-      device       T*       dK   [[buffer(7)]],                    \
-      device       T*       dV   [[buffer(8)]],                    \
-      const constant uint&  qL   [[buffer(9)]],                    \
-      const constant uint&  kL   [[buffer(10)]],                   \
-      const constant uint&  gqa  [[buffer(11)]],                   \
-      const constant uint&  nh   [[buffer(12)]],                   \
-      const constant float& sc   [[buffer(13)]],                   \
-      const constant bool&  ic   [[buffer(14)]],                   \
-      const constant uint4& qs   [[buffer(15)]],                   \
-      const constant uint4& ks   [[buffer(16)]],                   \
-      const constant uint4& vs   [[buffer(17)]],                   \
-      const constant uint4& os   [[buffer(18)]],                   \
-      const constant uint4& dos  [[buffer(19)]],                   \
-      const constant uint4& dks  [[buffer(20)]],                   \
-      const constant uint4& dvs  [[buffer(21)]],                   \
-      uint3 tgid [[threadgroup_position_in_grid]],                 \
+  void flash_attn_bwd_dkdv<T, D>( \
+      const device T*        Q   [[buffer(0)]],  \
+      const device T*        K   [[buffer(1)]],  \
+      const device T*        V   [[buffer(2)]],  \
+      const device T*        O   [[buffer(3)]],  \
+      const device T*        dO  [[buffer(4)]],  \
+      const device float*    LSE [[buffer(5)]],  \
+      const device float*    Dv  [[buffer(6)]],  \
+      device       T*        dK  [[buffer(7)]],  \
+      device       T*        dV  [[buffer(8)]],  \
+      const constant uint&   qL  [[buffer(9)]],  \
+      const constant uint&   kL  [[buffer(10)]], \
+      const constant uint&   gqa [[buffer(11)]], \
+      const constant uint&   nh  [[buffer(12)]], \
+      const constant float&  sc  [[buffer(13)]], \
+      const constant bool&   ic  [[buffer(14)]], \
+      const constant uint4&  qs  [[buffer(15)]], \
+      const constant uint4&  ks  [[buffer(16)]], \
+      const constant uint4&  vs  [[buffer(17)]], \
+      const constant uint4&  os  [[buffer(18)]], \
+      const constant uint4&  dos [[buffer(19)]], \
+      const constant uint4&  dks [[buffer(20)]], \
+      const constant uint4&  dvs [[buffer(21)]], \
+      uint3 tgid [[threadgroup_position_in_grid]], \
       uint  tid  [[thread_index_in_threadgroup]]);
 
 #define INST_FLASH_ALL(T) \
-  INST_FLASH_FWD(T, 64)     \
-  INST_FLASH_FWD(T, 128)    \
-  INST_FLASH_BWD_PRE(T, 64) \
-  INST_FLASH_BWD_PRE(T, 128)\
-  INST_FLASH_BWD_DQ(T, 64)  \
-  INST_FLASH_BWD_DQ(T, 128) \
-  INST_FLASH_BWD_DKDV(T, 64)  \
+  INST_FLASH_FWD(T, 64)      \
+  INST_FLASH_FWD(T, 128)     \
+  INST_FLASH_BWD_PRE(T, 64)  \
+  INST_FLASH_BWD_PRE(T, 128) \
+  INST_FLASH_BWD_DQ(T, 64)   \
+  INST_FLASH_BWD_DQ(T, 128)  \
+  INST_FLASH_BWD_DKDV(T, 64) \
   INST_FLASH_BWD_DKDV(T, 128)
 
 INST_FLASH_ALL(float)
