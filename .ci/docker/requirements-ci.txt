@@ -77,8 +77,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 
 # Only mkl-static and mkl-include are needed; the mkl package contains
 # dynamic libraries that are not discoverable by our build scripts.
-mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
-mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
