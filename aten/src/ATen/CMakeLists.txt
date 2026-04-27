@@ -66,140 +66,140 @@ if(USE_ROCM)
 endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
-file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
-file(GLOB_RECURSE ATen_TRANSFORMER_HEADERS "native/transformers/*.h")
+file(GLOB_RECURSE ATen_CORE_HEADERS CONFIGURE_DEPENDS  "core/*.h")
+file(GLOB_RECURSE ATen_CORE_SRCS CONFIGURE_DEPENDS "core/*.cpp")
+file(GLOB_RECURSE ATen_TRANSFORMER_HEADERS CONFIGURE_DEPENDS "native/transformers/*.h")
 if(NOT BUILD_LITE_INTERPRETER)
-  file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+  file(GLOB_RECURSE ATen_CORE_TEST_SRCS CONFIGURE_DEPENDS "core/*_test.cpp")
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
-file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp" "accelerator/*.cpp")
-file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
-file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
-file(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
-file(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
-file(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu" "cuda/tunable/*.cu")
-file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
-file(GLOB cudnn_cpp "cudnn/*.cpp")
-file(GLOB ops_h "ops/*.h")
+file(GLOB base_h CONFIGURE_DEPENDS "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
+file(GLOB base_cpp CONFIGURE_DEPENDS "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp" "accelerator/*.cpp")
+file(GLOB cuda_h CONFIGURE_DEPENDS "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
+file(GLOB cuda_cpp CONFIGURE_DEPENDS "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
+file(GLOB cuda_nvrtc_stub_h CONFIGURE_DEPENDS "cuda/nvrtc_stub/*.h")
+file(GLOB cuda_nvrtc_stub_cpp CONFIGURE_DEPENDS "cuda/nvrtc_stub/*.cpp")
+file(GLOB cuda_cu CONFIGURE_DEPENDS "cuda/*.cu" "cuda/detail/*.cu" "cuda/tunable/*.cu")
+file(GLOB cudnn_h CONFIGURE_DEPENDS "cudnn/*.h" "cudnn/*.cuh")
+file(GLOB cudnn_cpp CONFIGURE_DEPENDS "cudnn/*.cpp")
+file(GLOB ops_h CONFIGURE_DEPENDS "ops/*.h")
 
 # MTIA
-file(GLOB mtia_h "mtia/*.h" "mtia/detail/*.h")
-file(GLOB mtia_cpp "mtia/*.cpp" "mtia/detail/*.cpp")
-file(GLOB_RECURSE native_mtia_cpp "native/mtia/*.cpp")
-file(GLOB_RECURSE native_mtia_h "native/mtia/*.h")
+file(GLOB mtia_h CONFIGURE_DEPENDS "mtia/*.h" "mtia/detail/*.h")
+file(GLOB mtia_cpp CONFIGURE_DEPENDS "mtia/*.cpp" "mtia/detail/*.cpp")
+file(GLOB_RECURSE native_mtia_cpp CONFIGURE_DEPENDS "native/mtia/*.cpp")
+file(GLOB_RECURSE native_mtia_h CONFIGURE_DEPENDS "native/mtia/*.h")
 
-file(GLOB xpu_h "xpu/*.h" "xpu/detail/*.h")
-file(GLOB xpu_cpp "xpu/*.cpp" "xpu/detail/*.cpp")
+file(GLOB xpu_h CONFIGURE_DEPENDS "xpu/*.h" "xpu/detail/*.h")
+file(GLOB xpu_cpp CONFIGURE_DEPENDS "xpu/*.cpp" "xpu/detail/*.cpp")
 
-file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h" "hip/tunable/*.cuh" "hip/tunable/*.h")
-file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp" "hip/tunable/*.cpp")
+file(GLOB hip_h CONFIGURE_DEPENDS "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h" "hip/tunable/*.cuh" "hip/tunable/*.h")
+file(GLOB hip_cpp CONFIGURE_DEPENDS "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp" "hip/tunable/*.cpp")
 list(REMOVE_ITEM hip_cpp "${CMAKE_CURRENT_SOURCE_DIR}/hip/detail/LazyNVRTC.cpp")
-file(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip" "hip/tunable/*.hip")
-file(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
-file(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
-file(GLOB miopen_h "miopen/*.h")
-file(GLOB miopen_cpp "miopen/*.cpp")
+file(GLOB hip_hip CONFIGURE_DEPENDS "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip" "hip/tunable/*.hip")
+file(GLOB hip_nvrtc_stub_h CONFIGURE_DEPENDS "hip/nvrtc_stub/*.h")
+file(GLOB hip_nvrtc_stub_cpp CONFIGURE_DEPENDS "hip/nvrtc_stub/*.cpp")
+file(GLOB miopen_h CONFIGURE_DEPENDS "miopen/*.h")
+file(GLOB miopen_cpp CONFIGURE_DEPENDS "miopen/*.cpp")
 
-file(GLOB mkl_cpp "mkl/*.cpp")
-file(GLOB mkldnn_cpp "mkldnn/*.cpp")
+file(GLOB mkl_cpp CONFIGURE_DEPENDS "mkl/*.cpp")
+file(GLOB mkldnn_cpp CONFIGURE_DEPENDS "mkldnn/*.cpp")
 
-file(GLOB mkldnn_xpu_h "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
-file(GLOB mkldnn_xpu_cpp "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
+file(GLOB mkldnn_xpu_h CONFIGURE_DEPENDS "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
+file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
 
-file(GLOB native_cpp "native/*.cpp")
-file(GLOB native_mkl_cpp "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
-file(GLOB vulkan_cpp "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
+file(GLOB native_cpp CONFIGURE_DEPENDS "native/*.cpp")
+file(GLOB native_mkl_cpp CONFIGURE_DEPENDS "native/mkl/*.cpp")
+file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp")
+file(GLOB vulkan_cpp CONFIGURE_DEPENDS "vulkan/*.cpp")
+file(GLOB native_vulkan_cpp CONFIGURE_DEPENDS "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
-file(GLOB native_eigen_cpp "native/sparse/eigen/*.cpp")
+file(GLOB native_eigen_cpp CONFIGURE_DEPENDS "native/sparse/eigen/*.cpp")
 
 # Metal
-file(GLOB metal_h "metal/*.h")
-file(GLOB metal_cpp "metal/*.cpp")
-file(GLOB_RECURSE native_metal_h "native/metal/*.h")
-file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
-file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm" "native/metal/*.cpp")
+file(GLOB metal_h CONFIGURE_DEPENDS "metal/*.h")
+file(GLOB metal_cpp CONFIGURE_DEPENDS "metal/*.cpp")
+file(GLOB_RECURSE native_metal_h CONFIGURE_DEPENDS "native/metal/*.h")
+file(GLOB metal_test_srcs CONFIGURE_DEPENDS "native/metal/mpscnn/tests/*.mm")
+file(GLOB_RECURSE native_metal_srcs CONFIGURE_DEPENDS "native/metal/*.mm" "native/metal/*.cpp")
 EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
-file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
-file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
+file(GLOB metal_prepack_h CONFIGURE_DEPENDS "native/metal/MetalPrepackOpContext.h")
+file(GLOB metal_prepack_cpp CONFIGURE_DEPENDS "native/metal/MetalPrepackOpRegister.cpp")
 
-file(GLOB native_ao_sparse_cpp
+file(GLOB native_ao_sparse_cpp CONFIGURE_DEPENDS
             "native/ao_sparse/*.cpp"
             "native/ao_sparse/cpu/*.cpp"
             "native/ao_sparse/quantized/*.cpp"
             "native/ao_sparse/quantized/cpu/*.cpp")
 # MPS
-file(GLOB mps_cpp "mps/*.cpp")
-file(GLOB mps_mm "mps/*.mm")
-file(GLOB mps_h "mps/*.h")
-file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
-file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
-file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
-file(GLOB_RECURSE native_mps_h "native/mps/*.h")
-file(GLOB_RECURSE native_sparse_mps_mm "native/sparse/mps/*.mm")
-file(GLOB_RECURSE native_mps_sparse_metal "native/sparse/mps/*.metal")
+file(GLOB mps_cpp CONFIGURE_DEPENDS "mps/*.cpp")
+file(GLOB mps_mm CONFIGURE_DEPENDS "mps/*.mm")
+file(GLOB mps_h CONFIGURE_DEPENDS "mps/*.h")
+file(GLOB_RECURSE native_mps_cpp CONFIGURE_DEPENDS "native/mps/*.cpp")
+file(GLOB_RECURSE native_mps_mm CONFIGURE_DEPENDS "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_metal CONFIGURE_DEPENDS "native/mps/*.metal")
+file(GLOB_RECURSE native_mps_h CONFIGURE_DEPENDS "native/mps/*.h")
+file(GLOB_RECURSE native_sparse_mps_mm CONFIGURE_DEPENDS "native/sparse/mps/*.mm")
+file(GLOB_RECURSE native_mps_sparse_metal CONFIGURE_DEPENDS "native/sparse/mps/*.metal")
 
-file(GLOB native_sparse_cpp "native/sparse/*.cpp")
-file(GLOB native_quantized_cpp
+file(GLOB native_sparse_cpp CONFIGURE_DEPENDS "native/sparse/*.cpp")
+file(GLOB native_quantized_cpp CONFIGURE_DEPENDS
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
-file(GLOB native_nested_cpp "native/nested/*.cpp")
-file(GLOB native_transformers_cpp "native/transformers/*.cpp")
+file(GLOB native_nested_cpp CONFIGURE_DEPENDS "native/nested/*.cpp")
+file(GLOB native_transformers_cpp CONFIGURE_DEPENDS "native/transformers/*.cpp")
 
-file(GLOB native_h "native/*.h")
-file(GLOB native_ao_sparse_h
+file(GLOB native_h CONFIGURE_DEPENDS "native/*.h")
+file(GLOB native_ao_sparse_h CONFIGURE_DEPENDS
             "native/ao_sparse/*.h"
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
-file(GLOB native_cpu_h "native/cpu/*.h")
-file(GLOB native_utils_h "native/utils/*.h")
+file(GLOB native_quantized_h CONFIGURE_DEPENDS "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
+file(GLOB native_cpu_h CONFIGURE_DEPENDS "native/cpu/*.h")
+file(GLOB native_utils_h CONFIGURE_DEPENDS "native/utils/*.h")
 
-file(GLOB native_cuda_cu "native/cuda/*.cu")
-file(GLOB native_cuda_cpp "native/cuda/*.cpp")
-file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
-file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
-file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
-file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
-file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
-file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
-file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
-file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
-file(GLOB native_nested_h "native/nested/*.h")
-file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
-file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
+file(GLOB native_cuda_cu CONFIGURE_DEPENDS "native/cuda/*.cu")
+file(GLOB native_cuda_cpp CONFIGURE_DEPENDS "native/cuda/*.cpp")
+file(GLOB native_cuda_h CONFIGURE_DEPENDS "native/cuda/*.h" "native/cuda/*.cuh")
+file(GLOB native_cuda_linalg_cpp CONFIGURE_DEPENDS "native/cuda/linalg/*.cpp")
+file(GLOB native_hip_h CONFIGURE_DEPENDS "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
+file(GLOB native_cudnn_cpp CONFIGURE_DEPENDS "native/cudnn/*.cpp")
+file(GLOB native_sparse_cuda_cu CONFIGURE_DEPENDS "native/sparse/cuda/*.cu")
+file(GLOB native_sparse_cuda_cpp CONFIGURE_DEPENDS "native/sparse/cuda/*.cpp")
+file(GLOB native_quantized_cuda_cu CONFIGURE_DEPENDS "native/quantized/cuda/*.cu")
+file(GLOB native_quantized_cuda_cpp CONFIGURE_DEPENDS "native/quantized/cuda/*.cpp")
+file(GLOB native_quantized_cudnn_cpp CONFIGURE_DEPENDS "native/quantized/cudnn/*.cpp")
+file(GLOB native_nested_h CONFIGURE_DEPENDS "native/nested/*.h")
+file(GLOB native_nested_cuda_cu CONFIGURE_DEPENDS "native/nested/cuda/*.cu")
+file(GLOB native_nested_cuda_cpp CONFIGURE_DEPENDS "native/nested/cuda/*.cpp")
 
-file(GLOB native_hip_hip "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
-file(GLOB native_hip_cpp "native/hip/*.cpp")
-file(GLOB native_hip_linalg_cpp "native/hip/linalg/*.cpp")
-file(GLOB native_miopen_cpp "native/miopen/*.cpp")
-file(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
-file(GLOB native_nested_hip_hip "native/nested/hip/*.hip")
-file(GLOB native_nested_hip_cpp "native/nested/hip/*.cpp")
-file(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
-file(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
-file(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
-file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
-file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
-file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
-file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
-file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
-file(GLOB native_transformers_xpu_cpp "native/transformers/xpu/*.cpp")
-file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
-file(GLOB native_utils_cpp "native/utils/*.cpp")
-file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
-file(GLOB flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
-file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_api.cpp")
+file(GLOB native_hip_hip CONFIGURE_DEPENDS "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
+file(GLOB native_hip_cpp CONFIGURE_DEPENDS "native/hip/*.cpp")
+file(GLOB native_hip_linalg_cpp CONFIGURE_DEPENDS "native/hip/linalg/*.cpp")
+file(GLOB native_miopen_cpp CONFIGURE_DEPENDS "native/miopen/*.cpp")
+file(GLOB native_cudnn_hip_cpp CONFIGURE_DEPENDS "native/cudnn/hip/*.cpp")
+file(GLOB native_nested_hip_hip CONFIGURE_DEPENDS "native/nested/hip/*.hip")
+file(GLOB native_nested_hip_cpp CONFIGURE_DEPENDS "native/nested/hip/*.cpp")
+file(GLOB native_sparse_hip_hip CONFIGURE_DEPENDS "native/sparse/hip/*.hip")
+file(GLOB native_sparse_hip_cpp CONFIGURE_DEPENDS "native/sparse/hip/*.cpp")
+file(GLOB native_quantized_hip_hip CONFIGURE_DEPENDS "native/quantized/hip/*.hip")
+file(GLOB native_quantized_hip_cpp CONFIGURE_DEPENDS "native/quantized/hip/*.cpp")
+file(GLOB native_transformers_cuda_cu CONFIGURE_DEPENDS "native/transformers/cuda/*.cu")
+file(GLOB native_transformers_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cuda/*.cpp")
+file(GLOB native_transformers_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/*.hip")
+file(GLOB native_transformers_hip_cpp CONFIGURE_DEPENDS "native/transformers/hip/*.cpp")
+file(GLOB native_transformers_xpu_cpp CONFIGURE_DEPENDS "native/transformers/xpu/*.cpp")
+file(GLOB native_quantized_cudnn_hip_cpp CONFIGURE_DEPENDS "native/quantized/cudnn/hip/*.cpp")
+file(GLOB native_utils_cpp CONFIGURE_DEPENDS "native/utils/*.cpp")
+file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
+file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
+file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
 
 # flash_attention hip sources
-file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
+file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
   if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
@@ -284,7 +284,7 @@ if(USE_FLASH_ATTENTION)
     add_subdirectory(native/transformers/hip/flash_attn/ck)
     # FAv3 Generation
     add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
-    file(GLOB ck_sdpa_sources_hip
+    file(GLOB ck_sdpa_sources_hip CONFIGURE_DEPENDS
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
@@ -306,14 +306,14 @@ if(USE_FLASH_ATTENTION)
                                )
 
   endif()
-  file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
-  file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+  file(GLOB flash_attention_hip_aot_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/aot/*.hip")
+  file(GLOB flash_attention_src_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/src/*.hip")
 endif()
 
 #Mem_eff attention sources
-file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
-file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_attention/kernels/*.cu")
-file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
+file(GLOB mem_eff_attention_cuda_cu CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/*.cu")
+file(GLOB mem_eff_attention_cuda_kernels_cu CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/kernels/*.cu")
+file(GLOB mem_eff_attention_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   add_library(flash_attention OBJECT EXCLUDE_FROM_ALL ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
@@ -364,7 +364,7 @@ IF(USE_MSLK)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from MSLK into torch, you have to add it here.
     set(MSLK_CUTLASS_KERNELS_REGEX ".*(mx8mx8bf16_grouped|f4f4bf16_grouped|f4f4bf16).*")
-    file(GLOB_RECURSE mslk_native_cuda_cu
+    file(GLOB_RECURSE mslk_native_cuda_cu CONFIGURE_DEPENDS
       "${MSLK_SRCS}/cutlass/*.cu"
       "${MSLK_SRCS}/cutlass/**/*.cu")
     list(FILTER mslk_native_cuda_cu INCLUDE REGEX ${MSLK_CUTLASS_KERNELS_REGEX})
@@ -377,7 +377,7 @@ IF(USE_MSLK)
         "100a;103a;110a")
     endforeach()
 
-    file(GLOB_RECURSE mslk_native_cuda_cpp
+    file(GLOB_RECURSE mslk_native_cuda_cpp CONFIGURE_DEPENDS
       "${MSLK_SRCS}/common/*.cpp"
     )
 
@@ -414,7 +414,7 @@ IF(USE_MSLK)
       "${MSLK_CK_DIR}/include/ck/config.h"
     )
     # Only include the kernels we want to build to avoid increasing binary size.
-    file(GLOB_RECURSE mslk_native_rocm_hip
+    file(GLOB_RECURSE mslk_native_rocm_hip CONFIGURE_DEPENDS
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
     set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
@@ -466,11 +466,11 @@ IF(USE_MSLK)
 endif()
 
 # XNNPACK
-file(GLOB native_xnnpack "native/xnnpack/*.cpp")
+file(GLOB native_xnnpack CONFIGURE_DEPENDS "native/xnnpack/*.cpp")
 
 # KLEIDIAI
-file(GLOB native_kleidiai "native/kleidiai/*.cpp")
-file(GLOB native_kleidiai_h "native/kleidiai/*.h")
+file(GLOB native_kleidiai CONFIGURE_DEPENDS "native/kleidiai/*.cpp")
+file(GLOB native_kleidiai_h CONFIGURE_DEPENDS "native/kleidiai/*.h")
 
 # Add files needed from jit folders
 append_filelist("jit_core_headers" ATen_CORE_HEADERS)
@@ -628,8 +628,8 @@ if(USE_ROCM)
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
   if(NOT USE_ROCM_CK_GEMM)
-    file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
-    file(GLOB native_hip_ck "native/hip/ck*.hip")
+    file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
+    file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()

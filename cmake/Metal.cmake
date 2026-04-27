@@ -7,9 +7,16 @@ if(WERROR)
     string(APPEND METAL_CFLAGS -Werror)
 endif()
 
+# Headers transitively included by .metal sources. Any change to these must
+# retrigger the metal -> air step, since xcrun metal does not emit depfiles
+# we can hand to ninja.
+file(GLOB METAL_HEADER_DEPS CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/c10/metal/*.h"
+     "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/mps/kernels/*.h")
+
 function(metal_to_air SRC TARGET FLAGS)
     add_custom_command(COMMAND xcrun metal -c ${SRC} -I ${CMAKE_SOURCE_DIR} -I ${CMAKE_SOURCE_DIR}/aten/src -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
-                       DEPENDS ${SRC}
+                       DEPENDS ${SRC} ${METAL_HEADER_DEPS}
                        OUTPUT ${TARGET}
                        COMMENT "Compiling ${SRC} to ${TARGET}"
                        VERBATIM)
