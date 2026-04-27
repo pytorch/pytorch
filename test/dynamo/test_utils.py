@@ -14,10 +14,24 @@ from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
+
 _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_numpy_type_helpers_require_exact_numpy_types(self):
+        if np is None:
+            self.skipTest("requires numpy")
+        self.assertTrue(utils.is_numpy_int_type(np.int32(1)))
+        self.assertFalse(utils.is_numpy_int_type(type("I", (np.int32,), {})(1)))
+        self.assertTrue(utils.is_numpy_float_type(np.float32(1)))
+        self.assertFalse(utils.is_numpy_float_type(type("F", (np.single,), {})(1)))
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])
