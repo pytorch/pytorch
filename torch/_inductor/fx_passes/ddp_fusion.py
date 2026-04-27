@@ -575,8 +575,7 @@ def fuse_ddp_communication(
 ) -> None:
     for i, pa in enumerate(passes):
         with GraphTransformObserver(
-            graph.owning_module,  # pyrefly: ignore[bad-argument-type]
-            f"fuse_ddp_communication_pass_{i}",
+            graph.owning_module, f"fuse_ddp_communication_pass_{i}"
         ):
             if isinstance(pa, str):
                 func = globals()[pa]

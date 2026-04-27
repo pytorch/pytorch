@@ -1370,7 +1370,9 @@ class Graph:
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
-    def owning_module(self) -> GraphModule | None:
+    # TODO: should return GraphModule | None, but causes downstream errors
+    # where callers pass it to functions expecting non-optional GraphModule
+    def owning_module(self):  # pyrefly: ignore[unannotated-return]
         return self._owning_module
 
     @owning_module.setter

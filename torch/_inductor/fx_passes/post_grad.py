@@ -267,7 +267,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
+                graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
                 config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
@@ -279,7 +279,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         GraphTransformObserver(gm, "bucket_all_reduce").apply_graph_pass(
             lambda graph: bucket_all_reduce(
-                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
+                graph.owning_module,
                 config.bucket_all_reduces_fx_bucket_size_determinator,
                 config.bucket_all_reduces_fx,  # type: ignore[arg-type]
             )
@@ -299,7 +299,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
+                graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
                 config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
@@ -361,7 +361,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ):
             GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
                 lambda graph: schedule_overlap_bucketing_from_inductor_configs(
-                    graph.owning_module,  # pyrefly: ignore[bad-argument-type]
+                    graph.owning_module,
                 )
             )
 

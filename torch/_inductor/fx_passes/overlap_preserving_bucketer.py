@@ -396,8 +396,6 @@ class OverlapPreservingBucketer:
             from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
 
             gm = self.graph.owning_module
-            if gm is None:
-                raise AssertionError("graph.owning_module must not be None")
             replaced = expand_fusion_regions(gm, self.region_of)
 
         # Step 3: Transfer deps from erased fusion modules to inlined nodes

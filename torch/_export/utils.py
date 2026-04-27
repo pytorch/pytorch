@@ -848,14 +848,6 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
-                if not isinstance(new_node.target, str):
-                    raise AssertionError(
-                        f"Expected str target for get_attr, got {type(new_node.target)}"
-                    )
-                if not isinstance(node.target, str):
-                    raise AssertionError(
-                        f"Expected str target for get_attr, got {type(node.target)}"
-                    )
                 new_target_name = new_node.target
                 if hasattr(gm, new_target_name):
                     # Loop through and find the "submod_{i}" that have no name collision
