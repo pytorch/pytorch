@@ -102,7 +102,7 @@ class NullHandler:
 
 
 # If a virtualized value is set to _PoisonedVirtual then any attempt to get the
-# value will result an an exception being raised. This is useful if we want to
+# value will result in an exception being raised. This is useful if we want to
 # trap uninitialized reads of virtualized globals - for example when compiling
 # in a subprocess we don't want the child reading globals that weren't copied
 # from the parent.
