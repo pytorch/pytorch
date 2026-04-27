@@ -2088,7 +2088,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+            torch._dynamo.exc.Unsupported, "Can't .* torch._check"
         ):
             f(x)
 
@@ -2104,9 +2104,138 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+            torch._dynamo.exc.Unsupported, "Can't .* torch._check"
         ):
             f(x)
+
+    def test_check_with_constant_true(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_with(ValueError, x.shape[0] > 3, lambda: "bad shape")
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+    def test_check_with_constant_false_raises(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._check_with(ValueError, x.shape[0] > 3, lambda: "bad shape")
+            return x + 1
+
+        with self.assertRaises((ValueError, RuntimeError)):
+            f(torch.randn(3))
+
+    def test_check_with_try_except(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            try:
+                torch._check_with(ValueError, False, lambda: "expected")
+            except ValueError:
+                pass
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+    def test_check_value(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_value(x.shape[0] > 3, lambda: "bad value")
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+        @torch.compile(backend="eager")
+        def f_fail(x):
+            torch._check_value(x.shape[0] > 3, lambda: "bad value")
+            return x + 1
+
+        # RuntimeError because graph lowers to torch._check
+        with self.assertRaises((ValueError, RuntimeError)):
+            f_fail(torch.randn(3))
+
+    def test_check_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_index(x.shape[0] > 3, lambda: "bad index")
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+        @torch.compile(backend="eager")
+        def f_fail(x):
+            torch._check_index(x.shape[0] > 3, lambda: "bad index")
+            return x + 1
+
+        with self.assertRaises((IndexError, RuntimeError)):
+            f_fail(torch.randn(3))
+
+    def test_check_type(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_type(x.shape[0] > 3, lambda: "bad type")
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+        @torch.compile(backend="eager")
+        def f_fail(x):
+            torch._check_type(x.shape[0] > 3, lambda: "bad type")
+            return x + 1
+
+        with self.assertRaises((TypeError, RuntimeError)):
+            f_fail(torch.randn(3))
+
+    def test_check_not_implemented(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_not_implemented(x.shape[0] > 3, lambda: "not impl")
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
+
+        @torch.compile(backend="eager")
+        def f_fail(x):
+            torch._check_not_implemented(x.shape[0] > 3, lambda: "not impl")
+            return x + 1
+
+        with self.assertRaises((NotImplementedError, RuntimeError)):
+            f_fail(torch.randn(3))
+
+    def test_check_tensor_all(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_tensor_all(x > 0, lambda: "all must be positive")
+            return x + 1
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        self.assertEqual(f(x), x + 1)
+
+    def test_check_tensor_all_with(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check_tensor_all_with(
+                ValueError, x > 0, lambda: "all must be positive"
+            )
+            return x + 1
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        self.assertEqual(f(x), x + 1)
+
+    def test_check_with_closure_constant(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            msg = "shape check failed"
+            torch._check_with(ValueError, x.shape[0] > 3, lambda: msg)
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(f(x), x + 1)
 
     def test_assert(self):
         @torch.compile(backend="eager")

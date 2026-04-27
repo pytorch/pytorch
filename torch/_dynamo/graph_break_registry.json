@@ -3452,6 +3452,28 @@
       ]
     }
   ],
+  "GB9840": [
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9158": [
+    {
+      "Gb_type": "Can't convert torch._check*() message closure",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function whose closure variables are Python constants.",
+      "Hints": [
+        "Remove closure variables that reference non-constant values, e.g. ",
+        "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
