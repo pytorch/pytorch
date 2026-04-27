@@ -3992,9 +3992,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def func():
-            make_tensor = partial(
-                torch.rand, dtype=torch.float16, requires_grad=True
-            )
+            make_tensor = partial(torch.rand, dtype=torch.float16, requires_grad=True)
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
             make_q_tensor = partial(
