@@ -455,6 +455,48 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         c10d.barrier()
 
+        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
+        src_base.copy_(
+            torch.arange(2 * numel, dtype=dtype, device=self.device)
+            + self.rank * 2 * numel
+        )
+        src_view = src_base.narrow(0, numel // 2, numel)
+        dst = torch.empty_like(src_view)
+        symm_mem.rendezvous(src_base, group=group)
+        c10d.barrier()
+
+        if self.rank == 0:
+            ret = symm_mem.get(dst, src_view, group, peer=1)
+            self.assertIs(ret, dst)
+            expected = (
+                torch.arange(
+                    numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
+                )
+                + 2 * numel
+            )
+            torch.testing.assert_close(dst, expected)
+
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    src_base[::2],
+                    group,
+                    peer=1,
+                )
+
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[
+                ::2
+            ]
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(noncontig_dst, src, group, peer=1)
+
+            with self.assertRaisesRegex(RuntimeError, "symmetric memory"):
+                symm_mem.get(
+                    torch.empty_like(src), torch.empty_like(src), group, peer=1
+                )
+
+        c10d.barrier()
+
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(

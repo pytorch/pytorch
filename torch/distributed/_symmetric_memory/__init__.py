@@ -2171,9 +2171,10 @@ def get(
     ``src`` must be a contiguous tensor allocated with
     :func:`torch.distributed._symmetric_memory.empty` and rendezvoused with
     ``group``. ``dst`` can be a regular CUDA tensor or a symmetric-memory
-    tensor. The tensors must be contiguous, have the same dtype, be on the same
-    device, and contain the same number of elements. The copy is issued on the
-    current CUDA stream and the returned tensor is ``dst``.
+    tensor. Both tensors must be backed by contiguous memory, have the same
+    dtype, be on the same device, and contain the same number of elements. The
+    copy is issued on the current CUDA stream and the returned tensor is
+    ``dst``.
 
     Args:
         dst (Tensor): local destination tensor.
@@ -2189,7 +2190,9 @@ def get(
     if dst.numel() != src.numel():
         raise ValueError("get: dst and src must have the same number of elements")
     if not dst.is_contiguous() or not src.is_contiguous():
-        raise ValueError("get: dst and src must be contiguous")
+        raise ValueError("get: dst and src must be backed by contiguous memory")
+    if not is_symm_mem_tensor(src):
+        raise RuntimeError("get: src must be allocated from symmetric memory")
 
     group_name = _resolve_group_name(group)
     backend = get_backend(src.device)

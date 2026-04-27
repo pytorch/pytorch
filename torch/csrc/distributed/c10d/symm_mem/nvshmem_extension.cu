@@ -164,9 +164,12 @@ at::Tensor& nvshmem_get_out(
       "symm_mem.get: dst and src must have the same number of elements");
   TORCH_CHECK(
       dst.is_contiguous() && src.is_contiguous(),
-      "symm_mem.get: dst and src must be contiguous");
+      "symm_mem.get: dst and src must be backed by contiguous memory");
 
   auto hdl = c10d::symmetric_memory::rendezvous(src, group_name);
+  TORCH_CHECK(
+      hdl != nullptr,
+      "symm_mem.get: src must be allocated from symmetric memory");
   TORCH_CHECK(peer >= 0 && peer < hdl->get_world_size(), "symm_mem.get: invalid peer");
   auto global_peer = hdl->get_rank_to_global_rank().at(peer);
   auto nbytes = dst.numel() * dst.element_size();
