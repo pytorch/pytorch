@@ -964,8 +964,26 @@ class profile(_KinetoProfile):
 
         # If device collection was stopped (e.g. buffer overflow), force an
         # early stop regardless of what the schedule says.
+        #
+        # Note that we have to be careful about what the previous and current
+        # action is:
+        #
+        # - prev_action != NONE: if we already transitioned to NONE, the next
+        #   cycle must be allowed to start (NONE -> WARMUP calls prepare_trace
+        #   which resets the stopped flag). Blocking it would livelock.
+        #
+        # - current_action not NONE: if the schedule is already stopping us
+        #   (e.g. RECORD -> NONE), respect that. Without this, the RECORD
+        #   branch below would override NONE to RECORD_AND_SAVE, extending
+        #   profiling by a step when the schedule says to stop.
+        #
+        # When aborting from RECORD, we transition to RECORD_AND_SAVE rather
+        # than NONE so that the next step's RECORD_AND_SAVE -> NONE transition
+        # fires stop_trace + _trace_ready, saving the collected data. This
+        # costs one extra training step with profiling overhead.
         if (
-            self.use_device is not None
+            torch.autograd._is_stopped()
+            and self.use_device is not None
             and prev_action
             in (
                 ProfilerAction.WARMUP,
@@ -973,7 +991,6 @@ class profile(_KinetoProfile):
                 ProfilerAction.RECORD_AND_SAVE,
             )
             and self.current_action != ProfilerAction.NONE
-            and torch.autograd._is_stopped()
         ):
             warn(
                 "GPU activity collection was stopped early. "
@@ -982,8 +999,6 @@ class profile(_KinetoProfile):
             if prev_action == ProfilerAction.RECORD:
                 self.current_action = ProfilerAction.RECORD_AND_SAVE
             else:
-                # WARMUP: nothing to save, go straight to NONE.
-                # RECORD_AND_SAVE: transition to NONE fires stop_trace + _trace_ready.
                 self.current_action = ProfilerAction.NONE
 
         self._transit_action(prev_action, self.current_action)
