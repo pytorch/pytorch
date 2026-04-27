@@ -15787,11 +15787,8 @@ def forward(self, L_x_ : torch.Tensor):
 
     @torch._dynamo.config.patch(recompile_limit=2)
     def test_compile_exec_function_no_cache_thrash(self):
-        # Issue #124269: functions created via exec have no source
-        # file, but should not be wrapped in external_utils.wrap_inline.
-        # Otherwise every exec'd function compiles through wrap_inline's
-        # shared `inner` code object, exhausting its recompile cache
-        # after a few unique functions (and raising under fullgraph=True).
+        # Issue #124269: exec'd functions must not go through wrap_inline,
+        # else they share one `inner` code object and hit recompile_limit.
         code = "def op(x):\n    return torch.mean(x)"
         x = torch.zeros(3)
         for _ in range(5):  # > recompile_limit
