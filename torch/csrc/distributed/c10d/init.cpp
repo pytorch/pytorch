@@ -2191,6 +2191,7 @@ communication mechanism.
               py::arg("opts") = std::nullopt,
               py::arg("group_name") = std::nullopt,
               py::arg("group_desc") = std::nullopt,
+              py::arg("device_types") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
