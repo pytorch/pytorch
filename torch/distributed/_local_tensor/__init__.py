@@ -686,7 +686,8 @@ class _LocalOffsetBasedRNGTracker:
 
     @property
     def _device(self):
-        return torch.device(self._device_type, torch.cuda.current_device())
+        device_module = torch.get_device_module(self._device_type)
+        return torch.device(self._device_type, device_module.current_device())
 
     def _set_pre_op_offset(self, state, spec) -> None:
         """Compute and set per-rank offsets before the random operation."""
