@@ -7,7 +7,7 @@ import gc
 import itertools
 import unittest
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from typing import Any
 
 import torch
@@ -1995,10 +1995,7 @@ class TestFullyShardShareCommContext(FSDPTest):
         all_gather_streams = set()
         reduce_scatter_streams = set()
 
-        from torch.distributed.fsdp._fully_shard._fsdp_api import (
-            AllGather,
-            ReduceScatter,
-        )
+        from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
         from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
 
         orig_foreach_all_gather = foreach_all_gather
@@ -2030,22 +2027,12 @@ class TestFullyShardShareCommContext(FSDPTest):
 
         @torch.no_grad()
         def foreach_reduce_with_assert(
-            fsdp_params: list[FSDPParam],
-            unsharded_grads: list[torch.Tensor],
-            reduce_scatter_group: dist.ProcessGroup,
-            reduce_scatter_stream: torch.Stream,
-            reduce_scatter_comm: ReduceScatter,
-            orig_dtype: torch.dtype | None,
-            reduce_dtype: torch.dtype | None,
-            device: torch.device,
-            gradient_divide_factor: float | None,
-            all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
-            all_reduce_stream: torch.Stream,
-            all_reduce_grads: bool,
-            partial_reduce_output: torch.Tensor | None,  # only used for HSDP
-            all_reduce_hook: Callable[[torch.Tensor], None] | None,
-            force_sum_reduction_for_comms: bool = False,
-            module_fqn: str | None = None,
+            fsdp_params,
+            unsharded_grads,
+            reduce_scatter_group,
+            reduce_scatter_stream,
+            *args,
+            **kwargs,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2054,18 +2041,8 @@ class TestFullyShardShareCommContext(FSDPTest):
                 unsharded_grads,
                 reduce_scatter_group,
                 reduce_scatter_stream,
-                reduce_scatter_comm,
-                orig_dtype,
-                reduce_dtype,
-                device,
-                gradient_divide_factor,
-                all_reduce_group,
-                all_reduce_stream,
-                all_reduce_grads,
-                partial_reduce_output,
-                all_reduce_hook,
-                force_sum_reduction_for_comms,
-                module_fqn,
+                *args,
+                **kwargs,
             )
 
         with (
