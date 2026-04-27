@@ -87,7 +87,9 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
       [[maybe_unused]] const char* what = "") const override {
     // Clamp pos/n against size_ to prevent OOB reads from crafted zip
     // metadata. Mirrors FileAdapter::read (file_adapter.cc).
-    if (C10_UNLIKELY(pos >= static_cast<uint64_t>(size_))) {
+    // Also guard against a negative/zero size_ (off_t is signed): a crafted
+    // JNI-supplied size would otherwise wrap to UINT64_MAX and bypass checks.
+    if (C10_UNLIKELY(size_ <= 0 || pos >= static_cast<uint64_t>(size_))) {
       return 0;
     }
     const uint64_t remaining = static_cast<uint64_t>(size_) - pos;
