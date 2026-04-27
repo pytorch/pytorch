@@ -505,6 +505,7 @@ class TestRecheckAutotuneCache(TestCase):
 
         result = MagicMock(spec=StaticTritonCompileResult)
         result.config = cfg
+        result.runtime_winner = False
         return result
 
     @staticmethod
@@ -538,7 +539,7 @@ class TestRecheckAutotuneCache(TestCase):
 
         with patch(
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}, True),
         ):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 
@@ -571,7 +572,7 @@ class TestRecheckAutotuneCache(TestCase):
 
         with patch(
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}, True),
         ):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 
@@ -597,7 +598,7 @@ class TestRecheckAutotuneCache(TestCase):
 
         with patch(
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}, True),
         ):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 
@@ -621,7 +622,7 @@ class TestRecheckAutotuneCache(TestCase):
         # Cache returns no hit (empty list)
         with patch(
             "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([], None, {"autotune_cache_state": "miss"}),
+            return_value=([], None, {"autotune_cache_state": "miss"}, False),
         ):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 

@@ -273,13 +273,19 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
 
 
 def check_autotune_cache(
-    configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
-) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
+    configs: list[Config],
+    filename: str | None,
+    fn_src: str | None,
+    inductor_meta: dict[str, Any],
+) -> tuple[list[Config], AutotuneCache | None, dict[str, Any], bool]:
     """
-    Given a list of configs, checks autotune cache and return metadata
+    Given a list of configs, checks autotune cache and return metadata.
+    fn_src is the kernel body source (from fn.src) used for stable cache keys.
+    Returns (configs, autotune_cache, autotune_cache_info, cache_hit).
     """
     autotune_cache = None
     autotune_cache_info = {}
+    cache_hit = False
     disabled = inductor_meta.get("force_disable_caches", False)
     if (
         not disabled
@@ -289,7 +295,9 @@ def check_autotune_cache(
     ):
         configs_hash = hash_configs(configs)
 
-        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+        autotune_cache = AutotuneCache.create(
+            inductor_meta, filename, configs_hash, fn_src=fn_src
+        )
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
@@ -297,6 +305,7 @@ def check_autotune_cache(
                     best_config
                 )
                 autotune_cache_info["autotune_cache_state"] = "hit"
+                cache_hit = True
 
             else:
                 autotune_cache_info["autotune_cache_state"] = "miss"
@@ -304,8 +313,6 @@ def check_autotune_cache(
                 if inductor_meta.get("coordinate_descent_tuning"):
                     autotune_cache_info["coordesc_tuning"] = True
                     if len(configs) == 1:
-                        # This is the config that coordinate descent tuning started at, which
-                        # is not the same as the final config chosen (i.e. only_config, best_config)
                         autotune_cache_info["coordesc_tuning_start_config"] = (
                             triton_config_to_hashable(configs[0])
                         )
@@ -318,7 +325,7 @@ def check_autotune_cache(
             autotune_cache_info["autotune_cache_state"] = "force_disabled"
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
-    return configs, autotune_cache, autotune_cache_info
+    return configs, autotune_cache, autotune_cache_info, cache_hit
 
 
 class CachingAutotuner(KernelInterface):
@@ -344,6 +351,7 @@ class CachingAutotuner(KernelInterface):
         filename: str | None = None,
         reset_to_zero_arg_names: list[str] | None = None,
         autotune_cache_info: dict[str, Any] | None = None,
+        cache_hit: bool = False,
     ):
         super().__init__()
 
@@ -380,6 +388,7 @@ class CachingAutotuner(KernelInterface):
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
+        self.cache_hit = cache_hit
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -478,33 +487,35 @@ class CachingAutotuner(KernelInterface):
         """
         assert self.is_statically_launchable()
 
+        if len(self.compile_results) == 1 and self.compile_results[0].runtime_winner:
+            return
+
         configs = [result.config for result in self.compile_results]
 
-        (cached_configs, _, autotune_cache_info) = check_autotune_cache(
-            configs, self.filename, self.inductor_meta
+        fn_src = getattr(self.fn, "src", None)
+        (cached_configs, _, autotune_cache_info, cache_hit) = check_autotune_cache(
+            configs, self.filename, fn_src, self.inductor_meta
         )
         self.autotune_cache_info = autotune_cache_info
-        # I.e. there was an autotune cache hit
-        if len(cached_configs) == 1:
+        if cache_hit:
             best_config = cached_configs[0]
             found_by_coordesc = getattr(best_config, "found_by_coordesc", False)
-            # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
 
             for compile_result in self.compile_results:
                 if triton_config_to_hashable(compile_result.config) == best_config_hash:
                     compile_result.config.found_by_coordesc = found_by_coordesc
+                    compile_result.runtime_winner = True
                     self.compile_results = [compile_result]
                     return
 
-            # If the best config isn't in our list of compile results,
-            # it's likely because it was found by coordesc after the cache
-            # already saved
             if found_by_coordesc:
                 with dynamo_timed("CachingAutotuner.slow_precompile_config"):
                     if self.fn.fn is None:
                         self.fn = reload_kernel_from_src().fn
-                    self.compile_results = [self._precompile_config(best_config)]
+                    result = self._precompile_config(best_config)
+                    result.runtime_winner = True
+                    self.compile_results = [result]
 
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
@@ -530,7 +541,13 @@ class CachingAutotuner(KernelInterface):
             if static_triton_bundle_key is not None and self.is_statically_launchable():
                 TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
-            self._dynamic_scale_rblock()
+            is_runtime_winner = len(self.compile_results) == 1 and getattr(
+                self.compile_results[0], "runtime_winner", False
+            )
+            if is_runtime_winner and self.launchers:
+                self.launchers[0].config.found_by_coordesc = True
+            else:
+                self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -556,6 +573,8 @@ class CachingAutotuner(KernelInterface):
                 f"No valid triton configs. {type(exc).__name__}: {exc}"
             )
         self.compile_results = compile_results
+        if self.cache_hit and len(compile_results) == 1:
+            compile_results[0].runtime_winner = True
         self.configs = None
 
     def _dynamic_scale_rblock(self):
@@ -2013,6 +2032,7 @@ class CompileResult(Generic[_T]):
         self.config = config
         self.compile_meta = compile_meta
         self.inductor_meta = inductor_meta
+        self.runtime_winner = False
 
     def make_launcher(self) -> LauncherType: ...
 
@@ -2678,10 +2698,6 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
     inductor_meta = {} if inductor_meta is None else inductor_meta
-
-    configs, autotune_cache, autotune_cache_info = check_autotune_cache(
-        configs, filename, inductor_meta
-    )
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
@@ -2693,6 +2709,11 @@ def cached_autotune(
         reset_to_zero_arg_names.extend(triton_meta.pop("reset_to_zero"))
 
     def decorator(fn):
+        nonlocal configs
+        fn_src = getattr(fn, "src", None)
+        configs, autotune_cache, autotune_cache_info, cache_hit = check_autotune_cache(
+            configs, filename, fn_src, inductor_meta
+        )
         # Remove XBLOCK from config if it's not a function argument.
         # This way, coordinate descent tuning will not try to tune it.
         #
@@ -2739,6 +2760,7 @@ def cached_autotune(
             custom_kernel=custom_kernel,
             filename=filename,
             autotune_cache_info=autotune_cache_info,
+            cache_hit=cache_hit,
         )
 
     return decorator

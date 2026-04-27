@@ -4146,6 +4146,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 layout.device.type if layout else "unknown",
             )
 
+        cached_timings = self.lookup(
+            choices, name, inputs_key, benchmark=None, hint_override=hint_override
+        )
+        if cached_timings and len(cached_timings) == len(choices):
+            return cached_timings
+
         precompile_start_ts = time.time()
 
         if not use_pipelined_autotuning():
