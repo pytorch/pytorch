@@ -1,3 +1,5 @@
+# Owner(s): ["module: pallas"]
+
 """Tests for torch.library.pallas_op.
 
 Tests that do not require JAX or TPU hardware test the signature
@@ -8,32 +10,27 @@ Tests that require JAX are skipped when JAX is not installed.
 import inspect
 import types
 import unittest
-from unittest.mock import MagicMock, patch
 
 import torch
 from torch._library.pallas import (
     _get_torch_signature,
     _infer_static_argnums,
-    _is_valid_argument_type,
     _verify_signature,
     pallas_op,
 )
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _jax_available():
     try:
         import jax  # noqa: F401
+
         return True
     except ImportError:
         return False
 
 
-# Create a mock jax.Array type for tests that don't need real JAX
-class _MockJaxArray:
-    pass
-
-
-class SignatureVerificationTest(unittest.TestCase):
+class SignatureVerificationTest(TestCase):
     """Tests for signature verification without requiring JAX."""
 
     @unittest.skipUnless(_jax_available(), "JAX not installed")
@@ -81,7 +78,7 @@ class SignatureVerificationTest(unittest.TestCase):
             _verify_signature(inspect.signature(fn))
 
 
-class StaticArgnumInferenceTest(unittest.TestCase):
+class StaticArgnumInferenceTest(TestCase):
     @unittest.skipUnless(_jax_available(), "JAX not installed")
     def test_all_tensors(self):
         import jax
@@ -113,7 +110,7 @@ class StaticArgnumInferenceTest(unittest.TestCase):
         self.assertEqual(result, ())
 
 
-class TorchSignatureConversionTest(unittest.TestCase):
+class TorchSignatureConversionTest(TestCase):
     @unittest.skipUnless(_jax_available(), "JAX not installed")
     def test_basic_conversion(self):
         import jax
@@ -159,35 +156,36 @@ class TorchSignatureConversionTest(unittest.TestCase):
             pass
 
         torch_sig = _get_torch_signature(inspect.signature(fn))
-        self.assertEqual(
-            torch_sig.return_annotation, tuple[torch.Tensor, torch.Tensor]
-        )
+        self.assertEqual(torch_sig.return_annotation, tuple[torch.Tensor, torch.Tensor])
 
 
-class PallasOpRegistrationTest(unittest.TestCase):
+class PallasOpRegistrationTest(TestCase):
     def test_invalid_name_raises(self):
         with self.assertRaises(ValueError, msg="namespace::name"):
+
             @pallas_op("no_namespace")
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x
 
     def test_double_colon_required(self):
         with self.assertRaises(ValueError, msg="namespace::name"):
+
             @pallas_op("a::b::c")
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x
 
 
-class PallasOpDiscoverabilityTest(unittest.TestCase):
+class PallasOpDiscoverabilityTest(TestCase):
     def test_available_in_torch_library(self):
         self.assertTrue(hasattr(torch.library, "pallas_op"))
 
     def test_in_all(self):
         import torch.library as lib
+
         self.assertIn("pallas_op", lib.__all__)
 
 
-class DtypeMappingTest(unittest.TestCase):
+class DtypeMappingTest(TestCase):
     @unittest.skipUnless(_jax_available(), "JAX not installed")
     def test_roundtrip_common_dtypes(self):
         from torch._library.pallas import _jax_to_torch_dtype, _torch_to_jax_dtype
@@ -213,4 +211,4 @@ class DtypeMappingTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

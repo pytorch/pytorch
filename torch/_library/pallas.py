@@ -43,9 +43,7 @@ def _ensure_dtype_maps() -> None:
     try:
         import jax.numpy as jnp
     except ImportError as e:
-        raise ImportError(
-            "JAX is required for pallas_op. Please install JAX."
-        ) from e
+        raise ImportError("JAX is required for pallas_op. Please install JAX.") from e
 
     _TORCH_TO_JAX_DTYPE_MAP = {
         torch.float32: jnp.float32.dtype,
@@ -71,7 +69,8 @@ def _ensure_dtype_maps() -> None:
 
 def _torch_to_jax_dtype(dtype: torch.dtype) -> Any:
     _ensure_dtype_maps()
-    assert _TORCH_TO_JAX_DTYPE_MAP is not None
+    if _TORCH_TO_JAX_DTYPE_MAP is None:
+        raise RuntimeError("dtype maps not initialized")
     result = _TORCH_TO_JAX_DTYPE_MAP.get(dtype)
     if result is None:
         raise NotImplementedError(f"Unsupported dtype for pallas_op: {dtype}")
@@ -80,7 +79,8 @@ def _torch_to_jax_dtype(dtype: torch.dtype) -> Any:
 
 def _jax_to_torch_dtype(dtype: Any) -> torch.dtype:
     _ensure_dtype_maps()
-    assert _JAX_TO_TORCH_DTYPE_MAP is not None
+    if _JAX_TO_TORCH_DTYPE_MAP is None:
+        raise RuntimeError("dtype maps not initialized")
     result = _JAX_TO_TORCH_DTYPE_MAP.get(dtype)
     if result is None:
         raise NotImplementedError(f"Unsupported JAX dtype for pallas_op: {dtype}")
@@ -90,6 +90,7 @@ def _jax_to_torch_dtype(dtype: Any) -> torch.dtype:
 # ---------------------------------------------------------------------------
 # JAX ↔ Torch placeholder conversion
 # ---------------------------------------------------------------------------
+
 
 def jax_placeholder(tensor: torch.Tensor) -> Any:
     """Convert a torch.Tensor to a ``jax.ShapeDtypeStruct`` for tracing."""
@@ -113,9 +114,11 @@ def torch_placeholder(aval: Any) -> torch.Tensor | None:
 # Signature introspection
 # ---------------------------------------------------------------------------
 
+
 def _is_jax_array(annotation: type[Any]) -> bool:
     try:
         import jax
+
         return annotation is jax.Array
     except ImportError:
         return False
@@ -219,9 +222,11 @@ def _get_torch_signature(signature: inspect.Signature) -> inspect.Signature:
             return torch.Tensor
         if (underlying := _get_underlying_type_from_optional(typ)) is not None:
             return _map_jax_to_torch(underlying) | types.NoneType
-        if (origin := typing.get_origin(typ)) is tuple:
-            mapped_args = (_map_jax_to_torch(arg) for arg in typing.get_args(typ))
-            return origin[*mapped_args]
+        if typing.get_origin(typ) is tuple:
+            mapped_args = tuple(
+                _map_jax_to_torch(arg) for arg in typing.get_args(typ)
+            )
+            return tuple.__class_getitem__(mapped_args)
         return typ
 
     new_parameters = []
@@ -232,14 +237,13 @@ def _get_torch_signature(signature: inspect.Signature) -> inspect.Signature:
             param.replace(annotation=_map_jax_to_torch(param.annotation))
         )
     new_return_annotation = _map_jax_to_torch(signature.return_annotation)
-    return inspect.Signature(
-        new_parameters, return_annotation=new_return_annotation
-    )
+    return inspect.Signature(new_parameters, return_annotation=new_return_annotation)
 
 
 # ---------------------------------------------------------------------------
 # pallas_op
 # ---------------------------------------------------------------------------
+
 
 @exposed_in("torch.library")
 def pallas_op(
@@ -287,9 +291,7 @@ def pallas_op(
 
     """
     if "::" not in name or len(name.split("::")) != 2:
-        raise ValueError(
-            f"Op name must be in 'namespace::name' format, got: {name}"
-        )
+        raise ValueError(f"Op name must be in 'namespace::name' format, got: {name}")
 
     def dec(fn: Callable[..., object]) -> CustomOpDef:
         signature = inspect.signature(fn, follow_wrapped=False)
@@ -327,7 +329,10 @@ def pallas_op(
             import jax
             import jax.export
 
-            jax_args = [jax_placeholder(a) if isinstance(a, torch.Tensor) else a for a in args]
+            jax_args = [
+                jax_placeholder(a) if isinstance(a, torch.Tensor) else a
+                for a in args
+            ]
 
             jit_fn = jax.jit(fn, static_argnums=static_argnums)
             exported = jax.export.export(jit_fn, platforms=["tpu"])
