@@ -25,6 +25,8 @@ class TestBackendModule(TestCase):
         self.assertEqual(
             repr(ProfilerActivity.OPENREG), "<ProfilerActivity.OPENREG: 5>"
         )
+        self.assertEqual(str(ProfilerActivity.OPENREG), "ProfilerActivity.OPENREG")
+        self.assertEqual(ProfilerActivity.OPENREG.name, "OPENREG")
 
     def test_backend_module_registration(self):
         """Test backend module registration error handling"""
