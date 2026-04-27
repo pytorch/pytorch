@@ -783,15 +783,16 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       int32_t device_id,
       void** out_stream) {
     try {
-#if defined(USE_CUDA) || defined(USE_XPU)
-    if (at::accelerator::getAccelerator() && (device_type == kDLCUDA || device_type == kDLROCM || device_type == kDLOneAPI)) {
-      *out_stream = at::accelerator::getCurrentStream(device_id).native_handle();
-      return 0;
-    }
-#endif
-
-      // For CPU and other devices, return NULL (no stream concept)
+      const auto acc_type = at::accelerator::getAccelerator(false);
+      if (!acc_type) {
+        *out_stream = nullptr;
+        return 0;
+      }
       *out_stream = nullptr;
+      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
+        *out_stream =
+            at::accelerator::getCurrentStream(device_id).native_handle();
+      }
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
