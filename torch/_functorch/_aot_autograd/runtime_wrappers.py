@@ -97,6 +97,7 @@ from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
+    normalize_as_list,
     partial_flatten_asdict,
     simple_wraps,
     strict_zip,
@@ -471,6 +472,15 @@ class _FirstInvocationContext:
         return nullcontext()
 
 
+# Note [RuntimeWrapper codegen specification methods]
+# The run() method on _RuntimeCompiledFnInvoker and the capture_orig_inputs(),
+# increment_mutation_versions(), and finalize() methods on _RuntimeForwardEpilogue
+# are the readable reference implementations for the codegen'd _runtime_wrapper
+# generated in _create_runtime_wrapper(). They are not called on the hot path;
+# the codegen inlines their logic with all branches resolved at compile time.
+#
+# WARNING: Any semantic change to the runtime wrapper must be reflected in both
+# the reference methods here and the codegen in _create_runtime_wrapper().
 @dataclass
 class _RuntimeCompiledFnInvoker:
     compiled_fn: Callable[..., Any]
@@ -485,6 +495,9 @@ class _RuntimeCompiledFnInvoker:
         if not getattr(self.compiled_fn, "_boxed_call", False):
             self.compiled_fn = make_boxed_func(self.compiled_fn)
 
+    # WARNING: this is a reference implementation; the hot path uses codegen'd
+    # code from _create_runtime_wrapper(). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def run(self, args: list[Any], *, on_before_call: Callable[[], None]) -> list[Any]:
         with self.first_invocation_ctx():
             if self.trace_joint:
@@ -567,9 +580,15 @@ class _RuntimeForwardEpilogue:
         else:
             self.output_handlers = ()
 
+    # WARNING: this is a reference implementation; the hot path uses codegen'd
+    # code from _create_runtime_wrapper(). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def capture_orig_inputs(self, args: list[Any]) -> dict[int, Any]:
         return {i: args[i] for i in self.epilogue_args_idx}
 
+    # WARNING: this is a reference implementation; the hot path uses codegen'd
+    # code from _create_runtime_wrapper(). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def increment_mutation_versions(self, args: list[Any]) -> None:
         if self.keep_input_mutations:
             mutated_args = (
@@ -578,6 +597,9 @@ class _RuntimeForwardEpilogue:
             )
             torch.autograd.graph.increment_version(mutated_args)
 
+    # WARNING: this is a reference implementation; the hot path uses codegen'd
+    # code from _create_runtime_wrapper(). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def finalize(self, orig_inputs: dict[int, Any], all_outs: list[Any]) -> Any:
         self._validate_compiled_output_arity(all_outs)
         updated_inputs, fw_outs = self._split_mutated_inputs(all_outs)
@@ -716,6 +738,131 @@ class _RuntimeForwardEpilogue:
             handler(orig_inputs, fw_outs, out)
             for out, handler in zip(fw_outs, self.output_handlers)
         ]
+
+
+def _codegen_capture_orig_inputs(
+    rw_lines: list[str],
+    epilogue_args_idx: tuple[int, ...],
+) -> None:
+    if epilogue_args_idx:
+        idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
+        rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
+    else:
+        rw_lines.append("    orig_inputs = {}")
+
+
+def _codegen_increment_mutation_versions(
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
+    keep_input_mutations: bool,
+    runtime_metadata: ViewAndMutationMeta,
+) -> None:
+    if (
+        keep_input_mutations
+        and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+    ):
+        rw_globals["_increment_version_"] = torch.autograd.graph.increment_version
+        mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
+        gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
+        rw_lines.append(f"    _increment_version_(({gen_expr},))")
+
+
+def _codegen_compiled_fn_invocation(
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
+    trace_joint: bool,
+    indices_of_inps_to_detach: list[int],
+    disable_amp: bool,
+) -> None:
+    rw_lines.append("    with _first_ctx_():")
+    if trace_joint:
+        rw_lines.append("        args_ = list(args)")
+        for idx in indices_of_inps_to_detach:
+            rw_lines.append(
+                f"        if isinstance(args_[{idx}], torch.Tensor): "
+                f"args_[{idx}] = args_[{idx}].detach()"
+            )
+        rw_globals["_force_view_tracking_"] = (
+            torch.autograd._force_original_view_tracking
+        )
+        rw_lines.append(
+            "        with _force_view_tracking_(True), torch.enable_grad():"
+        )
+        rw_lines.append("            _on_before_call_()")
+        if disable_amp:
+            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+            rw_lines.append("            with _DisableAutocast_():")
+            rw_lines.append(
+                "                all_outs = _normalize_as_list_(_compiled_fn_(args_))"
+            )
+        else:
+            rw_lines.append(
+                "            all_outs = _normalize_as_list_(_compiled_fn_(args_))"
+            )
+    else:
+        rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
+        rw_lines.append("        try:")
+        rw_lines.append(
+            "            if grad_enabled: torch._C._set_grad_enabled(False)"
+        )
+        rw_lines.append("            _on_before_call_()")
+        if disable_amp:
+            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+            rw_lines.append("            with _DisableAutocast_():")
+            rw_lines.append(
+                "                all_outs = _normalize_as_list_(_compiled_fn_(args))"
+            )
+        else:
+            rw_lines.append(
+                "            all_outs = _normalize_as_list_(_compiled_fn_(args))"
+            )
+        rw_lines.append("        finally:")
+        rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
+    rw_lines.append("    del args")
+
+
+def _codegen_epilogue(
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
+    runtime_metadata: ViewAndMutationMeta,
+    runtime_epilogue: _RuntimeForwardEpilogue,
+    num_mutated_runtime_inps: int,
+    expected_outs: int,
+) -> None:
+    rw_lines.append(f"    if len(all_outs) != {expected_outs}:")
+    rw_lines.append(
+        f'        raise AssertionError(f"expected {expected_outs} outputs, '
+        f'got {{len(all_outs)}}")'
+    )
+
+    if num_mutated_runtime_inps > 0:
+        rw_lines.append(f"    updated_inputs = all_outs[:{num_mutated_runtime_inps}]")
+        rw_lines.append(f"    fw_outs = all_outs[{num_mutated_runtime_inps}:]")
+        rw_lines.append("    _apply_mutations_(orig_inputs, updated_inputs)")
+        rw_globals["_apply_mutations_"] = runtime_epilogue._apply_input_mutations
+    else:
+        rw_lines.append("    fw_outs = all_outs")
+
+    if runtime_metadata.num_outputs_aliased > 0:
+        rw_globals["_replay_aliases_"] = runtime_epilogue._replay_output_aliases
+        rw_lines.append("    ret_outs = _replay_aliases_(orig_inputs, fw_outs)")
+    else:
+        rw_lines.append("    ret_outs = fw_outs")
+
+    if runtime_metadata.dynamic_outputs:
+        rw_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
+        for i, o in enumerate(runtime_metadata.output_info):
+            if o.dynamic_dims is not None:
+                dims_name = f"_dyn_dims_{i}"
+                rw_globals[dims_name] = o.dynamic_dims
+                rw_lines.append(f"    _mark_dynamic_(ret_outs[{i}], {dims_name})")
+
+    if runtime_metadata.grad_enabled_mutation is not None:
+        rw_lines.append(
+            f"    torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})"
+        )
+
+    rw_lines.append("    return ret_outs")
 
 
 def _create_runtime_wrapper(
@@ -905,9 +1052,54 @@ def _create_runtime_wrapper(
             runtime_epilogue,
         )
 
-    @simple_wraps(compiled_invoker.compiled_fn)
+    from .subclass_codegen import _compile_and_exec_source
+
+    epilogue_args_idx = runtime_epilogue.epilogue_args_idx
+    num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
+    expected_outs = (
+        num_mutated_runtime_inps
+        + runtime_metadata.num_outputs
+        + runtime_metadata.num_intermediate_bases
+    )
+
+    rw_lines: list[str] = []
+    rw_globals: dict[str, object] = {
+        "torch": torch,
+        "_normalize_as_list_": normalize_as_list,
+    }
+
+    rw_lines.append(
+        "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):"
+    )
+    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
+    _codegen_increment_mutation_versions(
+        rw_lines, rw_globals, keep_input_mutations, runtime_metadata
+    )
+    _codegen_compiled_fn_invocation(
+        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+    )
+    _codegen_epilogue(
+        rw_lines,
+        rw_globals,
+        runtime_metadata,
+        runtime_epilogue,
+        num_mutated_runtime_inps,
+        expected_outs,
+    )
+    rw_source = "\n".join(rw_lines)
+
+    _codegen_runtime_wrapper = _compile_and_exec_source(
+        rw_source,
+        rw_globals,
+        "_runtime_wrapper",
+        "runtime_wrapper_orchestration",
+    )
+
+    _inner_compiled_fn = compiled_invoker.compiled_fn
+    _first_invocation_ctx = compiled_invoker.first_invocation_ctx
+
+    @simple_wraps(_inner_compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
-        # Create context manager for profiler
         cm = record_runtime_wrapper_prologue_enter()
         prologue_exited = False
 
@@ -918,20 +1110,20 @@ def _create_runtime_wrapper(
                 prologue_exited = True
 
         try:
-            # stash a ref to each input tensor we plan to use after the compiled function
-            orig_inputs = runtime_epilogue.capture_orig_inputs(args)
-            runtime_epilogue.increment_mutation_versions(args)
-            all_outs = compiled_invoker.run(args, on_before_call=exit_prologue)
+            result = _codegen_runtime_wrapper(
+                _inner_compiled_fn,
+                _first_invocation_ctx,
+                exit_prologue,
+                args,
+            )
         finally:
             exit_prologue()
-
         del args
-        return runtime_epilogue.finalize(orig_inputs, all_outs)
+        return result
 
     if not (trace_joint and _should_disable_saved_tensors_hooks()):
         return runtime_wrapper
 
-    # Disabling saved tensors hooks
     @simple_wraps(runtime_wrapper)
     def _runtime_wrapper(*args: Any, **kwargs: Any) -> Any:
         with _disable_saved_tensors_hooks():
