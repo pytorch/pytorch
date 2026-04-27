@@ -270,7 +270,6 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import filecmp
 import importlib
 import itertools
 import json
@@ -502,93 +501,6 @@ TORCH_VERSION = get_torch_version()
 report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
-
-
-# Windows has very bad support for symbolic links.
-# Instead of using symlinks, we're going to copy files over
-def mirror_files_into_torchgen() -> None:
-    # (new_path, orig_path)
-    # Directories are OK and are recursively mirrored.
-    paths = [
-        (
-            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
-            CWD / "aten/src/ATen/native/native_functions.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/native/tags.yaml",
-            CWD / "aten/src/ATen/native/tags.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/templates",
-            CWD / "aten/src/ATen/templates",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd",
-            CWD / "tools/autograd",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd/templates",
-            CWD / "tools/autograd/templates",
-        ),
-    ]
-    for new_path, orig_path in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
-
-
-def mirror_inductor_external_kernels() -> None:
-    """
-    Copy external kernels into Inductor so they are importable.
-    """
-    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
-    paths = [
-        (
-            CWD
-            / "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/cutedsl_grouped_gemm.py",
-            CWD
-            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
-            True,
-        ),
-    ]
-    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
-            (new_path.parent / "__init__.py").touch(exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        if (
-            not orig_path.exists()
-            and allow_missing_if_cuda_is_disabled
-            and cuda_is_disabled
-        ):
-            continue
-        raise RuntimeError(
-            "Check the file paths in `mirror_inductor_external_kernels()`"
-        )
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -974,28 +886,6 @@ def build_deps() -> None:
             '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
-
-    # Use copies instead of symbolic files.
-    # Windows has very poor support for them.
-    sym_files = [
-        CWD / "tools/shared/_utils_internal.py",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
-    ]
-    orig_files = [
-        CWD / "torch/_utils_internal.py",
-        CWD / "third_party/valgrind-headers/callgrind.h",
-        CWD / "third_party/valgrind-headers/valgrind.h",
-    ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
-        same = False
-        if sym_file.exists():
-            if filecmp.cmp(sym_file, orig_file):
-                same = True
-            else:
-                sym_file.unlink()
-        if not same:
-            shutil.copyfile(orig_file, sym_file)
 
 
 ################################################################################
@@ -1628,10 +1518,8 @@ def main() -> None:
         print(e, file=sys.stderr)
         sys.exit(1)
 
-    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-        mirror_inductor_external_kernels()
 
     (
         ext_modules,
