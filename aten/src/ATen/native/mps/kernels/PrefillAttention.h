@@ -935,6 +935,12 @@ prefill_attention(
     loader_k.next();
     loader_v.next();
   }
+  PREFILL_PRAGMA_UNROLL
+  for (short i = 0; i < kRowsPT; ++i) {
+    if (max_score[i] == -INFINITY) {
+      sum_score[i] = AccumType(1);
+    }
+  }
 
   // Normalize and store output.
   Otile.template row_bin_op<DivOp>(sum_score);

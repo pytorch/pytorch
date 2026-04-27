@@ -580,7 +580,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   // Attention.metal:
   //   prefill_attention_<dtype>_bq<BQ>_bk<BK>_bd<BD>_wm<WM>_wn<WN>
   //                    _hm<has_mask>_dc<do_causal>_mask<mask_dtype>
-  std::string dtype_str;
+  std::string_view dtype_str;
   switch (q_.scalar_type()) {
     case kFloat:
       dtype_str = "float32";
@@ -595,7 +595,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
       TORCH_CHECK(false, "sdpa prefill:unsupported dtype ", q_.scalar_type());
   }
 
-  std::string mask_dtype_str = dtype_str;
+  std::string_view mask_dtype_str = dtype_str;
   if (has_mask) {
     if (mask_.value().scalar_type() == kBool) {
       mask_dtype_str = "bool_";
