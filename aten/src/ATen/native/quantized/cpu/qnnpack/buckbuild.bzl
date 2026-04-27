@@ -41,6 +41,16 @@ def define_qnnpack(third_party, labels = []):
         ],
     )
 
+    # Workaround for MSVC: the auto-generated wrapper .c files use
+    # `#if defined(__x86_64__)` guards, but MSVC defines `_M_X64` instead.
+    # Clang-cl defines both, but some xplat configurations compile with
+    # MSVC directly. Adding -D__x86_64__ on MSVC makes the guards work
+    # without modifying the 70+ generated wrapper files.
+    _MSVC_X86_64_COMPAT_FLAGS = select({
+        "DEFAULT": [],
+        "ovr_config//compiler:msvc": ["-D__x86_64__"],
+    })
+
     fb_xplat_cxx_library(
         # @autodeps-skip
         name = "ukernels_sse2",
@@ -107,6 +117,7 @@ def define_qnnpack(third_party, labels = []):
         ],
         force_static = True,
         labels = labels,
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -155,6 +166,7 @@ def define_qnnpack(third_party, labels = []):
         ],
         force_static = True,
         labels = labels,
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -203,6 +215,7 @@ def define_qnnpack(third_party, labels = []):
         ],
         force_static = True,
         labels = labels,
+        preprocessor_flags = _MSVC_X86_64_COMPAT_FLAGS,
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -317,9 +330,6 @@ def define_qnnpack(third_party, labels = []):
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
-            ":ukernels_asm",
-            ":ukernels_neon",
-            ":ukernels_psimd",
             ":ukernels_scalar",
             ":ukernels_sse2",
             ":ukernels_sse41",
@@ -329,7 +339,20 @@ def define_qnnpack(third_party, labels = []):
             third_party("FP16"),
             third_party("FXdiv"),
             third_party("pthreadpool"),
-        ],
+        ] + select({
+            "DEFAULT": [":ukernels_psimd"],
+            "ovr_config//os:windows": [],
+        }) + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                ":ukernels_asm",
+                ":ukernels_neon",
+            ],
+            "ovr_config//cpu:arm64": [
+                ":ukernels_asm",
+                ":ukernels_neon",
+            ],
+        }),
         exported_deps = [
             third_party("cpuinfo"),
         ],
@@ -415,29 +438,38 @@ def define_qnnpack(third_party, labels = []):
         ],
     )
 
+    # ARM assembly sources, gated by CPU architecture.
+    # On non-ARM platforms (x86_64, etc.) no .S files are compiled,
+    # avoiding MSVC ml64.exe failures on Windows and unnecessary work elsewhere.
+    _AARCH32_ASM_SRCS = [
+        "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
+        "wrappers/q8conv/4x8-aarch32-neon.S",
+        "wrappers/q8dwconv/up8x9-aarch32-neon.S",
+        "wrappers/q8dwconv/up8x9-aarch32-neon-per-channel.S",
+        "wrappers/q8gemm/4x8-aarch32-neon.S",
+        "wrappers/q8gemm/4x8-dq-aarch32-neon.S",
+        "wrappers/q8gemm/4x8c2-xzp-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x4-packA-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x8c1x4-dq-packedA-aarch32-neon.S",
+        "wrappers/q8gemm_sparse/4x8c8x1-dq-packedA-aarch32-neon.S",
+    ]
+    _AARCH64_ASM_SRCS = [
+        "wrappers/q8conv/8x8-aarch64-neon.S",
+        "wrappers/q8gemm/8x8-aarch64-neon.S",
+        "wrappers/q8gemm/8x8-dq-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x4-packA-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S",
+        "wrappers/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S",
+    ]
+
     fb_xplat_cxx_library(
         # @autodeps-skip
         name = "ukernels_asm",
-        srcs = [
-            # AArch32 ukernels
-            "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
-            "wrappers/q8conv/4x8-aarch32-neon.S",
-            "wrappers/q8dwconv/up8x9-aarch32-neon.S",
-            "wrappers/q8dwconv/up8x9-aarch32-neon-per-channel.S",
-            "wrappers/q8gemm/4x8-aarch32-neon.S",
-            "wrappers/q8gemm/4x8-dq-aarch32-neon.S",
-            "wrappers/q8gemm/4x8c2-xzp-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x4-packA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x8c1x4-dq-packedA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/4x8c8x1-dq-packedA-aarch32-neon.S",
-            "wrappers/q8gemm_sparse/8x4-packA-aarch64-neon.S",
-            "wrappers/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S",
-            "wrappers/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S",
-            # AArch64 ukernels
-            "wrappers/q8conv/8x8-aarch64-neon.S",
-            "wrappers/q8gemm/8x8-aarch64-neon.S",
-            "wrappers/q8gemm/8x8-dq-aarch64-neon.S",
-        ],
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": _AARCH32_ASM_SRCS,
+            "ovr_config//cpu:arm64": _AARCH64_ASM_SRCS,
+        }),
         headers = subdir_glob([
             ("src", "qnnpack/assembly.h"),
             ("src", "**/*.S"),
