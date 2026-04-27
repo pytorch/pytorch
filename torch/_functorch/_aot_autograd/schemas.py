@@ -1223,7 +1223,7 @@ class CompilerWrapper:
     us factor these into compositional stages so we can handle each transformation incrementally
     instead of having to do it all at once.
 
-    Since there is a calling convention change, there are two parts to the wrpaper:
+    Since there is a calling convention change, there are two parts to the wrapper:
 
     1. The prologue, which is about compile-time behavior: given this original function, what
        is the new function with modified calling convention that we should trace with AOTAutograd
