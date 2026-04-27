@@ -371,18 +371,10 @@ class UniformQuantizationObserverBase(ObserverBase):
             )
 
         quant_min, quant_max = self.quant_min, self.quant_max
-
-        # Use double precision for intermediate computation to match C++
-        # ChooseQuantizationParams in
-        # caffe2/aten/src/ATen/native/quantized/cpu/QuantUtils.h,
-        # which uses double for scale and zero_point arithmetic then
-        # casts to float at the end.
-        min_val = min_val.to(torch.float64)
-        max_val = max_val.to(torch.float64)
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        device = min_val.device
+        device = min_val_neg.device
         scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
         zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
@@ -390,9 +382,19 @@ class UniformQuantizationObserverBase(ObserverBase):
             self.qscheme == torch.per_tensor_symmetric
             or self.qscheme == torch.per_channel_symmetric
         ):
-            scale, zero_point = self._calculate_symm_qparams(
-                min_val, max_val, strict_symm=True
-            )
+            max_val_pos = torch.max(-min_val_neg, max_val_pos)
+            scale = max_val_pos / (float(quant_max - quant_min) / 2)
+            scale = torch.max(scale, self.eps)
+            if self.dtype in [torch.quint8, torch.uint8]:
+                if self.has_customized_qrange:
+                    # When customized quantization range is used, down-rounded midpoint of the range is chosen.
+                    zero_point = zero_point.new_full(
+                        zero_point.size(), (quant_min + quant_max) // 2
+                    )
+                else:
+                    zero_point = zero_point.new_full(zero_point.size(), 128)
+            elif self.dtype == torch.uint16:
+                zero_point = zero_point.new_full(zero_point.size(), 2**15)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(quant_max - quant_min)
             scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
@@ -406,9 +408,6 @@ class UniformQuantizationObserverBase(ObserverBase):
             scale = torch.max(scale, self.eps)
             zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
-
-        # Cast scale back to float32 — C++ stores final scale as float
-        scale = scale.to(torch.float32)
 
         # For scalar values, cast them to Tensors of size 1 to keep the shape
         # consistent with default values in FakeQuantize.
@@ -425,116 +424,6 @@ class UniformQuantizationObserverBase(ObserverBase):
                     [float(zero_point)], dtype=zero_point.dtype, device=device
                 )
 
-        return scale, zero_point
-
-    def _calculate_symm_qparams(
-        self,
-        min_val: torch.Tensor,
-        max_val: torch.Tensor,
-        strict_symm: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        r"""Calculate scale and zero_point for the symmetric quantization
-        scheme (per_tensor_symmetric / per_channel_symmetric).
-
-        The behavior depends on ``strict_symm``:
-
-        * ``strict_symm=True`` (default): produce **true symmetric**
-          qparams regardless of whether the range straddles zero. The
-          symmetric range expansion
-          ``max(|min|/-symmetric_qmin, max/symmetric_qmax)`` is applied
-          unconditionally and ``zero_point`` is fixed at the dtype
-          midpoint ``(qmin + qmax) / 2`` (banker's-rounded).
-          ONEDNN's ``quantized::qconv_prepack`` requires
-          ``zero_point == 0`` for weights; the midpoint convention
-          satisfies this for signed dtypes (``qint8`` -> ``0``), which
-          is what PyTorch's default weight observers
-          (``default_weight_observer``,
-          ``default_per_channel_weight_observer``) use. Note: for
-          unsigned dtypes the midpoint is non-zero (``quint8`` -> ``128``,
-          ``uint16`` -> ``32768``) and so does NOT satisfy the ONEDNN
-          weight contract — use a signed dtype if targeting ONEDNN.
-
-        * ``strict_symm=False``: match C++
-          ``quant_utils::ChooseQuantizationParams`` with
-          ``preserve_sparsity=True`` in
-          ``caffe2/aten/src/ATen/native/quantized/cpu/QuantUtils.h``.
-          The symmetric expansion is applied only when the range
-          straddles zero; for same-sign ranges (``min >= 0`` or
-          ``max <= 0``) the zero-clamped min/max are used directly. The
-          ``zero_point`` follows the C++ pipeline: pick the smaller-error
-          variant of ``qmin - min/scale`` vs ``qmax - max/scale``;
-          override with the symmetric midpoint when the range straddles
-          zero; nudge to integer via clamp to ``[qmin, qmax]`` and
-          banker's rounding (``torch.round`` matches C++ ``nearbyint``).
-
-        Args:
-            min_val: Minimum values per channel (already in float64)
-            max_val: Maximum values per channel (already in float64)
-            strict_symm: If ``True`` (default), always produce true
-                symmetric qparams (midpoint zero_point, symmetric scale).
-                If ``False``, fall back to the C++-aligned same-sign
-                affine formula.
-
-        Returns:
-            scale, zero_point tensors. ``scale`` is float64; ``zero_point``
-            is int64.
-        """
-        quant_min, quant_max = self.quant_min, self.quant_max
-        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
-        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
-        if strict_symm:
-            # True symmetric: every channel uses the symmetric expansion
-            # + midpoint zero_point regardless of sign.
-            straddles_zero = torch.ones_like(min_val, dtype=torch.bool)
-        else:
-            # C++-aligned: only straddling ranges use the symmetric
-            # expansion + midpoint zero_point; same-sign ranges fall
-            # through to the affine formula.
-            straddles_zero = (min_val < 0) & (max_val > 0)
-        symmetric_qmin = -((quant_max - quant_min) // 2 + 1)
-        symmetric_qmax = (quant_max - quant_min) // 2
-        max_scale = torch.max(
-            torch.abs(min_val_neg) / (-symmetric_qmin),
-            max_val_pos / symmetric_qmax,
-        )
-        min_val_neg = torch.where(
-            straddles_zero, max_scale * symmetric_qmin, min_val_neg
-        )
-        max_val_pos = torch.where(
-            straddles_zero, max_scale * symmetric_qmax, max_val_pos
-        )
-        scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
-        scale = torch.max(scale, self.eps)
-
-        # Zero-point follows C++ ChooseQuantizationParams: pick the
-        # smaller-error variant of (qmin - min/scale) vs (qmax - max/scale),
-        # override with the symmetric midpoint when the range straddles zero,
-        # then nudge to integer via clamp + banker's rounding.
-        zero_point_from_min = quant_min - min_val_neg / scale
-        zero_point_from_max = quant_max - max_val_pos / scale
-        zero_point_from_min_error = abs(quant_min) - torch.abs(min_val_neg / scale)
-        zero_point_from_max_error = abs(quant_max) - torch.abs(max_val_pos / scale)
-        initial_zero_point = torch.where(
-            zero_point_from_min_error < zero_point_from_max_error,
-            zero_point_from_min,
-            zero_point_from_max,
-        )
-        midpoint = (quant_min + quant_max) / 2.0
-        initial_zero_point = torch.where(
-            straddles_zero,
-            torch.full_like(initial_zero_point, midpoint),
-            initial_zero_point,
-        )
-        nudged_zero_point = torch.where(
-            initial_zero_point < quant_min,
-            torch.full_like(initial_zero_point, quant_min),
-            torch.where(
-                initial_zero_point > quant_max,
-                torch.full_like(initial_zero_point, quant_max),
-                torch.round(initial_zero_point),
-            ),
-        )
-        zero_point = nudged_zero_point.to(torch.int64)
         return scale, zero_point
 
     @torch.jit.export
