@@ -9,6 +9,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDP_DEVICES,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
@@ -113,7 +114,7 @@ class TestApply(FSDPTestContinuous):
                 transformer.apply(self._init_linear_weights)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

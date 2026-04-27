@@ -970,10 +970,24 @@ def instantiate_device_type_tests(
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
+        # For PrivateUse1, use the registered backend name so the class name
+        # matches what setUpClass will produce, and set device_type on the
+        # generated class so child processes see the correct device string.
+        pu1_backend_name = None
+        if base.device_type == "privateuse1":
+            backend_name = torch._C._get_privateuse1_backend_name()
+            if backend_name != "privateuseone":
+                class_name = generic_test_class.__name__ + backend_name.upper()
+                pu1_backend_name = backend_name
 
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+
+        # Set device_type on the generated class for PrivateUse1 so child
+        # processes don't need setUpClass to resolve the backend name.
+        if pu1_backend_name is not None:
+            device_type_test_class.device_type = pu1_backend_name
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test

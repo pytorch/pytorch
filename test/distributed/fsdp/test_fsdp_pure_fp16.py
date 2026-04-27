@@ -13,6 +13,7 @@ from torch.distributed.fsdp import (
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDP_DEVICES,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
@@ -151,7 +152,7 @@ class TestPureFP16(FSDPTestContinuous):
                 self.assertEqual(param.grad.dtype, torch.float16)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

@@ -486,7 +486,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             and offload_policy.pin_memory
         ):
             return
-        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+        valid_device_types = ("cuda", "hpu", "xpu", "cpu")
+        if hasattr(torch._C, "_get_privateuse1_backend_name"):
+            backend_name = torch._C._get_privateuse1_backend_name()
+            if backend_name != "privateuseone":
+                valid_device_types = valid_device_types + (backend_name,)
+        if test_device_type not in valid_device_types:
             raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024

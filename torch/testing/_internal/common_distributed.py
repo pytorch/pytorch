@@ -631,6 +631,16 @@ def create_device(interface=None, lazy_init: bool = False):
         )
 
 
+def _is_bf16_supported():
+    if torch.accelerator.is_available():
+        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
+        return getattr(device_module, "is_bf16_supported", lambda: False)()
+    return False
+
+
+BFLOAT16_AVAILABLE = _is_bf16_supported()
+
+
 def get_timeout(test_id) -> int:
     return TIMEOUT_OVERRIDE.get(test_id.split(".")[-1], TIMEOUT_DEFAULT)
 
@@ -889,6 +899,7 @@ class MultiProcessTestCase(TestCase):
                 ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
+                    "world_size": self.world_size,
                 },
             )
             process.start()
@@ -1089,6 +1100,18 @@ class MultiProcessTestCase(TestCase):
             for pipe in self.pid_to_pipe.values():
                 pipe.close()
 
+    def _kill_surviving_processes(self):
+        """Terminate and kill any processes that haven't exited yet."""
+        for p in self.processes:
+            if p.exitcode is None:
+                p.terminate()
+        for p in self.processes:
+            if p.exitcode is None:
+                p.join(timeout=5)
+                if p.exitcode is None:
+                    p.kill()
+                    p.join(timeout=5)
+
     def _check_return_codes(self, fn, elapsed_time) -> None:
         """
         Checks that the return codes of all spawned processes match, and skips
@@ -1123,9 +1146,11 @@ class MultiProcessTestCase(TestCase):
                     f"and exception:\n{error_message}\n"
                 )
 
+            self._kill_surviving_processes()
             raise RuntimeError(error)
         # If no process exited uncleanly, we check for timeouts, and then ensure
         # each process exited cleanly.
+        self._kill_surviving_processes()
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(

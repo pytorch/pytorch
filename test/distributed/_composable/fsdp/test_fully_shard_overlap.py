@@ -103,7 +103,7 @@ class TestFullyShardOverlap(FSDPTest):
             )
             with torch.get_device_module(device_type).stream(comm_stream):
                 torch.get_device_module(device_type)._sleep(
-                    int(comm_sleep_ms * get_cycles_per_ms())
+                    int(comm_sleep_ms * get_cycles_per_ms(device_type.type))
                 )
             torch.get_device_module(device_type).current_stream().wait_stream(
                 comm_stream
@@ -208,7 +208,7 @@ class TestFullyShardOverlap(FSDPTest):
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(comm_sleep_ms * get_cycles_per_ms())
+                int(comm_sleep_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_all_gather_into_tensor(*args, **kwargs)
 
@@ -262,14 +262,14 @@ class Matmul(torch.autograd.Function):
     def forward(ctx, input: torch.Tensor, weight: torch.Tensor, sleep_ms: int):
         ctx.save_for_backward(input, weight)
         ctx.sleep_ms = sleep_ms
-        torch.get_device_module(device_type)._sleep(int(sleep_ms * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(int(sleep_ms * get_cycles_per_ms(device_type.type)))
         return input @ weight
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         (input, weight) = ctx.saved_tensors
         torch.get_device_module(device_type)._sleep(
-            int(2 * ctx.sleep_ms * get_cycles_per_ms())
+            int(2 * ctx.sleep_ms * get_cycles_per_ms(device_type.type))
         )
         grad_input = grad_output @ weight.T
         grad_weight = input.T @ grad_output
@@ -338,7 +338,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             ds = delay_streams[reduce_scatter_group]
             ds.wait_event(rs_event)
             with device_module.stream(ds):
-                device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
+                device_module._sleep(int(sleep_ms * get_cycles_per_ms(device_type.type)))
                 delayed_event = ds.record_event()
             return (rs_input, delayed_event, *rest)
 
