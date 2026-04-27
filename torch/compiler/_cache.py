@@ -171,6 +171,23 @@ def _deserialize_single_cache(
 CacheArtifactsResult = dict[str, list[CacheArtifact]]
 
 
+@dataclasses.dataclass(frozen=True)
+class CacheArtifactRecorder:
+    """
+    Shared entry point for cache implementations to record artifacts.
+    """
+
+    artifact_type: str
+    key: str
+
+    def record(self, content: Any) -> None:
+        CacheArtifactManager.record_artifact(self.artifact_type, self.key, content)
+
+    def record_if_present(self, content: Any | None) -> None:
+        if content is not None:
+            self.record(content)
+
+
 class CacheArtifactManager:
     """
     Lightweight manager class for collecting and processing cache artifacts for
@@ -178,7 +195,7 @@ class CacheArtifactManager:
 
     Intended Lifecycle:
     - Execute code via torch.compile, this will call
-        CacheArtifactManager.record_artifact on each cache artifact
+        CacheArtifactRecorder.record on each cache artifact
     - Call CacheArtifactManager.serialize to convert all the cache artifacts
         to portable format
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on

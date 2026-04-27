@@ -40,7 +40,7 @@ from torch._logging._internal import trace_structured_artifact
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.utils._ordered_set import OrderedSet
 
@@ -810,8 +810,8 @@ def get_local_code_state(cache_key: str) -> defaultdict[CodeId, CodeState] | Non
                         "get_code_state failed while reading %s", path, exc_info=True
                     )
                 else:
-                    CacheArtifactManager.record_artifact(
-                        PGOCacheArtifact.type(), cache_key, content
+                    CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(
+                        content
                     )
                     return hit(path, "local")
     return None
@@ -846,8 +846,8 @@ def lookup_remote_cache_entry(
                     exc_info=True,
                 )
             else:
-                CacheArtifactManager.record_artifact(
-                    PGOCacheArtifact.type(), cache_key, payload
+                CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(
+                    payload
                 )
         else:
             log.info("get_code_state remote miss on %s", cache_key)
@@ -991,9 +991,7 @@ def put_local_code_state(cache_key: str) -> None:
 
         pickled_code = pickle.dumps(_CODE_STATE)
 
-        CacheArtifactManager.record_artifact(
-            PGOCacheArtifact.type(), cache_key, pickled_code
-        )
+        CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(pickled_code)
 
         meta = write_local_impl(cache_key, pickled_code)
         if meta is None:

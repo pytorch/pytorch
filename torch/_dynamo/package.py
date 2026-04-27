@@ -469,7 +469,7 @@ class _DynamoCacheEntry:
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 
 
@@ -1116,8 +1116,8 @@ class DiskDynamoStore(DynamoStore):
         """
         try:
             pickled_content: bytes = pickle.dumps(cache_entry)
-            CacheArtifactManager.record_artifact(
-                PrecompileCacheArtifact.type(), path, pickled_content
+            CacheArtifactRecorder(PrecompileCacheArtifact.type(), path).record(
+                pickled_content
             )
             self._write_to_local_cache(pickled_content, path)
         except Exception as e:
