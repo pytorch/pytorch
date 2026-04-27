@@ -566,8 +566,7 @@ template <
     int WN,
     bool HAS_MASK,
     bool DO_CAUSAL,
-    typename MaskType = float,
-    typename AccumType = float>
+    typename MaskType = float>
 [[kernel, max_total_threads_per_threadgroup(WM* WN * 32)]] void
 prefill_attention(
     const device T* Q [[buffer(0)]],
@@ -582,6 +581,7 @@ prefill_attention(
     uint3 tid [[threadgroup_position_in_grid]],
     uint3 lid [[thread_position_in_threadgroup]]) {
   (void)lid;
+  using AccumType = c10::metal::accum_t<T>;
   constexpr bool has_mask = HAS_MASK;
   constexpr bool do_causal = DO_CAUSAL;
 
@@ -714,10 +714,10 @@ prefill_attention(
   // alignment: query at row r attends to keys at cols 0..r, regardless of qL
   // vs kL. So the last query in this block (row block_idx*BQ + q_block_size-1)
   // attends to cols 0..(block_idx*BQ + q_block_size - 1).
-  int kb_lim = (k_seq_len + BK - 1) / BK;
+  int kb_lim = c10::metal::ceil_div(k_seq_len, BK);
   if constexpr (do_causal) {
     int max_col = block_idx * BQ + q_block_size; // exclusive upper bound
-    kb_lim = min(kb_lim, (max_col + BK - 1) / BK);
+    kb_lim = min(kb_lim, c10::metal::ceil_div(max_col, BK));
   }
 
   for (int kb = 0; kb < kb_lim; kb++) {
@@ -971,8 +971,7 @@ prefill_attention(
       wn,                                                                 \
       hm,                                                                 \
       dc,                                                                 \
-      mtype,                                                              \
-      float)
+      mtype)
 
 #define instantiate_attn_shapes_helper(iname, itype, hm, dc, mname, mtype)    \
   instantiate_attn(iname, itype, 16, 8, 256, 2, 1, hm, dc, mname, mtype)      \
