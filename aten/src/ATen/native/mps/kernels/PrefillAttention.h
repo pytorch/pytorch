@@ -13,7 +13,6 @@
 #define STEEL_CONST static constant constexpr const
 #define STEEL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
 
-
 template <typename U>
 struct Limits {
   static const constant U max = metal::numeric_limits<U>::max();
@@ -39,7 +38,6 @@ instantiate_float_limit(half);
 instantiate_float_limit(float);
 instantiate_float_limit(bfloat);
 
-
 template <typename T>
 struct pointer_element {};
 template <typename T>
@@ -60,7 +58,6 @@ struct pointer_element<threadgroup T*> {
 };
 template <typename T>
 using pointer_element_t = typename pointer_element<remove_cv_t<T>>::type;
-
 
 template <int val>
 using Int = integral_constant<int, val>;
@@ -169,7 +166,6 @@ struct BlockLoaderT {
   }
 };
 
-
 template <typename T>
 struct TransformScale {
   T scale;
@@ -209,9 +205,8 @@ struct ExpSubOp {
   // (exp(-inf) = 0) and is what flash-attention implementations do.
   template <typename T>
   METAL_FUNC static constexpr T apply(T x, T y) {
-    return (y == -metal::numeric_limits<T>::infinity())
-        ? T(0)
-        : fast::exp2(x - y);
+    return (y == -metal::numeric_limits<T>::infinity()) ? T(0)
+                                                        : fast::exp2(x - y);
   }
 };
 
@@ -221,7 +216,6 @@ struct DivOp {
     return x / y;
   }
 };
-
 
 template <typename T, int kFragRows_, int kFragCols_>
 struct BaseMMAFrag {
@@ -263,8 +257,11 @@ struct BaseMMAFrag<T, 8, 8> {
   }
 
   template <typename SrcPtrType, typename StrX, typename StrY>
-  METAL_FUNC static constexpr void
-  load(thread frag_type& dst, SrcPtrType src, StrX str_x, StrY str_y) {
+  METAL_FUNC static constexpr void load(
+      thread frag_type& dst,
+      SrcPtrType src,
+      StrX str_x,
+      StrY str_y) {
     STEEL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
       STEEL_PRAGMA_UNROLL
@@ -307,8 +304,11 @@ struct BaseMMAFrag<T, 8, 8> {
   }
 
   template <typename DstPtrType, typename StrX, typename StrY>
-  METAL_FUNC static constexpr void
-  store(const thread frag_type& src, DstPtrType dst, StrX str_x, StrY str_y) {
+  METAL_FUNC static constexpr void store(
+      const thread frag_type& src,
+      DstPtrType dst,
+      StrX str_x,
+      StrY str_y) {
     using U = pointer_element_t<DstPtrType>;
     STEEL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
@@ -480,8 +480,9 @@ struct MMATile {
       for (short j = 0; j < kTileCols; ++j) {
         MMAFrag_t::load(
             frag_at(i, j),
-            &(src[(i * kFragRows) * w_x * str_x +
-                  (j * kFragCols) * w_y * str_y]),
+            &(
+                src[(i * kFragRows) * w_x * str_x +
+                    (j * kFragCols) * w_y * str_y]),
             Int<str_x>{},
             Int<str_y>{});
       }
@@ -504,8 +505,10 @@ struct MMATile {
   }
 
   template <typename U, int w_x, int w_y>
-  METAL_FUNC void
-  store_safe(device U* dst, const int ld, const short2 dst_tile_dims) const {
+  METAL_FUNC void store_safe(
+      device U* dst,
+      const int ld,
+      const short2 dst_tile_dims) const {
     STEEL_PRAGMA_UNROLL
     for (int i = 0; i < kTileRows; ++i) {
       STEEL_PRAGMA_UNROLL
@@ -560,13 +563,13 @@ METAL_FUNC void tile_matmad(
   }
 }
 
-struct SteelAttnParams {
-  int B;            // batch size
-  int H;            // number of query heads
-  int D;            // head dim
-  int qL;           // query sequence length
-  int kL;           // key sequence length
-  int gqa_factor;   // num_q_heads / num_kv_heads
+struct PrefillAttnParams {
+  int B; // batch size
+  int H; // number of query heads
+  int D; // head dim
+  int qL; // query sequence length
+  int kL; // key sequence length
+  int gqa_factor; // num_q_heads / num_kv_heads
   float scale;
   float softcapping;
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
@@ -576,10 +579,9 @@ struct SteelAttnParams {
   int O_strides[3];
 };
 
-struct SteelAttnMaskParams {
+struct PrefillAttnMaskParams {
   int M_strides[4]; // (B, H, qL, kL)
 };
-
 
 template <
     typename T,
@@ -593,13 +595,13 @@ template <
     typename MaskType = float,
     typename AccumType = float>
 [[kernel, max_total_threads_per_threadgroup(WM* WN * 32)]] void
-steel_attention(
+prefill_attention(
     const device T* Q [[buffer(0)]],
     const device T* K [[buffer(1)]],
     const device T* V [[buffer(2)]],
     device T* O [[buffer(3)]],
-    const constant SteelAttnParams* params [[buffer(4)]],
-    const constant SteelAttnMaskParams* mask_params [[buffer(5)]],
+    const constant PrefillAttnParams* params [[buffer(4)]],
+    const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
     const device MaskType* mask [[buffer(6)]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
@@ -656,30 +658,9 @@ steel_attention(
   threadgroup T* Vs = KV_smem;
 
   // Q / K / V loaders. K is loaded transposed.
-  using QBlockLoader = BlockLoaderT<
-      T,
-      BQ,
-      BD,
-      LDQ_tgp,
-      1,
-      1,
-      WM * WN * 32>;
-  using KBlockLoader = BlockLoaderT<
-      T,
-      BK,
-      BD,
-      1,
-      LDK_tgp,
-      0,
-      WM * WN * 32>;
-  using VBlockLoader = BlockLoaderT<
-      T,
-      BK,
-      BD,
-      LDV_tgp,
-      1,
-      0,
-      WM * WN * 32>;
+  using QBlockLoader = BlockLoaderT<T, BQ, BD, LDQ_tgp, 1, 1, WM * WN * 32>;
+  using KBlockLoader = BlockLoaderT<T, BK, BD, 1, LDK_tgp, 0, WM * WN * 32>;
+  using VBlockLoader = BlockLoaderT<T, BK, BD, LDV_tgp, 1, 0, WM * WN * 32>;
 
   // Stride between consecutive sequence rows for Q/K/V/O.
   const int q_seq_stride = params->Q_strides[2];
@@ -704,7 +685,7 @@ steel_attention(
   constexpr int kNWarps = WM * WN;
   static_assert(
       BQ >= (kNWarps * kFragSize) && BQ % (kNWarps * kFragSize) == 0,
-      "Each simdgroup must host atleast 1 simdgroup matrix along Q sequence.");
+      "Each simdgroup must host at least 1 simdgroup matrix along Q sequence.");
 
   constexpr int TQ = BQ / (kNWarps * kFragSize);
   constexpr int TK = BK / kFragSize;
@@ -761,7 +742,7 @@ steel_attention(
   // attends to cols 0..(block_idx*BQ + q_block_size - 1).
   int kb_lim = (k_seq_len + BK - 1) / BK;
   if constexpr (do_causal) {
-    int max_col = block_idx * BQ + q_block_size;  // exclusive upper bound
+    int max_col = block_idx * BQ + q_block_size; // exclusive upper bound
     kb_lim = min(kb_lim, (max_col + BK - 1) / BK);
   }
 
@@ -824,8 +805,7 @@ steel_attention(
 
       STEEL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
-        int row_pos =
-            block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
+        int row_pos = block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
         STEEL_PRAGMA_UNROLL
         for (short j = 0; j < stile_t::kTileCols; j++) {
           const int col_pos = kb * BK + sn + (j * stile_t::kFragCols);
@@ -888,8 +868,7 @@ steel_attention(
     if (params->softcapping != 1.0f) {
       using stile_t = decltype(Stile);
       using selem_t = typename stile_t::elem_type;
-      const selem_t softcapping_val =
-          static_cast<selem_t>(params->softcapping);
+      const selem_t softcapping_val = static_cast<selem_t>(params->softcapping);
 
       STEEL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
@@ -928,8 +907,7 @@ steel_attention(
     // exp(-inf - -inf) would otherwise produce NaN.
     STEEL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
-      factor[i] =
-          (new_max[i] == -metal::numeric_limits<AccumType>::infinity())
+      factor[i] = (new_max[i] == -metal::numeric_limits<AccumType>::infinity())
           ? AccumType(1)
           : fast::exp2(max_score[i] - new_max[i]);
     }
@@ -988,8 +966,7 @@ steel_attention(
   Otile.template row_bin_op<DivOp>(sum_score);
   threadgroup_barrier(mem_flags::mem_none);
 
-  device T* O_tile =
-      O + (tm + sm) * params->O_strides[2] + sn;
+  device T* O_tile = O + (tm + sm) * params->O_strides[2] + sn;
 
   if (q_block_size < BQ) {
     if ((tm + sm) < q_block_size && sn < BD) {
@@ -1006,45 +983,70 @@ steel_attention(
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>;
 
-#define instantiate_attn(                                            \
-    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)          \
-  instantiate_kernel(                                                \
-      "steel_attention_" #tname "_bq" #bq "_bk" #bk "_bd" #bd        \
-      "_wm" #wm "_wn" #wn "_hm" #hm "_dc" #dc "_mask" #mname,        \
-      steel_attention,                                               \
-      dtype,                                                         \
-      bq,                                                            \
-      bk,                                                            \
-      bd,                                                            \
-      wm,                                                            \
-      wn,                                                            \
-      hm,                                                            \
-      dc,                                                            \
-      mtype,                                                         \
+#define instantiate_attn(                                                 \
+    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)               \
+  instantiate_kernel(                                                     \
+      "prefill_attention_" #tname "_bq" #bq "_bk" #bk "_bd" #bd "_wm" #wm \
+      "_wn" #wn "_hm" #hm "_dc" #dc "_mask" #mname,                       \
+      prefill_attention,                                                  \
+      dtype,                                                              \
+      bq,                                                                 \
+      bk,                                                                 \
+      bd,                                                                 \
+      wm,                                                                 \
+      wn,                                                                 \
+      hm,                                                                 \
+      dc,                                                                 \
+      mtype,                                                              \
       float)
 
-#define instantiate_attn_shapes_helper(iname, itype, hm, dc, mname, mtype) \
-  instantiate_attn(iname, itype, 16, 8, 256, 2, 1, hm, dc, mname, mtype)   \
-  instantiate_attn(iname, itype, 32, 16, 128, 4, 1, hm, dc, mname, mtype)  \
-  instantiate_attn(iname, itype, 32, 32, 96, 4, 1, hm, dc, mname, mtype)   \
-  instantiate_attn(iname, itype, 32, 32, 80, 4, 1, hm, dc, mname, mtype)   \
-  instantiate_attn(iname, itype, 32, 32, 72, 4, 1, hm, dc, mname, mtype)   \
-  instantiate_attn(iname, itype, 32, 32, 64, 4, 1, hm, dc, mname, mtype)   \
-  instantiate_attn(iname, itype, 32, 32, 32, 4, 1, hm, dc, mname, mtype)
+#define instantiate_attn_shapes_helper(iname, itype, hm, dc, mname, mtype)    \
+  instantiate_attn(iname, itype, 16, 8, 256, 2, 1, hm, dc, mname, mtype)      \
+      instantiate_attn(iname, itype, 32, 16, 128, 4, 1, hm, dc, mname, mtype) \
+          instantiate_attn(                                                   \
+              iname, itype, 32, 32, 96, 4, 1, hm, dc, mname, mtype)           \
+              instantiate_attn(                                               \
+                  iname, itype, 32, 32, 80, 4, 1, hm, dc, mname, mtype)       \
+                  instantiate_attn(                                           \
+                      iname, itype, 32, 32, 72, 4, 1, hm, dc, mname, mtype)   \
+                      instantiate_attn(                                       \
+                          iname,                                              \
+                          itype,                                              \
+                          32,                                                 \
+                          32,                                                 \
+                          64,                                                 \
+                          4,                                                  \
+                          1,                                                  \
+                          hm,                                                 \
+                          dc,                                                 \
+                          mname,                                              \
+                          mtype)                                              \
+                          instantiate_attn(                                   \
+                              iname,                                          \
+                              itype,                                          \
+                              32,                                             \
+                              32,                                             \
+                              32,                                             \
+                              4,                                              \
+                              1,                                              \
+                              hm,                                             \
+                              dc,                                             \
+                              mname,                                          \
+                              mtype)
 
-#define instantiate_attn_causal_helper(iname, itype, mname, mtype)       \
-  instantiate_attn_shapes_helper(iname, itype, 0, 0, mname, mtype)       \
-  instantiate_attn_shapes_helper(iname, itype, 0, 1, mname, mtype)
+#define instantiate_attn_causal_helper(iname, itype, mname, mtype) \
+  instantiate_attn_shapes_helper(iname, itype, 0, 0, mname, mtype) \
+      instantiate_attn_shapes_helper(iname, itype, 0, 1, mname, mtype)
 
 #define instantiate_attn_causal_with_mask_helper(iname, itype, mname, mtype) \
   instantiate_attn_shapes_helper(iname, itype, 1, 0, mname, mtype)           \
-  instantiate_attn_shapes_helper(iname, itype, 1, 1, mname, mtype)
+      instantiate_attn_shapes_helper(iname, itype, 1, 1, mname, mtype)
 
-#define instantiate_attn_mask_helper(iname, itype)                          \
-  instantiate_attn_causal_helper(iname, itype, iname, itype)                \
-  instantiate_attn_causal_with_mask_helper(iname, itype, iname, itype)      \
-  instantiate_attn_causal_with_mask_helper(iname, itype, bool_, bool)
+#define instantiate_attn_mask_helper(iname, itype)                         \
+  instantiate_attn_causal_helper(iname, itype, iname, itype)               \
+      instantiate_attn_causal_with_mask_helper(iname, itype, iname, itype) \
+          instantiate_attn_causal_with_mask_helper(iname, itype, bool_, bool)
 
 instantiate_attn_mask_helper(float16, half)
-instantiate_attn_mask_helper(bfloat16, bfloat)
-instantiate_attn_mask_helper(float32, float)
+    instantiate_attn_mask_helper(bfloat16, bfloat)
+        instantiate_attn_mask_helper(float32, float)
