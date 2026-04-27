@@ -884,7 +884,9 @@ endif()
 
 # Enable IPO for Release builds if not explicitly set
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
-  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # turns CMake LTO for OSS builds
+  if(NOT MSVC AND NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)"))
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # turns CMake LTO for OSS builds on Clang and GCC except aarch64
+  endif()
 endif()
 
 # The below means we are cross compiling for arm64 or x86_64 on MacOSX
