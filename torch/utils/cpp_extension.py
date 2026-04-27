@@ -222,6 +222,61 @@ def _join_sycl_home(*paths) -> str:
 
 
 
+def _wrap_compiler(compiler: str | list[str]) -> list[str]:
+    """Prepend a compiler wrapper (ccache/sccache) if available.
+
+    Accepts a compiler as a string or list. Always returns a list with the
+    wrapper prepended, or the original value as a list if no wrapper is found.
+    Disabled when TORCH_NO_COMPILER_WRAPPER is set.
+    """
+    if isinstance(compiler, str):
+        compiler = [compiler]
+    # hipcc with ccache/sccache is currently broken
+    # I.e. compilation fails with
+    #  sccache: caused by: Compiler not supported: "sh: 1: /usr/local/cuda/bin/nvcc: not found\n
+    # sh: 1: nvcc: not found\nDevice not supported - Defaulting to AMD\n
+    # failed to execute:/opt/rocm/lib/llvm/bin/clang++  -O3  -E -x c /tmp/sccachei1cosZ/testfile.c\n"
+    if os.environ.get('TORCH_NO_COMPILER_WRAPPER') or IS_WINDOWS or torch.version.hip is not None:
+        return compiler
+    for wrapper in ('ccache', 'sccache'):
+        if shutil.which(wrapper):
+            return [wrapper] + compiler
+    return compiler
+
+
+def _windows_quote(arg: str) -> str:
+    """Quote a single argument per the MSVC ``CommandLineToArgvW`` rules."""
+    if arg and not any(c in arg for c in ' \t\n\v"'):
+        return arg
+    out = ['"']
+    backslashes = 0
+    for c in arg:
+        if c == '\\':
+            backslashes += 1
+            continue
+        if c == '"':
+            out.append('\\' * (2 * backslashes + 1))
+            out.append('"')
+        else:
+            out.append('\\' * backslashes)
+            out.append(c)
+        backslashes = 0
+    out.append('\\' * (2 * backslashes))
+    out.append('"')
+    return ''.join(out)
+
+
+def _shell_join(cmd: list[str]) -> str:
+    """Quote and join ``cmd`` for the current platform's shell.
+
+    ``shlex.join`` produces POSIX-style quoting which ninja does not parse
+    correctly on Windows for paths like ``C:\\Program Files\\...``.
+    """
+    if IS_WINDOWS:
+        return ' '.join(_windows_quote(a) for a in cmd)
+    return shlex.join(cmd)
+
+
 ABI_INCOMPATIBILITY_WARNING = (
     "                               !! WARNING !!"
     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -810,15 +865,17 @@ class BuildExtension(build_ext):
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = [_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc')]
-                    self.compiler.set_executable('compiler_so', nvcc)
+                    self.compiler.set_executable('compiler_so', _wrap_compiler(nvcc))
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if IS_HIP_EXTENSION:
                         cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
-                elif isinstance(cflags, dict):
-                    cflags = cflags['cxx']
+                else:
+                    self.compiler.set_executable('compiler_so', _wrap_compiler(list(original_compiler)))
+                    if isinstance(cflags, dict):
+                        cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
                 append_std17_if_no_std_present(cflags)
@@ -1025,15 +1082,17 @@ class BuildExtension(build_ext):
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
-                        cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
-                    elif isinstance(self.cflags, dict):
-                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
-                        append_std17_if_no_std_present(cflags)
-                        cmd += cflags
-                    elif isinstance(self.cflags, list):
-                        cflags = COMMON_MSVC_FLAGS + self.cflags
-                        append_std17_if_no_std_present(cflags)
-                        cmd += cflags
+                        cmd = _wrap_compiler([nvcc, '-c', src, '-o', obj] + include_list + cflags)
+                    else:
+                        if isinstance(self.cflags, dict):
+                            cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
+                            append_std17_if_no_std_present(cflags)
+                            cmd += cflags
+                        elif isinstance(self.cflags, list):
+                            cflags = COMMON_MSVC_FLAGS + self.cflags
+                            append_std17_if_no_std_present(cflags)
+                            cmd += cflags
+                        cmd = _wrap_compiler(cmd)
 
                 return original_spawn(cmd)
 
@@ -1888,6 +1947,8 @@ def _check_and_build_extension_h_precompiler_headers(
     b_is_gcc = check_compiler_is_gcc(compiler)
     if b_is_gcc is False:
         return
+
+    compiler = _shell_join(_wrap_compiler(compiler))
 
     head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
@@ -3041,7 +3102,7 @@ e.
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append(f'cxx = {compiler}')
+    config.append(f'cxx = {_shell_join(_wrap_compiler(compiler))}')
     if with_cuda or cuda_dlink_post_cflags:
         if "PYTORCH_NVCC" in os.environ:
             nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
@@ -3050,6 +3111,7 @@ e.
                 nvcc = _get_hipcc_path()
             else:
                 nvcc = _join_cuda_home('bin', 'nvcc')
+            nvcc = _shell_join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
         sycl = 'icx' if IS_WINDOWS else 'icpx'
