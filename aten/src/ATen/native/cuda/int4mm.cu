@@ -12,6 +12,10 @@
 #include <ATen/DeviceGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#if defined(USE_ROCM)
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 
 namespace at::native {
 
@@ -126,12 +130,6 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   const uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
-
-#if defined (__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
-#define CDNA2_OR_LATER 1
-#else
-#define CDNA2_OR_LATER 0
-#endif
 
 #if defined(USE_ROCM) || (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
@@ -621,13 +619,22 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     int32_t kTiles) {
   constexpr int32_t kMTileSize = 16;
 #if defined(USE_ROCM)
+  // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
+  // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908
+#if defined(__gfx908__)
+  printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
+  return;
+#else
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+    return;
+  }
+#endif
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
 #endif
   constexpr int32_t kKTileSize = 16;
-
-#if !defined(USE_ROCM) || CDNA2_OR_LATER
 
   static_assert(
       ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
@@ -717,6 +724,9 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         // execution dependency. Instead, we only periodically accumulate into
         // `c`
 #if defined(USE_ROCM)
+        // TODO: revisit this, we should not be diverging around the use of
+        //       vectors, it is possible to obtain the underlying native vector
+        //       type and feed it into the builtin.
         VecT<float, 4> cTmp[2];
 #else
         float4 cTmp[2];
@@ -733,12 +743,14 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
 #pragma unroll
         for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-          cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-              a[i * kInnerKTiles + j * 2 + k].val,
-              b[i][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-              cTmp[k], 0, 0, 0);
-#else
+#if defined(USE_ROCM) && !defined(__gfx908__)
+          if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+            cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
+                a[i * kInnerKTiles + j * 2 + k].val,
+                b[i][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
+                cTmp[k], 0, 0, 0);
+          }
+#elif !defined(USE_ROCM)
           asm volatile(
               "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
               "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
@@ -831,12 +843,14 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
 #pragma unroll
       for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-        cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-          a[j * 2 + k].val,
-          b[0][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-          cTmp[k], 0, 0, 0);
-#else
+#if defined(USE_ROCM) && !defined(__gfx908__)
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+          cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
+            a[j * 2 + k].val,
+            b[0][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
+            cTmp[k], 0, 0, 0);
+        }
+#elif !defined(USE_ROCM)
         asm volatile(
             "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
@@ -916,9 +930,6 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         laneId,
         sum_f32);
   }
-#else
-    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
-#endif
 }
 
 
@@ -1296,9 +1307,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   if (!isCDNA2orLater(in.device().index())) {
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
-#endif
-
-#if defined(USE_ROCM)
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
