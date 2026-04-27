@@ -4782,7 +4782,7 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
         raise NotImplementedError
 
 
@@ -4793,7 +4793,13 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
+        if timeout is not None and self.future is not None:
+            # Wait on the underlying cross-process future with the caller's
+            # timeout; raises concurrent.futures.TimeoutError if it does not
+            # resolve in time. result_fn will then consume the completed
+            # future without blocking further.
+            self.future.result(timeout=timeout)
         return self.result_fn()
 
 
@@ -4811,7 +4817,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
 
-    def result(self) -> CachingAutotuner:
+    def result(self, timeout: float | None = None) -> CachingAutotuner:
+        # timeout is accepted for interface parity with other CodeCacheFuture
+        # subclasses; this work is synchronous in-process and has no pending
+        # future to wait on.
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             self.static_autotuner.recheck_autotune_cache(

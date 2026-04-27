@@ -74,6 +74,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+# Bound Inductor compile-worker futures on ROCm so a stuck Triton compile
+# fails fast with a clear RuntimeError naming the kernel, instead of blocking
+# until the outer test timeout kills the shard and loses all context. Scoped
+# to ROCm because the known-bad cases (sort-with-index on gfx90a/gfx942) have
+# only been observed there; leaving CPU/CUDA jobs unbounded avoids regressing
+# any legitimately long compile on those backends.
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+fi
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
