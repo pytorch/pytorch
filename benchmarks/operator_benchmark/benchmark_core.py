@@ -376,16 +376,18 @@ class BenchmarkRunner:
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return result.median
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
+        cuda_sync = "cuda" in test_case.test_config.test_name
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
         test_case._output_mean()
         backward_time = timeit.timeit(
-            functools.partial(test_case.run_backward, iters, print_per_iter), number=1
+            functools.partial(test_case.run_backward, iters, print_per_iter, cuda_sync),
+            number=1,
         )
         return backward_time
 
