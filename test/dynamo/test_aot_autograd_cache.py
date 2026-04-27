@@ -1984,6 +1984,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertNotEqual(res1, res3)
             self.assertEqual(res1, res3.sub(torch.ones(2, 2)))
 
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("always_keep_tensor_constants", True)
+    @functorch_config.patch(
+        {
+            "enable_autograd_cache": True,
+            "strict_autograd_cache": True,
+            "bundled_autograd_cache": True,
+        }
+    )
+    def test_tensor_constant(self):
+        """Bundled AOT cache serialization with strict_autograd_cache should
+        succeed when the compiled graph contains tensor constants."""
+
+        def fn(x):
+            idx = torch.tensor([], dtype=torch.long, device=x.device)
+            return x[idx]
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with torch.no_grad():
+            compiled_fn(torch.randn(4, device=GPU_TYPE))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
     @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -2045,7 +2069,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not HAS_GPU, "GPU is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2147,7 +2171,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not HAS_GPU, "GPU is unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
