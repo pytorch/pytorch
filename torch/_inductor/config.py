@@ -1239,6 +1239,29 @@ class aten_distributed_optimizations:
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
 
+    # Pre-bucket FSDP collectives before overlap scheduling.
+    # Merges per-parameter FSDP collectives into buckets sized to
+    # saturate the process group's network bandwidth.
+    pre_bucketing_fsdp_collectives: bool = True
+
+    # Override bucket cap in MB for pre-bucketing. When None, auto-computes
+    # from the NCCL analytical model using the configs below.
+    pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None
+
+    # Floor for auto-computed bucket cap in MB.
+    pre_bucketing_fsdp_collectives_min_bucket_cap_mb: float = 10.0
+
+    # Ceiling for auto-computed bucket cap in MB.
+    pre_bucketing_fsdp_collectives_max_bucket_cap_mb: float = 500.0
+
+    # Verbose logging: per-collective sizes and bucket composition
+    # via logger and trace_structured.
+    pre_bucketing_fsdp_collectives_verbose: bool = False
+
+    # Multiplier on the empirical saturation model's output.
+    # With the empirical profiles this should be 1.0; kept for manual tuning.
+    pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

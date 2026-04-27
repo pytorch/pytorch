@@ -310,22 +310,21 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
+    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> bool:
-    """
-    Check if the node is a FSDP-related all_gather by its recursive ancestors.
-    On the path from the all-gather to its originate placeholder, there should not be any compute node
-    So there should be ONLY ONE placeholder in its recursive ancestors.
+    """Check if an all_gather derives from exactly one placeholder (parameter).
+
+    When all_node_ancestors is provided, uses it for O(|ancestors|) lookup.
+    Otherwise delegates to the BFS implementation in fsdp.py.
     """
     if not is_all_gather_into_tensor(node):
         return False
+    if all_node_ancestors is not None:
+        phs = (a for a in all_node_ancestors[node] if a.op == "placeholder")
+        return next(phs, None) is not None and next(phs, None) is None
+    from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
-    seen_placeholders = 0
-    for ancestor in all_node_ancestors[node]:
-        if ancestor.op == "placeholder":
-            seen_placeholders += 1
-
-    return seen_placeholders == 1
+    return _is_fsdp_all_gather(node)
 
 
 def is_fsdp_reduce_scatter(node: torch.fx.Node) -> bool:
