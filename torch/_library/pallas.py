@@ -344,34 +344,6 @@ def pallas_op(
 
         result.register_fake(fake_fn)
 
-        # -- FunctionalTensorMode decomposition -------------------------
-        from .._subclasses.functional_tensor import FunctionalTensorMode
-
-        def functional_decomp(mode, op, types, args, kwargs):  # type: ignore[no-untyped-def]
-            from torch.export._trace import custom_pallas_ops_decomposition_disabled
-
-            if custom_pallas_ops_decomposition_disabled():
-                return mode.__torch_dispatch__(op, types, args, kwargs)
-            else:
-                import torch._subclasses
-
-                unrecognized_types = [
-                    t
-                    for t in types
-                    if not issubclass(t, torch._subclasses.FakeTensor)
-                    and t
-                    not in [
-                        torch.Tensor,
-                        torch._subclasses.functional_tensor.FunctionalTensor,
-                    ]
-                ]
-                if unrecognized_types:
-                    return NotImplemented
-                with mode:
-                    return fn(*args, **kwargs)
-
-        result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
-
         # Store metadata for downstream consumers.
         result._pallas_donate_argnums = donate_argnums or []  # type: ignore[attr-defined]
         result._pallas_static_argnums = static_argnums  # type: ignore[attr-defined]

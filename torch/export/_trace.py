@@ -205,19 +205,6 @@ def custom_triton_ops_decomposition_disabled():
     return not torch._functorch.config.decompose_custom_triton_ops
 
 
-@contextmanager
-def _disable_custom_pallas_op_functional_decomposition():
-    old = torch._functorch.config.decompose_custom_pallas_ops
-    try:
-        torch._functorch.config.decompose_custom_pallas_ops = False
-        yield torch._functorch.config.decompose_custom_pallas_ops
-    finally:
-        torch._functorch.config.decompose_custom_pallas_ops = old
-
-
-def custom_pallas_ops_decomposition_disabled():
-    return not torch._functorch.config.decompose_custom_pallas_ops
-
 
 def _fixup_key(x):
     return "L__self__" + _strip_root(x)
