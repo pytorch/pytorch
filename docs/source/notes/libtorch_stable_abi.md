@@ -25,7 +25,8 @@ discussed below.
 It consists of
 
 - torch/csrc/stable/library.h: Provides a stable version of TORCH_LIBRARY and similar macros.
-- torch/csrc/stable/tensor_struct.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
+- torch/csrc/stable/tensor.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
+- torch/csrc/stable/device.h: Provides torch::stable::Device, a stable version of c10::Device.
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
@@ -103,7 +104,7 @@ TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
 // (1) Don't include <torch/torch.h> <ATen/ATen.h>
 //     only include APIs from torch/csrc/stable, torch/headeronly and C-shims
 #include <torch/csrc/stable/library.h>
-#include <torch/csrc/stable/tensor_struct.h>
+#include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
