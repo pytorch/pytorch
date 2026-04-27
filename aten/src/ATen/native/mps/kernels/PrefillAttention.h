@@ -1,6 +1,6 @@
-// Steel-style flash attention prefill kernel for MPS.
+// Flash-attention prefill kernel for MPS.
 // Adapted from kernels-community/metal-flash-sdpa, which is itself
-// adapted from MLX (mlx/backend/metal/kernels/steel/attn).
+// adapted from MLX.
 // Uses simdgroup-matrix MMA for high throughput; supports causal mask,
 // optional additive/bool mask, GQA/MQA and softcapping.
 // Operates on PyTorch's dense [B, H, L, D] layout via per-tensor strides.
@@ -10,8 +10,8 @@
 // one bundled section), so Attention.mm only needs a single library handle.
 #pragma once
 
-#define STEEL_CONST static constant constexpr const
-#define STEEL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
+#define PREFILL_CONST static constant constexpr const
+#define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
 
 template <typename U>
 struct Limits {
@@ -74,8 +74,8 @@ template <
     short TCOLS = BCOLS / n_reads,
     short TROWS = tgp_size / TCOLS>
 struct BlockLoaderT {
-  STEEL_CONST short n_rows = (BROWS + TROWS - 1) / TROWS;
-  STEEL_CONST short vec_size = n_reads;
+  PREFILL_CONST short n_rows = (BROWS + TROWS - 1) / TROWS;
+  PREFILL_CONST short vec_size = n_reads;
 
   const int src_ld;
   const int tile_stride;
@@ -103,9 +103,9 @@ struct BlockLoaderT {
 
   template <typename UnaryOp>
   METAL_FUNC void apply_inplace_op(thread const UnaryOp& op) const {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < BROWS; i += TROWS) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         dst[i * kDstStrRow + j * kDstStrCol] =
             op.apply(dst[i * kDstStrRow + j * kDstStrCol]);
@@ -114,9 +114,9 @@ struct BlockLoaderT {
   }
 
   METAL_FUNC void load_unsafe() const {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < BROWS; i += TROWS) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         dst[i * kDstStrRow + j * kDstStrCol] = src[i * src_ld + j];
       }
@@ -127,9 +127,9 @@ struct BlockLoaderT {
     src_tile_dim = src_tile_dim - short2(bj, bi);
 
     if (src_tile_dim.x <= 0 || src_tile_dim.y <= 0) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < BROWS; i += TROWS) {
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short j = 0; j < vec_size; j++) {
           dst[i * kDstStrRow + j * kDstStrCol] = T(0);
         }
@@ -140,21 +140,21 @@ struct BlockLoaderT {
     bool tmp_idx[vec_size];
     T tmp_val[vec_size];
 
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < BROWS; i += TROWS) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         tmp_idx[j] = (i < src_tile_dim.y) && (j < src_tile_dim.x);
       }
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         tmp_val[j] = src[(tmp_idx[j] ? i * src_ld + j : 0)];
       }
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         tmp_val[j] = tmp_idx[j] ? tmp_val[j] : T(0);
       }
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < vec_size; j++) {
         dst[i * kDstStrRow + j * kDstStrCol] = tmp_val[j];
       }
@@ -225,13 +225,13 @@ struct BaseMMAFrag {
 
 template <typename T>
 struct BaseMMAFrag<T, 8, 8> {
-  STEEL_CONST int kFragRows = 8;
-  STEEL_CONST int kFragCols = 8;
+  PREFILL_CONST int kFragRows = 8;
+  PREFILL_CONST int kFragCols = 8;
 
-  STEEL_CONST int kElemsPerFrag = (kFragRows * kFragCols) / 32;
+  PREFILL_CONST int kElemsPerFrag = (kFragRows * kFragCols) / 32;
 
-  STEEL_CONST int kElemRows = 1;
-  STEEL_CONST int kElemCols = 2;
+  PREFILL_CONST int kElemRows = 1;
+  PREFILL_CONST int kElemCols = 2;
 
   static_assert(
       kElemRows * kElemCols == kElemsPerFrag,
@@ -262,9 +262,9 @@ struct BaseMMAFrag<T, 8, 8> {
       SrcPtrType src,
       StrX str_x,
       StrY str_y) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
         dst[i * kElemCols + j] =
             static_cast<T>(src[i * str_x.value + j * str_y.value]);
@@ -289,9 +289,9 @@ struct BaseMMAFrag<T, 8, 8> {
       LimY lim_y,
       OffX off_x = Int<0>{},
       OffY off_y = Int<0>{}) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
         if ((off_x + i) < lim_x && (off_y + j) < lim_y) {
           dst[i * kElemCols + j] = static_cast<T>(
@@ -310,9 +310,9 @@ struct BaseMMAFrag<T, 8, 8> {
       StrX str_x,
       StrY str_y) {
     using U = pointer_element_t<DstPtrType>;
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
         dst[i * str_x + j * str_y.value] =
             static_cast<U>(src[i * kElemCols + j]);
@@ -338,9 +338,9 @@ struct BaseMMAFrag<T, 8, 8> {
       OffX off_x = Int<0>{},
       OffY off_y = Int<0>{}) {
     using U = pointer_element_t<DstPtrType>;
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
         if ((off_x + i) < lim_x && (off_y + j) < lim_y) {
           dst[(off_x + i) * str_x + (off_y + j) * str_y.value] =
@@ -389,9 +389,9 @@ struct BaseMMAFrag<T, 8, 8> {
   METAL_FUNC static constexpr void row_bin_op(
       thread frag_type& inp_vals,
       thread T* row_vals) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
         inp_vals[i * kElemCols + j] =
             Op::apply(inp_vals[i * kElemCols + j], row_vals[i]);
@@ -408,21 +408,21 @@ template <
 struct MMATile {
   using MMAFrag_t = MMAFrag_;
   using elem_type = T;
-  STEEL_CONST int kFragRows = MMAFrag_t::kFragRows;
-  STEEL_CONST int kFragCols = MMAFrag_t::kFragCols;
-  STEEL_CONST int kElemsPerFrag = MMAFrag_t::kElemsPerFrag;
+  PREFILL_CONST int kFragRows = MMAFrag_t::kFragRows;
+  PREFILL_CONST int kFragCols = MMAFrag_t::kFragCols;
+  PREFILL_CONST int kElemsPerFrag = MMAFrag_t::kElemsPerFrag;
 
-  STEEL_CONST int kTileRows = kTileRows_;
-  STEEL_CONST int kTileCols = kTileCols_;
+  PREFILL_CONST int kTileRows = kTileRows_;
+  PREFILL_CONST int kTileCols = kTileCols_;
 
-  STEEL_CONST int kRows = kTileRows * kFragRows;
-  STEEL_CONST int kCols = kTileCols * kFragCols;
+  PREFILL_CONST int kRows = kTileRows * kFragRows;
+  PREFILL_CONST int kCols = kTileCols * kFragCols;
 
-  STEEL_CONST int kNumFrags = kTileRows * kTileCols;
-  STEEL_CONST int kElemsPerTile = kNumFrags * kElemsPerFrag;
+  PREFILL_CONST int kNumFrags = kTileRows * kTileCols;
+  PREFILL_CONST int kElemsPerTile = kNumFrags * kElemsPerFrag;
 
-  STEEL_CONST int kRowsPerThread = kTileRows * MMAFrag_t::kElemRows;
-  STEEL_CONST int kColsPerThread = kTileCols * MMAFrag_t::kElemCols;
+  PREFILL_CONST int kRowsPerThread = kTileRows * MMAFrag_t::kElemRows;
+  PREFILL_CONST int kColsPerThread = kTileCols * MMAFrag_t::kElemCols;
 
   typedef typename MMAFrag_t::mat_type mat_type;
   typedef typename MMAFrag_t::frag_type frag_type;
@@ -432,7 +432,7 @@ struct MMATile {
   METAL_FUNC MMATile() thread {}
 
   METAL_FUNC constexpr void clear() {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kNumFrags; ++i) {
       val_frags[i] = frag_type(0);
     }
@@ -450,9 +450,9 @@ struct MMATile {
 
   template <typename Op>
   METAL_FUNC void row_reduce(thread T vals[kRowsPerThread]) const {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kTileCols; ++j) {
         MMAFrag_t::template row_reduce<Op>(
             frag_at(i, j), &vals[i * MMAFrag_t::kElemRows]);
@@ -462,9 +462,9 @@ struct MMATile {
 
   template <typename Op>
   METAL_FUNC void row_bin_op(thread T vals[kRowsPerThread]) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kTileCols; ++j) {
         MMAFrag_t::template row_bin_op<Op>(
             frag_at(i, j), &vals[i * MMAFrag_t::kElemRows]);
@@ -474,9 +474,9 @@ struct MMATile {
 
   template <typename U, int w_x, int w_y, int str_x, int str_y>
   METAL_FUNC void load(const threadgroup U* src) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kTileCols; ++j) {
         MMAFrag_t::load(
             frag_at(i, j),
@@ -491,9 +491,9 @@ struct MMATile {
 
   template <typename U, int w_x, int w_y>
   METAL_FUNC void store(device U* dst, const int ld) const {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kTileRows; ++i) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short j = 0; j < kTileCols; ++j) {
         MMAFrag_t::store(
             frag_at(i, j),
@@ -509,9 +509,9 @@ struct MMATile {
       device U* dst,
       const int ld,
       const short2 dst_tile_dims) const {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (int i = 0; i < kTileRows; ++i) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (int j = 0; j < kTileCols; ++j) {
         MMAFrag_t::store_safe(
             frag_at(i, j),
@@ -544,14 +544,14 @@ METAL_FUNC void tile_matmad(
     thread MMATile<Atype, M, K, MMAFragA>& A,
     thread MMATile<Btype, K, N, MMAFragB>& B,
     thread MMATile<Ctype, M, N, MMAFragC>& C) {
-  STEEL_PRAGMA_UNROLL
+  PREFILL_PRAGMA_UNROLL
   for (short m = 0; m < M; ++m) {
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short n = 0; n < N; ++n) {
       short m_serp = m;
       short n_serp = (m % 2) ? (N - 1 - n) : n;
 
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short k = 0; k < K; ++k) {
         MMAFragD::mma(
             D.frag_at(m_serp, n_serp),
@@ -731,7 +731,7 @@ prefill_attention(
   AccumType max_score[kRowsPT];
   AccumType sum_score[kRowsPT] = {0};
 
-  STEEL_PRAGMA_UNROLL
+  PREFILL_PRAGMA_UNROLL
   for (short i = 0; i < kRowsPT; ++i) {
     max_score[i] = Limits<AccumType>::min;
   }
@@ -762,7 +762,7 @@ prefill_attention(
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short dd = 0; dd < TD; dd++) {
       simdgroup_barrier(mem_flags::mem_none);
 
@@ -782,12 +782,12 @@ prefill_attention(
       using selem_t = typename stile_t::elem_type;
       constexpr auto neg_inf = -metal::numeric_limits<selem_t>::infinity();
 
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short j = 0; j < stile_t::kTileCols; j++) {
           short col_pos = sn + (j * stile_t::kFragCols);
-          STEEL_PRAGMA_UNROLL
+          PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemCols; jj++) {
             if ((col_pos + jj) >= k_block_size) {
               Stile.frag_at(i, j)[jj] = neg_inf;
@@ -803,13 +803,13 @@ prefill_attention(
       using selem_t = typename stile_t::elem_type;
       constexpr auto neg_inf = -metal::numeric_limits<selem_t>::infinity();
 
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
         int row_pos = block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short j = 0; j < stile_t::kTileCols; j++) {
           const int col_pos = kb * BK + sn + (j * stile_t::kFragCols);
-          STEEL_PRAGMA_UNROLL
+          PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemCols; jj++) {
             if (row_pos < (col_pos + jj)) {
               Stile.frag_at(i, j)[jj] = neg_inf;
@@ -831,11 +831,11 @@ prefill_attention(
       using MMAFrag_mask_t = BaseMMAFrag<melem_t, kFragSize, kFragSize>;
       using frag_t = typename MMAFrag_mask_t::frag_type;
 
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
         const int row_pos_in_seq =
             block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short j = 0; j < stile_t::kTileCols; j++) {
           const int col_pos_in_seq = kb * BK + sn + (j * stile_t::kFragCols);
 
@@ -851,7 +851,7 @@ prefill_attention(
               row_pos_in_seq,
               col_pos_in_seq);
 
-          STEEL_PRAGMA_UNROLL
+          PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
             if constexpr (is_bool) {
               Stile.frag_at(i, j)[jj] =
@@ -870,11 +870,11 @@ prefill_attention(
       using selem_t = typename stile_t::elem_type;
       const selem_t softcapping_val = static_cast<selem_t>(params->softcapping);
 
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short j = 0; j < stile_t::kTileCols; j++) {
-          STEEL_PRAGMA_UNROLL
+          PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
             Stile.frag_at(i, j)[jj] =
                 metal::tanh(Stile.frag_at(i, j)[jj]) * softcapping_val;
@@ -894,7 +894,7 @@ prefill_attention(
     // Online softmax update.
     AccumType new_max[kRowsPT];
     AccumType factor[kRowsPT];
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
       new_max[i] = max_score[i];
     }
@@ -905,14 +905,14 @@ prefill_attention(
     // If new_max is -inf, both old/new max are -inf (nothing valid yet).
     // Use factor=1 so we keep the running state unchanged for that row.
     // exp(-inf - -inf) would otherwise produce NaN.
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
       factor[i] = (new_max[i] == -metal::numeric_limits<AccumType>::infinity())
           ? AccumType(1)
           : fast::exp2(max_score[i] - new_max[i]);
     }
 
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
       max_score[i] = new_max[i];
     }
@@ -920,7 +920,7 @@ prefill_attention(
     AccumType sum_score_tmp[kRowsPT] = {0};
     Stile.template row_reduce<SumOp>(sum_score_tmp);
 
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
       sum_score[i] = sum_score[i] * factor[i] + sum_score_tmp[i];
     }
@@ -929,11 +929,11 @@ prefill_attention(
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    STEEL_PRAGMA_UNROLL
+    PREFILL_PRAGMA_UNROLL
     for (short iq = 0; iq < TQ; iq++) {
-      STEEL_PRAGMA_UNROLL
+      PREFILL_PRAGMA_UNROLL
       for (short id = 0; id < TD; id++) {
-        STEEL_PRAGMA_UNROLL
+        PREFILL_PRAGMA_UNROLL
         for (short ik = 0; ik < TK; ik++) {
           if constexpr (BD == 128) {
             simdgroup_barrier(mem_flags::mem_none);

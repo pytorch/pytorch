@@ -446,9 +446,8 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
   return {std::move(final_out), std::move(final_out)};
 }
 
-// Steel-style flash-attention prefill (kernels in SteelAttention.metal).
-// Picks block sizes per head dim and dispatches one threadgroup per
-// (Q-block, head, batch).
+// Flash-attention prefill (kernels in Attention.metal). Picks block sizes
+// per head dim and dispatches one threadgroup per (Q-block, head, batch).
 namespace {
 
 struct PrefillAttnParamsHost {
@@ -490,7 +489,7 @@ inline PrefillBlockShape prefill_block_shape_for_head_dim(int64_t head_dim) {
     case 32:
       return {32, 32, 4, 1};
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported head_dim for steel attention: ", head_dim);
+      TORCH_INTERNAL_ASSERT(false, "Unsupported head_dim for prefill attention: ", head_dim);
   }
 }
 
@@ -532,9 +531,9 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   auto out = at::empty_like(q_);
 
   // Strides for [B, H, L, D] layout. Last-dim stride must be 1.
-  TORCH_CHECK(q_.stride(-1) == 1, "steel sdpa: query last-dim must be contiguous");
-  TORCH_CHECK(k_.stride(-1) == 1, "steel sdpa: key last-dim must be contiguous");
-  TORCH_CHECK(v_.stride(-1) == 1, "steel sdpa: value last-dim must be contiguous");
+  TORCH_CHECK(q_.stride(-1) == 1, "sdpa prefill:query last-dim must be contiguous");
+  TORCH_CHECK(k_.stride(-1) == 1, "sdpa prefill:key last-dim must be contiguous");
+  TORCH_CHECK(v_.stride(-1) == 1, "sdpa prefill:value last-dim must be contiguous");
 
   PrefillAttnParamsHost params{};
   params.B = static_cast<int>(batchSize);
@@ -563,7 +562,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   PrefillAttnMaskParamsHost mask_params{};
   if (has_mask) {
     Tensor m = mask_.value();
-    TORCH_CHECK(m.dim() == 4, "steel sdpa: mask must be 4D after broadcast");
+    TORCH_CHECK(m.dim() == 4, "sdpa prefill:mask must be 4D after broadcast");
     // Kernel assumes mask kL stride is 1; materialize if not.
     if (m.stride(-1) != 1) {
       m = m.contiguous();
@@ -578,9 +577,9 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   const auto shape = prefill_block_shape_for_head_dim(headSize);
 
   // Compose kernel name. Name format must match the instantiations in
-  // SteelAttention.metal:
-  //   steel_attention_<dtype>_bq<BQ>_bk<BK>_bd<BD>_wm<WM>_wn<WN>
-  //                  _hm<has_mask>_dc<do_causal>_mask<mask_dtype>
+  // Attention.metal:
+  //   prefill_attention_<dtype>_bq<BQ>_bk<BK>_bd<BD>_wm<WM>_wn<WN>
+  //                    _hm<has_mask>_dc<do_causal>_mask<mask_dtype>
   std::string dtype_str;
   switch (q_.scalar_type()) {
     case kFloat:
@@ -593,7 +592,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
       dtype_str = "bfloat16";
       break;
     default:
-      TORCH_CHECK(false, "steel sdpa: unsupported dtype ", q_.scalar_type());
+      TORCH_CHECK(false, "sdpa prefill:unsupported dtype ", q_.scalar_type());
   }
 
   std::string mask_dtype_str = dtype_str;
@@ -602,7 +601,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
       mask_dtype_str = "bool_";
     } else {
       TORCH_CHECK(mask_.value().scalar_type() == q_.scalar_type(),
-                  "steel sdpa: float mask dtype must match query dtype");
+                  "sdpa prefill:float mask dtype must match query dtype");
     }
   }
 
@@ -721,13 +720,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   // boolean to decide if we can use kernel paths
   bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
 
-  // Steel-style prefill kernel: long-Q path. Requires Q/K/V to share the same
+  // Prefill kernel: long-Q path. Requires Q/K/V to share the same
   // head dim, the head dim to be one of the instantiated shapes, the dtype to
   // be float/half/bfloat, and any mask to be either bool or matching the
-  // query dtype. Set PYTORCH_MPS_DISABLE_STEEL_ATTENTION=1 to fall back to
+  // query dtype. Set PYTORCH_MPS_DISABLE_PREFILL_ATTENTION=1 to fall back to
   // MPSGraph for benchmarking / debugging.
   static const bool prefill_attention_disabled = []() {
-    auto val = c10::utils::get_env("PYTORCH_MPS_DISABLE_STEEL_ATTENTION");
+    auto val = c10::utils::get_env("PYTORCH_MPS_DISABLE_PREFILL_ATTENTION");
     return val.has_value() && val != "0";
   }();
   bool prefill_supported_dtype =
@@ -736,9 +735,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       !mask_.has_value() || (mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype());
   bool prefill_head_dim_supported =
       (query_head_dim == value_head_dim) && prefill_attention_supports_head_dim(query_head_dim);
-  // For very short Q (qL <= 8) the steel BQ=16/32 tile is mostly empty and
+  // For very short Q (qL <= 8) the BQ=16/32 prefill tile is mostly empty and
   // the existing MPSGraph fallback gives similar throughput with tighter
-  // numerical accuracy at small head counts. Skip steel there so we don't
+  // numerical accuracy at small head counts. Skip prefill there so we don't
   // regress the existing decode-style tests.
   bool prefill_q_long_enough = query_seq_len > 8;
   bool supports_prefill = !prefill_attention_disabled && !supports_fast_sdpa && prefill_supported_dtype &&
