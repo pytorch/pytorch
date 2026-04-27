@@ -3786,7 +3786,12 @@ class TestPrivateUse1ProfilerState(TestCase):
 class TestProfilerEarlyAbort(TestCase):
     """Tests for early abort of device profiling when Kineto signals that
     collection has stopped (e.g. CUPTI buffer overflow). The exit condition
-    is mocked so no actual overflow is needed."""
+    is mocked so no actual overflow is needed.
+
+    Note that we don't actually depend on any CUDA specific behavior. But the
+    early abort logic does behave different if the user has only requested
+    CPU-only profiling. Explicitly specifying a GPU device seems cleaner than
+    patching the `use_device` attributes in the profiler."""
 
     PATCH_TARGET = "torch.autograd._is_stopped"
 

@@ -553,7 +553,10 @@ void profilerStep() {
 
 bool isStopped() {
 #ifdef USE_KINETO
-  return libkineto::api().activityProfiler().isStopped();
+  if (libkineto::api().isProfilerInitialized()) {
+    return libkineto::api().activityProfiler().isStopped();
+  }
+  return false;
 #else
   return false;
 #endif
