@@ -681,9 +681,7 @@ use_pre_grad_passes: bool = True
 #   requires custom passes to implement uuid() for the cache key.
 # "default": resolves to "late" when possible (no custom pass, or custom pass
 #   with uuid), falls back to "early" otherwise.
-pre_grad_pass_timing: Literal["early", "late", "default"] = (
-    "late" if is_fbcode() else "default"
-)
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
 
 
 use_joint_graph_passes: bool = True
