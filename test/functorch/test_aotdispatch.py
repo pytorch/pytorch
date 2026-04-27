@@ -8,19 +8,19 @@
 
 import copy
 import itertools
-import logging
 import operator
 import unittest
 import warnings
 import weakref
 from collections.abc import Callable
-from contextlib import ContextDecorator, contextmanager, ExitStack, nullcontext
+from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
+    capture_codegen_source,
     decorate,
     decorateForModules,
     saved_tensors_hooks_to_gm,
@@ -7138,33 +7138,6 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
-    @contextmanager
-    def _capture_codegen_source(self, artifact_name):
-        trace_log = logging.getLogger("torch.__trace")
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == artifact_name
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
-
     def _make_effectful_op(self, name):
         @torch.library.custom_op(f"test::{name}", mutates_args=())
         def op(x: torch.Tensor) -> torch.Tensor:
@@ -7192,7 +7165,7 @@ def forward(self, primals_1, tangents_1):
         op = self._make_effectful_op("codegen_single_effect")
         handle = _register_effectful_op(op, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("effect_tokens_wrapper") as captured:
+            with capture_codegen_source("effect_tokens_wrapper") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7214,7 +7187,7 @@ def forward(self, primals_1, tangents_1):
             handle.destroy()
 
     def test_effect_tokens_no_codegen_when_zero(self):
-        with self._capture_codegen_source("effect_tokens_wrapper") as captured:
+        with capture_codegen_source("effect_tokens_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7371,7 +7344,7 @@ def forward(self, primals_1, tangents_1):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_emitted(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7390,7 +7363,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("_set_offset_", source)
 
     def test_functionalized_rng_no_codegen(self):
-        with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+        with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7469,7 +7442,7 @@ def forward(self, primals_1, tangents_1):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_source_structure(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with self._capture_codegen_source("functionalized_rng_wrapper") as captured:
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
