@@ -4953,6 +4953,40 @@ class TestCustomOpFastPath(TestCase):
             fp_dispatch_sub(tt)
             self.assertTrue(called)
 
+    @requires_compile
+    def test_fast_path_taken_under_torch_compile_replay(self):
+        # Dynamo constant-folds is_compiling() to True, so fast_call returns
+        # the fallback sentinel during tracing and the C++ dispatcher handles
+        # FakeTensorMode evaluations. But Inductor's compiled wrapper calls
+        # `torch.ops.<ns>.<name>.default(x)` at runtime, and the fast path
+        # must fire on every replay. We verify this by poisoning the slow path
+        # *after* tracing/compilation completes.
+        @torch.library.custom_op("_torch_testing::fp_compile", mutates_args=())
+        def fp_compile(x: Tensor) -> Tensor:
+            return x + 1
+
+        @fp_compile.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            return torch.ops._torch_testing.fp_compile.default(x)
+
+        x = torch.randn(4)
+        expected = x + 1
+
+        # First call traces+compiles. FakeTensorMode invocations during
+        # tracing legitimately route through `_orig_op`, so we cannot
+        # poison it yet.
+        self.assertEqual(f(x), expected)
+
+        # Cached replays should never reach `_orig_op`; if they do, the
+        # poison raises.
+        with self._assert_fast_path_taken(fp_compile):
+            for _ in range(3):
+                self.assertEqual(f(x), expected)
+
 
 class TestLibrarySourceLocation(TestCase):
     def test_library_source_location(self):
