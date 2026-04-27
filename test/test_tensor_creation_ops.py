@@ -4,7 +4,6 @@
 import torch
 import numpy as np
 
-import pytest
 import sys
 import math
 import warnings
@@ -4243,9 +4242,14 @@ class TestAsArray(TestCase):
         # Copy is forced because of different device
         other = get_another_device(device)
         if other is not None:
-            caps = torch.accelerator.get_device_capability(other)
-            if dtype not in caps.get("supported_dtypes", set()):
-                pytest.xfail(f"{other} doesn't support {dtype}")
+            try:
+                caps = torch.accelerator.get_device_capability(other)
+            except Exception:
+                pass
+            else:
+                if dtype not in caps["supported_dtypes"]:
+                    self.skipTest(f"{other} doesn't support {dtype}")
+
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
