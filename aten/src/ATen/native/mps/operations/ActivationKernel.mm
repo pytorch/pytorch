@@ -33,7 +33,7 @@ Tensor relu_mps(const Tensor& self) {
   if (output.numel() == 0)
     return output;
   auto iter = at::TensorIteratorConfig().add_output(output).add_input(self).build();
-  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "relu");
   return output;
 }
 
@@ -42,7 +42,7 @@ Tensor& relu_mps_(Tensor& self) {
   if (self.numel() == 0)
     return self;
   auto iter = at::TensorIteratorConfig().add_output(self).add_input(self).set_check_mem_overlap(false).build();
-  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "relu");
   return self;
 }
 
@@ -105,7 +105,7 @@ static void silu_kernel(TensorIteratorBase& iter) {
     at::mul_out(out, self, at::sigmoid(self));
     return;
   }
-  lib.exec_unary_kernel(iter, "silu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, "silu");
 }
 
 static void silu_backward_kernel(TensorIteratorBase& iter) {
