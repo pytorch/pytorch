@@ -42,8 +42,7 @@ MPSStream::~MPSStream() {
     [(__bridge MPSGraphExecutable*)val release];
   }
   for (auto& step : _capturedSteps) {
-    [(__bridge NSArray*)step.inputsArray release];
-    [(__bridge NSArray*)step.resultsArray release];
+    MPSStream::releaseCapturedStep(step);
   }
   [_commandQueue release];
   _commandQueue = nil;
@@ -334,12 +333,7 @@ void MPSStream::captureBegin() {
   // Release any steps from a previous capture.
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     for (auto& step : _capturedSteps) {
-      if (step.kind == CapturedStep::Kind::MPSGraph) {
-        [(__bridge NSArray*)step.inputsArray release];
-        [(__bridge NSArray*)step.resultsArray release];
-      } else if (step.metalKernel) {
-        [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
-      }
+      releaseCapturedStep(step);
     }
     _capturedSteps.clear();
     [_recordingEncoder release];
@@ -361,17 +355,24 @@ void MPSStream::captureReset() {
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     _captureMode.store(false, std::memory_order_release);
     for (auto& step : _capturedSteps) {
-      if (step.kind == CapturedStep::Kind::MPSGraph) {
-        [(__bridge NSArray*)step.inputsArray release];
-        [(__bridge NSArray*)step.resultsArray release];
-      } else if (step.metalKernel) {
-        [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
-      }
+      releaseCapturedStep(step);
     }
     _capturedSteps.clear();
     [_recordingEncoder release];
     _recordingEncoder = nil;
   });
+}
+
+void MPSStream::releaseCapturedStep(CapturedStep& step) {
+  if (step.kind == CapturedStep::Kind::MPSGraph) {
+    [(__bridge NSArray*)step.inputsArray release];
+    [(__bridge NSArray*)step.resultsArray release];
+  } else if (step.metalKernel) {
+    for (auto& b : step.metalKernel->buffers) {
+      [(__bridge id<MTLBuffer>)b.buffer release];
+    }
+    [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
+  }
 }
 
 void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel) {

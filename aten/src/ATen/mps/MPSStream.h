@@ -205,6 +205,10 @@ class TORCH_API MPSStream {
   };
   std::atomic<bool> _captureMode{false};
   std::vector<CapturedStep> _capturedSteps;
+
+  // Release retained Objective-C refs held by a captured step (PSO + bound
+  // MTLBuffers for MetalKernel steps, inputs/results arrays for MPSGraph steps).
+  static void releaseCapturedStep(CapturedStep& step);
 #ifdef __OBJC__
   MPSRecordingEncoder* _recordingEncoder = nil;
 #else

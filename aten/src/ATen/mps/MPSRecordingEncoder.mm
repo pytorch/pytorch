@@ -18,8 +18,13 @@
 }
 
 - (void)dealloc {
-  if (_pending && _pending->pso) {
-    [(__bridge id<MTLComputePipelineState>)_pending->pso release];
+  if (_pending) {
+    if (_pending->pso) {
+      [(__bridge id<MTLComputePipelineState>)_pending->pso release];
+    }
+    for (auto& b : _pending->buffers) {
+      [(__bridge id<MTLBuffer>)b.buffer release];
+    }
   }
   [_inner release];
   [super dealloc];
@@ -37,8 +42,13 @@
 #pragma mark - Recording overrides
 
 - (void)setComputePipelineState:(id<MTLComputePipelineState>)state {
-  if (_pending && _pending->pso) {
-    [(__bridge id<MTLComputePipelineState>)_pending->pso release];
+  if (_pending) {
+    if (_pending->pso) {
+      [(__bridge id<MTLComputePipelineState>)_pending->pso release];
+    }
+    for (auto& b : _pending->buffers) {
+      [(__bridge id<MTLBuffer>)b.buffer release];
+    }
   }
   _pending = std::make_unique<at::mps::MPSStream::CapturedMetalKernel>();
   _pending->pso = (__bridge void*)state;
@@ -49,6 +59,7 @@
 
 - (void)setBuffer:(id<MTLBuffer>)buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index {
   if (_pending) {
+    [buffer retain];
     _pending->buffers.push_back({
       (__bridge void*)buffer,
       static_cast<size_t>(offset),
