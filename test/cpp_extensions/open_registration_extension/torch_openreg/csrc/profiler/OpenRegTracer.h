@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace torch_openreg::profiler {
+namespace openreg::profiler {
 
 // Activity types recorded by the tracer.  The session maps these to
 // libkineto::ActivityType when building GenericTraceActivity.
@@ -63,4 +63,4 @@ class OpenRegTracer {
   std::vector<TraceRecord> records_;
 };
 
-} // namespace torch_openreg::profiler
+} // namespace openreg::profiler

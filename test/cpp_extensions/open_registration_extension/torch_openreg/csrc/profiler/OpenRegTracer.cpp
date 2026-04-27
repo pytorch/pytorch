@@ -3,7 +3,7 @@
 #include <stack>
 #include <utility>
 
-namespace torch_openreg::profiler {
+namespace openreg::profiler {
 
 namespace {
 
@@ -74,4 +74,4 @@ std::vector<TraceRecord> OpenRegTracer::flush() {
   return out;
 }
 
-} // namespace torch_openreg::profiler
+} // namespace openreg::profiler
