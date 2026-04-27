@@ -456,6 +456,19 @@ def local_response_norm(
 
 __all__ += ["local_response_norm"]
 
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    *,
+    weight: Tensor | None = ...,
+    reduction: str = ...,
+    ignore_index: int | None = ...,
+    label_smoothing: float = ...,
+) -> Tensor: ...
+
+__all__ += ["linear_cross_entropy"]
+
 def log_softmax(
     input: Tensor,
     dim: int | None = ...,

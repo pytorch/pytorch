@@ -2064,6 +2064,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
+    xfail('nn.functional.linear_cross_entropy', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
