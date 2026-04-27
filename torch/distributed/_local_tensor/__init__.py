@@ -230,7 +230,7 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
 
 def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available acceleator devices.
+    Collects RNG state from all available accelerator devices.
 
     Returns:
         List of RNG state tensors, one for each accelerator device.

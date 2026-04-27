@@ -1164,7 +1164,7 @@ class ComboKernel(Kernel):
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         """
-        Build metadata used by combo-kernel grid/disaptch/autotune helpers.
+        Build metadata used by combo-kernel grid/dispatch/autotune helpers.
         """
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
