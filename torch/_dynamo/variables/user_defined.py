@@ -1586,6 +1586,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return result
 
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9404
+        source = self.source and self.get_source_by_walking_mro(tx, "__neg__")
+        method_var = self.resolve_type_attr(
+            tx,
+            "__neg__",
+            inspect.getattr_static(type(self.value), "__neg__"),
+            source,
+        )
+        return method_var.call_function(tx, [], {})
+
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (
             f"calling torch function on object without __torch_function__ {self}"
