@@ -4339,10 +4339,14 @@ class DictGuardManager : public GuardManager {
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
-    // If you are calling this, you probably want to go through a key, value
-    // child manager and then add a leaf guard on them. DictGuardManager already
-    // has TYPE_MATCH and LENGTH_CHECK built in.
-    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
+    // DictGuardManager handles TYPE_MATCH and LENGTH_CHECK inline.
+    // Most leaf guards should go on key/value child managers instead.
+    // ID_MATCH is the exception — it guards the container's identity,
+    // not its contents, and is needed when user code calls id() on a dict.
+    TORCH_CHECK(
+        dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr,
+        "DictGuardManager only supports ID_MATCH as a leaf guard");
+    GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr

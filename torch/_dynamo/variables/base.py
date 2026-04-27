@@ -1025,6 +1025,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def get_id(self, tx: InstructionTranslator) -> int | None:
+        """Return id() of the underlying Python object, or None if unavailable.
+
+        The base implementation uses source resolution for sourceful VTs.
+        Subclasses override for special cases (e.g. NNModuleVariable uses
+        get_submodule, ConstantVariable handles singletons).
+        """
+        if self.source:
+            return id(tx.output.resolve_source_value(self.source))
+        return None
+
+    def get_id_guard_type(self) -> Callable[..., Any] | None:
+        if self.source:
+            return GuardBuilder.ID_MATCH
+        return None
+
     def get_real_python_backed_value(self) -> object:
         """Return the Python object this VT wraps, for `is` comparison.
 

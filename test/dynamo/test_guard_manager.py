@@ -822,9 +822,13 @@ user_stack=None)
 
         self.assertTrue(root.check(f_locals))
 
-        # Check that no one can add a leaf guard
+        # ID_MATCH is the only leaf guard supported on DictGuardManager.
+        dict_mgr.add_id_match_guard(id(f_locals["d"]), "id match on dict", None)
+        self.assertTrue(root.check(f_locals))
+
+        # Other leaf guards are rejected.
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_id_match_guard(id_type(f_locals), "id match", None)
+            dict_mgr.add_equals_match_guard(f_locals["d"], ["equals match"], None)
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):

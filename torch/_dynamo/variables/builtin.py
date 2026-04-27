@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -78,12 +78,7 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    NO_SUCH_SUBOBJ,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -2183,7 +2178,8 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         arg = args[0]
         if istype(arg, variables.FrozensetVariable):
-            return FrozensetVariable([x.vt for x in arg.set_items])
+            # CPython: frozenset(existing_frozenset) returns the same object.
+            return arg
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
             return FrozensetVariable(items)
@@ -2722,44 +2718,22 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_id(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
-        if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
-            nn_mod_variable = args[0]
-            mod = tx.output.get_submodule(nn_mod_variable.module_key)
-            return VariableTracker.build(tx, id(mod))
-        elif len(args) == 1 and args[0].is_tensor():
-            tensor_variable = cast(TensorVariable, args[0])
-            return tensor_variable.call_id(tx)
-        elif istype(args[0], variables.FunctoolsPartialVariable):
-            return VariableTracker.build(tx, id(args[0].fake_value))
-        elif len(args) == 1:
-            arg = args[0]
-            if isinstance(
-                arg,
-                (
-                    variables.UserDefinedClassVariable,
-                    variables.UserDefinedObjectVariable,
-                ),
-            ):
-                if arg.source:
-                    if isinstance(arg, variables.UserDefinedClassVariable):
-                        install_guard(arg.source.make_guard(GuardBuilder.CLASS_MATCH))
-                    else:
-                        install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
-            real_val = arg.get_real_python_backed_value()
-            if real_val is not NO_SUCH_SUBOBJ:
-                return VariableTracker.build(tx, id(real_val))
-            return FakeIdVariable(id(arg))
-        else:
-            unimplemented(
-                gb_type="id() with unsupported args",
-                context=str(args),
-                explanation=f"Dynamo doesn't know how to trace id() call with args {args}",
-                hints=[
-                    "Supported args are Tensors, and functions/nn.Modules/user-defined objects "
-                    "from outside the compiled region.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"id() takes exactly one argument ({len(args)} given)"],
             )
+        arg = args[0]
+
+        real_id = arg.get_id(tx)
+        if real_id is not None:
+            guard_type = arg.get_id_guard_type()
+            if guard_type is not None and arg.source:
+                install_guard(arg.source.make_guard(guard_type))
+            return VariableTracker.build(tx, real_id)
+
+        return FakeIdVariable(id(arg))
 
     def call_deepcopy(
         self, tx: "InstructionTranslator", x: VariableTracker
