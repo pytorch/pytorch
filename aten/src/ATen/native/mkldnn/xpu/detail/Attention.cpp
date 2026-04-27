@@ -872,7 +872,8 @@ void sdpa(
   inputs.reserve(l_inputs.size());
 
 #define ADD_INPUT(variable) \
-  inputs.emplace_back(make_graph_tensor(l_inputs[i++], eng, variable.const_data_ptr()))
+  inputs.emplace_back(      \
+      make_graph_tensor(l_inputs[i++], eng, variable.const_data_ptr()))
 
   ADD_INPUT(query);
   ADD_INPUT(key);
@@ -973,7 +974,8 @@ void sdpa_backward(
   inputs.reserve(l_inputs.size());
 
 #define ADD_INPUT(variable) \
-  inputs.emplace_back(make_graph_tensor(l_inputs[i++], eng, variable.const_data_ptr()))
+  inputs.emplace_back(      \
+      make_graph_tensor(l_inputs[i++], eng, variable.const_data_ptr()))
 
   ADD_INPUT(grad_out);
   ADD_INPUT(query);

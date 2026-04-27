@@ -161,7 +161,9 @@ sycl::event convolution(
       src.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_m = make_onednn_memory(
-      conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.mutable_data_ptr());
+      conv_fwd_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   auto conv_forward = dnnl::convolution_forward(conv_fwd_pd);
@@ -249,8 +251,8 @@ sycl::event convolution_backward_weights(
 
   src_m = make_onednn_memory(src_md, engine, src.const_data_ptr());
   diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.const_data_ptr());
-  diff_weight_m = make_onednn_memory(
-      weight_md, engine, diff_weight.mutable_data_ptr());
+  diff_weight_m =
+      make_onednn_memory(weight_md, engine, diff_weight.mutable_data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -269,7 +271,9 @@ sycl::event convolution_backward_weights(
       src.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_m = make_onednn_memory(
-      conv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.mutable_data_ptr());
+      conv_bwd_w_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   // execute primitive

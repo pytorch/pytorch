@@ -263,7 +263,8 @@ void quantized_matmul(
 
   auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
   auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -276,7 +277,9 @@ void quantized_matmul(
   at::Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.mutable_data_ptr());
+      matmul_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   if (attr.with_binary())
@@ -297,7 +300,8 @@ void quantized_matmul(
       get_onednn_dims(weight_scales),
       dnnl::memory::data_type::f32,
       dnnl::memory::format_tag::x);
-  m2_sc_m = make_onednn_memory(m2_sc_md, engine, weight_scales.const_data_ptr());
+  m2_sc_m =
+      make_onednn_memory(m2_sc_md, engine, weight_scales.const_data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, m2_sc_m});
 
   dnnl::memory m1_sc_m, m1_zp_m;
@@ -506,12 +510,14 @@ sycl::event scaled_matmul(
 
   // Create memory
   auto src_usr_m = make_onednn_memory(src_md, engine, mat1.const_data_ptr());
-  auto weights_usr_m = make_onednn_memory(weights_md, engine, mat2.const_data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_md, engine, result.mutable_data_ptr());
+  auto weights_usr_m =
+      make_onednn_memory(weights_md, engine, mat2.const_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_md, engine, result.mutable_data_ptr());
   dnnl::memory b_usr_m;
   if (with_bias) {
-    b_usr_m =
-        make_onednn_memory(bias_md, engine, possible_reshaped_bias.const_data_ptr());
+    b_usr_m = make_onednn_memory(
+        bias_md, engine, possible_reshaped_bias.const_data_ptr());
   }
 
   // Prepare runtime scale memories (flat 1-D views) using the specs
