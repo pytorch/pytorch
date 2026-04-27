@@ -2935,11 +2935,14 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_run_unsafe_fallback(
             error: RuntimeError | None = None,
         ) -> FakeTensor | None:
-            # We infer the meta of a custom ops that return None to just
-            # return None. custom ops are not allowed to mutate metadata
-            # of their inputs, so this is safe.
+            # We infer the meta of custom ops that return None to just
+            # return None, and Tag.out ops to return their out= args.
+            # Custom ops are not allowed to mutate metadata of their
+            # inputs, so this is safe.
             if torch._library.utils.can_generate_trivial_fake_impl(func):
-                return None
+                return torch._library.utils.generate_trivial_fake_impl(
+                    func, *args, **kwargs
+                )
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)

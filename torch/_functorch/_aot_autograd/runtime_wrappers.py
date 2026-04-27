@@ -980,24 +980,43 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        @wraps(compiled_fn)
-        def wrapper(runtime_args: list[Any]) -> Any:
-            if runtime_metadata.is_rng_op_functionalized:
-                # Add the seed and offset to args
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                runtime_args.extend([seed, offset])
-                out = compiled_fn(runtime_args)
-                out = self._functionalized_rng_runtime_epilogue(
-                    runtime_metadata,
-                    out,
-                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
-                    runtime_metadata.num_forward_returns,
-                )
-                return out
-            return compiled_fn(runtime_args)
+        if not runtime_metadata.is_rng_op_functionalized:
+            return compiled_fn
 
-        wrapper._boxed_call = True  # type: ignore[attr-defined]
-        return wrapper
+        if runtime_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {runtime_metadata.num_outputs_rng_offset}"
+            )
+
+        from .subclass_codegen import _compile_and_exec_source
+
+        offset_index = runtime_metadata.num_forward_returns
+        lines = ["def _functionalized_rng_wrapper(runtime_args):"]
+        lines.append("    seed, offset = _get_rng_state_()")
+        lines.append("    runtime_args.extend([seed, offset])")
+        lines.append("    outs = _compiled_fn_(runtime_args)")
+        lines.append(f"    _set_offset_(outs[{offset_index}])")
+        if self.return_new_outs:
+            lines.append(
+                f"    return outs[:{offset_index}] + outs[{offset_index + 1}:]"
+            )
+        else:
+            lines.append("    return outs")
+        source = "\n".join(lines)
+
+        inner_fn = _compile_and_exec_source(
+            source,
+            {
+                "_compiled_fn_": compiled_fn,
+                "_get_rng_state_": CUDARngStateHelper.get_torch_state_as_tuple,
+                "_set_offset_": CUDARngStateHelper.set_new_offset,
+            },
+            "_functionalized_rng_wrapper",
+            "functionalized_rng_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
     # Calling convention: If we are running functionalized RNG, then outs consists
     # of (user_outs, rng_offset)
@@ -1866,6 +1885,18 @@ def merge_view_inputs(
             return False
         return True
 
+    def _format_input(idx: int) -> str:
+        if (
+            aot_config.aot_autograd_arg_pos_to_source is not None
+            and idx < len(aot_config.aot_autograd_arg_pos_to_source)
+            and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
+        ):
+            source = aot_config.aot_autograd_arg_pos_to_source[idx]
+            name = getattr(source, "local_name", source.name)
+        else:
+            name = fwd_inputs_descs[idx].expr()
+        return f"input {idx} ({name})"
+
     if len(fwd_inputs) != len(mutated_input_info):
         raise AssertionError(
             f"expected len(fwd_inputs) == len(mutated_input_info), "
@@ -1944,7 +1975,9 @@ def merge_view_inputs(
             if not is_inference:
                 if not _are_differentiable_views(view1, view2):
                     raise AssertionError(
-                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                        f"aot_autograd() does not yet handle non-differentiable view input mutations. "
+                        f"{_format_input(idx1)} and {_format_input(idx2)} share storage but are "
+                        f"not differentiable views of each other."
                     )
             # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
             # not handling for now
@@ -2000,15 +2033,30 @@ def merge_view_inputs(
             # Case where all of the aliases require gradients, and have the same _base.
             i, synthetic_base = non_none_bases[0]
             synthetic_base_desc = ViewBaseAOTInput(fwd_inputs_descs[i])
-            for _, other_base in non_none_bases[1:]:
+            for j, other_base in non_none_bases[1:]:
                 if other_base is not synthetic_base:
                     raise AssertionError(
-                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                        f"aot_autograd() does not yet handle non-differentiable view input mutations. "
+                        f"Aliased inputs share storage but have different autograd ._base tensors: "
+                        f"{_format_input(i)} and {_format_input(j)} have ._base fields that point to different tensors."
                     )
             for alias in aliases_with_none_bases:
                 if alias is not synthetic_base:
+                    none_base_indices = [
+                        _format_input(k)
+                        for k in aliased_input_indices
+                        if fwd_inputs[k]._base is None
+                    ]
+                    has_base_indices = [
+                        _format_input(k)
+                        for k in aliased_input_indices
+                        if fwd_inputs[k]._base is not None
+                    ]
                     raise AssertionError(
-                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                        f"aot_autograd() does not yet handle non-differentiable view input mutations. "
+                        f"Aliased inputs share storage but have mixed autograd ._base states: "
+                        f"{has_base_indices} have ._base set, while "
+                        f"{none_base_indices} have ._base=None (and are not the synthetic base)."
                     )
         base_args.append(synthetic_base)
         base_args_descs.append(synthetic_base_desc)

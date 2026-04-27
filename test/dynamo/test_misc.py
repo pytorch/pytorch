@@ -82,7 +82,10 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     TEST_CUDA,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
@@ -15068,7 +15071,7 @@ fn
             ):
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "The output of this custom operator \(1\) must not also be an input",
+                    r"The output of this custom operator \(1\) must not also be an input",
                 ):
                     _ = compiled_fn(x)
                 # Shouldn't error here because we already invoked once
@@ -15077,7 +15080,7 @@ fn
                 compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "The output of this custom operator \(1\) must not also be an input",
+                    r"The output of this custom operator \(1\) must not also be an input",
                 ):
                     _ = compiled_fn(x)
 
@@ -15969,7 +15972,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @onlyCUDA
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self, device):
         def fn(x):
@@ -15983,7 +15986,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @onlyCUDA
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable_bad_inputs(self, device):
         def fn1(x):
@@ -16010,9 +16013,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @onlyCUDA
     @torch._dynamo.config.patch(recompile_limit=999)
-    def test_legacy_cuda_tensor(self):
+    def test_legacy_cuda_tensor(self, device):
         typs = [
             torch.cuda.FloatTensor,
             torch.cuda.DoubleTensor,
@@ -16183,25 +16186,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         # Previously would crash with:
         #   RuntimeError: value cannot be converted to type at::Half without overflow
 
-
-instantiate_parametrized_tests(MiscTestsPyTree)
-
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(
-    MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
-)
-
-
-class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
-    def test_symbool_tensor_mul(self):
+    def test_symbool_tensor_mul(self, device):
         def symbool_mul_fn(x_bool, sentinel):
             result = x_bool * sentinel
             return result
 
-        x_true = torch.tensor([True], device="cuda")
-        x_false = torch.tensor([False], device="cuda")
-        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        x_true = torch.tensor([True], device=device)
+        x_false = torch.tensor([False], device=device)
+        sentinel = torch.tensor(2.0, requires_grad=True, device=device)
         eager_result_true = symbool_mul_fn(x_true, sentinel)
         eager_result_false = symbool_mul_fn(x_false, sentinel)
         compiled_fn = torch.compile(
@@ -16214,8 +16206,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_result_true.item(), 2.0)
         self.assertEqual(compiled_result_false.item(), 0.0)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
-    def test_symbool_guard_or_false(self):
+    def test_symbool_guard_or_false(self, device):
         def symbool_guard_fn(a_bool_tensor, b):
             u0 = a_bool_tensor.item()
             # Make sure guard_or_false still handles SymBool produced by .item()
@@ -16227,9 +16218,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         compiled_guard_fn = torch.compile(
             symbool_guard_fn, backend="eager", dynamic=True
         )
-        a_true = torch.tensor(True, device="cuda")
-        a_false = torch.tensor(False, device="cuda")
-        b = torch.randn(6, device="cuda")
+        a_true = torch.tensor(True, device=device)
+        a_false = torch.tensor(False, device=device)
+        b = torch.randn(6, device=device)
         eager_res_true = symbool_guard_fn(a_true, b)
         compiled_res_true = compiled_guard_fn(a_true, b)
         self.assertEqual(eager_res_true, compiled_res_true)
@@ -16239,8 +16230,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_res_true, b * 10)
         self.assertEqual(compiled_res_false, b * 100)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
-    def test_symbool_tensor_mul_does_not_fail(self):
+    def test_symbool_tensor_mul_does_not_fail(self, device):
         def fuzzed_program(arg_0, sentinel):
             var_node_2 = arg_0
             var_node_1 = torch.squeeze(var_node_2)
@@ -16250,8 +16240,8 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 result = result.real
             return result
 
-        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
-        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
+        sentinel = torch.tensor(1.0, requires_grad=True, device=device)
+        arg_0 = torch.tensor([True], dtype=torch.bool, device=device)
         args = (arg_0,) + (sentinel,)
         try:
             compiled_program = torch.compile(
@@ -16261,6 +16251,76 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
 
+    def test_module_to_with_shared_weights_compile(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if x.device.type != "cpu":
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        container = Container()
+        container_eager = copy.deepcopy(container)
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            compiled = torch.compile(container, backend="eager", fullgraph=True)
+
+            inp1 = torch.randn(4, 4, 4, device=device)
+
+            compiled_result1 = compiled(inp1)
+            eager_result1 = container_eager(inp1)
+            same(compiled_result1, eager_result1)
+
+            compiled_result2 = compiled(inp1)
+            eager_result2 = container_eager(inp1)
+            same(compiled_result2, eager_result2)
+
+    def test_module_to_move_compile(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.fc(x)
+                self.to("cpu")
+                return x
+
+        mod = Model().to(device)
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
+            x = torch.randn(10, 10, device=device)
+            ref = fn(x)
+            self.assertEqual(str(mod.fc.weight.device), "cpu")
+            mod.to(device)
+            ref = fn(
+                x
+            )  # second time compile runs, we should also move the module to cpu device
+            self.assertEqual(str(mod.fc.weight.device), "cpu")
+
+
+instantiate_parametrized_tests(MiscTestsPyTree)
+
+instantiate_device_type_tests(
+    MiscTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
+
+
+class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensorify_track_item_symint(self):
         def _random_resize(image: torch.Tensor):
@@ -16300,72 +16360,6 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(w % 14 == 0)
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
-
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
-    def test_module_to_with_shared_weights_compile(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-
-            def forward(self, x):
-                token_ids = torch.randint(0, 10, (4,), device=x.device)
-                embedded = self.embedding(token_ids).sum()
-                return x.sum() + embedded.sum()
-
-        class Container(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if "cuda" in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        container = Container()
-        container_eager = copy.deepcopy(container)
-        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
-            compiled = torch.compile(container, backend="eager", fullgraph=True)
-
-            inp1 = torch.randn(4, 4, 4, device="cuda")
-
-            # First call with CUDA input
-            compiled_result1 = compiled(inp1)
-            eager_result1 = container_eager(inp1)
-            same(compiled_result1, eager_result1)
-
-            # Second call - weights are now on CUDA from first call
-            # This tests that .to(cuda) on already-cuda weights doesn't fail
-            compiled_result2 = compiled(inp1)
-            eager_result2 = container_eager(inp1)
-            same(compiled_result2, eager_result2)
-
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
-    def test_module_to_move_compile(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                x = self.fc(x)
-                self.to("cpu")
-                return x
-
-        mod = Model().cuda()
-        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
-            fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
-            x = torch.randn(10, 10, device="cuda")
-            ref = fn(x)
-            self.assertEqual(str(mod.fc.weight.device), "cpu")
-            mod.cuda()
-            ref = fn(
-                x
-            )  # second time compile runs, we should also move the module to cpu device
-            self.assertEqual(str(mod.fc.weight.device), "cpu")
 
 
 if __name__ == "__main__":

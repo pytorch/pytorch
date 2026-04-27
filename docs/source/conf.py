@@ -156,7 +156,8 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
-    "llm_disabled": "true",
+    "llm_disabled": os.environ.get("CI") and os.environ.get("WITH_PUSH") != "true",
+    "llm_generate_full": "false",
     "icon_links": [
         {
             "name": "X",
@@ -2595,10 +2596,10 @@ def _skip_git_dates_on_ci(app):
     The pytorch theme runs 2 git subprocess calls per page to display
     "Created/Updated" dates. On CI preview builds this is wasteful (dates
     aren't needed) and problematic (treeless clones make git log slow).
-    Release builds previously kept date lookups, but on CI's treeless clones
-    the git log calls are too slow (~5600 subprocess calls for ~2800 pages).
+    Release builds (WITH_PUSH=true) keep the original behavior so dates
+    appear in published docs.
     """
-    if not os.environ.get("CI"):
+    if not os.environ.get("CI") or os.environ.get("WITH_PUSH") == "true":
         return
 
     try:

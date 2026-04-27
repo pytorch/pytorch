@@ -3073,27 +3073,33 @@ def _get_config(numels: dict[str, int]) -> dict[str, int]:
     return {prefix.upper() + "BLOCK": numel for prefix, numel in numels.items()}
 
 
-def _combo_tiling_signature(
-    tiling_scores: dict[str, Any] | None,
-) -> tuple[tuple[str, float], ...] | None:
+def _subkernel_fingerprint(combo_meta: dict[str, Any], i: int) -> tuple[Any, ...]:
+    """Per-sub-kernel heuristic inputs as a hashable tuple. Identical
+    fingerprints imply identical heuristic output.
+
+    Per-kernel fields (num_load, autotune_hints, tiling_scores, etc.) live
+    inside combo_meta[f"inductor_meta_{i}"] (single source of truth — see
+    TritonKernel.inductor_meta_per_kernel). Combo-level fields (heuristic,
+    size_hints, tile_hint, reduction_hint) remain top-level in combo_meta.
     """
-    Build a grouping signature from tiling scores.
-
-    Normalize scores so proportional patterns (e.g. {x: 8, y: 1} vs {x: 16, y: 2})
-    end up in the same group, while kernels with different coalescing preference do not.
-    """
-    if not tiling_scores:
-        return None
-
-    total = sum(float(score) for score in tiling_scores.values())
-    if total == 0:
-        return tuple(sorted((dim, 0.0) for dim in tiling_scores))
-
-    return tuple(
-        sorted(
-            (dim, round(float(score) / total, 2))
-            for dim, score in tiling_scores.items()
-        )
+    sub_meta = combo_meta.get(f"inductor_meta_{i}", {})
+    tma = sub_meta.get("tma_min_block_sizes") or {}
+    tiling_scores = sub_meta.get("tiling_scores") or {}
+    return (
+        combo_meta[f"heuristic_{i}"],
+        tuple(sorted(combo_meta[f"size_hints_{i}"].items())),
+        sub_meta.get("num_load"),
+        sub_meta.get("num_store"),
+        sub_meta.get("num_reduction"),
+        tuple(sorted(sub_meta.get("autotune_hints") or [], key=str)),
+        sub_meta.get("atomic_add_found"),
+        sub_meta.get("no_x_dim"),
+        combo_meta.get(f"reduction_hint_{i}"),
+        combo_meta.get(f"tile_hint_{i}"),
+        sub_meta.get("add_persistent_rblock", False),
+        sub_meta.get("has_loadstore_with_contiguous_rdim"),
+        tuple(sorted(tma.items())),
+        tuple(sorted(tiling_scores.items())),
     )
 
 
@@ -3161,10 +3167,14 @@ def _handle_combo_kernel_per_subkernel_blocks(
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
-        tiling_scores_i = combo_meta.get(f"tiling_scores_{i}")
-        inductor_meta_i = dict(inductor_meta_clean)
-        if tiling_scores_i is not None:
-            inductor_meta_i["tiling_scores"] = tiling_scores_i
+        # Per-sub-kernel inductor_meta passthrough packed by combo_grid_meta()
+        # via TritonKernel.inductor_meta_per_kernel(). Forward into
+        # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
+        # pick configs based on the actual sub-kernel .
+        inductor_meta_i = {
+            **inductor_meta_clean,
+            **combo_meta.get(f"inductor_meta_{i}", {}),
+        }
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
@@ -3226,15 +3236,9 @@ def _handle_combo_kernel_per_subkernel_blocks(
         for c in cfgs:
             unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
-        cfg_key = tuple(item for c in cfgs for item in sorted(c.kwargs.items()))
         group_key = (
-            (
-                subkernel_heuristic,
-                skip_rblock,
-                cfg_key,
-                _combo_tiling_signature(tiling_scores_i),
-            )
-            if torch._inductor.config.combo_kernel_autotune_grouping
+            _subkernel_fingerprint(combo_meta, i)
+            if combo_meta.get("autotune_grouping")
             else (i,)
         )
         if group_key in group_map:
@@ -4690,10 +4694,10 @@ class GridExpr:
         at codegen time and are instead referenced by variable names.
         """
         meta: dict[str, Any] = {
-            "XBLOCK": f"{kernel_name}_result.xblock",
-            "YBLOCK": f"{kernel_name}_result.yblock",
-            "ZBLOCK": f"{kernel_name}_result.zblock",
-            "R0_BLOCK": f"{kernel_name}_result.r0block",
+            "XBLOCK": f"{kernel_name}_result.xblocks[0]",
+            "YBLOCK": f"{kernel_name}_result.yblocks[0]",
+            "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
+            "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
@@ -4882,6 +4886,15 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 
 class SequentialFlattenComboKernelGrid(GridExpr):
     """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
+
+    def generate_lazy(self, kernel_name: str) -> None:
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        num_kernels = combo_meta["num_kernels"]
+        meta: dict[str, Any] = {}
+        for i in range(num_kernels):
+            meta[f"XBLOCK_{i}"] = f"{kernel_name}_result.xblocks[{i}]"
+            meta[f"YBLOCK_{i}"] = f"{kernel_name}_result.yblocks[{i}]"
+        self.generate(meta, is_lazy=True)
 
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]

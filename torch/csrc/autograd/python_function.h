@@ -41,7 +41,6 @@ struct PyNode : public Node {
       const SwapSavedVariables& saved);
 
   void release_variables() override;
-  void release_resources() override;
   std::string name() const override;
   bool is_traceable() override;
 
@@ -61,9 +60,9 @@ struct PyNode : public Node {
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
     // If python is already dead, leak the wrapped python objects
-    if (obj && Py_IsInitialized()) {
+    if (Py_IsInitialized()) {
       pybind11::gil_scoped_acquire gil;
-      Py_CLEAR(obj);
+      Py_DECREF(obj);
     }
   }
 };
@@ -155,8 +154,7 @@ struct THPFunction {
   // for it.  We can't enforce this directly in the constructor of
   // THPFunction though, because there's no way to keep it live long enough
   // to save an owning reference to PyNode into the grad_fn of a Variable.
-  c10::weak_intrusive_ptr<torch::autograd::PyNode> cdata{
-      c10::intrusive_ptr<torch::autograd::PyNode>()};
+  std::weak_ptr<torch::autograd::PyNode> cdata;
 };
 
 bool THPFunction_initModule(PyObject* module);
