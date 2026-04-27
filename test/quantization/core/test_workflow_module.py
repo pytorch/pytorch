@@ -96,7 +96,7 @@ class TestObserver(QuantizationTestCase):
                                                     qscheme=qscheme,
                                                     reduce_range=reduce_range)]
 
-        def _get_ref_params(reduce_range, qscheme, dtype, input_scale, max_val):
+        def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
             if dtype not in _INT_DTYPES:
                 raise AssertionError(f"Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}")
             eps = torch.tensor([tolerance])
@@ -122,32 +122,12 @@ class TestObserver(QuantizationTestCase):
 
             scale, zero_point = 1.0, 0
             if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
-                # Mirror observer._calculate_qparams symmetric branch:
-                # always apply the C++-aligned symmetric expansion
-                # `max(|min|/-symmetric_qmin, max/symmetric_qmax)` (per
-                # `quant_utils::ChooseQuantizationParams` with
-                # `preserve_sparsity=True`); zero_point follows the
-                # ONEDNN-compatible policy — banker's-rounded midpoint
-                # `(qmin + qmax) / 2` of the active quantization range
-                # (which already accounts for `reduce_range`). For signed
-                # dtypes this evaluates to `0` (e.g. qint8/int16/qint32:
-                # midpoint = -0.5, banker's round -> 0); for unsigned
-                # dtypes it gives `128` for full quint8/uint8 and `64` for
-                # reduce_range quint8/uint8, `2**15` for uint16. See
-                # D101413736.
-                symmetric_qmin = -((quant_max - quant_min) // 2 + 1)
-                symmetric_qmax = (quant_max - quant_min) // 2
-                max_scale = torch.max(
-                    torch.abs(min_val_neg) / (-symmetric_qmin),
-                    max_val_pos / symmetric_qmax,
-                )
-                eff_min_neg = max_scale * symmetric_qmin
-                eff_max_pos = max_scale * symmetric_qmax
-                scale = torch.max(
-                    (eff_max_pos - eff_min_neg) / float(quant_max - quant_min), eps
-                )
-                if dtype in [torch.quint8, torch.uint8, torch.uint16]:
-                    zero_point = round((quant_min + quant_max) / 2)
+                scale = torch.max(-min_val_neg, max_val_pos) / (float(quant_max - quant_min) / 2)
+                scale = torch.max(scale, eps)
+                if dtype in [torch.quint8, torch.uint8]:
+                    zero_point = 128
+                if dtype == torch.uint16:
+                    zero_point = 2 ** 15
             else:
                 scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
                 zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
@@ -174,7 +154,7 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.min_val, 1.0 * input_scale)
             self.assertEqual(myobs.max_val, 8.0 * input_scale)
             qparams = myobs.calculate_qparams()
-            ref_scale, ref_zero_point = _get_ref_params(reduce_range, qscheme, qdtype, input_scale, 8.0)
+            ref_scale, ref_zero_point = _get_ref_params(reduce_range, qscheme, qdtype, input_scale, 1.0, 8.0)
 
             self.assertEqual(qparams[1].item(), ref_zero_point)
             self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
@@ -235,19 +215,11 @@ class TestObserver(QuantizationTestCase):
             qparams = myobs.calculate_qparams()
             ref_min_vals = [[1.0, -4.0], [-4.0, 3.0], [-4.0, 2.0], [-4.0, -3.0]]
             ref_max_vals = [[6.0, 8.0], [5.0, 8.0], [6.0, 8.0], [7.0, 8.0]]
-            # Symmetric per-channel references: scale uses the C++-aligned
-            # symmetric expansion `max(|min|/-symmetric_qmin,
-            # max/symmetric_qmax)` (per
-            # `quant_utils::ChooseQuantizationParams` with
-            # `preserve_sparsity=True`) for all channels regardless of
-            # whether the range straddles zero. zero_point is the
-            # ONEDNN-compatible policy value: `0` for qint8, `128` for
-            # quint8. See D101413736.
             per_channel_symmetric_ref_scales = [
-                [0.04724409, 0.06299213],
-                [0.03937008, 0.06299213],
-                [0.04724409, 0.06299213],
-                [0.05511811, 0.06299213],
+                [0.04705882, 0.06274509],
+                [0.03921569, 0.0627451],
+                [0.04705882, 0.0627451],
+                [0.05490196, 0.0627451],
             ]
             per_channel_affine_ref_scales = [
                 [0.02352941, 0.04705882],
@@ -273,9 +245,7 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.max_val, ref_max_vals[ch_axis])
             if qscheme == torch.per_channel_symmetric:
                 ref_scales = per_channel_symmetric_ref_scales[ch_axis]
-                ref_zero_points = (
-                    [0, 0] if qdtype is torch.qint8 else [128, 128]
-                )
+                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
             elif qscheme == torch.per_channel_affine_float_qparams:
                 ref_scales = per_channel_affine_float_qparams_ref_scales[ch_axis]
                 ref_zero_points = [-1 * ref_min_vals[ch_axis][i] / ref_scales[i] for i in range(len(ref_scales))]
@@ -288,17 +258,7 @@ class TestObserver(QuantizationTestCase):
                 )
 
             if reduce_range:
-                if qscheme == torch.per_channel_symmetric:
-                    # With the symmetric expansion, the scale ratio between
-                    # reduce_range and standard depends on which arm of
-                    # `max(|min|/-symmetric_qmin, max/symmetric_qmax)` wins.
-                    # All channels in this test have the max-arm winning,
-                    # so the uniform factor is `127/63` (sym_qmax: 127 -> 63).
-                    # quint8 + per_channel_symmetric is forced to
-                    # `reduce_range=False` above, so only qint8 reaches here.
-                    ref_scales = [s * 127 / 63 for s in ref_scales]
-                else:
-                    ref_scales = [s * 255 / 127 for s in ref_scales]
+                ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
             self.assertEqual(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), rtol=1e-5, atol=0.0001)
             if qscheme == torch.per_channel_affine_float_qparams:
@@ -526,129 +486,6 @@ class TestObserver(QuantizationTestCase):
             scale, zero_point = torch._choose_qparams_per_tensor(x)
             self.assertEqual(scale, params[0])
             self.assertEqual(zero_point, params[1])
-
-    def test_observer_matching_choose_qparams_symmetric(self):
-        # Parity check: `_calculate_symm_qparams` must match the C++
-        # `quant_utils::ChooseQuantizationParams` (preserve_sparsity=True)
-        # path used by `torch.fused_moving_avg_obs_fake_quant`. Two modes:
-        #
-        # * `strict_symm=False` matches C++ for all input ranges
-        #   (straddling AND same-sign).
-        # * `strict_symm=True` (the default used by `_calculate_qparams`)
-        #   forces true symmetric qparams (midpoint zero_point), which only
-        #   coincides with C++ when the observed range straddles zero.
-        #
-        # Regression coverage for D101413736.
-        torch.manual_seed(NP_RANDOM_SEED)
-        # Mix of straddling and same-sign inputs to exercise both arms of
-        # max(|min|/-sym_qmin, max/sym_qmax) and the same-sign affine
-        # fallback (only reached with strict_symm=False).
-        test_inputs = [
-            # Straddling zero
-            torch.randn(3, 3),
-            torch.randn(3, 3, 3, 3),
-            torch.tensor([-2.0, 0.5, 1.0, 3.0]),
-            torch.tensor([-3.0, -0.5, 0.5, 1.0]),
-            # Same-sign positive
-            torch.tensor([0.1, 1.0, 2.0, 3.0]),
-            torch.rand(3, 3, 3),
-            # Same-sign negative
-            torch.tensor([-3.0, -1.0, -0.1]),
-        ]
-        cases = [
-            (torch.qint8, -128, 127),
-            (torch.quint8, 0, 255),
-        ]
-        for qdtype, quant_min, quant_max in cases:
-            for x in test_inputs:
-                obs = MovingAverageMinMaxObserver(
-                    averaging_constant=1.0,
-                    dtype=qdtype,
-                    qscheme=torch.per_tensor_symmetric,
-                    quant_min=quant_min,
-                    quant_max=quant_max,
-                )
-                obs(x)
-                straddles_zero = bool(
-                    (obs.min_val < 0).item() and (obs.max_val > 0).item()
-                )
-
-                # Drive the C++ symmetric path via
-                # `fused_moving_avg_obs_fake_quant`. The kernel only writes
-                # `scale` / `zero_point` when `fake_quant_on=1`, so we enable
-                # the fake-quant pass (its output tensor is discarded) and
-                # read the qparams populated by
-                # `ChooseQuantizationParams(preserve_sparsity=True)`.
-                running_min = torch.zeros(1)
-                running_max = torch.zeros(1)
-                cpp_scale = torch.ones(1)
-                cpp_zero_point = torch.zeros(1, dtype=torch.int64)
-                observer_on = torch.ones(1, dtype=torch.int64)
-                fake_quant_on = torch.ones(1, dtype=torch.int64)
-                torch.fused_moving_avg_obs_fake_quant(
-                    x,
-                    observer_on,
-                    fake_quant_on,
-                    running_min,
-                    running_max,
-                    cpp_scale,
-                    cpp_zero_point,
-                    1.0,        # averaging_const
-                    quant_min,
-                    quant_max,
-                    0,          # ch_axis (ignored for per-tensor)
-                    False,      # per_row_fake_quant
-                    True,       # symmetric_quant
-                )
-
-                min_val_f64 = obs.min_val.to(torch.float64).reshape(1)
-                max_val_f64 = obs.max_val.to(torch.float64).reshape(1)
-
-                # strict_symm=False: must match C++ for every input.
-                py_scale_affine, py_zp_affine = obs._calculate_symm_qparams(
-                    min_val_f64, max_val_f64, strict_symm=False
-                )
-                msg_affine = (
-                    f"strict_symm=False, dtype={qdtype}, "
-                    f"x.shape={tuple(x.shape)}"
-                )
-                self.assertEqual(
-                    py_scale_affine.to(torch.float32),
-                    cpp_scale,
-                    atol=0,
-                    rtol=0,
-                    msg=msg_affine,
-                )
-                self.assertEqual(
-                    py_zp_affine, cpp_zero_point, atol=0, rtol=0, msg=msg_affine
-                )
-
-                # strict_symm=True: matches C++ only when the range
-                # straddles zero (both branches collapse to the symmetric
-                # expansion + midpoint zero_point in that case). For
-                # same-sign ranges the two intentionally diverge.
-                if straddles_zero:
-                    py_scale_strict, py_zp_strict = obs._calculate_symm_qparams(
-                        min_val_f64, max_val_f64, strict_symm=True
-                    )
-                    msg_strict = (
-                        f"strict_symm=True, dtype={qdtype}, "
-                        f"x.shape={tuple(x.shape)}"
-                    )
-                    self.assertEqual(
-                        py_scale_strict.to(torch.float32),
-                        cpp_scale,
-                        atol=0,
-                        rtol=0,
-                        msg=msg_strict,
-                    )
-                    self.assertEqual(
-                        py_zp_strict,
-                        cpp_zero_point,
-                        atol=0,
-                        rtol=0,
-                        msg=msg_strict,
-                    )
 
     def test_per_channel_observers_load_state_dict(self):
         observer_list = [PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver]
@@ -882,14 +719,14 @@ class TestHistogramObserver(QuantizationTestCase):
 
         if reduce_range:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0472441 * 127 / 63
-                ref_zero_point = 0 if qdtype is torch.qint8 else 64
+                ref_scale = 0.0470588 * 255 / 127
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
                 ref_scale = 0.0235294 * 255 / 127
                 ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0472441
+                ref_scale = 0.0470588
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
                 ref_scale = 0.0235294
@@ -1056,7 +893,7 @@ class TestFakeQuantize(TestCase):
         X = torch.tensor([[-5, -3.5, -2, 0, 3, 5, 7], [1, 3, 2, 5, 6.5, 8, 10]], dtype=torch.float32)
         y_ref = fq_module(X)
         state_dict = fq_module.state_dict()
-        self.assertEqual(state_dict['scale'], [0.055118, 0.078740])
+        self.assertEqual(state_dict['scale'], [0.054902, 0.078431])
         self.assertEqual(state_dict['zero_point'], [0, 0])
         b = io.BytesIO()
         torch.save(state_dict, b)
