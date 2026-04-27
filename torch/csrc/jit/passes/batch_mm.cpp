@@ -65,7 +65,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 
 // Note [Overlapping trees]
 // Additionally it wouldn't be too hard to add support for partially overlapping
-// trees. Right now the it's forbidden in the algorithm (only a single tree will
+// trees. Right now it's forbidden in the algorithm (only a single tree will
 // be allowed), so theoretically we might miss some optimization options,
 // especially that the rejected tree could be much larger. I didn't implement
 // that because it's not necessary for the simple RNN cases I saw, so I decided

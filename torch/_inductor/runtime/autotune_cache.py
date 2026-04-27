@@ -390,7 +390,7 @@ class _AutotuneCacheBundlerImpl:
         if not inductor_meta.get("autotune_local_cache", True):
             return False
 
-        # Check if the we're enabled via config
+        # Check if we're enabled via config
         if (
             bundled_autotune_remote_cache := inductor_meta.get(
                 "bundled_autotune_remote_cache"
