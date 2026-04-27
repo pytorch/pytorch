@@ -982,7 +982,7 @@ class profile(_KinetoProfile):
         # fires stop_trace + _trace_ready, saving the collected data. This
         # costs one extra training step with profiling overhead.
         if (
-            torch.autograd._is_stopped()
+            torch.autograd._is_kineto_stopped()
             and self.use_device is not None
             and prev_action
             in (

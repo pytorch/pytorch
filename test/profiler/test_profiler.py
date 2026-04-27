@@ -3793,7 +3793,7 @@ class TestProfilerEarlyAbort(TestCase):
     CPU-only profiling. Explicitly specifying a GPU device seems cleaner than
     patching the `use_device` attributes in the profiler."""
 
-    PATCH_TARGET = "torch.autograd._is_stopped"
+    PATCH_TARGET = "torch.autograd._is_kineto_stopped"
 
     def _make_profiler(self, **schedule_kwargs):
         return profile(
@@ -3805,7 +3805,7 @@ class TestProfilerEarlyAbort(TestCase):
         p = self._make_profiler(wait=0, warmup=2, active=2)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
-            # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_stopped
+            # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_kineto_stopped
             # returns True so we override current_action to NONE.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
@@ -3820,7 +3820,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD -> RECORD per schedule, but _is_stopped
+            # step 1 -> 2: RECORD -> RECORD per schedule, but _is_kineto_stopped
             # -> True overrides to RECORD_AND_SAVE (two-step wind-down).
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
@@ -3840,7 +3840,7 @@ class TestProfilerEarlyAbort(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD_AND_SAVE -> WARMUP (repeat), but
-            # _is_stopped -> True forces NONE
+            # _is_kineto_stopped -> True forces NONE
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
@@ -3849,7 +3849,7 @@ class TestProfilerEarlyAbort(TestCase):
         p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
-            # step 0 -> 1: NONE -> NONE. _is_stopped is True, but since
+            # step 0 -> 1: NONE -> NONE. _is_kineto_stopped is True, but since
             # the result is NONE either way, we can't distinguish whether the
             # early abort path fired — we just verify the profiler lands in
             # the expected state.
@@ -3866,7 +3866,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_stopped is True,
+            # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_kineto_stopped is True,
             # but the schedule naturally transitions to NONE here too, so we
             # can't distinguish the cause — we just verify the profiler lands
             # in the expected state.
@@ -3874,8 +3874,8 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_cpu_only_profiler_ignores_stale_is_stopped(self):
-        """A CPU-only profiler should not abort even if _is_stopped returns
+    def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
+        """A CPU-only profiler should not abort even if _is_kineto_stopped returns
         True (e.g. stale flag from a previous device profiler)."""
         p = profile(
             activities=[ProfilerActivity.CPU],
