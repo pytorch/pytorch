@@ -59,6 +59,25 @@ def aot_eager_regional_inductor():
     )
 
 
+class SingleCondModel(torch.nn.Module):
+    def __init__(self, d=64):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(d, d)
+        self.fc2 = torch.nn.Linear(d, d)
+
+    def forward(self, x):
+        x = self.fc1(x)
+
+        def true_fn(x):
+            return x * 2.0
+
+        def false_fn(x):
+            return x * 3.0
+
+        x = torch.cond(x.shape[0] < 32, true_fn, false_fn, (x,))
+        return self.fc2(x)
+
+
 class MooType:
     def __init__(self, x):
         self.x = x
@@ -958,6 +977,43 @@ from user code:
         if not hasattr(backend_result.compiled_fn, "serialize"):
             raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_aot_cache_predicate_not_pickleable(self):
+        import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
+
+        model = SingleCondModel().eval()
+
+        old_cacheable = torch.ops.higher_order.cond._cacheable
+        torch.ops.higher_order.cond._cacheable = True
+        try:
+            with (
+                functorch_config.patch(
+                    enable_autograd_cache=True,
+                    force_non_lazy_backward_lowering=True,
+                    strict_autograd_cache=True,
+                ),
+                inductor_config.patch(
+                    fx_graph_cache=True,
+                    fx_graph_remote_cache=False,
+                ),
+            ):
+                compiled = torch.compile(model, backend="inductor", dynamic=True)
+
+                # Test both branches of the cond predicate (x.shape[0] < 32).
+                for batch_size in (16, 64):
+                    inp = torch.randn(batch_size, 64)
+                    expected = model(inp)
+                    actual = compiled(inp)
+                    self.assertEqual(expected, actual)
+
+                # If the SymBool predicate is not pickleable, the FxGraphCache
+                # silently bypasses instead of caching. Assert no bypass occurred.
+                self.assertEqual(
+                    torch._dynamo.utils.counters["inductor"]["fxgraph_cache_bypass"], 0
+                )
+        finally:
+            torch.ops.higher_order.cond._cacheable = old_cacheable
 
     def test_fullgraph_capture_with_pytree_module(self):
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export

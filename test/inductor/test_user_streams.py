@@ -13,6 +13,7 @@ import unittest
 import torch
 import torch._inductor.metrics
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._inductor import config as inductor_config
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
     EnterDeviceContextManagerWithStreamInfoLine,
@@ -28,8 +29,11 @@ from torch._inductor.stream_utils import get_stream_name
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    TEST_WITH_ROCM,
+)
 
 
 def _extract_wrapper_body(code):
@@ -1155,13 +1159,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[1024]"):
         l_x_ = L_x_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
         a: "f32[1024]" = l_x_ * 2
 
         b: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
@@ -1176,8 +1180,7 @@ arg0_1, = args
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-    stream1 = get_external_object_by_index(0)
+    stream1 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
         arg0_1 = copy_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
@@ -1187,7 +1190,7 @@ with torch.cuda._DeviceGuard(0):
         buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         stream0 = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=stream0)
-        torch.ops.streams.synchronize_stream.default(0)
+        torch.ops.streams.synchronize_stream.default(1)
     return (buf3, )""",
         )
 
@@ -1224,20 +1227,20 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
-        record_event = torch.ops.streams.record_event(1, 2);  record_event = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index_2 = None
+        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(1, 0);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(2, 1);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
         return (b,)
 """,  # noqa: B950
         )
@@ -1303,35 +1306,35 @@ class GraphModule(torch.nn.Module):
         l_w2_ = L_w2_
         l_w3_ = L_w3_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
+        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(5);  get_external_object_by_index_4 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(3, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(4, 1);  record_event = None
 
-        wait_event = torch.ops.streams.wait_event(3, 1);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(4, 2);  wait_event = None
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(4, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(5, 2);  record_event_1 = None
 
-        wait_event_1 = torch.ops.streams.wait_event(4, 2);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(5, 3);  wait_event_1 = None
 
         c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
 
-        synchronize_stream_2 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_2 = None
+        synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
         return (c,)
 """,  # noqa: B950
         )
@@ -1399,32 +1402,31 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_2 = None
 
-        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
+        get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
         a: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
 
-        record_event = torch.ops.streams.record_event(2, 0);  record_event = None
+        record_event = torch.ops.streams.record_event(3, 1);  record_event = None
 
         b: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
 
-        record_event_1 = torch.ops.streams.record_event(3, 1);  record_event_1 = None
+        record_event_1 = torch.ops.streams.record_event(4, 2);  record_event_1 = None
 
-        get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_4 = None
-        wait_event = torch.ops.streams.wait_event(2, 4);  wait_event = None
+        wait_event = torch.ops.streams.wait_event(3, 0);  wait_event = None
 
-        wait_event_1 = torch.ops.streams.wait_event(3, 4);  wait_event_1 = None
+        wait_event_1 = torch.ops.streams.wait_event(4, 0);  wait_event_1 = None
 
         c: "f32[32, 32]" = a + b;  a = b = None
 
-        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
         return (c,)
 """,  # noqa: B950
         )
@@ -1935,6 +1937,401 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
+@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+class TestPDLWithMultiStream(InductorTestCase):
+    """Tests that PDL (Programmatic Dependent Launch) composes safely with
+    user-annotated multi-stream code under torch.compile.
+
+    PDL's GDC intrinsics are stream-local: gdc_wait/gdc_launch_dependents
+    only govern the overlap between consecutive kernels on the *same* CUDA
+    stream.  Cross-stream ordering is handled entirely by CUDA events at the
+    wrapper level.  These tests verify that enabling PDL in the presence of
+    multi-stream code doesn't break correctness, doesn't interfere with
+    stream-level invariants (no cross-stream fusion, event ops preserved),
+    and still applies within each stream's own kernel sequence.
+    """
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_single_side_stream(self):
+        """PDL metadata is emitted for a kernel on a side stream."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x * 2
+                b = a + 1
+            s.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        result, (wrapper_code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("torch.cuda.stream", wrapper_code)
+        self.assertIn("synchronize_stream", wrapper_code)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_correctness_with_multiple_streams(self):
+        """Enabling PDL with independent side streams produces correct results."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            with torch.cuda.stream(s1):
+                a = x * 2 + 1
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                b = x * 3 + 2
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(compiled_fn(x), expected)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        # s1 kernel, s2 kernel, and default-stream add kernel
+        (
+            FileCheck()
+            # s1 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # s2 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # default stream add
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_cross_stream_events_preserved(self):
+        """Event record/wait for cross-stream sync must survive with PDL on.
+
+        PDL is stream-local so it cannot replace event-based cross-stream
+        ordering.  Verify the events are still in the generated code."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            a = x * 2 + 1
+            event.record()
+
+            with torch.cuda.stream(s):
+                event.wait()
+                b = a + 3
+
+            s.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+
+        # Both kernels (default + side stream) get PDL intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # default stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # side stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_same_stream_consecutive_kernels(self):
+        """Two consecutive kernels on the same side stream should both get PDL.
+
+        This is the case where PDL is actually useful: the second kernel can
+        overlap with the first via GDC intrinsics because they share a stream."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x, y):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                # Two separate fused groups on the same stream
+                a = x**2 + x
+                y.copy_(a)
+            s.synchronize()
+            return y
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.empty(1024, device="cuda")
+        expected = fn(x, y.clone())
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(compiled_fn(x, y.clone()), expected)
+
+        triton_code = run_and_get_triton_code(torch.compile(fn), x, y.clone())
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_no_fusion_across_streams(self):
+        """PDL must not cause cross-stream ops to be fused."""
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            with torch.cuda.stream(s1):
+                a = x * 2
+                b = a + 1
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                c = x * 3
+                d = c + 2
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            return b + d
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result = compiled_fn(x)
+        self.assertEqual(result, expected)
+
+        # 3 kernels: s1 pointwise, s2 pointwise, default stream add
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+
+        # All 3 kernels should have PDL with GDC intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # s1 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # s2 kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # default stream add
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_stress_multistream_correctness(self):
+        """Stress test: heavy work across streams with PDL must produce
+        correct results over many iterations to surface any races.
+
+        Uses 4096x4096 matmuls (matching TestStreamOrderingStress) so the
+        GPU work is long enough that a missing event.wait() would cause
+        the consumer to read stale data."""
+        from torch._inductor.utils import run_and_get_code
+
+        N = 4096
+        ITERS = 20
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+
+            h = x
+            for _ in range(4):
+                h = h @ w
+            e.record()
+
+            with torch.cuda.stream(s):
+                e.wait()
+                out = torch.relu(h) + 1.0
+
+            s.synchronize()
+            return out
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+
+        # Verify codegen once before the stress loop
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w)
+        # Wrapper must have stream context and event sync
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn("wait_event", code)
+        # The relu+add pointwise kernel should have PDL
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(code)
+
+        for _ in range(ITERS):
+            expected = fn(x, w)
+            actual = compiled_fn(x, w)
+            torch.cuda.synchronize()
+            self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_pdl_mutation_across_streams(self):
+        """Buffer mutation on one stream, read on another, with PDL enabled.
+
+        The mutation is on a locally-created buffer (not an input) to avoid
+        the dynamo guard that forbids event.record() after input mutation."""
+        from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            # Produce a new buffer (not input mutation) then record
+            a = x * 2
+            event.record()
+
+            with torch.cuda.stream(s):
+                event.wait()
+                # In-place add on side stream
+                a.add_(1)
+
+            s.synchronize()
+            return a
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+
+        # Both kernels (default + side stream) get PDL intrinsics
+        triton_code = run_and_get_triton_code(torch.compile(fn), x)
+        (
+            FileCheck()
+            # default stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            # side stream kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(triton_code)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@torch._inductor.config.patch({"triton.cudagraphs": True})
+class TestStreamCudagraphInteraction(InductorTestCase):
+    """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
+
+    def test_implicit_current_stream_with_cudagraphs(self):
+        """Event record/wait with implicit current stream must work under cudagraph capture.
+
+        The implicit current stream resolves at runtime via torch.cuda.current_stream(),
+        which correctly returns the cudagraph capture stream during recording.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            ev.record()
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait()
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_explicit_current_stream_with_cudagraphs(self):
+        """Passing torch.cuda.current_stream() explicitly must also work under capture.
+
+        The user writes ev.record(torch.cuda.current_stream()) which is
+        semantically identical to ev.record() — both should resolve to the
+        capture stream during cudagraph recording, not the stale default stream.
+        """
+        s1 = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x, y):
+            cur = torch.cuda.current_stream()
+            ev.record(cur)
+            with torch.cuda.stream(s1):
+                ev.wait()
+                z = x * 2
+                ev2.record()
+            ev2.wait(cur)
+            return z + y
+
+        x = torch.randn(100, 100, device="cuda")
+        y = torch.randn(100, 100, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertEqual(result, expected)
+
+
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestStreamCodegen)
@@ -1942,6 +2339,8 @@ instantiate_parametrized_tests(TestUserStreamCompile)
 instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
+instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
 if __name__ == "__main__":

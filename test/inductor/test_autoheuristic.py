@@ -11,7 +11,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
@@ -70,6 +70,7 @@ class AutoHeuristicTest(TestCase):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
+    @skipIfRocm(msg="AutoHeuristic doesn't currently work on the ROCm stack")
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
     def test_autoheuristic(self):

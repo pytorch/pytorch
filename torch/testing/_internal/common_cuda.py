@@ -178,6 +178,7 @@ def evaluate_platform_supports_fp8():
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
+            return False
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():

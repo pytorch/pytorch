@@ -35,22 +35,34 @@ def _bmm_outer_product_impl(
 ) -> torch.Tensor:
     a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
     b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
-    if _has_triton() and _is_outer_product(a, b) and not (a_is_cow or b_is_cow):
+    if (
+        _has_triton()
+        and a.is_cuda
+        and b.is_cuda
+        and _is_outer_product(a, b)
+        and not (a_is_cow or b_is_cow)
+    ):
         from .triton_kernels import bmm_outer_product
 
         return bmm_outer_product(a, b)
     return fallback_kernel.call_boxed(dispatch_keys, a, b)
 
 
+def _register_for_dispatch_key(dispatch_key: str) -> None:
+    fallback_kernel = torch.library.get_kernel("aten::bmm", dispatch_key)
+    tu.register_op_override(
+        "aten",
+        "bmm",
+        dispatch_key,
+        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
+        allow_multiple_override=True,
+    )
+
+
 def register_to_dispatch() -> None:
     if not _has_triton():
         return
 
-    fallback_kernel = torch.library.get_kernel("aten::bmm", "CUDA")
-    tu.register_op_override(
-        "aten",
-        "bmm",
-        "CUDA",
-        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
-        allow_multiple_override=True,
-    )
+    _register_for_dispatch_key("CUDA")
+    if torch.xpu._is_compiled():
+        _register_for_dispatch_key("XPU")
