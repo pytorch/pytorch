@@ -35,6 +35,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    SymmMemAllGather,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
@@ -1740,7 +1741,8 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
         return torch.device("cuda", self.rank)
 
     @parametrize("sum_reduction", [True, False])
-    def test_fully_shard_symm_mem(self, sum_reduction: bool):
+    @parametrize("recurse_at_root", [False, True])
+    def test_fully_shard_symm_mem(self, sum_reduction: bool, recurse_at_root: bool):
         torch.manual_seed(42 + self.rank)
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
@@ -1753,10 +1755,24 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
             if isinstance(module, TransformerBlock):
                 fully_shard(module)
                 module.set_force_sum_reduction_for_comms(sum_reduction)
-                module.set_symm_mem_for_comm()
+                if not recurse_at_root:
+                    module.set_symm_mem_for_comm()
         fully_shard(model)
         model.set_force_sum_reduction_for_comms(sum_reduction)
-        model.set_symm_mem_for_comm()
+        if recurse_at_root:
+            model.set_symm_mem_for_comm(recurse=True)
+        else:
+            model.set_symm_mem_for_comm()
+
+        # Verify symm_mem was applied to every FSDP param group in the
+        # hierarchy regardless of which call pattern was used.
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    self.assertIsInstance(
+                        fsdp_param_group._all_gather_comm, SymmMemAllGather
+                    )
 
         bs = 4
         inp = torch.randint(0, model_args.vocab_size, (bs, seq_len), device=device)

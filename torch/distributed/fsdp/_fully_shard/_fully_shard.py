@@ -656,7 +656,9 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.gradient_divide_factor = factor
 
-    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+    def set_force_sum_reduction_for_comms(
+        self, enable: bool, recurse: bool = False
+    ) -> None:
         """
         Sets whether to require the low-level collective communication
         primitives to exclusively use "sum"-type reductions, even if it comes
@@ -672,10 +674,16 @@ class FSDPModule:
 
         Args:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
         """
-        state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group.force_sum_reduction_for_comms = enable
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
@@ -736,7 +744,9 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_allocate_memory_from_process_group(enable)
 
-    def set_symm_mem_for_comm(self, backend: Literal["NCCL"] = "NCCL") -> None:
+    def set_symm_mem_for_comm(
+        self, backend: Literal["NCCL"] = "NCCL", recurse: bool = False
+    ) -> None:
         """
         Sets the symmetric memory (``symm_mem``) backend for allocating the
         staging buffers used in all-gather collectives. This allows NCCL to use
@@ -765,10 +775,16 @@ class FSDPModule:
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
                 ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
         """
-        state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group.set_symm_mem(backend)
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.set_symm_mem(backend)
 
     def _set_unshard_async_op(self, async_op: bool):
         """
