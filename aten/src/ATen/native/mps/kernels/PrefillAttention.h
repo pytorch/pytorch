@@ -13,31 +13,6 @@
 #define PREFILL_CONST static constant constexpr const
 #define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
 
-template <typename U>
-struct Limits {
-  static const constant U max = metal::numeric_limits<U>::max();
-  static const constant U min = metal::numeric_limits<U>::min();
-  static const constant U finite_max = metal::numeric_limits<U>::max();
-  static const constant U finite_min = metal::numeric_limits<U>::min();
-};
-
-#define instantiate_float_limit(type)             \
-  template <>                                     \
-  struct Limits<type> {                           \
-    static constexpr constant type max =          \
-        metal::numeric_limits<type>::infinity();  \
-    static constexpr constant type min =          \
-        -metal::numeric_limits<type>::infinity(); \
-    static constexpr constant type finite_max =   \
-        metal::numeric_limits<type>::max();       \
-    static constexpr constant type finite_min =   \
-        -metal::numeric_limits<type>::max();      \
-  };
-
-instantiate_float_limit(half);
-instantiate_float_limit(float);
-instantiate_float_limit(bfloat);
-
 template <typename T>
 struct pointer_element {};
 template <typename T>
@@ -205,8 +180,7 @@ struct ExpSubOp {
   // (exp(-inf) = 0) and is what flash-attention implementations do.
   template <typename T>
   METAL_FUNC static constexpr T apply(T x, T y) {
-    return (y == -metal::numeric_limits<T>::infinity()) ? T(0)
-                                                        : fast::exp2(x - y);
+    return (y == -INFINITY) ? T(0) : fast::exp2(x - y);
   }
 };
 
@@ -733,7 +707,7 @@ prefill_attention(
 
   PREFILL_PRAGMA_UNROLL
   for (short i = 0; i < kRowsPT; ++i) {
-    max_score[i] = Limits<AccumType>::min;
+    max_score[i] = -INFINITY;
   }
 
   // Causal masking can shorten the K range. PyTorch convention is upper-left
@@ -780,7 +754,7 @@ prefill_attention(
     if (k_block_size < BK) {
       using stile_t = decltype(Stile);
       using selem_t = typename stile_t::elem_type;
-      constexpr auto neg_inf = -metal::numeric_limits<selem_t>::infinity();
+      constexpr auto neg_inf = -INFINITY;
 
       PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
@@ -801,7 +775,7 @@ prefill_attention(
     if constexpr (do_causal) {
       using stile_t = decltype(Stile);
       using selem_t = typename stile_t::elem_type;
-      constexpr auto neg_inf = -metal::numeric_limits<selem_t>::infinity();
+      constexpr auto neg_inf = -INFINITY;
 
       PREFILL_PRAGMA_UNROLL
       for (short i = 0; i < stile_t::kTileRows; i++) {
@@ -823,7 +797,7 @@ prefill_attention(
     if constexpr (has_mask) {
       using stile_t = decltype(Stile);
       using selem_t = typename stile_t::elem_type;
-      constexpr auto neg_inf = -metal::numeric_limits<selem_t>::infinity();
+      constexpr auto neg_inf = -INFINITY;
 
       constexpr bool is_bool = is_same_v<MaskType, bool>;
       using melem_t = typename metal::conditional_t<is_bool, bool, selem_t>;
@@ -907,7 +881,7 @@ prefill_attention(
     // exp(-inf - -inf) would otherwise produce NaN.
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
-      factor[i] = (new_max[i] == -metal::numeric_limits<AccumType>::infinity())
+      factor[i] = (new_max[i] == -INFINITY)
           ? AccumType(1)
           : fast::exp2(max_score[i] - new_max[i]);
     }
