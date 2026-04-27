@@ -962,10 +962,11 @@ class profile(_KinetoProfile):
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
-        # If GPU collection was stopped (e.g. buffer overflow), force an
+        # If device collection was stopped (e.g. buffer overflow), force an
         # early stop regardless of what the schedule says.
         if (
-            prev_action
+            self.use_device is not None
+            and prev_action
             in (
                 ProfilerAction.WARMUP,
                 ProfilerAction.RECORD,

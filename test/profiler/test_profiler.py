@@ -3782,18 +3782,17 @@ class TestPrivateUse1ProfilerState(TestCase):
                 )
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerEarlyAbort(TestCase):
-    """Tests for early abort of profiling. Note that the common case in
-    in production will actually be GPU profiling. But because we're mocking
-    the exit condition, we can just use CPU only profiling.
-
-    For all of these tests, `ProfilerAction.NONE` indicates an early return."""
+    """Tests for early abort of device profiling when Kineto signals that
+    collection has stopped (e.g. CUPTI buffer overflow). The exit condition
+    is mocked so no actual overflow is needed."""
 
     PATCH_TARGET = "torch.autograd._is_stopped"
 
     def _make_profiler(self, **schedule_kwargs):
         return profile(
-            activities=[ProfilerActivity.CPU],
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             schedule=torch.profiler.schedule(**schedule_kwargs),
         )
 
@@ -3868,6 +3867,21 @@ class TestProfilerEarlyAbort(TestCase):
             # in the expected state.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_cpu_only_profiler_ignores_stale_is_stopped(self):
+        """A CPU-only profiler should not abort even if _is_stopped returns
+        True (e.g. stale flag from a previous device profiler)."""
+        p = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=2),
+        )
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
 
