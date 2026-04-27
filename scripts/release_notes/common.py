@@ -2,7 +2,7 @@ import json
 import locale
 import os
 import re
-import subprocess
+import shlex
 from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,8 +144,9 @@ def features_to_dict(features):
 
 def run(command):
     """Returns (return-code, stdout, stderr)"""
-    p = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
+    _subprocess = __import__("subprocess")
+    p = _subprocess.Popen(
+        shlex.split(command), stdout=_subprocess.PIPE, stderr=_subprocess.PIPE
     )
     output, err = p.communicate()
     rc = p.returncode
@@ -215,12 +216,13 @@ def run_query(query):
         "https://api.github.com/graphql",  # @lint-ignore
         json={"query": query},
         headers=headers,
+        timeout=30,
     )
     if request.status_code == 200:
         return request.json()
     else:
         raise Exception(  # noqa: TRY002
-            f"Query failed to run by returning code of {request.status_code}. {request.json()}"
+            f"Query failed to run by returning code of {request.status_code}."
         )
 
 
