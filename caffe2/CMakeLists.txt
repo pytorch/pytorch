@@ -48,7 +48,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__torch_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+  file(GLOB_RECURSE torchgen_python CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/torchgen/*.py")
 
 
   # Add source, includes, and libs to lists
@@ -357,9 +357,9 @@ if(USE_PER_OPERATOR_HEADERS)
   list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
 endif()
 
-file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
-file(GLOB_RECURSE autograd_yaml "${TOOLS_PATH}/autograd/*.yaml")
-file(GLOB_RECURSE autograd_templates "${TOOLS_PATH}/autograd/templates/*")
+file(GLOB_RECURSE autograd_python CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE autograd_yaml CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.yaml")
+file(GLOB_RECURSE autograd_templates CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/templates/*")
 add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
@@ -1241,9 +1241,9 @@ endif()
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
-  file(GLOB lite_interpreter_python "${TOOLS_PATH}/lite_interpreter/*.py")
+  file(GLOB lite_interpreter_python CONFIGURE_DEPENDS "${TOOLS_PATH}/lite_interpreter/*.py")
   if(${TRACING_BASED})
-    file(GLOB code_analyzer_python "${TOOLS_PATH}/code_analyzer/*.py")
+    file(GLOB code_analyzer_python CONFIGURE_DEPENDS "${TOOLS_PATH}/code_analyzer/*.py")
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
