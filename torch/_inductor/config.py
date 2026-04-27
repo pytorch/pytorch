@@ -1535,6 +1535,16 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
+# Per-future timeout (seconds) for AsyncCompile._wait_futures. 0 (the
+# default) means no timeout; a positive value raises a RuntimeError naming
+# the kernel when a compile worker does not finish in time. CI sets this
+# via TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT (300s) so a stuck compile
+# doesn't burn the whole shard budget, while non-CI users with legitimately
+# long compiles are not affected.
+compile_worker_wait_timeout: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT", "0")
+)
+
 enable_autograd_for_aot: bool = False
 
 
