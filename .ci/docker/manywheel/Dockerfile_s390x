@@ -13,7 +13,6 @@ ARG DEVTOOLSET_VERSION=14
 RUN yum -y install epel-release
 RUN yum -y update
 RUN yum install -y \
-  sudo \
   autoconf \
   automake \
   bison \
