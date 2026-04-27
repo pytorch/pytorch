@@ -482,6 +482,7 @@ class ComboKernel(Kernel):
         features: SIMDKernelFeatures,
         optimize_mask: bool,
         triton_kernel_cls: type[TritonKernel],
+        tiling_scores: dict[str, sympy.Expr] | None = None,
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
@@ -504,6 +505,7 @@ class ComboKernel(Kernel):
             is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
+            tiling_scores=tiling_scores,
         )
 
     def codegen_static_numels_sub_kernel(
@@ -775,6 +777,16 @@ class ComboKernel(Kernel):
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
+        # Sum per-sub-kernel bandwidth / FLOP estimates for the combo launch.
+        sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
+        self._kernel_num_gb = sum(m.get("kernel_num_gb") or 0 for m in sub_metas)
+        if config.benchmark_kernel or config.profile_bandwidth:
+            inductor_meta["kernel_num_gb"] = self._kernel_num_gb
+        if config.benchmark_kernel:
+            inductor_meta["kernel_flop"] = sum(
+                m.get("kernel_flop") or 0 for m in sub_metas
+            )
+
         sub_kernel = selected_kernel
         if heuristics == "foreach":
             heuristics_line = f"""
@@ -987,7 +999,7 @@ class ComboKernel(Kernel):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb=0))
+            code.splice(self.codegen_kernel_benchmark(num_gb=self._kernel_num_gb))
 
         return code.getvalue()
 
@@ -1151,6 +1163,9 @@ class ComboKernel(Kernel):
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
+        """
+        Build metadata used by combo-kernel grid/disaptch/autotune helpers.
+        """
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
         min_blocks = (
@@ -1160,6 +1175,9 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
+            # Captured at codegen time so runtime sees the same value the
+            # source was generated with, regardless of later config changes.
+            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
         if not self.enable_autotune:
@@ -1204,19 +1222,17 @@ class ComboKernel(Kernel):
                 )
 
                 meta[f"size_hints_{num}"] = size_hints_list[num]
+                meta[f"inductor_meta_{num}"] = sub_kernel.inductor_meta_per_kernel()
                 if meta[f"heuristic_{num}"] == "pointwise":
                     if len(size_hints_list[num]) == 2:
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
-                    if sub_kernel.tiling_scores:
-                        meta[f"tiling_scores_{num}"] = {
-                            dim: V.graph.sizevars.optimization_hint(score, fallback=1)
-                            for dim, score in sub_kernel.tiling_scores.items()
-                        }
                 else:
                     meta[f"reduction_hint_{num}"] = (
-                        sub_kernel.features.get_reduction_hint().name
+                        sub_kernel.features.get_reduction_hint(
+                            sub_kernel.tiling_scores
+                        ).name
                     )
 
             for tree in sub_kernel.range_trees:

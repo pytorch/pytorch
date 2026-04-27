@@ -909,22 +909,22 @@ def meta_segment_reduce(
             "segment_reduce(): indices based reduction is not supported yet."
         )
 
-    def segment_reduce_lengths_tensor(lengths_shape):
+    def segment_reduce_output(segment_count):
+        output_shape = list(data.shape)
+        output_shape[axis] = segment_count
         return torch.empty(
-            lengths_shape + data.shape[axis + 1 :],
+            output_shape,
             dtype=data.dtype,
             device="meta",
             memory_format=torch.contiguous_format,
         )
 
     if lengths is not None:
-        return segment_reduce_lengths_tensor(lengths.shape)
+        return segment_reduce_output(lengths.shape[axis])
     # FIXME should probably check that lengths and offset aren't both set, but
     # the ATen implementation neglects this too
     if offsets is not None:
-        # lengths == torch.diff(offsets)
-        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
-        return segment_reduce_lengths_tensor(lengths_shape)
+        return segment_reduce_output(offsets.shape[axis] - 1)
     raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
 
 
@@ -3252,7 +3252,7 @@ def meta_avg_pool3d(
     )
 
     torch._check(
-        not divisor_override or divisor_override != 0,
+        divisor_override is None or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
@@ -3339,7 +3339,7 @@ def meta_avg_pool3d_backward(
     )
 
     torch._check(
-        not divisor_override or divisor_override != 0,
+        divisor_override is None or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
@@ -6291,6 +6291,7 @@ def meta__scaled_dot_product_attention_math_for_mps(
     is_causal: bool = False,
     dropout_mask: Tensor | None = None,
     scale: float | None = None,
+    enable_gqa: bool = False,
 ) -> tuple[Tensor, Tensor]:
     def ensure_4d(x):
         if x.dim() == 3:
