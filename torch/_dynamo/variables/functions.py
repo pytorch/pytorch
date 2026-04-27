@@ -297,7 +297,7 @@ def init_cellvars(
 ) -> None:
     """
     Update `result` to add mapping from local name to new cells created
-    directly by `code`, or update SideEffects in `parent` if the a local cell is
+    directly by `code`, or update SideEffects in `parent` if a local cell is
     already in `result` (cell argument).
     """
     side_effects = parent.output.side_effects
