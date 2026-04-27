@@ -286,7 +286,9 @@ def stage_backward_weight(
         handles = []
         if len(param_group["intermediates"]) > 1:
             for grads_tuple, intermediate in zip(
-                param_group["grads"], param_group["intermediates"]
+                param_group["grads"],
+                param_group["intermediates"],
+                strict=True,
             ):
                 handles.append(
                     intermediate.register_prehook(
