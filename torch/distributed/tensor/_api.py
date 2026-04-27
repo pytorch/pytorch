@@ -905,8 +905,8 @@ def distribute_tensor(
     assert_no_mixed_partial_types(placements)
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we need to check:
-        # 1. if the we can further shard this DTensor if the two device mesh belong to
-        #   the same parenet mesh and further sharding is possible.
+        # 1. if we can further shard this DTensor if the two device mesh belong to
+        #   the same parent mesh and further sharding is possible.
         # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(
