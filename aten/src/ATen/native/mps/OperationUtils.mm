@@ -4,6 +4,7 @@
 #include <c10/metal/common.h>
 #include <functional>
 #include <stdexcept>
+#include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -981,12 +982,11 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
-                                           std::optional<c10::ScalarType> scalar_arg_type,
-                                           bool supports_vec4) {
+                                           std::optional<c10::ScalarType> scalar_arg_type) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, supports_vec4);
+      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type);
     }
     return;
   }
@@ -998,12 +998,45 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     return;
   }
   using namespace mps;
-  bool use_vec4 =
-      supports_vec4 && iter.is_contiguous() && !alpha.has_value() && at::isFloatingType(iter.common_dtype());
+  // For contiguous non-alpha unary ops we have two kernel flavors: an
+  // ILP_PER_THREAD-wide one that wins on large tensors, and a one-thread-per-
+  // element scalar fallback for small tensors where the ILP per-thread
+  // overhead isn't amortized. Crossover measured empirically on M-series.
+  // Crossover empirically measured on M-series across {sin, cos, tanh, exp} x
+  // {f32, f16, bf16}: cos/sin cross over near 128K, exp/tanh near 256K. Picking
+  // 256K here avoids regressions on every measured op at the cost of leaving
+  // some 128-256K wins on the table. Revisit per-Apple-GPU if wider data exists.
+  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18; // 262144 elements
+  const bool is_contiguous = iter.is_contiguous();
+  // ILP is gated on floating-point output dtype. Integer outputs come only from
+  // cheap ops (neg/abs/sqr/bitwise_not) where the smaller threadgroup count
+  // from the wider per-thread tile regresses real-world sizes, and complex
+  // outputs lose because the wide per-thread state spills out of registers.
+  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type());
+  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ILP_DISPATCH_THRESHOLD;
+  // Bench-only override: force ILP or scalar dispatch.
+  if (is_contiguous && !alpha.has_value()) {
+    if (auto force = c10::utils::get_env("PYTORCH_UNARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  // alpha kernels are registered under "_dense_" (unary_alpha_dense); only the
+  // plain unary path has the new "_dense_scalar_" / "_dense_" (ILP) split.
+  std::string_view dense_suffix;
+  if (!is_contiguous) {
+    dense_suffix = "strided";
+  } else if (dense_ilp || alpha.has_value()) {
+    dense_suffix = "dense";
+  } else {
+    dense_suffix = "dense_scalar";
+  }
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 use_vec4 ? "dense_vec4" : (iter.is_contiguous() ? "dense" : "strided"),
+                                 dense_suffix,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
@@ -1018,11 +1051,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (use_vec4) {
+      if (dense_ilp) {
         mtl_setBytes(computeEncoder, length, 2);
-        mtl_dispatch1DJob(computeEncoder, cplState, (length + 3) / 4);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
-        if (!iter.is_contiguous()) {
+        if (!is_contiguous) {
           mtl_setArgs<2>(computeEncoder,
                          outputTensor.sizes(),
                          inputTensor.strides(),
@@ -1030,7 +1064,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                          inputTensor.ndimension());
         }
         if (alpha) {
-          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), iter.is_contiguous() ? 2 : 6);
+          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), is_contiguous ? 2 : 6);
         }
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
