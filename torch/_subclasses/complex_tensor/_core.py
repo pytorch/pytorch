@@ -37,6 +37,24 @@ class ComplexTensor(Tensor):
         real = real.contiguous()
         imag = imag.contiguous()
 
+        # NOTE conj/neg (hameerabbasi):
+        # All of the following follows from two rules (`!=` represents XOR):
+        # 1. `x.real.is_neg() := x.is_neg()`
+        # 2. `x.imag.is_neg() := (x.is_conj() != x.is_neg())`
+        #
+        # Or, in words:
+        # 1. The conjugate flag doesn't affect the real part
+        # 2. The conjugate flag affects the imaginary part
+        # 3. The negative flag affects both the real and imaginary parts
+        #
+        # So, in order to flip the sign of just the real part, we need to flip the
+        # negative flag and the conjugate flag, in order to not affect the imaginary part.
+        #
+        # Flipping the sign of the imaginary part equates to flipping the conjugate flag.
+        #
+        # The internal tensors `self._re` and `self._im` store the raw data.
+        # The programmer-visible tensors `self.re` and `self.im` are views into `self._re` and `self._im`,
+        # with the negative flag and conjugate flag applied to them.
         if real.is_neg():
             neg_flag = not neg_flag
             conj_flag = not conj_flag
@@ -98,6 +116,7 @@ class ComplexTensor(Tensor):
         )
         res._re = real.detach()
         res._im = imag.detach()
+        # See "NOTE conj/neg (hameerabbasi)"
         torch._C._set_conj(res, conj_flag)
         torch._C._set_neg(res, neg_flag)
 
@@ -108,6 +127,7 @@ class ComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
+        # See "NOTE conj/neg (hameerabbasi)"
         negate = self.is_neg()
         real = self._re
         if negate:
@@ -116,6 +136,7 @@ class ComplexTensor(Tensor):
 
     @property
     def im(self) -> Tensor:
+        # See "NOTE conj/neg (hameerabbasi)"
         negate = self.is_neg() != self.is_conj()
         imag = self._im
         if negate:
