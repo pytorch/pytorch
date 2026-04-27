@@ -57,7 +57,7 @@ from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
@@ -1164,10 +1164,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if entry is None and guard_info["cache_status_detailed"] == "guard_miss":
                 counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             cache_info.update(guard_info)
+            CacheArtifactRecorder(
+                AOTAutogradCacheArtifact.type(), key
+            ).record_if_present(pickled_content)
             if pickled_content is not None:
-                CacheArtifactManager.record_artifact(
-                    AOTAutogradCacheArtifact.type(), key, pickled_content
-                )
                 if (
                     should_bundle_autograd_cache()
                     and aot_config is not None
@@ -1279,9 +1279,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             content = AOTAutogradCache._pickle_entry(entry, remote)
             if content is None:
                 return None
-            CacheArtifactManager.record_artifact(
-                AOTAutogradCacheArtifact.type(), key, content
-            )
+            CacheArtifactRecorder(AOTAutogradCacheArtifact.type(), key).record(content)
             if (
                 should_bundle_autograd_cache()
                 and entry.sanitized_aot_config.precompile_backend_id is not None
