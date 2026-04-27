@@ -4419,6 +4419,12 @@ class TestLinalg(TestCase):
         t2 = torch.randn((5, 7), device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
+        # https://github.com/pytorch/pytorch/issues/180377: aliasing Q and R
+        # in `out=` silently produced wrong results when A was square.
+        t3 = torch.randn(3, 3, device=device, dtype=dtype)
+        B = torch.empty_like(t3)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            torch.linalg.qr(t3, out=(B, B))
 
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:

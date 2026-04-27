@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
@@ -2448,6 +2449,11 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
                                std::string_view mode,
                                const Tensor & Q,
                                const Tensor & R) {
+  // Aliased Q and R produce silent wrong results: the GEQRF stage writes the
+  // packed factorization into the shared storage, then `R.triu_()` zeros the
+  // lower triangle that ORGQR needs to reconstruct Q. See #180377.
+  at::assert_no_overlap(Q, R);
+
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto k = std::min(m, n);
