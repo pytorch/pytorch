@@ -1161,7 +1161,7 @@ def convolution_backward_lowering(
 
         # TODO: use_ck_conv_template for bwd conv
 
-        dw = autotune_select_algorithm(
+        dw, _ = autotune_select_algorithm(
             "convolution_bwd_weight", choices_dw, args_w, layout_dw
         )
 
@@ -1195,7 +1195,7 @@ def convolution_backward_lowering(
 
         # TODO: use_ck_conv_template for bwd conv
 
-        dx = autotune_select_algorithm(
+        dx, _ = autotune_select_algorithm(
             "convolution_bwd_input", choices_dx, args_x, layout_dx
         )
 
