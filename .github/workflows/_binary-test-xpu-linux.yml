@@ -1,0 +1,110 @@
+name: linux-binary-test-xpu
+
+# Reusable workflow that runs the XPU binary test (setup-xpu, ECR login,
+# docker pull, test-pytorch-binary, teardown-xpu). Called from the
+# matrix-driven manywheel-test-xpu job in
+# generated-linux-binary-manywheel-nightly.yml.
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+      PYTORCH_ROOT:
+        required: true
+        type: string
+      PACKAGE_TYPE:
+        required: true
+        type: string
+      DESIRED_CUDA:
+        required: true
+        type: string
+      GPU_ARCH_TYPE:
+        required: true
+        type: string
+      DOCKER_IMAGE:
+        required: true
+        type: string
+      DOCKER_IMAGE_TAG_PREFIX:
+        required: true
+        type: string
+      DESIRED_PYTHON:
+        required: false
+        type: string
+      runs_on:
+        required: false
+        type: string
+        default: linux.idc.xpu
+      timeout-minutes:
+        required: false
+        type: number
+        default: 240
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      # Caller workflow's top-level env: doesn't propagate into reusable
+      # workflows, so redeclare the ones the docker/test scripts read.
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      AWS_DEFAULT_REGION: us-east-1
+      BINARY_ENV_FILE: /tmp/env
+      BUILD_ENVIRONMENT: linux-binary-manywheel
+      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+      - name: Setup XPU
+        uses: ./.github/actions/setup-xpu
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ inputs.DOCKER_IMAGE }}
+          custom-tag-prefix: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+          docker-build-dir: .ci/docker
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Test Pytorch binary
+        uses: ./.github/actions/test-pytorch-binary
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Teardown XPU
+        uses: ./.github/actions/teardown-xpu
