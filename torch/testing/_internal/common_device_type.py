@@ -484,6 +484,35 @@ class DeviceTypeTestBase(TestCase):
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
 
+    @classmethod
+    def register_op_overrides(cls, op_overrides, overwrite=False):
+        if cls.op_overrides is None or overwrite:
+            cls.op_overrides = {}
+
+        for op_name, decorators in op_overrides.items():
+            cls.op_overrides.setdefault(op_name, [])
+            cls.op_overrides[op_name].extend(decorators)
+
+    @classmethod
+    def register_test_exclusions(cls, test_exclusions, overwrite=False):
+        if (
+            not hasattr(cls, "test_exclusions")
+            or cls.test_exclusions is None
+            or overwrite
+        ):
+            cls.test_exclusions = {}
+        for test_class, tests in test_exclusions.items():
+            if test_class not in cls.test_exclusions:
+                cls.test_exclusions[test_class] = tests
+            elif cls.test_exclusions[test_class] == "*":
+                continue
+            elif tests == "*":
+                cls.test_exclusions[test_class] = "*"
+            else:
+                cls.test_exclusions[test_class] = list(
+                    set(cls.test_exclusions[test_class]) | set(tests)
+                )
+
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):

@@ -152,15 +152,17 @@ class TestDeviceTypeOpenReg(TestCase):
 
 
 # Modify PrivateUse1TestBase which is automatically included for OpenReg
-PrivateUse1TestBase.op_overrides = {
-    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
-    "op_skip_f32": [
-        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
-    ],
-    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
-    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
-    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
-}
+PrivateUse1TestBase.register_op_overrides(
+    {
+        "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
+        "op_skip_f32": [
+            DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
+        ],
+        "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+        # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
+        "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
+    }
+)
 
 
 class TestSkippedSpecificTestCases(TestCase):
@@ -192,10 +194,12 @@ class TestSkippedWholeTestClass(TestCase):
 
 
 # PrivateUse1 can skip individual methods or an entire instantiated class.
-PrivateUse1TestBase.test_exclusions = {
-    "TestSkippedSpecificTestCases": ["test_skipped"],
-    "TestSkippedWholeTestClass": "*",
-}
+PrivateUse1TestBase.register_test_exclusions(
+    {
+        "TestSkippedSpecificTestCases": ["test_skipped"],
+        "TestSkippedWholeTestClass": "*",
+    }
+)
 
 
 class TestSupportedOpsWithOverrides(TestCase):
