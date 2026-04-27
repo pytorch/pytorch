@@ -500,7 +500,6 @@ def init_backend_registration() -> None:
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
-    from .halide import HalideScheduling
     from .mps import MetalScheduling
     from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
@@ -509,10 +508,15 @@ def init_backend_registration() -> None:
     from .wrapper_fxir import WrapperFxCodegen
     from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
+    def _halide_scheduling(scheduling):
+        from .halide import HalideScheduling
+
+        return HalideScheduling(scheduling)
+
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {
+        cpu_backends: dict[str, Any] = {
             "cpp": CppScheduling,
-            "halide": HalideScheduling,
+            "halide": _halide_scheduling,
             "triton": TritonScheduling,
             "pallas": PallasScheduling,
         }
@@ -528,9 +532,9 @@ def init_backend_registration() -> None:
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-        cuda_backends = {
+        cuda_backends: dict[str, Any] = {
             "triton": CUDACombinedScheduling,
-            "halide": HalideScheduling,
+            "halide": _halide_scheduling,
             "pallas": PallasScheduling,
         }
         register_backend_for_device(
