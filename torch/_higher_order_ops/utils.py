@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 @dataclass
@@ -459,6 +460,16 @@ def _collect_fake_inputs(inputs):
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
                         inputs_fake.append(val)
+                    elif is_traceable_wrapper_subclass(val):
+                        for attr_name in val.__tensor_flatten__()[0]:
+                            unwrapped_input = getattr(val, attr_name)
+                            if not isinstance(unwrapped_input, torch.Tensor):
+                                continue
+                            if not isinstance(unwrapped_input, FakeTensor):
+                                raise AssertionError(
+                                    f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
+                                )
+                            inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
                         if not isinstance(val, FakeTensor):
@@ -1155,29 +1166,36 @@ def register_fake(hop, fn=None):
     return register(fn)
 
 
-class FunctionalizeCtxWrapper:
+class SubgraphCallableWrapper:
     """
-    This is a dummy wrapper to facilitate fake tensor caching.
+    Wraps a callable while preserving the original subgraph identity for
+    fake tensor caching. Without this, passing a plain closure to
+    invoke_subgraph would bypass the dispatch cache entirely.
+    """
 
-    For AOT Dispatcher metadata collection pass, HOPs go from functionalization
-    key to fake tensor key. The functionalization key wraps the subgraphs in a
-    function, which changes from call to call even though the subgraph might
-    still be same.
+    def __init__(self, fn, subgraph):
+        self.fn = fn
+        self.subgraph = subgraph
+        self._boxed_call = getattr(subgraph, "_boxed_call", False)
 
-    To enable fake tensor caching, we just wrap the ctx and subgraph in this
-    class and then use the subgraph as the hash.
+    def __hash__(self):
+        return id(self.subgraph)
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+
+class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
+    """
+    Wraps a subgraph with functionalization context for the AOT Dispatcher
+    metadata collection pass.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
     def __init__(self, ctx, subgraph):
+        super().__init__(subgraph, subgraph)
         self.ctx = ctx
-        self.subgraph = subgraph
-        # Propagate so callers pass inputs as a list, enabling input deallocation.
-        self._boxed_call = getattr(subgraph, "_boxed_call", False)
-
-    def __hash__(self):
-        return id(self.subgraph)
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
