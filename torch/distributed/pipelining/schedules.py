@@ -1401,9 +1401,7 @@ def _defer_recv_ops(
                 # (lower rank does RECV before SEND)
                 if rank < peer:
                     to_flush = [
-                        k
-                        for k, v in deferred.items()
-                        if _recv_peer_rank(v) == peer
+                        k for k, v in deferred.items() if _recv_peer_rank(v) == peer
                     ]
                     for key in to_flush:
                         new_actions.append(deferred.pop(key))
@@ -1675,7 +1673,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
             for rank in self.pipeline_order:
                 writer.writerow(self.pipeline_order[rank])
 
-    def _load_csv(self, filename, format="compute_only"):
+    def _load_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
+    ):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
 
