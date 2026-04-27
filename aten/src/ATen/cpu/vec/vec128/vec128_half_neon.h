@@ -216,7 +216,10 @@ class Vectorized<c10::Half> : public Vectorized16<
     } else {
       float16_t tmp_values[size()];
       vst1q_f16(reinterpret_cast<float16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(float16_t));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(float16_t));
     }
   }
   int zero_mask() const {

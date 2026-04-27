@@ -92,7 +92,10 @@ struct VectorizedQuantizedConverter {
   }
 
   void store(void* ptr, int count = size()) const {
-    memcpy(ptr, vals.data(), std::min<int64_t>(count, size()) * sizeof(value_type));
+    memcpy(
+        ptr,
+        vals.data(),
+        std::min<int64_t>(count, size()) * sizeof(value_type));
   }
 
   float_vec_return_type dequantize(

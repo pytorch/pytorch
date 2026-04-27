@@ -282,7 +282,8 @@ struct Vectorized {
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
     Vectorized vector;
-    std::memcpy(vector.values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
+    std::memcpy(
+        vector.values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
     return vector;
   }
   static Vectorized<T> loadu_one_fourth(const void* ptr) {
