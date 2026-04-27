@@ -3,6 +3,7 @@ import copy
 import glob
 import importlib
 import importlib.abc
+import importlib.util
 import os
 import re
 import shlex
@@ -145,7 +146,15 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2
+        # Guess #2: Support for ROCm distribution from TheRock
+        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
+        # (include/, lib/, bin/, ...), so the module's own location is the
+        # ROCM_HOME we want. Use find_spec to locate it without importing.
+        spec = importlib.util.find_spec('_rocm_sdk_core')
+        if spec is not None and spec.origin is not None:
+            rocm_home = str(Path(spec.origin).parent.resolve())
+    if rocm_home is None:
+        # Guess #3
         hipcc_path = shutil.which('hipcc')
         if hipcc_path is not None:
             rocm_home = os.path.dirname(os.path.dirname(
@@ -154,7 +163,7 @@ def _find_rocm_home() -> str | None:
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
         else:
-            # Guess #3
+            # Guess #4
             fallback_path = '/opt/rocm'
             if os.path.exists(fallback_path):
                 rocm_home = fallback_path
