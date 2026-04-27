@@ -686,6 +686,13 @@ class NNModuleVariable(VariableTracker):
             source=NNModuleSource(GetItemSource(self.source, key_value)),
         )
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from . import ListIteratorVariable
+
+        return ListIteratorVariable(
+            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -931,9 +938,7 @@ class NNModuleVariable(VariableTracker):
                 items_result.append(named_embed(name, submod))
             return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
         elif name == "__iter__":
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
+            return self.tp_iter_impl(tx)
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
@@ -1100,26 +1105,33 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
-                if not (
-                    self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_hooks_with_kwargs")  # type: ignore[attr-defined]
-                    .realize()
-                    .len()
-                    or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")  # type: ignore[attr-defined]
-                    .realize()
-                    .len()
-                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
-                ):
+
+                def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
+                    vt = obj.var_getattr(tx, attr)
+                    vt = vt.realize() if hasattr(vt, "realize") else vt
+                    return vt.len()  # type: ignore[union-attr]
+
+                has_hooks = any(
+                    _hooks_dict_len(self, attr)
+                    for attr in (
+                        "_backward_hooks",
+                        "_backward_pre_hooks",
+                        "_forward_hooks",
+                        "_forward_hooks_with_kwargs",
+                        "_forward_pre_hooks",
+                        "_forward_pre_hooks_with_kwargs",
+                    )
+                ) or any(
+                    _hooks_dict_len(globals_vt, attr)
+                    for attr in (
+                        "_global_backward_pre_hooks",
+                        "_global_backward_hooks",
+                        "_global_forward_hooks",
+                        "_global_forward_pre_hooks",
+                    )
+                )
+
+                if not has_hooks:
                     name = "forward"
                     fn = self.value_type.forward  # type: ignore[attr-defined]
 
@@ -1251,6 +1263,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslator", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
         dict_vt = self.var_getattr(tx, field)
+        if isinstance(dict_vt, variables.UserDefinedDictVariable):
+            dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None

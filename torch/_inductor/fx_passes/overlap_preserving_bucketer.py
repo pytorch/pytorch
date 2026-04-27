@@ -49,7 +49,7 @@ class WhyNoBucket:
     def __call__(self, reason: str, *args: Any) -> None:
         if bucket_log.isEnabledFor(logging.DEBUG):
             bucket_log.debug(
-                "cannot bucket %s with %s: " + reason,  # noqa: G003
+                "cannot bucket %s with %s: " + reason,
                 self.name1,
                 self.name2,
                 *args,
@@ -396,6 +396,8 @@ class OverlapPreservingBucketer:
             from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
 
             gm = self.graph.owning_module
+            if gm is None:
+                raise AssertionError("graph.owning_module must not be None")
             replaced = expand_fusion_regions(gm, self.region_of)
 
         # Step 3: Transfer deps from erased fusion modules to inlined nodes

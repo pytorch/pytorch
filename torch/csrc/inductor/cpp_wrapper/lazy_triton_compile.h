@@ -96,7 +96,7 @@ static inline int getOptionalIntAttr(
     int sentinel = -1) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return (val.get() != Py_None) ? _THPUtils_unpackInt(val) : sentinel;
+  return (!Py_IsNone(val.get())) ? _THPUtils_unpackInt(val) : sentinel;
 }
 
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {

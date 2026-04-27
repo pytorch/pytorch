@@ -1156,7 +1156,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "multiple times"):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            def foo(x: torch.Tensor) -> torch.Tensor:
                 raise NotImplementedError
 
         # Unless we delete the original op.
@@ -1164,14 +1164,14 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         # Smoke test
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
@@ -1775,7 +1775,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
     numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
-    return numpy_view_copy""",  # noqa: B950
+    return numpy_view_copy""",
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
@@ -3060,6 +3060,27 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_default_none(self):
+        @torch.library.custom_op(
+            "_torch_testing::copy_optional_out", mutates_args={"out"}
+        )
+        def copy_optional_out(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is not None:
+                out.copy_(x)
+                return x.new_empty(0)
+            return x.clone()
+
+        x = torch.randn(3)
+        self.assertEqual(copy_optional_out(x), x)
+
+        out = torch.empty_like(x)
+        version = out._version
+        result = copy_optional_out(x, out=out)
+        self.assertEqual(result.numel(), 0)
+        self.assertEqual(out, x)
+        self.assertGreater(out._version, version)
 
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once

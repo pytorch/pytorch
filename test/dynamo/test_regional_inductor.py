@@ -835,7 +835,7 @@ def forward(self, primals_1, primals_2):
     getitem_10 = invoke_subgraph_6[1]
     getitem_1 = invoke_subgraph_6[0];  invoke_subgraph_6 = None
     sin_3 = torch.ops.aten.sin.default(getitem_1)
-    return (sin_3, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, getitem_10, getitem_1)""",  # noqa: B950
+    return (sin_3, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, getitem_10, getitem_1)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -860,7 +860,7 @@ def forward(self, primals_1, getitem_9, getitem_8, getitem, sin_1, getitem_11, g
     add = torch.ops.aten.add.Tensor(getitem_3, getitem_6);  getitem_3 = getitem_6 = None
     cos_3 = torch.ops.aten.cos.default(primals_1);  primals_1 = None
     mul_3 = torch.ops.aten.mul.Tensor(getitem_5, cos_3);  getitem_5 = cos_3 = None
-    return (mul_3, add)""",  # noqa: B950
+    return (mul_3, add)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -991,7 +991,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     alias_1 = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
     alias_2 = torch.ops.aten.alias.default(alias);  alias = None
     alias_3 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3)""",  # noqa: B950
+    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )
@@ -1009,7 +1009,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
     add = torch.ops.aten.add.Tensor(getitem_3, getitem_4);  getitem_3 = getitem_4 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_5);  add = getitem_5 = None
-    return (add_1, None, None, None, None, None, None, None, None)""",  # noqa: B950
+    return (add_1, None, None, None, None, None, None, None, None)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )

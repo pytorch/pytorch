@@ -76,6 +76,7 @@ from torch.utils._python_dispatch import (
     _unset_infra_mode,
     autograd_would_have_decomposed,
     TorchDispatchMode,
+    TraceableWrapperSubclass,
 )
 from torch.utils._stats import count
 from torch.utils._thunk import Thunk
@@ -506,11 +507,11 @@ def get_proxy_slot(
     return res
 
 
-# Recursively traverses tensor subclasses,
+# Recursively traverses traceable wrapper subclasses,
 # returnining an (unordered) list of Proxy objects that are tracked
 # for all inner tensors, given the current extant proxy mode.
 # Returns an empty list if no proxy mode is active.
-def _get_proxies(t: torch.Tensor) -> list[Proxy]:
+def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     proxies = []
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if mode is None:
@@ -1855,22 +1856,69 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             torch._functorch.predispatch._vmap_increment_nesting,
             torch._functorch.predispatch._vmap_decrement_nesting,
             torch._functorch.vmap.lazy_load_decompositions,
+            torch._functorch.predispatch._make_dual,
+            torch._functorch.predispatch._unpack_dual,
+            torch._functorch.predispatch._jvp_increment_nesting,
+            torch._functorch.predispatch._jvp_decrement_nesting,
+            torch._functorch.predispatch._unwrap_for_grad,
+            torch._functorch.predispatch._enter_dual_level,
+            torch._functorch.predispatch._exit_dual_level,
         ]:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
                 func,
                 proxies,
-                {},
+                kwargs,
             )
             res = func(*args, **kwargs)
-            track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            # When JVP transforms are active, snapshot_fake calls detach
+            # which goes through C++ functorch dispatch keys, potentially
+            # re-wrapping the result as a grad tracking tensor.
+            # Temporarily disable functorch transforms during tracking to
+            # prevent this corruption of meta["val"].
+            if func in _jvp_predispatch_functions:
+                with torch._C._DisableFuncTorch():
+                    track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            else:
+                track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
             return res
         return func(*args, **kwargs)
 
 
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
+)
+
+
+# JVP predispatch functions need special handling during tracing:
+# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
+_jvp_predispatch_functions = frozenset(
+    {
+        torch._functorch.predispatch._make_dual,
+        torch._functorch.predispatch._unpack_dual,
+        torch._functorch.predispatch._jvp_increment_nesting,
+        torch._functorch.predispatch._jvp_decrement_nesting,
+        torch._functorch.predispatch._unwrap_for_grad,
+        torch._functorch.predispatch._enter_dual_level,
+        torch._functorch.predispatch._exit_dual_level,
+    }
+)
+
+# These JVP predispatch wrappers manage transform nesting/level state
+# and must survive FX dead code elimination even with zero output users.
+# Registered here rather than in predispatch.py to avoid circular imports
+# (predispatch.py loads before torch.fx during torch.autograd init).
+from torch.fx.node import _side_effectful_functions
+
+
+_side_effectful_functions.update(
+    {
+        torch._functorch.predispatch._jvp_increment_nesting,
+        torch._functorch.predispatch._jvp_decrement_nesting,
+        torch._functorch.predispatch._enter_dual_level,
+        torch._functorch.predispatch._exit_dual_level,
+    }
 )
 
 

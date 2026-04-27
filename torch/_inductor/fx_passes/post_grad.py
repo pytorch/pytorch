@@ -267,7 +267,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
                 config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
@@ -279,7 +279,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         GraphTransformObserver(gm, "bucket_all_reduce").apply_graph_pass(
             lambda graph: bucket_all_reduce(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_reduces_fx_bucket_size_determinator,
                 config.bucket_all_reduces_fx,  # type: ignore[arg-type]
             )
@@ -299,7 +299,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_gathers_fx_bucket_size_determinator,
                 config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
@@ -361,9 +361,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ):
             GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
                 lambda graph: schedule_overlap_bucketing_from_inductor_configs(
-                    graph.owning_module,
+                    graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 )
             )
+
+    if config.aten_distributed_optimizations.enable_low_contention_collectives:
+        from torch._inductor.fx_passes.low_contention_collectives import (
+            replace_collectives_with_low_contention,
+        )
+
+        GraphTransformObserver(
+            gm, "replace_collectives_with_low_contention"
+        ).apply_graph_pass(replace_collectives_with_low_contention)
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -1695,7 +1704,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     ]:
         return False
     # Inductor falls back to aten.index_put_.
-    # index_put_ will will call nonzero() and perform a H2D sync if
+    # index_put_ will call nonzero() and perform a H2D sync if
     # any of its indices are bool/byte tensors
     # However, it will short-circuit this H2D sync and run mask_fill_
     # if the value we are putting is a cpu scalar.

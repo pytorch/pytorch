@@ -2187,6 +2187,36 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, args, kwargs, torch.cuda._maybe_exchange_device
             )
 
+        @register(torch._dynamo.decorators.override_optimization_hint)
+        def handle_override_optimization_hint(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .constant import ConstantVariable
+            from .tensor import SymNodeVariable
+
+            x_vt = args[0]
+            val_vt = args[1]
+            val = val_vt.as_python_constant()
+
+            if x_vt.is_python_constant():
+                torch._dynamo.decorators.override_optimization_hint(
+                    x_vt.as_python_constant(), val
+                )
+                return ConstantVariable.create(None)
+
+            if isinstance(x_vt, SymNodeVariable):
+                torch._dynamo.decorators.override_optimization_hint(x_vt.sym_num, val)
+                return ConstantVariable.create(None)
+
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "override_optimization_hint expects a SymInt or int argument, "
+                f"got {type(x_vt).__name__}",
+            )
+
         @register(torch.autograd.grad)
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
@@ -3134,6 +3164,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_callable = _LeafCallable(wrapped_real_impl)
         fake_impl_callable = _LeafCallable(wrapped_fake_impl)
+        hook_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fn", None)
+        if hook_fn is not None:
+            hook_fake_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fake_fn", None)
+            real_impl_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
+            real_impl_callable._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
 
         def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
