@@ -54,7 +54,7 @@ using std::round;
 
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)
-TORCH_API const std::map<string, string>& GetBuildOptions();
+TORCH_API const std::map<std::string, std::string>& GetBuildOptions();
 
 } // namespace caffe2
 
