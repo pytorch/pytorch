@@ -1084,6 +1084,17 @@ def build_subgraph_input_mapping(
     return subgraph_input_mapping
 
 
+def has_tensor_subclass_args(args_vt: "Sequence[VariableTracker]") -> bool:
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    for arg in args_vt:
+        if isinstance(arg, TensorVariable):
+            example = arg.as_proxy().node.meta.get("example_value")
+            if example is not None and is_traceable_wrapper_subclass(example):
+                return True
+    return False
+
+
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
     _ALLOW_FALLBACK_TO_EAGER = False
@@ -1204,7 +1215,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO (anijain2305) - Collect issues why this does not work for export,
         # and enable if request arises.
-        reuse = not tx.output.export
+        # Disable reuse for tensor subclass inputs — stamp_out_subgraph
+        # reconstructs outputs as plain tensors, losing subclass metadata.
+        reuse = not tx.output.export and not has_tensor_subclass_args(fn_args_vt)
 
         # User-provided reuse_hash_fn path: hash key determines cache lookup.
         if reuse and reuse_hash_fn is not None:

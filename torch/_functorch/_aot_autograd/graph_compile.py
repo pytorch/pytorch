@@ -978,7 +978,18 @@ def run_joint_graph_passes_on_hops(
         new_call_function_node.meta = copy.copy(old_call_function_node.meta)
 
         output = new_hop_gm.graph.find_nodes(op="output")[0]
-        out_example_vals = [n.meta["val"] if n else None for n in output.args[0]]
+        out_example_vals = []
+        for n in output.args[0]:
+            if n is None:
+                out_example_vals.append(None)
+            elif "val" in n.meta:
+                out_example_vals.append(n.meta["val"])
+            elif n.op == "get_attr":
+                # Opaque objects (e.g. DeviceMesh) saved for backward don't
+                # have "val" metadata. Fetch the actual attribute value.
+                out_example_vals.append(getattr(new_hop_gm, n.target))
+            else:
+                raise KeyError(f"Node {n.name} (op={n.op}) missing 'val' in meta")
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
     for bw_node in reversed(bw_hop_nodes):
