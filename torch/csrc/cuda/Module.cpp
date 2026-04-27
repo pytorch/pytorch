@@ -34,6 +34,7 @@
 
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
@@ -1643,7 +1644,13 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
+  auto& engine = torch::autograd::Engine::get_default_engine();
+  pybind11::gil_scoped_release no_gil;
   at::cuda::clearCublasWorkspaces();
+  engine.execute_callback_on_device_threads(
+      c10::cuda::device_count(), [] {
+        at::cuda::clearCublasWorkspaces();
+      });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
