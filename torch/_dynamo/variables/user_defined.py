@@ -1591,7 +1591,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
     ) -> VariableTracker:
         # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9404
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
         source = self.source and self.get_source_by_walking_mro(tx, "__neg__")
         method_var = self.resolve_type_attr(
             tx,

@@ -481,9 +481,9 @@ its type to `common_constant_types`.
         self,
         tx: Any,
     ) -> VariableTracker:
-        # CPython: int defines nb_negative (long_neg, Objects/longobject.c:5172).
-        # float defines nb_negative (float_neg, Objects/floatobject.c:841).
-        # complex defines nb_negative (complex_neg, Objects/complexobject.c:569).
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
         # bool inherits nb_negative from int via slot inheritance.
         return ConstantVariable.create(-self.value)
 
