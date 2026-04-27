@@ -15,6 +15,8 @@
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps_backward_native.h>
 #endif
 
 namespace at {
@@ -539,5 +541,222 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
         q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 }
+
+// ---------------------------------------------------------------------------
+// FlashAttention-2 forward for MPS
+// Returns (output, logsumexp) — logsumexp is saved for backward pass.
+// Supports head_dim 64 and 128; GQA; causal and non-causal.
+// ---------------------------------------------------------------------------
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    const std::optional<Tensor>& attn_mask,
+    std::optional<double> scale) {
+  TORCH_CHECK(dropout_p == 0.0,
+              "_scaled_dot_product_flash_attention_for_mps: dropout is not supported");
+  TORCH_CHECK(!attn_mask.has_value(),
+              "_scaled_dot_product_flash_attention_for_mps: attn_mask is not supported");
+  TORCH_CHECK(c10::isFloatingType(query.scalar_type()),
+              "_scaled_dot_product_flash_attention_for_mps: unsupported dtype ", query.scalar_type());
+
+  auto [q_, uq] = ensure_4d(query);
+  auto [k_, uk] = ensure_4d(key);
+  auto [v_, uv] = ensure_4d(value);
+
+  const int64_t B   = q_.size(0);
+  const int64_t H   = q_.size(1);
+  const int64_t qL  = q_.size(2);
+  const int64_t kL  = k_.size(2);
+  const int64_t D   = q_.size(3);
+  const int64_t kvH = k_.size(1);
+
+  TORCH_CHECK(D == 64 || D == 128,
+              "_scaled_dot_product_flash_attention_for_mps: only head_dim 64 or 128 supported, got ", D);
+  TORCH_CHECK(H % kvH == 0,
+              "_scaled_dot_product_flash_attention_for_mps: query heads (", H,
+              ") must be divisible by kv heads (", kvH, ")");
+
+  const uint32_t gqa_factor  = H / kvH;
+  const uint32_t num_heads   = H;
+  const float    scale_value = sdp::calculate_scale(query, scale).expect_float();
+
+  auto out = at::empty({B, H, qL, D}, q_.options());
+  // logsumexp is always [B, H, qL] float, regardless of input rank
+  auto lse = at::empty({B, H, qL}, at::TensorOptions().dtype(at::kFloat).device(q_.device()));
+
+  auto q_c = q_.is_contiguous() ? q_ : q_.contiguous();
+  auto k_c = k_.is_contiguous() ? k_ : k_.contiguous();
+  auto v_c = v_.is_contiguous() ? v_ : v_.contiguous();
+
+  using namespace mps;
+  const std::string kname = fmt::format("flash_attn_fwd_{}_{}", scalarToMetalTypeString(q_c), D);
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      constexpr uint32_t BQ = 64;
+      const MTLSize tg   = MTLSizeMake(BQ, 1, 1);
+      const MTLSize grid = MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1);
+
+      auto pso = lib.getPipelineStateForFunc(kname);
+      [computeEncoder setComputePipelineState:pso];
+
+      const auto q_str = std::array<uint32_t, 4>{(uint32_t)q_c.stride(0), (uint32_t)q_c.stride(1), (uint32_t)q_c.stride(2), 1};
+      const auto k_str = std::array<uint32_t, 4>{(uint32_t)k_c.stride(0), (uint32_t)k_c.stride(1), (uint32_t)k_c.stride(2), 1};
+      const auto v_str = std::array<uint32_t, 4>{(uint32_t)v_c.stride(0), (uint32_t)v_c.stride(1), (uint32_t)v_c.stride(2), 1};
+      const auto o_str = std::array<uint32_t, 4>{(uint32_t)out.stride(0), (uint32_t)out.stride(1), (uint32_t)out.stride(2), 1};
+
+      mtl_setArgs(computeEncoder,
+                  q_c, k_c, v_c, out, lse,
+                  (uint32_t)qL, (uint32_t)kL,
+                  gqa_factor, num_heads,
+                  scale_value, is_causal,
+                  q_str, k_str, v_str, o_str);
+      [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:tg];
+    }
+  });
+
+  // Restore original rank for output; logsumexp stays [B, H, qL]
+  auto final_out = uq ? out.squeeze(0) : out;
+  return {std::move(final_out), std::move(lse)};
+}
+
+// ---------------------------------------------------------------------------
+// FlashAttention-2 backward for MPS
+// Three kernel passes: preprocess → dQ → dK+dV
+// GQA (gqa_factor > 1) not yet supported in backward (dK/dV race condition);
+// falls back gracefully via TORCH_CHECK.
+// ---------------------------------------------------------------------------
+
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_backward(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    double dropout_p,
+    bool is_causal,
+    const std::optional<Tensor>& attn_mask,
+    std::optional<double> scale) {
+  TORCH_CHECK(dropout_p == 0.0,
+              "_scaled_dot_product_flash_attention_for_mps_backward: dropout is not supported");
+
+  auto [q_, uq]  = ensure_4d(query);
+  auto [k_, uk]  = ensure_4d(key);
+  auto [v_, uv]  = ensure_4d(value);
+  auto [o_, uo]  = ensure_4d(out);
+  auto [do_, udo] = ensure_4d(grad_out);
+
+  const int64_t B   = q_.size(0);
+  const int64_t H   = q_.size(1);
+  const int64_t qL  = q_.size(2);
+  const int64_t kL  = k_.size(2);
+  const int64_t D   = q_.size(3);
+  const int64_t kvH = k_.size(1);
+
+  TORCH_CHECK(H == kvH,
+              "_scaled_dot_product_flash_attention_for_mps_backward: GQA not yet supported in backward, "
+              "query heads (", H, ") must equal kv heads (", kvH, ")");
+
+  const uint32_t gqa_factor  = 1;
+  const uint32_t num_heads   = H;
+  const float    scale_value = sdp::calculate_scale(query, scale).expect_float();
+
+  // logsumexp from forward is always [B, H, qL] float
+  Tensor lse = logsumexp.is_contiguous() ? logsumexp : logsumexp.contiguous();
+
+  auto q_c  = q_.is_contiguous()  ? q_  : q_.contiguous();
+  auto k_c  = k_.is_contiguous()  ? k_  : k_.contiguous();
+  auto v_c  = v_.is_contiguous()  ? v_  : v_.contiguous();
+  auto o_c  = o_.is_contiguous()  ? o_  : o_.contiguous();
+  auto do_c = do_.is_contiguous() ? do_ : do_.contiguous();
+
+  auto dQ    = at::zeros_like(q_c);
+  auto dK    = at::zeros_like(k_c);
+  auto dV    = at::zeros_like(v_c);
+  auto D_vec = at::empty({B, H, qL},
+                          at::TensorOptions().dtype(at::kFloat).device(q_.device()));
+
+  using namespace mps;
+  const std::string dtype_str  = scalarToMetalTypeString(q_c);
+  const std::string pre_kname  = fmt::format("flash_attn_bwd_pre_{}_{}", dtype_str, D);
+  const std::string dq_kname   = fmt::format("flash_attn_bwd_dq_{}_{}", dtype_str, D);
+  const std::string dkdv_kname = fmt::format("flash_attn_bwd_dkdv_{}_{}", dtype_str, D);
+
+  const auto q_str  = std::array<uint32_t, 4>{(uint32_t)q_c.stride(0),  (uint32_t)q_c.stride(1),  (uint32_t)q_c.stride(2),  1};
+  const auto k_str  = std::array<uint32_t, 4>{(uint32_t)k_c.stride(0),  (uint32_t)k_c.stride(1),  (uint32_t)k_c.stride(2),  1};
+  const auto v_str  = std::array<uint32_t, 4>{(uint32_t)v_c.stride(0),  (uint32_t)v_c.stride(1),  (uint32_t)v_c.stride(2),  1};
+  const auto o_str  = std::array<uint32_t, 4>{(uint32_t)o_c.stride(0),  (uint32_t)o_c.stride(1),  (uint32_t)o_c.stride(2),  1};
+  const auto do_str = std::array<uint32_t, 4>{(uint32_t)do_c.stride(0), (uint32_t)do_c.stride(1), (uint32_t)do_c.stride(2), 1};
+  const auto dq_str = std::array<uint32_t, 4>{(uint32_t)dQ.stride(0),   (uint32_t)dQ.stride(1),   (uint32_t)dQ.stride(2),   1};
+  const auto dk_str = std::array<uint32_t, 4>{(uint32_t)dK.stride(0),   (uint32_t)dK.stride(1),   (uint32_t)dK.stride(2),   1};
+  const auto dv_str = std::array<uint32_t, 4>{(uint32_t)dV.stride(0),   (uint32_t)dV.stride(1),   (uint32_t)dV.stride(2),   1};
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  // Pass 1: preprocess — compute D_vec[i] = rowsum(dO_i * O_i)
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      constexpr uint32_t BQ = 64;
+      auto pso = lib.getPipelineStateForFunc(pre_kname);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder,
+                  do_c, o_c, D_vec,
+                  (uint32_t)qL, num_heads,
+                  do_str, o_str);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1)
+                     threadsPerThreadgroup:MTLSizeMake(BQ, 1, 1)];
+    }
+  });
+
+  // Pass 2: dQ — outer Q-tiles, inner K-tiles; no atomics
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      constexpr uint32_t BQ = 64;
+      auto pso = lib.getPipelineStateForFunc(dq_kname);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder,
+                  q_c, k_c, v_c, o_c, do_c, lse, D_vec, dQ,
+                  (uint32_t)qL, (uint32_t)kL,
+                  gqa_factor, num_heads,
+                  scale_value, is_causal,
+                  q_str, k_str, v_str, o_str, do_str, dq_str);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (qL + BQ - 1) / BQ, 1)
+                     threadsPerThreadgroup:MTLSizeMake(BQ, 1, 1)];
+    }
+  });
+
+  // Pass 3: dK + dV — outer K-tiles, inner Q-tiles; no atomics
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      constexpr uint32_t BK = 64;
+      auto pso = lib.getPipelineStateForFunc(dkdv_kname);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder,
+                  q_c, k_c, v_c, o_c, do_c, lse, D_vec, dK, dV,
+                  (uint32_t)qL, (uint32_t)kL,
+                  gqa_factor, num_heads,
+                  scale_value, is_causal,
+                  q_str, k_str, v_str, o_str, do_str, dk_str, dv_str);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (kL + BK - 1) / BK, 1)
+                     threadsPerThreadgroup:MTLSizeMake(BK, 1, 1)];
+    }
+  });
+
+  auto final_dQ = uq ? dQ.squeeze(0) : dQ;
+  auto final_dK = uk ? dK.squeeze(0) : dK;
+  auto final_dV = uv ? dV.squeeze(0) : dV;
+  return {std::move(final_dQ), std::move(final_dK), std::move(final_dV)};
+}
+
 } // namespace native
 } // namespace at

@@ -46,6 +46,7 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_native.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_backward.h>

@@ -15316,6 +15316,17 @@
   dispatch:
     CPU: _scaled_dot_product_flash_attention_cpu_backward
 
+- func: _scaled_dot_product_flash_attention_for_mps(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
+  dispatch:
+    MPS: _scaled_dot_product_flash_attention_for_mps
+  tags: nondeterministic_seeded
+
+- func: _scaled_dot_product_flash_attention_for_mps_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, float dropout_p, bool is_causal, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    MPS: _scaled_dot_product_flash_attention_for_mps_backward
+
 - func: _scaled_dot_product_fused_attention_overrideable_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor attn_bias, bool[4] grad_input_mask, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value, Tensor grad_attn_bias)
   device_check: NoCheck
   variants: function
