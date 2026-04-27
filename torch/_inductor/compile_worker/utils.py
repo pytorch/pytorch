@@ -40,22 +40,20 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     # Install a crash handler to print out the stacktrace for SEGV
     torch._C._initCrashHandler()
 
-    # Opt-in SIGUSR1 stack dumper for CI hang diagnosis; parent process (the
-    # pytest test subprocess) enables this via test/conftest.py and propagates
-    # the env var. On SIGUSR1 we dump all Python threads to stderr. Use
-    # sys.__stderr__ instead of sys.stderr so the dump goes to the real fd 2
-    # and is unaffected by pytest's stderr capture — important because this
-    # initializer runs in a forked worker that inherits the parent's sys.stderr.
-    if os.environ.get("PYTORCH_FAULT_HANDLER") == "1":
-        import faulthandler
-        import sys
+    # SIGUSR1 stack dumper for CI hang diagnosis. The default-mode SubprocPool
+    # sidecar is started via subprocess.Popen (fresh Python), so the parent
+    # test process's faulthandler/SIGUSR1 registration does not propagate;
+    # install locally. Mirrors common_utils.install_fault_handler — kept
+    # inline to avoid pulling the testing module into worker startup.
+    import faulthandler
+    import sys
 
-        stderr = sys.__stderr__ or sys.stderr
-        faulthandler.enable(file=stderr, all_threads=True)
-        if hasattr(faulthandler, "register"):
-            faulthandler.register(
-                signal.SIGUSR1, file=stderr, all_threads=True, chain=False
-            )
+    stderr = sys.__stderr__ or sys.stderr
+    faulthandler.enable(file=stderr, all_threads=True)
+    if hasattr(faulthandler, "register"):
+        faulthandler.register(
+            signal.SIGUSR1, file=stderr, all_threads=True, chain=False
+        )
 
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
     global _IN_TOPLEVEL_PROCESS

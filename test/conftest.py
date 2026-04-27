@@ -22,12 +22,18 @@ from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestSha
 
 
 try:
-    from torch.testing._internal.common_utils import parse_cmd_line_args
+    from torch.testing._internal.common_utils import (
+        install_fault_handler,
+        parse_cmd_line_args,
+    )
 except ImportError:
     # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
     # main / PR's tests are sometimes run against the previous day's nightly which won't
     # have this function.
     def parse_cmd_line_args():
+        pass
+
+    def install_fault_handler():
         pass
 
 
@@ -92,32 +98,8 @@ def pytest_addoption(parser: Parser) -> None:
     shard_addoptions(parser)
 
 
-def _install_fault_handler() -> None:
-    # Dump Python stacks from every thread when this process receives SIGUSR1
-    # or when faulthandler detects a fatal signal (SEGV, etc.). Used to
-    # diagnose flaky CI hangs: test/run_test.py's outer timeout sends SIGUSR1
-    # to the whole process tree before SIGKILL so we capture stacks in the log.
-    #
-    # Use sys.__stderr__ (the real fd 2, not the pytest capture proxy) so the
-    # dump works under pytest's default --capture=sys and survives being
-    # inherited into forked subprocess compile workers.
-    import faulthandler
-    import signal as _signal
-    import sys as _sys
-
-    stderr = _sys.__stderr__ or _sys.stderr
-    faulthandler.enable(file=stderr, all_threads=True)
-    if hasattr(faulthandler, "register"):  # not on Windows
-        faulthandler.register(
-            _signal.SIGUSR1, file=stderr, all_threads=True, chain=False
-        )
-    # Inductor compile-worker subprocesses inherit this env var and self-arm
-    # the same SIGUSR1 handler in _async_compile_initializer.
-    os.environ["PYTORCH_FAULT_HANDLER"] = "1"
-
-
 def pytest_configure(config: Config) -> None:
-    _install_fault_handler()
+    install_fault_handler()
     parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).

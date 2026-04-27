@@ -1069,12 +1069,37 @@ def parse_cmd_line_args():
     set_rng_seed()
 
 
+# Set by install_fault_handler(); _dump_subprocess_stacks() no-ops unless True
+# so non-test consumers of wait_for_process don't gain a SIGUSR1 side effect.
+_fault_handler_installed = False
+
+
+def install_fault_handler() -> None:
+    # Dump Python stacks from every thread when this process receives SIGUSR1
+    # or when faulthandler detects a fatal signal (SEGV, etc.). Used to
+    # diagnose flaky CI hangs: test/run_test.py's outer timeout sends SIGUSR1
+    # to the whole process tree before SIGKILL so we capture stacks in the log.
+    #
+    # Use sys.__stderr__ (the real fd 2, not the pytest capture proxy) so the
+    # dump works under pytest's default --capture=sys.
+    import faulthandler
+
+    stderr = sys.__stderr__ or sys.stderr
+    faulthandler.enable(file=stderr, all_threads=True)
+    if hasattr(faulthandler, "register"):  # not on Windows
+        faulthandler.register(
+            signal.SIGUSR1, file=stderr, all_threads=True, chain=False
+        )
+    global _fault_handler_installed
+    _fault_handler_installed = True
+
+
 def _dump_subprocess_stacks(pid):
     # Request Python stack dumps from `pid` and all its descendants via SIGUSR1
-    # (handler installed in test/conftest.py and inductor compile workers).
-    # Used on CI timeout to capture diagnostics before the SIGINT/SIGKILL
-    # sequence destroys in-process state.
-    if not hasattr(signal, "SIGUSR1"):
+    # (handler installed by install_fault_handler() and in inductor compile
+    # workers). Used on CI timeout to capture diagnostics before the
+    # SIGINT/SIGKILL sequence destroys in-process state.
+    if not _fault_handler_installed or not hasattr(signal, "SIGUSR1"):
         return
     try:
         import psutil
