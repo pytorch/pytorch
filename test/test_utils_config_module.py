@@ -26,7 +26,10 @@ class TestConfigModule(TestCase):
         # Config changes get persisted between test cases
         for k in config._config:
             config._config[k].user_override.set(_UNSET_SENTINEL)
+            config._config[k].hide = False
         config._hash_digest = None
+        config._get_dict_dirty_keys_var.set(None)
+        config._get_dict_cache_var.set(None)
         # Reset deprecation warning flags
         for k in config._config:
             config._config[k]._deprecation_warned = False
@@ -663,6 +666,105 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertEqual(config.e_int, 2)
         self.assertEqual(config.e_int, 1)
         self.assertEqual(config.e_string, "string")
+
+    def test_get_dict_readonly_values_caching(self):
+        """readonly_values=True should return cached results on repeated calls."""
+        d1 = config._get_dict(readonly_values=True)
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1, d2)
+
+    def test_get_dict_readonly_values_cache_invalidation(self):
+        """Mutating a config key should be reflected in subsequent cached calls."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d2["e_int"], 42)
+
+    def test_get_dict_readonly_values_does_not_mutate_prior_result(self):
+        """Mutating config after a cached call should not affect the prior result."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        self.assertEqual(d2["e_int"], 42)
+
+    def test_get_dict_readonly_values_multiple_cache_keys(self):
+        """Different filter arguments should produce independent cached results."""
+        d_all = config._get_dict(readonly_values=True)
+        d_filtered = config._get_dict(ignored_keys=["e_int"], readonly_values=True)
+        self.assertIn("e_int", d_all)
+        self.assertNotIn("e_int", d_filtered)
+
+        # Mutate and verify both cache entries update correctly
+        config.e_string = "changed"
+        d_all2 = config._get_dict(readonly_values=True)
+        d_filtered2 = config._get_dict(ignored_keys=["e_int"], readonly_values=True)
+        self.assertEqual(d_all2["e_string"], "changed")
+        self.assertEqual(d_filtered2["e_string"], "changed")
+
+    def test_get_dict_readonly_values_full_dirty_clears_cache(self):
+        """Exceeding the dirty keys cap should trigger a full cache rebuild."""
+        config._get_dict(readonly_values=True)
+        # Mutate more distinct keys than the cap to force fully dirty state.
+        all_keys = [k for k in config._config if config._config[k].alias is None]
+        self.assertGreater(len(all_keys), config._GET_DICT_DIRTY_KEYS_CAP)
+        for key in all_keys[: config._GET_DICT_DIRTY_KEYS_CAP + 1]:
+            setattr(config, key, config._config[key].default)
+        self.assertIsNone(config._get_dict_dirty_keys_var.get())
+        d = config._get_dict(readonly_values=True)
+        self.assertIsNotNone(d)
+
+    def test_get_dict_non_readonly_ignores_cache(self):
+        """Non-readonly calls should not use or pollute the cache."""
+        d1 = config._get_dict(readonly_values=False)
+        self.assertIsNone(config._get_dict_cache_var.get())
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=False)
+        self.assertEqual(d2["e_int"], 42)
+        self.assertEqual(d1["e_int"], 1)
+
+    def test_get_dict_cache_not_poisoned_by_caller_mutation(self):
+        """Mutating a returned dict must not affect subsequent cached calls."""
+        d1 = config._get_dict(readonly_values=True)
+        d1["e_int"] = 999
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d2["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_delattr(self):
+        """Deleting a config key should invalidate the cache."""
+        config.e_int = 42
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 42)
+        del config.e_int
+        d2 = config._get_dict(readonly_values=True)
+        # __delattr__ resets user_override, so the default is returned
+        self.assertEqual(d2["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_patch(self):
+        """Config changes via patch() should be reflected in cached results."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        with config.patch(e_int=42):
+            d2 = config._get_dict(readonly_values=True)
+            self.assertEqual(d2["e_int"], 42)
+        d3 = config._get_dict(readonly_values=True)
+        self.assertEqual(d3["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_closure_patcher(self):
+        """Config changes via _make_closure_patcher should be reflected in cached results."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        change_fn = config._make_closure_patcher(e_int=42)
+        revert = change_fn()
+        try:
+            d2 = config._get_dict(readonly_values=True)
+            self.assertEqual(d2["e_int"], 42)
+        finally:
+            revert()
+        d3 = config._get_dict(readonly_values=True)
+        self.assertEqual(d3["e_int"], 1)
 
 
 if __name__ == "__main__":
