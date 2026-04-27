@@ -167,7 +167,7 @@ class CUDAGraph(_CUDAGraph):
     def raw_cuda_graph(self) -> int:
         r"""Returns the underlying cudaGraph_t. ``keep_graph`` must be True.
 
-        See the following for APIs for how to manipulate this object: `Graph Managmement <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html>`_ and `cuda-python Graph Management bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-management>`_
+        See the following for APIs for how to manipulate this object: `Graph Management <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html>`_ and `cuda-python Graph Management bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-management>`_
         """
         return super().raw_cuda_graph()
 
