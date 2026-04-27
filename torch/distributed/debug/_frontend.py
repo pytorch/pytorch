@@ -20,6 +20,12 @@ from torch.distributed.debug._store import get_world_size, tcpstore_client
 logger: logging.Logger = logging.getLogger(__name__)
 
 _DEFAULT_FETCH_TIMEOUT: float = 60.0
+_AUTH_TOKEN_ENV: str = "TORCH_DISTRIBUTED_DEBUG_AUTH_TOKEN"
+_AUTH_HEADER: str = "X-Auth-Token"
+
+
+def _get_auth_token() -> str | None:
+    return os.environ.get(_AUTH_TOKEN_ENV)
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +88,12 @@ def fetch_thread_pool(urls: list[str], timeout: float) -> list[Response]:
 
     max_workers = 20
 
+    token = _get_auth_token()
+    auth_headers = {_AUTH_HEADER: token} if token else {}
+
     def get(url: str) -> Response:
         try:
-            resp = requests.post(url, timeout=timeout)
+            resp = requests.post(url, timeout=timeout, headers=auth_headers)
             return Response(resp.status_code, resp.text)
         except requests.exceptions.Timeout as e:
             return Response(408, f"Timeout: {e}")
@@ -104,9 +113,12 @@ def fetch_aiohttp(urls: list[str], timeout: float) -> list[Response]:
     # pyrefly: ignore [missing-import]
     import aiohttp
 
+    token = _get_auth_token()
+    auth_headers = {_AUTH_HEADER: token} if token else {}
+
     async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
         try:
-            async with session.post(url) as resp:
+            async with session.post(url, headers=auth_headers) as resp:
                 text = await resp.text()
                 return Response(resp.status, text)
         except asyncio.TimeoutError as e:
@@ -338,6 +350,10 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self):
+        token = _get_auth_token()
+        if token and self.headers.get(_AUTH_HEADER) != token:
+            self.send_error(401, "Unauthorized")
+            return
         self.frontend._handle_request(self)
 
     def get_path(self) -> str:
@@ -386,7 +402,7 @@ class FrontendServer:
             all_templates.update(handler.templates())
 
         loader = DictLoader(all_templates)
-        self._jinja_env = Environment(loader=loader, enable_async=True)
+        self._jinja_env = Environment(loader=loader, enable_async=True, autoescape=True)  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
         self._jinja_env.globals.update(
             zip=zip,
             format_json=format_json,
