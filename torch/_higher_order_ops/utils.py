@@ -310,7 +310,7 @@ def _set_compilation_env():
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
     # the top-level frame produces no graph, the default behavior is to fallback to eager.
     # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
-    # For while_loop, during inspecting the inner call, we trace into the python dispathcer
+    # For while_loop, during inspecting the inner call, we trace into the python dispatcher
     # logic, which is not tracable as of today. So the proper fix can be either 1. allow dispatch
     # logic to be dynamo tracable or 2. fixing https://github.com/pytorch/pytorch/issues/144360.
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
