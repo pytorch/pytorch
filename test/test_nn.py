@@ -1885,6 +1885,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    def test_weight_norm_empty_input(self):
+        # Regression test for #181510. weight_norm on a Linear layer with a
+        # zero-sized in_features dim used to dispatch a nullptr/zero-length
+        # pointer into the vectorized loadu helpers and trip UBSan
+        # (null-pointer-passed-to-non-null) under an ASAN/UBSAN build. The
+        # fused CPU kernel now treats an empty `v` as "norm of empty = 0" and
+        # skips the reduction.
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+            m = torch.nn.utils.weight_norm(nn.Linear(0, 1).to(dtype=dtype))
+            x = torch.empty((1, 0), dtype=dtype)
+            out = m(x)
+            self.assertEqual(out.shape, torch.Size([1, 1]))
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))

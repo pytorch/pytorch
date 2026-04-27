@@ -10,6 +10,8 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
+#include <algorithm>
+
 namespace at::native {
 
 namespace {
@@ -407,6 +409,22 @@ void weight_norm_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  // #181510: with an empty input (e.g. nn.Linear(0, 1).weight has shape (1, 0)),
+  // the inner kernels dispatch v_data + i*N pointers (which can be null for
+  // a zero-numel tensor) into the vectorized loadu paths and trigger UBSan
+  // null-pointer-passed-to-non-null. The L2 norm of an empty vector is
+  // sqrt(0) = 0, so fill `norm` accordingly and skip the kernel when there is
+  // nothing to reduce.
+  if (v.numel() == 0) {
+    if (norm.numel() > 0) {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, v.scalar_type(),
+          "weight_norm_kernel_empty", [&]() {
+        using accscalar_t = at::opmath_type<scalar_t>;
+        std::fill_n(norm.data_ptr<accscalar_t>(), norm.numel(), accscalar_t(0));
+      });
+    }
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, v.scalar_type(),
       "weight_norm_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;
@@ -432,6 +450,20 @@ void weight_norm_backward_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == saved_v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  // #181510 (companion to the forward fix): the backward kernels have the
+  // same vectorized-loadu pattern over `v_data + i*N` and would trigger the
+  // same UBSan diagnostic if a backward pass ever runs with empty saved_v.
+  // grad_v is empty (numel matches saved_v); grad_g has no signal, so fill
+  // it with zeros.
+  if (saved_v.numel() == 0) {
+    if (grad_g.numel() > 0) {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, saved_v.scalar_type(),
+          "weight_norm_backward_kernel_empty", [&]() {
+        std::fill_n(grad_g.data_ptr<scalar_t>(), grad_g.numel(), scalar_t(0));
+      });
+    }
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, saved_v.scalar_type(),
       "weight_norm_backward_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;
