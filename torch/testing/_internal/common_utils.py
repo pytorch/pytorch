@@ -1623,6 +1623,21 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+
+# TODO: Remove PYTORCH_TEST_WITH_HIPDNN once hipdnn is enabled by default on ROCm.
+# Opt-in: enable hipDNN globally for the test session. Existing CUDA conv tests
+# (numerics, gradcheck, channels_last, decomp, OpInfo) then run against hipdnn
+# instead of MIOpen on ROCm without per-test changes.
+TEST_WITH_HIPDNN = os.getenv('PYTORCH_TEST_WITH_HIPDNN', '0') == '1'
+if TEST_WITH_HIPDNN:
+    if torch.backends.hipdnn.is_available():
+        torch.backends.hipdnn.enabled = True
+    else:
+        warnings.warn(
+            "PYTORCH_TEST_WITH_HIPDNN=1 was set but hipDNN is not available; "
+            "tests will run against the default backend (MIOpen on ROCm).",
+            stacklevel=2,
+        )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
