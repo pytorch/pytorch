@@ -191,6 +191,10 @@ struct TORCH_API Engine {
 
   void queue_callback(std::function<void()> callback);
 
+  void execute_callback_on_device_threads(
+      c10::DeviceIndex device_count,
+      std::function<void()> callback);
+
   bool is_checkpoint_valid();
 
   // Should be called after fork to notify that worker threads are gone
@@ -272,6 +276,7 @@ struct TORCH_API Engine {
  private:
   // Number of non-reentrant threads
   std::atomic<uint32_t> non_reentrant_device_thread_count_;
+  std::atomic_bool device_threads_started_{false};
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;
