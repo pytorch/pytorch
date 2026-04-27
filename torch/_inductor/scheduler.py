@@ -3039,10 +3039,6 @@ class NodeUser:
 _post_grad_graph_counter = itertools.count()
 
 
-def used_non_deterministic_runtime_estimations() -> bool:
-    return config.runtime_estimations_mms_benchmark
-
-
 def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
     """Get free symbols from a node's layout (size, stride, offset)."""
     free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
@@ -3286,14 +3282,7 @@ class Scheduler:
                     self.nodes, self.name_to_buf
                 )
 
-            if (
-                used_non_deterministic_runtime_estimations()
-                and config_comms.runtime_estimations_align_across_all_distributed_ranks
-                and (
-                    config.runtime_estimations_mms_benchmark
-                    or config_comms.runtime_estimations_use_nccl_lib_estimations
-                )
-            ):
+            if config_comms.runtime_estimations_align_across_all_distributed_ranks:
                 has_collectives = False
                 for node in self.nodes:
                     if is_collective(node.node):

@@ -2544,14 +2544,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             [mock_node_1, mock_node_2, mock_node_3]
         )
 
-        # only MM related nodes should be aligned
+        # all nodes should be aligned across ranks (median)
         self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
-        self.assertEqual(
-            mock_node_2.override_estimated_runtime, 0.3 if self.rank == 0 else 0.4
-        )
-        self.assertEqual(
-            mock_node_3.override_estimated_runtime, 0.5 if self.rank == 0 else 0.6
-        )
+        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
+        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
