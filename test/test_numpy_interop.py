@@ -706,6 +706,19 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y, f(x))
 
 
+    @onlyCPU
+    def test_array_wrap_numpy2_no_deprecation_warning(self, device):
+        # gh-180657: NumPy 2 added context/return_scalar params to __array_wrap__.
+        # Verify that calling np.delete (which triggers __array_wrap__) does not
+        # raise a DeprecationWarning.
+        import warnings
+
+        x = torch.arange(10)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            np.delete(x, 0)
+
+
 instantiate_device_type_tests(TestNumPyInterop, globals())
 
 if __name__ == "__main__":
