@@ -1254,6 +1254,43 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
     yield SampleInput(make_arg(M, S, M), make_arg(M, M, S))
 
+
+def sample_inputs_triton_bmm_outer_product(op_info, device, dtype, requires_grad, **kwargs):
+    """Generate (B, M, 1) x (B, 1, N) -> (B, M, N) outer-product samples for the
+    Triton BMM kernel. The kernel requires contiguous inputs with these exact
+    shape contracts; it does not accept broadcasts or non-contiguous strides."""
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    test_configs = [
+        (2, 16, 32),
+        (4, 64, 64),
+        (8, 128, 256),
+        (1, 512, 128),
+        (16, 32, 64),
+        (3, 7, 11),
+    ]
+
+    for batch_size, m_dim, n_dim in test_configs:
+        a = make_arg((batch_size, m_dim, 1)).contiguous()
+        b = make_arg((batch_size, 1, n_dim)).contiguous()
+        yield SampleInput(a, args=(b,))
+
+        yield SampleInput(
+            make_arg((batch_size, m_dim, 1), low=-2.0, high=2.0).contiguous(),
+            args=(make_arg((batch_size, 1, n_dim), low=-2.0, high=2.0).contiguous(),),
+        )
+
+        yield SampleInput(
+            make_arg((batch_size, m_dim, 1), low=0.1, high=1.0).contiguous(),
+            args=(make_arg((batch_size, 1, n_dim), low=0.1, high=1.0).contiguous(),),
+        )
+
+
+def reference_bmm_outer_product(a, b):
+    # Inputs are ndarrays: TestCommon.test_numpy_ref calls SampleInput.numpy() first.
+    return np.matmul(a, b)
+
+
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -23298,6 +23335,66 @@ dsl_ops_by_dsl: dict[str, list[OpInfo]] = {}
 for dsl_name in torch.backends.python_native.available_dsls:
     dsl_ops_by_dsl[dsl_name] = []
 
+# DSL OpInfos. The underlying kernels live under torch/_native/ops; import failures
+# (e.g. no Triton installed) just disable the corresponding OpInfo.
+try:
+    from torch._native.ops.bmm_outer_product.triton_kernels import (
+        bmm_outer_product as _triton_bmm_outer_product_kernel,
+    )
+    _HAS_TRITON_BMM = True
+except ImportError:
+    def _triton_bmm_outer_product_kernel(a, b):
+        return torch.ops.aten.bmm(a, b)
+    _HAS_TRITON_BMM = False
+
+dsl_ops_by_dsl.setdefault('triton', []).append(
+    OpInfo(
+        "triton_bmm_outer_product",
+        op=_triton_bmm_outer_product_kernel,
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_triton_bmm_outer_product,
+        ref=reference_bmm_outer_product,
+        supports_autograd=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_out=False,
+        inplace_variant=None,
+        # Direct Triton kernel launches don't interoperate with tensor subclasses
+        # (CompositeCompliantTensor, COW wrapper) or FakeTensor.
+        supports_cow_input_no_materialize_forward=False,
+        decorators=[
+            DecorateInfo(onlyCUDA),
+        ],
+        skips=(
+            DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
+            DecorateInfo(unittest.skipIf(not _HAS_TRITON_BMM, "Triton BMM outer product not available")),
+            # noncontiguous_like() on (B,M,1)/(B,1,N) breaks the shape contract the
+            # kernel requires, so skip the generic non-contig test.
+            DecorateInfo(
+                unittest.skip("Outer-product kernel requires contiguous (B,M,1)/(B,1,N)"),
+                "TestCommon",
+                "test_noncontiguous_samples",
+            ),
+            # Triton kernels take raw pointers and can't dispatch through tensor
+            # subclasses (CompositeCompliantTensor, CrossRefFakeMode, etc.).
+            DecorateInfo(unittest.skip("Triton kernel incompatible with tensor subclasses"),
+                         "TestCompositeCompliance"),
+            DecorateInfo(unittest.skip("Triton kernel incompatible with FakeTensor"),
+                         "TestFakeTensor"),
+            DecorateInfo(unittest.skip("Triton kernel not introspectable for tag inference"),
+                         "TestTags"),
+            DecorateInfo(unittest.skip("Triton kernel not introspectable for conjugate/negate views"),
+                         "TestMathBits"),
+            # Sample generator only targets the primary CUDA device.
+            DecorateInfo(unittest.skip("Sample generator allocates on the primary CUDA device"),
+                         "TestCommon",
+                         "test_multiple_devices"),
+        ),
+        variant_test_name="triton_optimized",
+    )
+)
+
 op_db += opinfo.definitions.op_db
 
 # Separate registry for experimental Python Reference OpInfos.
@@ -27020,7 +27117,7 @@ if OPINFO_RESTRICT_TO_DSL:
         op_db = []
 else:
     for ops in dsl_ops_by_dsl.values():
-        op_db += ops
+        op_db.extend(ops)
 
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
