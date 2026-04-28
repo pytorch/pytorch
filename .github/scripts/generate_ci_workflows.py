@@ -250,8 +250,6 @@ S390X_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={
-                LABEL_CIFLOW_BINARIES,
-                LABEL_CIFLOW_BINARIES_WHEEL,
                 LABEL_CIFLOW_S390,
             },
             isolated_workflow=True,
