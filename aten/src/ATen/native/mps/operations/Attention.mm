@@ -660,11 +660,11 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
   const int64_t D   = q_.size(3);
   const int64_t kvH = k_.size(1);
 
-  TORCH_CHECK(H == kvH,
-              "_scaled_dot_product_flash_attention_for_mps_backward: GQA not yet supported in backward, "
-              "query heads (", H, ") must equal kv heads (", kvH, ")");
+  TORCH_CHECK(H % kvH == 0,
+              "_scaled_dot_product_flash_attention_for_mps_backward: query heads (", H,
+              ") must be divisible by kv heads (", kvH, ")");
 
-  const uint32_t gqa_factor  = 1;
+  const uint32_t gqa_factor  = (uint32_t)(H / kvH);
   const uint32_t num_heads   = H;
   const float    scale_value = sdp::calculate_scale(query, scale).expect_float();
 
@@ -744,10 +744,10 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_for_mps_b
       mtl_setArgs(computeEncoder,
                   q_c, k_c, v_c, o_c, do_c, lse, D_vec, dK, dV,
                   (uint32_t)qL, (uint32_t)kL,
-                  gqa_factor, num_heads,
+                  gqa_factor, (uint32_t)kvH,
                   scale_value, is_causal,
                   q_str, k_str, v_str, o_str, do_str, dk_str, dv_str);
-      [computeEncoder dispatchThreadgroups:MTLSizeMake(B * H, (kL + BK - 1) / BK, 1)
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B * kvH, (kL + BK - 1) / BK, 1)
                      threadsPerThreadgroup:MTLSizeMake(32, BK, 1)];
     }
   });

@@ -851,7 +851,7 @@ template<typename T, int D>
 
     const uint b    = bh / nh;
     const uint h    = bh % nh;
-    const uint kv_h = h;  // gqa=1 enforced in C++ for backward
+    const uint kv_h = h / gqa;
 
     const device T*  Q_ptr  = Q  + b * qs[0]  + h    * qs[1];
     const device T*  K_ptr  = K  + b * ks[0]  + kv_h * ks[1];
@@ -967,14 +967,12 @@ template<typename T, int D>
     const uint k_row   = tgid.y * BK + k_local;
     const uint k_min   = tgid.y * BK;
 
+    // bh encodes (batch, kv_head): bh = b * nh + kv_h  (nh == kvH here)
+    const uint kv_h = bh % nh;
     const uint b    = bh / nh;
-    const uint h    = bh % nh;
-    const uint kv_h = h;  // gqa=1 enforced in C++ for backward
 
-    const device T*  Q_ptr  = Q  + b * qs[0]  + h    * qs[1];
     const device T*  K_ptr  = K  + b * ks[0]  + kv_h * ks[1];
     const device T*  V_ptr  = V  + b * vs[0]  + kv_h * vs[1];
-    const device T*  dO_ptr = dO + b * dos[0] + h    * dos[1];
     device       T*  dK_ptr = dK + b * dks[0] + kv_h * dks[1];
     device       T*  dV_ptr = dV + b * dvs[0] + kv_h * dvs[1];
 
@@ -994,6 +992,12 @@ template<typename T, int D>
 
     const uint tg_size = 32 * BK;
 
+    for (uint g = 0; g < gqa; g++) {
+        const uint q_head = kv_h * gqa + g;
+        const device T* Q_ptr  = Q  + b * qs[0]  + q_head * qs[1];
+        const device T* dO_ptr = dO + b * dos[0] + q_head * dos[1];
+        const uint bh_lse = b * (nh * gqa) + q_head;
+
     for (uint qb = 0; qb < qL; qb += BQS) {
         if (ic && qb + (uint)BQS - 1 < k_min) continue;
 
@@ -1011,8 +1015,8 @@ template<typename T, int D>
         for (uint q_row = qb; q_row < tile_end; ++q_row) {
             if (ic && k_row > q_row) continue;
 
-            float lse_i   = LSE[bh * qL + q_row];
-            float d_vec_i = Dv[bh * qL + q_row];
+            float lse_i   = LSE[bh_lse * qL + q_row];
+            float d_vec_i = Dv[bh_lse * qL + q_row];
             int i = (int)(q_row - qb);
 
             float qk = 0.0f;
@@ -1035,6 +1039,7 @@ template<typename T, int D>
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
+    } // end gqa g-loop
 
     if (!valid_k) return;
 
