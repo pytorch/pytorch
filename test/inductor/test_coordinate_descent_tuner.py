@@ -114,6 +114,51 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
         self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
+    def test_combo_tunable_fields_flow_into_tunable_fields(self):
+        """``inductor_meta["combo_coordesc_field_order"]`` must be
+        prepended to ``tunable_fields`` so combo-kernel per-subkernel
+        block fields are visible from the moment the tuner is
+        constructed (not only after ``autotune`` is called)."""
+        tuner = CoordescTuner(
+            inductor_meta={
+                "combo_coordesc_field_order": [
+                    "XBLOCK_0",
+                    "YBLOCK_0",
+                    "XBLOCK_1",
+                ],
+            }
+        )
+        fields = tuner.tunable_fields
+        # Combo fields appear in order, ahead of the base fields.
+        self.assertEqual(fields[:3], ["XBLOCK_0", "YBLOCK_0", "XBLOCK_1"])
+        self.assertIn("XBLOCK", fields)
+
+    def test_get_neighbor_configs_iterates_combo_fields(self):
+        """``get_neighbor_configs`` must yield candidates that vary
+        each combo field. Regression: an earlier refactor lazily
+        populated combo fields inside ``autotune``, so callers that
+        invoked the enumeration methods directly (e.g. incremental
+        autotune) iterated only the base fields."""
+        tuner = CoordescTuner(
+            inductor_meta={
+                "combo_coordesc_field_order": ["XBLOCK_0", "XBLOCK_1"],
+            }
+        )
+        config = triton.Config(
+            {"XBLOCK_0": 8, "XBLOCK_1": 16, "XBLOCK": 32},
+            num_warps=4,
+            num_stages=1,
+        )
+        neighbors = tuner.get_neighbor_configs(config)
+        varied_fields = {
+            field
+            for neighbor in neighbors
+            for field, value in neighbor.kwargs.items()
+            if value != config.kwargs.get(field)
+        }
+        self.assertIn("XBLOCK_0", varied_fields)
+        self.assertIn("XBLOCK_1", varied_fields)
+
     def test_value_too_large_combo_field_limits(self):
         tuner = CoordescTuner(
             size_hints={"x": 2**20, "r0_": 2**20},
@@ -203,6 +248,15 @@ class TestCoordinateDescentTuner(TestCase):
                 "XBLOCK_2": 128,
                 "YBLOCK_2": 16,
             },
+        )
+
+        # End-to-end: a CoordescTuner constructed with the populated
+        # ``inductor_meta`` must surface the combo fields via
+        # ``tunable_fields`` in the same order, ahead of the base fields.
+        tuner = CoordescTuner(inductor_meta=inductor_meta)
+        self.assertEqual(
+            tuner.tunable_fields[: len(inductor_meta["combo_coordesc_field_order"])],
+            inductor_meta["combo_coordesc_field_order"],
         )
 
 

@@ -75,7 +75,6 @@ class CoordescTuner:
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
-        self._combo_tunable_fields: list[str] = []
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -107,8 +106,8 @@ class CoordescTuner:
         return timing
 
     @property
-    def tunable_fields(self):
-        out = [
+    def tunable_fields(self) -> list[str]:
+        out: list[str] = [
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
@@ -137,7 +136,15 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
-        out = self._combo_tunable_fields + out
+        # Combo-kernel per-subkernel block fields (e.g. XBLOCK_0/1, YBLOCK_0/1)
+        # come from the worker-side metadata in ``inductor_meta``. Prepend
+        # them so coordesc iterates them alongside the base fields. Read
+        # live each call so any post-construction mutation of
+        # ``inductor_meta`` is observed.
+        combo_fields: list[str] = self.inductor_meta.get(
+            "combo_coordesc_field_order", []
+        )
+        out = combo_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
@@ -227,22 +234,21 @@ class CoordescTuner:
             return xblock <= split_size
         return True
 
-    def check_all_tuning_directions(
+    def get_all_direction_configs(
         self,
         # pyrefly: ignore [missing-attribute]
-        func: Callable[["triton.Config"], float],
-        best_config,
-        best_timing,
-    ):
-        """
-        Check all directions. We only do this once the regular coordinate
-        descent tuning find no better choices any more.
-        We only have a few tunable fields, so this should be fine.
+        config: "triton.Config",
+    ) -> list["triton.Config"]:  # pyrefly: ignore  # missing-attribute
+        """Return the Cartesian product of neighbor values across every
+        tunable field, as a list of valid candidate configs.
+
+        Enumeration only — does not benchmark. Caller is responsible
+        for measuring each candidate.
         """
         candidate_values_list = []
         effective_fields = []
         for field in self.tunable_fields:
-            old_value = get_field(best_config, field)
+            old_value = get_field(config, field)
             if old_value is None:
                 continue
             radius = self.inductor_meta.get("coordinate_descent_search_radius", 1)
@@ -255,15 +261,30 @@ class CoordescTuner:
             candidate_values_list.append(candidate_values)
             effective_fields.append(field)
 
-        choices = itertools.product(*candidate_values_list)
-        improved = False
-        for choice in choices:
+        configs = []
+        for choice in itertools.product(*candidate_values_list):
             assert len(choice) == len(effective_fields)
-            candidate_config = copy.deepcopy(best_config)
+            candidate = copy.deepcopy(config)
             for new_val, field in zip(choice, effective_fields):
-                set_field(candidate_config, field, new_val)
-            if not self.is_valid_config(candidate_config):
-                continue
+                set_field(candidate, field, new_val)
+            if self.is_valid_config(candidate):
+                configs.append(candidate)
+        return configs
+
+    def check_all_tuning_directions(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        func: Callable[["triton.Config"], float],
+        best_config,
+        best_timing,
+    ):
+        """
+        Check all directions. We only do this once the regular coordinate
+        descent tuning find no better choices any more.
+        We only have a few tunable fields, so this should be fine.
+        """
+        improved = False
+        for candidate_config in self.get_all_direction_configs(best_config):
             cmp_res, candidate_timing = self.compare_config(
                 func, candidate_config, best_config, best_timing
             )
@@ -300,6 +321,59 @@ class CoordescTuner:
             return True, candidate_timing
         return False, candidate_timing
 
+    def get_field_neighbors(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        config: "triton.Config",
+        field: str,
+    ) -> list["triton.Config"]:  # pyrefly: ignore  # missing-attribute
+        """Return every valid neighbor of ``config`` along ``field``
+        only — varies that single axis while leaving every other field
+        fixed.
+
+        Building block for ``get_neighbor_configs`` (which fans out
+        across all tunable fields) and for callers that want
+        Gauss-Seidel-style coordinate descent — evaluate one axis,
+        update the working point, then evaluate the next axis from the
+        updated point.
+
+        Returns ``[]`` when ``field`` isn't present on ``config`` (the
+        kernel doesn't carry it). Enumeration only — does not
+        benchmark.
+        """
+        cur_val = get_field(config, field)
+        if cur_val is None:
+            return []
+        neighbors = []
+        for next_val in self.get_neighbour_values(field, cur_val):
+            candidate = copy.deepcopy(config)
+            set_field(candidate, field, next_val)
+            if self.is_valid_config(candidate):
+                neighbors.append(candidate)
+        return neighbors
+
+    def get_neighbor_configs(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        config: "triton.Config",
+    ) -> list["triton.Config"]:  # pyrefly: ignore  # missing-attribute
+        """Return every valid single-field neighbor of ``config``,
+        across all tunable fields. Snapshot semantic — every neighbor
+        is derived from ``config`` as-is.
+
+        Use ``get_field_neighbors`` directly when you want Gauss-Seidel
+        updates between axes (i.e., updating the working point between
+        fields).
+
+        Enumeration only — does not benchmark. Caller is responsible
+        for measuring each candidate.
+        """
+        return [
+            neighbor
+            for field in self.tunable_fields
+            for neighbor in self.get_field_neighbors(config, field)
+        ]
+
     def autotune(
         self,
         # pyrefly: ignore [missing-attribute]
@@ -325,32 +399,17 @@ class CoordescTuner:
         best_config = baseline_config
         best_timing = baseline_timing
 
-        self._combo_tunable_fields = self.inductor_meta.get(
-            "combo_coordesc_field_order", []
-        )
-
-        tunable_fields = self.tunable_fields
-
         while improved:
             improved = False
 
-            for name in tunable_fields:
-                cur_val = get_field(best_config, name)
-                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
-                if cur_val is None:
-                    continue
-
-                # It's possible that candidate_values is empty.
-                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
-                # We would not try either larger or smaller XBLOCK in this case.
-                candidate_values = self.get_neighbour_values(name, cur_val)
-
-                for next_val in candidate_values:
-                    candidate_config = copy.deepcopy(best_config)
-                    set_field(candidate_config, name, next_val)
-
-                    if not self.is_valid_config(candidate_config):
-                        continue
+            # Gauss-Seidel: walk one field at a time, applying any
+            # improvement immediately so subsequent fields see the
+            # updated working point. Pre-fetching all neighbors via
+            # ``get_neighbor_configs`` would snapshot the working
+            # point at the top of this iteration, costing one extra
+            # outer pass to absorb chained improvements.
+            for field in self.tunable_fields:
+                for candidate_config in self.get_field_neighbors(best_config, field):
                     cmp_res, candidate_timing = self.compare_config(
                         func, candidate_config, best_config, best_timing
                     )
