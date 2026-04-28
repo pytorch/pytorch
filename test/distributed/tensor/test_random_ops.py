@@ -730,6 +730,53 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_bernoulli_tensor_prob(self):
+        mesh = self.build_device_mesh()
+        t = torch.rand(8, 4, device=self.device_type)
+        p = torch.full((8, 4), 0.5, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        dp = distribute_tensor(p, mesh, [Shard(0)])
+
+        result = dt.clone().bernoulli_(dp)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue(((local == 0) | (local == 1)).all())
+
+        result = torch.ops.aten.bernoulli.Tensor(dt, dp)
+        self.assertEqual(result.placements, (Shard(0),))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_bernoulli_p_float(self):
+        mesh = self.build_device_mesh()
+        t = torch.rand(8, 4, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        result = torch.bernoulli(dt, p=0.5)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue(((local == 0) | (local == 1)).all())
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_randint_like_generator(self):
+        mesh = self.build_device_mesh()
+        t = torch.zeros(8, 4, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+
+        result = torch.ops.aten.randint_like.generator(dt, 10, generator=None)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue((local >= 0).all() and (local < 10).all())
+
+        result = torch.ops.aten.randint_like.low_generator_dtype(
+            dt, 2, 10, generator=None
+        )
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue((local >= 2).all() and (local < 10).all())
+
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
