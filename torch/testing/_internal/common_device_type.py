@@ -3,6 +3,7 @@
 import copy
 import gc
 import inspect
+import logging
 import os
 import runpy
 import sys
@@ -67,6 +68,8 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+log = logging.getLogger(__name__)
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1271,9 +1274,13 @@ class ops(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print(f"Failed to instantiate {test_name} for op {op.name}!")
+                    log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
         if op is check_exhausted_iterator:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
             raise ValueError(
                 "An empty op_list was passed to @ops. "
                 "Note that this may result from reuse of a generator."
