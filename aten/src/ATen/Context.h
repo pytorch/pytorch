@@ -430,6 +430,9 @@ class TORCH_API Context {
   void setWarnOnAccumulateGradStreamMismatch(bool enabled);
   bool warnOnAccumulateGradStreamMismatch() const;
 
+  void setOverrideStaleCaptureStream(bool enabled);
+  bool overrideStaleCaptureStream() const;
+
   bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
@@ -527,6 +530,7 @@ class TORCH_API Context {
 #endif
   bool display_vmap_fallback_warnings_ = false;
   bool warn_on_accumulate_grad_stream_mismatch_ = true;
+  bool override_stale_capture_stream_ = false;
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
