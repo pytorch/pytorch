@@ -1554,8 +1554,8 @@ void Engine::execute_callback_on_device_threads(
     return;
   }
 
-  const auto queue_count = std::min(
-      device_ready_queues_.size(), static_cast<size_t>(device_count));
+  const auto queue_count =
+      std::min(device_ready_queues_.size(), static_cast<size_t>(device_count));
   std::vector<std::shared_ptr<GraphTask>> graph_tasks;
   graph_tasks.reserve(queue_count);
 
