@@ -160,21 +160,22 @@ class OpSpec:
         if isinstance(self.output_specs, DTensorSpec):
             return self.output_specs.mesh
         elif isinstance(self.output_specs, tuple):
-            out_spec = self.output_specs[0]
-            if not isinstance(out_spec, DTensorSpec):
-                raise AssertionError
-            return out_spec.mesh
-        elif self.output_specs is None:
-            # For no-output ops, get mesh from input_specs
-            if self.input_specs is None or len(self.input_specs) <= 0:
-                raise AssertionError(
-                    "Cannot determine mesh: output_specs is None and input_specs is empty"
-                )
-            return self.input_specs[0].mesh
-        else:
+            for out_spec in self.output_specs:
+                if isinstance(out_spec, DTensorSpec):
+                    return out_spec.mesh
+            # all entries are None — fall through to input_specs
+        elif self.output_specs is not None:
             raise ValueError(
-                f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
+                f"output_specs expects DTensorSpec, tuple of DTensorSpec, or None but got: {self.output_specs}"
             )
+        # output_specs is None or tuple-of-all-None — try input_specs
+        if self.input_specs is not None:
+            for spec in self.input_specs:
+                if spec is not None:
+                    return spec.mesh
+        raise AssertionError(
+            "Cannot determine mesh: no non-None DTensorSpec in output_specs or input_specs"
+        )
 
     def input_spec(self, index: int = 0) -> DTensorSpec:
         if self.input_specs is None:

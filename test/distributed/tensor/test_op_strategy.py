@@ -1094,6 +1094,74 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertNotIn(1, shard_dims, "Should not shard on padded dim")
 
 
+class TestOpSpecMesh(TestCase):
+    """Tests for OpSpec.mesh property handling of None specs."""
+
+    def setUp(self):
+        super().setUp()
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=4, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, placements):
+        mesh = DeviceMesh("cpu", torch.arange(4))
+        tm = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+        return DTensorSpec(mesh, placements, tm)
+
+    def test_mesh_from_single_output_spec(self):
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=spec, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs(self):
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(spec, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs_with_leading_none(self):
+        """When the first output spec is None, mesh should come from the
+        next non-None entry."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=(None, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_output_is_none(self):
+        """When output_specs is None, mesh should come from input_specs."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=None, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_with_leading_none(self):
+        """When output_specs is None and input_specs has leading None entries,
+        mesh should come from the first non-None input spec."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=None, input_specs=(None, spec))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_tuple_output_all_none(self):
+        """When output_specs is a tuple of all None, mesh should fall through
+        to input_specs — same behavior as output_specs=None."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(None, None), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_raises_when_all_specs_none(self):
+        """When both output_specs and all input_specs are None, mesh should
+        raise AssertionError."""
+        op_spec = OpSpec(output_specs=None, input_specs=(None, None))
+        with self.assertRaisesRegex(AssertionError, "Cannot determine mesh"):
+            _ = op_spec.mesh
+
+
 class TestExpandToFullMeshOpStrategy(TestCase):
     """Tests for expand_to_full_mesh_op_strategy function.
 
