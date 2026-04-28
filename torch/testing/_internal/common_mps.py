@@ -673,13 +673,6 @@ if torch.backends.mps.is_available():
             "put": None,
         }
 
-        if MACOS_VERSION < 15.0:
-            UNIMPLEMENTED_XFAILLIST.update(
-                {
-                    "quantile": None,
-                    "nanquantile": None,
-                }
-            )
         if sparse:
             UNIMPLEMENTED_XFAILLIST.update(UNIMPLEMENTED_XFAILLIST_SPARSE)
 

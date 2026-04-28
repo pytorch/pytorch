@@ -8507,13 +8507,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
-        # MPS has correctness problem for transposed sort before MacOS15
+        # MPS has correctness problem for transposed sort before MacOS15.
+        # Size is chosen above the single-block Metal path threshold so the
+        # MPSGraph fallback (where the pre-15 bug exists) is exercised.
         ctx = (
             contextlib.nullcontext()
             if self.device != "mps" or MACOS_VERSION >= 15.0
             else self.assertRaises(AssertionError)
         )
-        inp = torch.randn(128, 10).transpose(0, 1)
+        inp = torch.randn(4097, 10).transpose(0, 1)
         with ctx:
             self.common(fn, (inp, False))
             self.common(fn, (inp, True))
