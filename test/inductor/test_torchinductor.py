@@ -79,6 +79,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
+    xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
@@ -16696,6 +16697,10 @@ if RUN_GPU:
 
             return kernels
 
+        # On Blackwell+, #179729 raised the split-reduction no-split threshold to 524288,
+        # so the 256*256=65536-element reduction below no longer splits and produces 1 kernel
+        # instead of the expected 2.
+        @xfailIfSM100OrLater
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
