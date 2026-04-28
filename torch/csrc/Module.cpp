@@ -788,7 +788,6 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
         *out_stream = nullptr;
         return 0;
       }
-      *out_stream = nullptr;
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
         *out_stream =
             at::accelerator::getCurrentStream(device_id).native_handle();
