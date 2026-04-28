@@ -10,6 +10,7 @@ import random
 import unittest
 import math
 import enum
+import os
 
 import torch
 import numpy as np
@@ -23290,8 +23291,14 @@ op_db: list[OpInfo] = [
         ),
     ),
 ]
-op_db += opinfo.definitions.op_db
 
+dsl_ops_by_dsl: dict[str, list[OpInfo]] = {}
+
+# populate the lists with available dsl names
+for dsl_name in torch.backends.python_native.available_dsls:
+    dsl_ops_by_dsl[dsl_name] = []
+
+op_db += opinfo.definitions.op_db
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
@@ -26988,8 +26995,37 @@ python_ref_db = [
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
+# Read environment variable for DSL restriction
+OPINFO_RESTRICT_TO_DSL = os.environ.get('OPINFO_RESTRICT_TO_DSL')
+
+# If specified, restrict only to specified DSL OpInfo entries.
+if OPINFO_RESTRICT_TO_DSL:
+    # Validate against known DSL backends
+    import torch.backends.python_native as pn
+
+    if OPINFO_RESTRICT_TO_DSL not in pn.all_dsls:
+        raise ValueError(
+            f"Invalid DSL backend '{OPINFO_RESTRICT_TO_DSL}'. "
+            f"Valid DSL backends: {pn.all_dsls} "
+            f"(available: {pn.available_dsls})"
+        )
+
+    # Check if we have OpInfos for this DSL
+    if OPINFO_RESTRICT_TO_DSL in dsl_ops_by_dsl:
+        op_db = dsl_ops_by_dsl[OPINFO_RESTRICT_TO_DSL]
+        print(f"Filtered to {len(op_db)} OpInfo(s) for DSL '{OPINFO_RESTRICT_TO_DSL}'")
+    else:
+        # Valid DSL but no OpInfos available for it
+        print(f"No OpInfo entries found for DSL '{OPINFO_RESTRICT_TO_DSL}' (valid DSL, but no tests defined)")
+        op_db = []
+else:
+    for ops in dsl_ops_by_dsl.values():
+        op_db += ops
+
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
+
+
 unary_ufuncs = [op for op in ops_and_refs if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in ops_and_refs if isinstance(op, SpectralFuncInfo)]
@@ -27001,6 +27037,7 @@ reduction_ops = [op for op in ops_and_refs if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
+
 
 def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
@@ -27048,6 +27085,10 @@ def skipOps(test_case_name, base_test_name, to_skip):
         matching_opinfos = [o for o in all_opinfos
                             if o.name == op_name and o.variant_test_name == variant_name]
         if len(matching_opinfos) < 1:
+            # When OPINFO_RESTRICT_TO_DSL filters op_db down to a DSL subset,
+            # xfail entries targeting filtered-out ops are benign - just skip them.
+            if OPINFO_RESTRICT_TO_DSL:
+                continue
             raise AssertionError(f"Couldn't find OpInfo for {xfail}")
         for op in matching_opinfos:
             decorators = list(op.decorators)
