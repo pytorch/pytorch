@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 import functools
 import logging
 import operator
 import sys
+from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING
 
 
@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 
-def _get_example_value(node: fx.Node) -> Optional[str]:
+def _get_example_value(node: fx.Node) -> str | None:
     """
     Get the example value key for a node, since dynamo uses "example_value"
     while non-strict export uses "val.
@@ -98,12 +98,12 @@ def insert_deferred_runtime_asserts(
         _get_placeholder_expr,
         _has_uninterpretable_sympy_function,
         CallMethodKey,
-        cast_symbool_to_symint_guardless,
         ConvertIntKey,
         DivideByKey,
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
+        RuntimeAssert,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import (
@@ -161,38 +161,39 @@ def insert_deferred_runtime_asserts(
         elif "val" in node.meta:
             break
 
+    # Note: DO NOT register one _set_node_metadata_hook(_node_metadata_hook)
+    # for each nodes in the graph.
+    # _set_node_metadata_hook is expensive and this can cause compile
+    # time to regress significantly.
     def _node_metadata_hook(
         node: torch.fx.Node,
-        stack_trace: Optional[str] = None,
-        nn_module_stack: Optional[dict[str, Any]] = None,
-        custom: Optional[dict[str, Any]] = None,
+        stack_trace: str | None = None,
+        nn_module_stack: dict[str, Any] | None = None,
+        custom: dict[str, Any] | None = None,
+        skip_val: bool = False,
     ) -> None:
-        fake_args = pytree.tree_map(
-            lambda arg: (
-                _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
-            ),
-            node.args,
-        )
-        try:
-            target = node.target
-            if node.op == "call_method":
-                if not isinstance(node.target, str):
-                    raise AssertionError(
-                        f"Expected str target, got {type(node.target)}"
-                    )
-                target = getattr(fake_args[0], node.target)
-                fake_args = fake_args[1:]
-            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
-        except NotImplementedError:
-            # This can happen when attempting to reify a symbol with an unsupported call_function node,
-            # e.g. with NestedTensors + sym_size.int via match_symbol().
-            # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
-            pass
-        except torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode:
-            # This can happen when node args are symints
-            # e.g. test/dynamo/test_export.py -k test_export_preserve_constraints_as_metadata_tensor
-            # aten.sym_constrain_range_for_size(u0)
-            pass
+        if not skip_val:
+            fake_args = pytree.tree_map(
+                lambda arg: (
+                    _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
+                ),
+                node.args,
+            )
+            try:
+                target = node.target
+                if node.op == "call_method":
+                    if not isinstance(node.target, str):
+                        raise AssertionError(
+                            f"Expected str target, got {type(node.target)}"
+                        )
+                    target = getattr(fake_args[0], node.target)
+                    fake_args = fake_args[1:]
+                node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+            except NotImplementedError:
+                # This can happen when attempting to reify a symbol with an unsupported call_function node,
+                # e.g. with NestedTensors + sym_size.int via match_symbol().
+                # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
+                pass
         if stack_trace is not None:
             node.meta["stack_trace"] = stack_trace
         if nn_module_stack is not None:
@@ -206,7 +207,9 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
-    def _sympy_interp(expr_to_proxy, expr):
+    def _sympy_interp(
+        expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
+    ) -> fx.Proxy:
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -239,7 +242,7 @@ def insert_deferred_runtime_asserts(
             isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number)
         )
 
-    def add_runtime_asserts(ras):
+    def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
         for ra in ras:
             if (
                 # redundant
@@ -268,17 +271,28 @@ def insert_deferred_runtime_asserts(
             else:
                 # Convert the sympy expression into a sequence of FX
                 # nodes
-                res = _sympy_interp(expr_to_proxy, ra.expr).node
-
-                graph.call_function(
-                    torch.ops.aten._assert_scalar.default,
-                    # TODO: use ra.msg here, but it's pretty
-                    # useless right now
-                    (
-                        res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                with _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        stack_trace=node.meta.get("stack_trace"),
+                        nn_module_stack=node.meta.get("nn_module_stack"),
+                        # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                        # as the input node to the assertion
+                        custom=node.meta.get("custom"),
                     ),
-                )
+                ):
+                    res = _sympy_interp(expr_to_proxy, ra.expr).node
+
+                    graph.call_function(
+                        torch.ops.aten._assert_scalar.default,
+                        # TODO: use ra.msg here, but it's pretty
+                        # useless right now
+                        (
+                            res,
+                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                        ),
+                    )
                 added_asserts.add(ra.expr)
 
     nodes = list(graph.nodes)
@@ -286,19 +300,8 @@ def insert_deferred_runtime_asserts(
         # Placeholders can match symbols, but when we destructure them
         # with size we have to make sure we insert the nodes after all
         # the placeholders
-        with (
-            graph.inserting_before(
-                nodes[i + 1] if node not in placeholders else first_non_placeholder
-            ),
-            _set_node_metadata_hook(
-                gm,
-                functools.partial(
-                    _node_metadata_hook,
-                    stack_trace=node.meta.get("stack_trace"),
-                    nn_module_stack=node.meta.get("nn_module_stack"),
-                    custom=node.meta.get("custom"),
-                ),
-            ),
+        with graph.inserting_before(
+            nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Unfortunately, this logic still must remain because manual
             # make_fx calls may not explicitly bind all symbolic ints as
@@ -309,7 +312,7 @@ def insert_deferred_runtime_asserts(
                 and (example_value := _get_example_value(node)) is not None
             ):
 
-                def match_symbol(symint, cb):
+                def match_symbol(symint: object, cb: Callable[[], fx.Node]) -> None:
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
@@ -318,7 +321,18 @@ def insert_deferred_runtime_asserts(
                         )
                         and s not in expr_to_proxy
                     ):
-                        expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
+                            ),
+                        ):
+                            expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
 
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
@@ -379,7 +393,7 @@ def insert_deferred_runtime_asserts(
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
-                def has_new_untracked_symbols():
+                def has_new_untracked_symbols() -> bool:
                     # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
@@ -393,7 +407,7 @@ def insert_deferred_runtime_asserts(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
 
-                def has_new_unbacked_bindings():
+                def has_new_unbacked_bindings() -> bool:
                     if resolved_unbacked_bindings is None:
                         raise AssertionError("resolved_unbacked_bindings is None")
                     for key in resolved_unbacked_bindings:
@@ -413,10 +427,21 @@ def insert_deferred_runtime_asserts(
                     if _is_intermediate_tensor_sym_call(
                         node
                     ):  # reify from input shapes
-                        expr_to_proxy[sym_expr] = _sympy_interp(
-                            expr_to_proxy,
-                            sym_expr,
-                        )  # type: ignore[arg-type]
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
+                            ),
+                        ):
+                            expr_to_proxy[sym_expr] = _sympy_interp(
+                                expr_to_proxy,
+                                sym_expr,
+                            )  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
@@ -459,7 +484,7 @@ def insert_deferred_runtime_asserts(
 
                     # TODO: some CSE when generating these nodes can probably
                     # help reduce graph size and improve compile time
-                    def go(node, keypath):
+                    def go(node: fx.Node, keypath: tuple[object, ...]) -> fx.Node:
                         if keypath == ():
                             return node
                         if (
@@ -512,9 +537,7 @@ def insert_deferred_runtime_asserts(
                             )
                         elif isinstance(keypath[0], ConvertIntKey):
                             return go(
-                                graph.call_function(
-                                    cast_symbool_to_symint_guardless, (node,)
-                                ),
+                                graph.call_function(torch.sym_ite, (node, 1, 0)),
                                 keypath[1:],
                             )
                         elif isinstance(keypath[0], DivideByKey):
@@ -536,7 +559,20 @@ def insert_deferred_runtime_asserts(
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
                     if s not in expr_to_proxy:
-                        expr_to_proxy[s] = fx.Proxy(go(node, keypath), tracer=tracer)
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
+                            ),
+                        ):
+                            expr_to_proxy[s] = fx.Proxy(
+                                go(node, keypath), tracer=tracer
+                            )
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
             for i0 in defs:
@@ -593,7 +629,7 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s):
+                    def convert(s: Any) -> int | None:
                         if s in (int_oo, -int_oo):
                             return None
                         try:
@@ -601,13 +637,17 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if (
-                        expr_to_proxy[i0].node.target
-                        is not cast_symbool_to_symint_guardless
+                    with _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                            nn_module_stack=node.meta.get("nn_module_stack"),
+                            # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                            # as the input node to the assertion
+                            custom=node.meta.get("custom"),
+                        ),
                     ):
-                        # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
-                        # raises AOTAutograd errors on cast_symbool_to_symint_guardless
-
                         if (min_val := convert(vr.lower)) is not None:
                             ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
                             graph.call_function(

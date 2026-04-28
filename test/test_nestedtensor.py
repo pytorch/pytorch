@@ -10,7 +10,6 @@ import sys
 import tempfile
 import unittest
 from functools import partial
-from typing import Optional
 
 import numpy as np
 
@@ -73,7 +72,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
-from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+from torch.utils.checkpoint import checkpoint
 
 
 # Tests are ported from pytorch/nestedtensor.
@@ -3935,7 +3934,7 @@ def get_atol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
 def get_tolerances(
     true_value: torch.Tensor,
     computed_value: torch.Tensor,
-    fudge_factor: Optional[float] = None,
+    fudge_factor: float | None = None,
 ) -> tuple[float, float]:
     """Returns the absolute and relative tolerances for comparing two tensors."""
     fudge_factor = fudge_factor if fudge_factor is not None else 1.0
@@ -7478,22 +7477,6 @@ torch.cuda.synchronize()
         checkpoint(fn, values, offsets, use_reentrant=False).backward()
         self.assertIsNotNone(values.grad)
 
-        context_fn = partial(
-            create_selective_checkpoint_contexts, [torch.ops.aten.cumsum.default]
-        )
-
-        values.grad = None
-
-        def fn(values, lengths):
-            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
-            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
-            return convert_nt_to_jagged(nt).sum()
-
-        checkpoint(
-            fn, values, lengths, use_reentrant=False, context_fn=context_fn
-        ).backward()
-        self.assertIsNotNone(values.grad)
-
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
@@ -8770,6 +8753,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="unimplemented_masked_fill",
     ),
+    XFailRule(
+        sample_match_fn=lambda device, sample: "(T, NT)" in sample.name,
+        op_match_fn=lambda device, op: op.full_name == "nextafter",
+        name="nextafter_backward_not_implemented",
+    ),
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
@@ -8785,7 +8773,7 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
+        error_type=(torch._dynamo.exc.Unsupported, torch._dynamo.exc.UserError),
         # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
         error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),

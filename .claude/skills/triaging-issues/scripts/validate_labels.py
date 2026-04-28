@@ -208,12 +208,18 @@ def main():
     except json.JSONDecodeError as e:
         debug_log(f"JSON decode error: {e}")
         print(f"Hook error: Invalid JSON input: {e}", file=sys.stderr)
-        print("Hook was unable to validate labels; stopping triage.", file=sys.stderr)
+        print(
+            "Hook was unable to validate labels; stopping triage.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     except Exception as e:
         debug_log(f"Unexpected error: {type(e).__name__}: {e}")
         print(f"Hook error: {e}", file=sys.stderr)
-        print("Hook was unable to validate labels; stopping triage.", file=sys.stderr)
+        print(
+            "Hook was unable to validate labels; stopping triage.",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
 

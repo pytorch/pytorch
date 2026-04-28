@@ -163,6 +163,11 @@ if(INTERN_BUILD_ATEN_OPS)
     set(GEN_XPU_FLAG --xpu)
   endif()
 
+  set(GEN_MTIA_FLAG)
+  if(USE_MTIA)
+    set(GEN_MTIA_FLAG --mtia)
+  endif()
+
   set(CUSTOM_BUILD_FLAGS)
   if(INTERN_BUILD_MOBILE)
     if(USE_VULKAN)
@@ -245,10 +250,12 @@ if(INTERN_BUILD_ATEN_OPS)
       "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --headeronly-install-dir ${CMAKE_BINARY_DIR}/torch/headeronly/core
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}
       ${GEN_XPU_FLAG}
+      ${GEN_MTIA_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -302,6 +309,10 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+    if(gen_type STREQUAL "headers")
+      list(APPEND OUTPUT_LIST
+        "${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h")
+    endif()
     if(USE_XPU)
       list(APPEND OUTPUT_LIST
         ${xpu_generated_${gen_type}}
@@ -411,14 +422,10 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
-  if(CXX_SVE_FOUND AND CXX_SVE256_FOUND AND CXX_ARM_BF16_FOUND)
+  if(CXX_SVE256_FOUND)
     list(APPEND CPU_CAPABILITY_NAMES "SVE256")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION -DHAVE_ARM_BF16_CPU_DEFINITION")
-    if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-    else()
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-    endif()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION")
+    list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=256")
   endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
@@ -430,6 +437,11 @@ if(INTERN_BUILD_ATEN_OPS)
     function(process_vec NAME)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
+      # IMPL is absolute here; make it relative to NEW_IMPL's directory so the
+      # generated #include is worktree-independent (ccache/re-cc friendly).
+      if(USE_RELATIVE_PATHS)
+        file(RELATIVE_PATH IMPL "${CMAKE_BINARY_DIR}/aten/src/ATen" "${IMPL}")
+      endif()
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)

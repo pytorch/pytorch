@@ -160,6 +160,16 @@ except ImportError:
 
 
 T = TypeVar("T")
+T1 = TypeVar("T1")
+T2 = TypeVar("T2")
+T3 = TypeVar("T3")
+T4 = TypeVar("T4")
+T5 = TypeVar("T5")
+T6 = TypeVar("T6")
+T7 = TypeVar("T7")
+T8 = TypeVar("T8")
+T9 = TypeVar("T9")
+T10 = TypeVar("T10")
 R = TypeVar("R")
 _P = ParamSpec("_P")
 
@@ -1092,8 +1102,95 @@ def istype(
 ) -> TypeIs[T]: ...
 
 
+# This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
+def istype(
+    obj: object, allowed_types: tuple[type[T1], type[T2]]
+) -> TypeIs[T1 | T2]: ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: tuple[type[T1], type[T2], type[T3]]
+) -> TypeIs[T1 | T2 | T3]: ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: tuple[type[T1], type[T2], type[T3], type[T4]]
+) -> TypeIs[T1 | T2 | T3 | T4]: ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: tuple[type[T1], type[T2], type[T3], type[T4], type[T5]]
+) -> TypeIs[T1 | T2 | T3 | T4 | T5]: ...
+
+
+@overload
+def istype(
+    obj: object,
+    allowed_types: tuple[type[T1], type[T2], type[T3], type[T4], type[T5], type[T6]],
+) -> TypeIs[T1 | T2 | T3 | T4 | T5 | T6]: ...
+
+
+@overload
+def istype(
+    obj: object,
+    allowed_types: tuple[
+        type[T1], type[T2], type[T3], type[T4], type[T5], type[T6], type[T7]
+    ],
+) -> TypeIs[T1 | T2 | T3 | T4 | T5 | T6 | T7]: ...
+
+
+@overload
+def istype(
+    obj: object,
+    allowed_types: tuple[
+        type[T1], type[T2], type[T3], type[T4], type[T5], type[T6], type[T7], type[T8]
+    ],
+) -> TypeIs[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8]: ...
+
+
+@overload
+def istype(
+    obj: object,
+    allowed_types: tuple[
+        type[T1],
+        type[T2],
+        type[T3],
+        type[T4],
+        type[T5],
+        type[T6],
+        type[T7],
+        type[T8],
+        type[T9],
+    ],
+) -> TypeIs[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9]: ...
+
+
+@overload
+def istype(
+    obj: object,
+    allowed_types: tuple[
+        type[T1],
+        type[T2],
+        type[T3],
+        type[T4],
+        type[T5],
+        type[T6],
+        type[T7],
+        type[T8],
+        type[T9],
+        type[T10],
+    ],
+) -> TypeIs[T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9 | T10]: ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: tuple[type, ...] | list[type] | set[type]
+) -> bool: ...
 
 
 def istype(obj: object, allowed_types: Any) -> bool:
@@ -1643,6 +1740,7 @@ def _get_dynamo_config_for_logging() -> str | None:
             "_autograd_backward_strict_mode_banned_ops",
             "reorderable_logging_functions",
             "ignore_logger_methods",
+            "ignore_logging_functions",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
@@ -1767,7 +1865,7 @@ def record_compilation_metrics(
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
         "config_suppress_errors": config.suppress_errors,
-        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
+        "config_inline_inbuilt_nn_modules": True,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
@@ -2822,6 +2920,24 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+def enumerate_items_with_dict_position(
+    obj: dict[K, V],
+) -> Iterable[tuple[int, K, V | Any]]:
+    """Enumerate dict items yielding (dict_keys_position, key, value).
+
+    For OrderedDicts where move_to_end/prepend has been used, the OrderedDict
+    iteration order can differ from dict.keys() order.  We iterate in
+    OrderedDict order (correct execution semantics) but return each key's
+    dict.keys() position so that ConstDictKeySource indices stay consistent
+    with PyDict_Next / C++ DictGuardManager.
+    """
+    items = get_items_from_dict(obj)
+    if isinstance(obj, OrderedDict):
+        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
+        return ((key_to_pos[k], k, v) for k, v in items)
+    return ((i, k, v) for i, (k, v) in enumerate(items))
+
+
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
     torch.nn.Module.__init__(obj)
@@ -2842,6 +2958,29 @@ def dataclass_fields(cls: Any) -> Any:
 
 
 iter_next = next
+
+
+def normalize_count_iter(count_iter: Iterator[Any]) -> tuple[Any, Any]:
+    try:
+        _, args = count_iter.__reduce__()
+    except TypeError:
+        # Python 3.14 no longer pickles itertools.count, so fall back to the
+        # repr and only recover literal arguments. Non-literal arguments still
+        # fall back to user-defined handling via the NotImplemented sentinel.
+        import ast
+
+        count_repr = repr(count_iter)
+        if not count_repr.startswith("count(") or not count_repr.endswith(")"):
+            return (NotImplemented, NotImplemented)
+        try:
+            args = ast.literal_eval(f"({count_repr[6:-1]},)")
+        except (SyntaxError, ValueError):
+            return (NotImplemented, NotImplemented)
+        if not isinstance(args, tuple) or not 1 <= len(args) <= 2:
+            return (NotImplemented, NotImplemented)
+    if len(args) == 1:
+        return (args[0], 1)
+    return (args[0], args[1])
 
 
 def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
@@ -2867,12 +3006,10 @@ dict_getitem = dict.__getitem__
 
 @torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Call dict(d) to prevent calling overridden __iter__/keys
-    dict_class = dict
-    if isinstance(d, OrderedDict):
-        dict_class = OrderedDict
+    # Use dict.keys() to match the iteration order of PyDict_Next used by
+    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
     # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict_class.keys(d), n, n + 1))
+    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_getitem(s: set[T], n: int) -> T:
@@ -2937,7 +3074,6 @@ def raise_args_mismatch(
     actual: str = "",
 ) -> None:
     from torch._dynamo.exc import raise_observed_exception
-    from torch._dynamo.variables import ConstantVariable
 
     msg_str = (
         f"wrong number of arguments or keyword arguments for {name}() call.\n"
@@ -2948,7 +3084,7 @@ def raise_args_mismatch(
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(msg_str)],
+        args=[msg_str],
     )
 
 
@@ -2959,7 +3095,6 @@ def iter_contains(
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
-    from .variables.constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
 
     if search.is_python_constant():
         found_const = any(
@@ -2980,7 +3115,7 @@ def iter_contains(
         if must_check_tensor_id:
             if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
-                    return CONSTANT_VARIABLE_TRUE
+                    return ConstantVariable.create(True)
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
@@ -2994,7 +3129,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = CONSTANT_VARIABLE_FALSE
+        found = ConstantVariable.create(False)
     return found
 
 
@@ -3050,7 +3185,7 @@ def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
+from torch._subclasses import UnsupportedFakeTensorException
 
 
 def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
@@ -3788,11 +3923,11 @@ def _get_fake_value_impl(
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: B904
+            raise UserError(
                 UserErrorType.CONSTRAINT_VIOLATION,
                 str(cause),
                 case_name="constrain_as_size_example",
-            )
+            ) from cause
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
@@ -4310,18 +4445,16 @@ def defake(x: Any) -> Any:
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
-        size = []
-        for s in x.size():
-            if isinstance(s, torch.SymInt):
-                size.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                size.append(s)
-        stride = []
-        for s in x.stride():
-            if isinstance(s, torch.SymInt):
-                stride.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                stride.append(s)
+        # optimization_hint is appropriate here because defake only needs a
+        # plausible concrete shape to allocate a real tensor; it does not need
+        # to install guards. For unbacked symbols the heuristic fallback is fine.
+        size = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.size()
+        ]
+        stride = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s)
+            for s in x.stride()
+        ]
     else:
         size = x.size()
         stride = x.stride()
@@ -4711,6 +4844,7 @@ def is_tensor_base_attr_getter(value: Any) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
+        and hasattr(value.__self__, "__objclass__")
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
 
@@ -5212,11 +5346,30 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
+def is_pybind11_enum_member(value: Any) -> bool:
+    """Check if value is a pybind11 enum member (singleton with stable hash).
+
+    Pybind11 enums have __members__ on their type and each member is a singleton.
+    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
+    into the type's __dict__, which trips raise_on_overridden_hash. But these
+    are safe: members are singletons with hash == value, same as Python enums.
+    """
+    t = type(value)
+    members = getattr(t, "__members__", None)
+    if members is None:
+        return False
+    name = getattr(value, "name", None)
+    return name is not None and members.get(name) is value
+
+
 def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
     from . import graph_break_hints
     from .exc import unimplemented
 
     is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden and is_pybind11_enum_member(obj):
+        return
 
     if is_overridden:
         unimplemented(

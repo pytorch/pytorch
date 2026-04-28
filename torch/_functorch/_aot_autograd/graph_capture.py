@@ -39,6 +39,7 @@ from .streams import (
     insert_backward_syncs,
     populate_fw_metadata_with_stream_indices,
     sync_deallocations,
+    wrap_all_sync_nodes_with_control_deps,
 )
 from .utils import (
     call_and_expect_output_descs,
@@ -190,6 +191,96 @@ def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     return detached_t
 
 
+@dataclasses.dataclass
+class _GraphCaptureTracingResult:
+    fn_to_trace: Callable[..., Any]
+    flat_args: Any
+    flat_args_descs: Any
+    maybe_subclass_meta: SubclassMeta | None
+
+
+def _detach_traced_inputs(flat_args: Any) -> Any:
+    if detect_fake_mode():
+        detach_tensor = _detach_and_copy_item_memo
+    else:
+
+        def detach_tensor(t: torch.Tensor) -> torch.Tensor:
+            return t.detach()
+
+    return pytree.tree_map_only(torch.Tensor, detach_tensor, flat_args)
+
+
+def _prepare_graph_capture_tracing(
+    fn_to_trace: Callable[..., Any],
+    flat_args: Any,
+    flat_args_descs: Any,
+    flat_fn: TraceFn,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+    aot_config: AOTConfig,
+    trace_joint: bool,
+    joint_fn_handle: Any | None = None,
+) -> _GraphCaptureTracingResult:
+    if aot_config.disable_functionalization:
+        updated_flat_args, updated_flat_args_descs = flat_args, flat_args_descs
+    else:
+        fn_to_trace, updated_flat_args, updated_flat_args_descs = (
+            create_functionalized_fn(
+                fn_to_trace,
+                flat_args,
+                flat_args_descs,
+                meta=fw_metadata,
+                aot_config=aot_config,
+                trace_joint=trace_joint,
+                joint_fn_handle=joint_fn_handle,
+            )
+        )
+
+    subclass_tracing_info = aot_dispatch_subclass(
+        fn_to_trace,
+        updated_flat_args,
+        updated_flat_args_descs,
+        is_joint_structure=trace_joint,
+        meta=fw_metadata,
+        fw_only=flat_fn,
+    )
+    fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
+    updated_flat_args = subclass_tracing_info.plain_tensor_args
+    updated_flat_args_descs = subclass_tracing_info.plain_tensor_args_descs
+
+    if not aot_config.disable_functionalization:
+        fn_to_trace, updated_flat_args, updated_flat_args_descs = (
+            handle_effect_tokens_fn(
+                fn_to_trace,
+                updated_flat_args,
+                updated_flat_args_descs,
+                meta=fw_metadata,
+                trace_joint=trace_joint,
+            )
+        )
+
+    return _GraphCaptureTracingResult(
+        fn_to_trace=fn_to_trace,
+        flat_args=updated_flat_args,
+        flat_args_descs=updated_flat_args_descs,
+        maybe_subclass_meta=subclass_tracing_info.maybe_subclass_meta,
+    )
+
+
+def _create_graph_and_save_traced_inputs(
+    fn_to_trace: Callable[..., Any],
+    flat_args: Any,
+    flat_args_descs: Any,
+    *,
+    aot_config: AOTConfig,
+) -> tuple[torch.fx.GraphModule, Any]:
+    saved_flat_args = _detach_traced_inputs(flat_args)
+    return (
+        _create_graph(fn_to_trace, flat_args, flat_args_descs, aot_config=aot_config),
+        saved_flat_args,
+    )
+
+
 def aot_dispatch_base_graph(
     flat_fn: TraceFn,
     flat_args: list[FxValue],
@@ -211,59 +302,28 @@ def aot_dispatch_base_graph(
         fw_metadata,
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
-
-    if aot_config.disable_functionalization:
-        updated_flat_args, updated_flat_args_descs = (
-            flat_args,
-            flat_args_descs,
-        )
-    else:
-        fn_to_trace, updated_flat_args, updated_flat_args_descs = (
-            create_functionalized_fn(
-                fn_to_trace,
-                flat_args,
-                flat_args_descs,
-                meta=fw_metadata,
-                aot_config=aot_config,
-                trace_joint=False,
-            )
-        )
-
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
     # into CompilerWrappers.
-    (
+    tracing_state = _prepare_graph_capture_tracing(
         fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-        maybe_subclass_meta,
-    ) = aot_dispatch_subclass(
-        fn_to_trace,
-        updated_flat_args,
-        updated_flat_args_descs,
-        is_joint_structure=False,
-        meta=fw_metadata,
-        fw_only=flat_fn,
+        flat_args,
+        flat_args_descs,
+        flat_fn,
+        fw_metadata=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=False,
     )
-
-    if not aot_config.disable_functionalization:
-        (
-            fn_to_trace,
-            updated_flat_args_subclasses_desugared,
-            updated_flat_args_subclasses_desugared_descs,
-        ) = handle_effect_tokens_fn(
-            fn_to_trace,
-            updated_flat_args_subclasses_desugared,
-            updated_flat_args_subclasses_desugared_descs,
-            meta=fw_metadata,
-            trace_joint=False,
-        )
+    fn_to_trace = tracing_state.fn_to_trace
+    updated_flat_args_subclasses_desugared = tracing_state.flat_args
+    updated_flat_args_subclasses_desugared_descs = tracing_state.flat_args_descs
+    maybe_subclass_meta = tracing_state.maybe_subclass_meta
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
-        str(aot_config.aot_id),
-        str(fw_metadata),
-        str(maybe_subclass_meta),
+        aot_config.aot_id,
+        fw_metadata,
+        maybe_subclass_meta,
     )
 
     # We track buffer assignments when exporting in non-strict mode.
@@ -277,26 +337,17 @@ def aot_dispatch_base_graph(
             mod_when_exporting_non_strict, assigned_buffers
         )
 
-    fake_mode = detect_fake_mode()
-    if fake_mode:
-        saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
-            torch.Tensor,
-            _detach_and_copy_item_memo,
-            updated_flat_args_subclasses_desugared,
-        )
-    else:
-        saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
-            torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
-        )
-    saved_updated_flat_args_subclasses_desugared_descs = (
-        updated_flat_args_subclasses_desugared_descs
-    )
-
-    fw_module = _create_graph(
+    (
+        fw_module,
+        saved_updated_flat_args_subclasses_desugared,
+    ) = _create_graph_and_save_traced_inputs(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
         updated_flat_args_subclasses_desugared_descs,
         aot_config=aot_config,
+    )
+    saved_updated_flat_args_subclasses_desugared_descs = (
+        updated_flat_args_subclasses_desugared_descs
     )
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
@@ -327,6 +378,8 @@ def aot_dispatch_base_graph(
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
         assign_epilogue_copy_streams(fw_module)
+        # Wrap sync nodes with control_deps to prevent reordering
+        wrap_all_sync_nodes_with_control_deps(fw_module)
         # Populate fw_metadata with stream indices from the compiled graph
         populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()
@@ -396,11 +449,10 @@ def aot_dispatch_base_graph(
         )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
-    if aot_config.is_export:
-        if maybe_subclass_meta is not None:
-            raise AssertionError(
-                "aot_export_module does not support tensor subclass inputs for now."
-            )
+    if aot_config.is_export and maybe_subclass_meta is not None:
+        raise AssertionError(
+            "aot_export_module does not support tensor subclass inputs for now."
+        )
     return (
         fw_module,
         saved_updated_flat_args_subclasses_desugared,
@@ -446,51 +498,23 @@ def aot_dispatch_autograd_graph(
     )
     # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle
-
-    if aot_config.disable_functionalization:
-        updated_joint_inputs, updated_joint_inputs_descs = (
-            joint_inputs,
-            joint_inputs_descs,
-        )
-    else:
-        joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs = (
-            create_functionalized_fn(
-                joint_fn_to_trace,
-                joint_inputs,
-                joint_inputs_descs,
-                meta=fw_metadata,
-                aot_config=aot_config,
-                trace_joint=True,
-                joint_fn_handle=joint_fn_handle,
-            )
-        )
-
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
     # into CompilerWrappers.
-    subclass_tracing_info = aot_dispatch_subclass(
+    tracing_state = _prepare_graph_capture_tracing(
         joint_fn_to_trace,
-        updated_joint_inputs,
-        updated_joint_inputs_descs,
-        is_joint_structure=True,
-        meta=fw_metadata,
-        fw_only=flat_fn,
+        joint_inputs,
+        joint_inputs_descs,
+        flat_fn,
+        fw_metadata=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=True,
+        joint_fn_handle=joint_fn_handle,
     )
-
-    joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
-    updated_joint_inputs = subclass_tracing_info.plain_tensor_args
-    updated_joint_inputs_descs = subclass_tracing_info.plain_tensor_args_descs
-
-    if not aot_config.disable_functionalization:
-        (joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs) = (
-            handle_effect_tokens_fn(
-                joint_fn_to_trace,
-                updated_joint_inputs,
-                updated_joint_inputs_descs,
-                meta=fw_metadata,
-                trace_joint=True,
-            )
-        )
+    joint_fn_to_trace = tracing_state.fn_to_trace
+    updated_joint_inputs = tracing_state.flat_args
+    updated_joint_inputs_descs = tracing_state.flat_args_descs
+    maybe_subclass_meta = tracing_state.maybe_subclass_meta
 
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
@@ -500,19 +524,7 @@ def aot_dispatch_autograd_graph(
     # This destroys requires_grad/grad_fn information.  However, backends
     # beneath AOTAutograd are indifferent to this information, so it doesn't
     # matter.
-
-    fake_mode = detect_fake_mode()
-    if fake_mode:
-        saved_updated_joint_inputs = pytree.tree_map_only(
-            torch.Tensor, _detach_and_copy_item_memo, updated_joint_inputs
-        )
-    else:
-        saved_updated_joint_inputs = pytree.tree_map_only(
-            torch.Tensor, lambda t: t.detach(), updated_joint_inputs
-        )
-    maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
-
-    fx_g = _create_graph(
+    fx_g, saved_updated_joint_inputs = _create_graph_and_save_traced_inputs(
         joint_fn_to_trace,
         updated_joint_inputs,
         updated_joint_inputs_descs,
@@ -540,6 +552,10 @@ def aot_dispatch_autograd_graph(
     # is distinct from their allocation stream
     sync_deallocations(fx_g)
 
+    # Wrap sync nodes with control_deps to prevent reordering
+    # (must be after sync_deallocations which inserts additional sync nodes)
+    wrap_all_sync_nodes_with_control_deps(fx_g)
+
     # Populate fw_metadata with stream indices from the compiled graph
     # NB: This needs to be done after the above stream assignments
     populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
@@ -557,11 +573,10 @@ def aot_dispatch_autograd_graph(
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
-    if aot_config.is_export:
-        if maybe_subclass_meta is not None:
-            raise AssertionError(
-                "aot_export_module does not support tensor subclass inputs for now."
-            )
+    if aot_config.is_export and maybe_subclass_meta is not None:
+        raise AssertionError(
+            "aot_export_module does not support tensor subclass inputs for now."
+        )
     return (
         fx_g,
         saved_updated_joint_inputs,

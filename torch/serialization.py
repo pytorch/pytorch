@@ -1384,7 +1384,7 @@ def load(
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
             tensor storages from disk to CPU memory in the first step, ``f`` is mapped, which means tensor storages
             will be lazily loaded when their data is accessed.
-        pickle_load_args: (Python 3 only) optional keyword arguments passed over to
+        pickle_load_args: optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`,
             only works if :attr:`weights_only=False`, e.g., :attr:`errors=...`.
 
@@ -1480,10 +1480,10 @@ def load(
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
     force_weights_only_load = (
-        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
     force_no_weights_only_load = (
-        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
 
     if force_weights_only_load and force_no_weights_only_load:

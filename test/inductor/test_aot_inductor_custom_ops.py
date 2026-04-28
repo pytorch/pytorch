@@ -138,6 +138,9 @@ _memory_format_test_lib.impl(
 _memory_format_test_lib.impl(
     "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CUDA"
 )
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "XPU"
+)
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_memory_format_arg")
@@ -156,6 +159,7 @@ def _fn_with_layout_arg_impl(x, layout):
 
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CPU")
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CUDA")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "XPU")
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_layout_arg")
@@ -501,7 +505,7 @@ class AOTInductorTestsTemplate:
         args = (torch.randn(4, 4, device=self.device),)
         self.check_model(m, args)
 
-    @skipIfXpu
+    @skipIfXpu(msg="compile error - torch-xpu-ops: 2609")
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):

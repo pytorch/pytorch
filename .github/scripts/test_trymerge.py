@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Tests implemented in this file are relying on GitHub GraphQL APIs
 # In order to avoid test flakiness, results of the queries
 # are cached in gql_mocks.json
@@ -7,12 +8,14 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+from __future__ import annotations
+
 import gzip
 import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Optional
+from typing import Any
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
@@ -32,6 +35,7 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
+    MergeRuleFailedError,
     PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
@@ -147,8 +151,8 @@ def mock_revert(
     pr: GitHubPR,
     *,
     dry_run: bool = False,
-    comment_id: Optional[int] = None,
-    reason: Optional[str] = None,
+    comment_id: int | None = None,
+    reason: str | None = None,
 ) -> None:
     pass
 
@@ -1110,6 +1114,70 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "Approved by: \n"
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_wraps_parent_rule_error(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """
+        When a stacked dependency PR fails the merge-rule check, the error
+        raised by merge_ghstack_into should identify the failing PR number
+        and preserve the original exception subclass.
+        """
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+
+        inner_msg = "Approvers from one of the following sets are needed"
+        mock_find_matching_merge_rule.side_effect = MergeRuleFailedError(inner_msg)
+
+        with self.assertRaises(MergeRuleFailedError) as cm:
+            top_pr.merge_ghstack_into(mock_repo, True)
+
+        self.assertIn("#106034", str(cm.exception))
+        self.assertIn(inner_msg, str(cm.exception))
+        self.assertNotIsInstance(cm.exception, MandatoryChecksMissingError)
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_preserves_mandatory_checks_subclass(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """The wrapping must preserve MandatoryChecksMissingError so callers
+        that catch it specifically (e.g. for retry behavior) keep working."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        mock_find_matching_merge_rule.side_effect = MandatoryChecksMissingError(
+            "1 mandatory check(s) failed"
+        )
+
+        with self.assertRaises(MandatoryChecksMissingError) as cm:
+            top_pr.merge_ghstack_into(mock_repo, True)
+
+        self.assertIn("#106034", str(cm.exception))
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

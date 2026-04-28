@@ -30,12 +30,14 @@ __all__ = ["DTensorExtensions"]
 
 def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if device_mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
     num_chunks = device_mesh.size(mesh_dim=0)
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if tensor.placements[0].is_shard():
         shard_dim = cast(DShard, placement).dim
         chunk_size = tensor.size(shard_dim) // num_chunks
@@ -52,13 +54,15 @@ def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
 def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
-    assert coord is not None
+    if coord is None:
+        raise AssertionError
     return _get_box_for(tensor, coord[0])
 
 
 def _create_shard_md_from_dt(dt: DTensor, current_rank: int) -> ShardMetadata:
     mesh = dt.device_mesh
-    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
 
     offsets, sizes = _get_local_box(dt)
     return ShardMetadata(
@@ -78,6 +82,7 @@ def _create_sharded_tensor_md_from_dt(
     my_rank = dist.get_rank(dt_pg)
     scapegoat_rank = 0 if my_rank > 0 else 1
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if dt.placements[0].is_shard():
         shard_count = dt_pg.size()
     else:
@@ -109,7 +114,8 @@ def _create_sharded_tensor_md_from_dt(
 
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
-    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
     return mesh.get_group()
 
 
@@ -152,7 +158,8 @@ def _chunk_tensor(
     pg: dist.ProcessGroup,
 ) -> torch.Tensor:
     if type(tensor) is ShardedTensor:
-        assert len(tensor.local_shards()) == 1
+        if len(tensor.local_shards()) != 1:
+            raise AssertionError
 
         inner_param = tensor.local_tensor()
         inner_st = _create_chunk_sharded_tensor(
@@ -179,7 +186,8 @@ def _chunk_tensor(
         return st_outer
     elif type(tensor) is DTensor:
         device_mesh = tensor.device_mesh
-        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+        if device_mesh.ndim != 1:
+            raise AssertionError("Only 1D DeviceMeshes currently handled")
 
         inner_param = tensor._local_tensor
 
@@ -300,7 +308,8 @@ def _all_gather_dtensor(
     parent_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
-    assert parent_mesh == tensor.device_mesh
+    if parent_mesh != tensor.device_mesh:
+        raise AssertionError
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]

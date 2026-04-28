@@ -145,29 +145,19 @@ class _HeadTailLoadBalancer(_LoadBalancer):
         """
         seq_length = self.seq_length
         world_size = self.world_size
-        assert seq_length % (world_size * 2) == 0
+        if seq_length % (world_size * 2) != 0:
+            raise AssertionError
         chunk_size = seq_length // (world_size * 2)
-        all_indices = []
 
-        for rank in range(world_size):
-            # Generate indices for first chunk of the cp rank
-            first_chunk_start = rank * chunk_size
-            first_chunk_indices = list(
-                range(first_chunk_start, first_chunk_start + chunk_size)
-            )
+        # Split sequence into 2*world_size chunks, then pair chunk r with
+        # chunk (2*world_size - 1 - r) for each rank.
+        indices = torch.arange(seq_length, dtype=torch.int, device=self.device)
+        chunks = indices.view(world_size * 2, chunk_size)
+        head_idx = torch.arange(world_size, device=self.device)
+        tail_idx = 2 * world_size - 1 - head_idx
+        paired = torch.stack([chunks[head_idx], chunks[tail_idx]], dim=1)
+        all_indices_tensor = paired.reshape(-1)
 
-            # Second chunk: positions from the complementary chunk
-            second_chunk_idx = world_size * 2 - rank - 1
-            second_chunk_start = second_chunk_idx * chunk_size
-            second_chunk_indices = list(
-                range(second_chunk_start, second_chunk_start + chunk_size)
-            )
-            # combine the indices for this rank
-            all_indices.extend(first_chunk_indices + second_chunk_indices)
-
-        all_indices_tensor = torch.tensor(
-            all_indices, dtype=torch.int, device=self.device
-        )
         if restore:
             all_indices_tensor = torch.argsort(all_indices_tensor)
 
@@ -261,9 +251,10 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
     def _generate_indices_for_batch(self, seq_length_per_doc, restore) -> Tensor:  # type: ignore[no-untyped-def]
         world_size = self.world_size
         device = self.device
-        assert all(
+        if not all(
             seq_length % (2 * world_size) == 0 for seq_length in seq_length_per_doc
-        )
+        ):
+            raise AssertionError
         chunk_length_per_doc = [
             seq_length // (2 * world_size) for seq_length in seq_length_per_doc
         ]
@@ -344,7 +335,8 @@ class _PTRRLoadBalancer(_LoadBalancer):
                 [0, 5, 6, 10]       # values = [9, 15, 8, 15], sum = 47
             ]
         """
-        assert process_time.ndim == 1
+        if process_time.ndim != 1:
+            raise AssertionError
 
         num_tasks = process_time.size(0)
 
@@ -460,9 +452,8 @@ class _PTRRLoadBalancer(_LoadBalancer):
 
         # NOTE: only support the case where the qkv block size are equal
         q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
-        assert q_blk_size == kv_blk_size, (
-            "for now only support q_blk_size == kv_blk_size"
-        )
+        if q_blk_size != kv_blk_size:
+            raise AssertionError("for now only support q_blk_size == kv_blk_size")
 
         indices = torch.arange(
             q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device

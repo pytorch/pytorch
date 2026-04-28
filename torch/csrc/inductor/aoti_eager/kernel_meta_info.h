@@ -69,6 +69,10 @@ struct TensorMetadata {
 
   // Compare two TensorMetadata objects
   bool operator==(const TensorMetadata& other) const;
+
+  // Dynamic-shape-aware comparison: matches by dtype/device/rank but
+  // skips exact sizes/strides comparison.
+  bool dynamic_check(const TensorMetadata& other) const;
 };
 
 // ParameterTag is to represent the type of the input parameters of a aten
@@ -124,13 +128,18 @@ struct ParameterMetadata {
       const std::vector<at::Tensor>& tensor_list,
       uint64_t input_order);
   ParameterMetadata(
-      const std::vector<TensorMetadata>& tensor_metadata_list,
+      std::vector<TensorMetadata> tensor_metadata_list,
       uint64_t input_order);
   ParameterMetadata(const c10::Scalar& scalar, uint64_t input_order);
-  ParameterMetadata(const std::string& string_value, uint64_t input_order);
+  ParameterMetadata(std::string string_value, uint64_t input_order);
   ParameterMetadata(const c10::Device& device, uint64_t input_order);
 
   bool operator==(const ParameterMetadata& other) const;
+
+  // Dynamic-shape-aware comparison: matches by type/dtype/device/rank but
+  // skips exact size/stride comparison for tensors, so a single compiled
+  // kernel can serve multiple input shapes.
+  bool dynamic_check(const ParameterMetadata& other) const;
 
  private:
   // Helper function to compare two ParameterMetadata objects with the same

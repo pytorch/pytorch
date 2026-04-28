@@ -1787,11 +1787,13 @@ def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Te
     """
     lm = enabled_local_tensor_mode()
     if lm is not None:
-        assert isinstance(tensor, LocalTensor)
+        if not isinstance(tensor, LocalTensor):
+            raise AssertionError(f"Expected LocalTensor, got {type(tensor)}")
         return lm.tensor_map(tensor, cb)
     else:
         r = cb(dist.get_rank(), tensor)
-        assert r is not None
+        if r is None:
+            raise AssertionError("callback returned None")
         return r
 
 
@@ -1889,7 +1891,7 @@ class _ExceptionRaisingThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             self.exception = e
 
     def join(self, timeout=None):

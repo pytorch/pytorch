@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, TypeGuard
 from typing_extensions import final, override, Self
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
@@ -438,12 +438,16 @@ class _SerializedFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
         if not serialized:
-            return _InProcessFxCompile().codegen_and_compile(
+            eager_compile = _InProcessFxCompile()
+            eager_compile.compile_region_name = self.compile_region_name
+            return eager_compile.codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
 
         inputs, constants = serialized
         output = self._send_to_child(inputs).deserialize(constants)
+        if isinstance(output.graph, CompiledFxGraph):
+            output.graph.compile_region_name = self.compile_region_name
 
         self._postprocess(output)
         self._compile_stats[type(self)].codegen_and_compile += 1
@@ -469,7 +473,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
+            log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
         # Triton kernel wrapper nodes contain references to the kernel_side_table

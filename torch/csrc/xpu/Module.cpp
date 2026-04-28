@@ -336,6 +336,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(gpu_eu_count)                                           \
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
+      ._(memory_clock_rate)                                      \
+      ._(memory_bus_width)                                       \
       ._(sub_group_sizes)                                        \
       ._(local_mem_size)                                         \
       ._(has_fp16)                                               \
@@ -371,7 +373,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
-                   << ", gpu_eu_count=" << prop.gpu_eu_count
+                   << ", memory_clock_rate=" << prop.memory_clock_rate
+                   << "MHz, memory_bus_width=" << prop.memory_bus_width
+                   << "-bit, gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
@@ -390,6 +394,14 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       c10::xpu::XPUCachingAllocator::XPUAllocator,
       std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
       m, "_xpu_XPUAllocator");
+
+  // Register concrete XPUPluggableAllocator type with inheritance
+  py::class_<
+      torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator,
+      c10::xpu::XPUCachingAllocator::XPUAllocator,
+      std::shared_ptr<
+          torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
+      m, "_XPUPluggableAllocator");
 
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());

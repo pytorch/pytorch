@@ -1,7 +1,7 @@
 import copy
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 
@@ -48,7 +48,7 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
     if isinstance(replacement, GraphModule):
         replacement.graph.lint()
 
-    def try_get_attr(gm: torch.nn.Module, target: str) -> Optional[Any]:
+    def try_get_attr(gm: torch.nn.Module, target: str) -> Any | None:
         module_path, _, attr_name = target.rpartition(".")
         try:
             mod: torch.nn.Module = gm.get_submodule(module_path)
@@ -95,8 +95,8 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 @compatibility(is_backward_compatible=True)
 def replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
+    pattern: Callable[..., Any] | GraphModule,
+    replacement: Callable[..., Any] | GraphModule,
 ) -> list[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
@@ -225,16 +225,13 @@ def replace_pattern(
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
-    match_filters: Optional[
-        list[Callable[["InternalMatch", Graph, Graph], bool]]
-    ] = None,
+    pattern: Callable[..., Any] | Graph | GraphModule,
+    replacement: Callable[..., Any] | Graph | GraphModule | None = None,
+    match_filters: list[Callable[["InternalMatch", Graph, Graph], bool]] | None = None,
     ignore_literals: bool = False,
     # Placed at the end to avoid breaking backward compatibility
-    replacement_callback: Optional[
-        Callable[["InternalMatch", Graph, Graph], Graph]
-    ] = None,
+    replacement_callback: Callable[["InternalMatch", Graph, Graph], Graph]
+    | None = None,
     node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     """
@@ -264,16 +261,13 @@ def replace_pattern_with_filters(
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
-    match_filters: Optional[
-        list[Callable[["InternalMatch", Graph, Graph], bool]]
-    ] = None,
+    pattern: Callable[..., Any] | Graph | GraphModule,
+    replacement: Callable[..., Any] | Graph | GraphModule | None = None,
+    match_filters: list[Callable[["InternalMatch", Graph, Graph], bool]] | None = None,
     ignore_literals: bool = False,
     # Placed at the end to avoid breaking backward compatibility
-    replacement_callback: Optional[
-        Callable[["InternalMatch", Graph, Graph], Graph]
-    ] = None,
+    replacement_callback: Callable[["InternalMatch", Graph, Graph], Graph]
+    | None = None,
     node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     from torch.fx.passes.utils.matcher_utils import InternalMatch, SubgraphMatcher
@@ -423,7 +417,9 @@ def _replace_pattern(
                 f"{len(copied_returning_nodes)}"  # pyrefly: ignore [bad-argument-type]
             )
         for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
             gn.replace_all_uses_with(copied_node)
+            # pyrefly: ignore [unsupported-operation]
             match_changed_node[gn] = copied_node
         # Remove the original nodes
         for node in reversed(pattern_graph.nodes):

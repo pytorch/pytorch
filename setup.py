@@ -271,7 +271,6 @@ if sys.version_info < python_min_version:
     sys.exit(-1)
 
 import filecmp
-import glob
 import importlib
 import itertools
 import json
@@ -280,7 +279,6 @@ import subprocess
 import sysconfig
 import tempfile
 import textwrap
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -315,6 +313,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
+from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
 from tools.setup_helpers.env import (
@@ -399,56 +398,45 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
-CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None)) or "--cmake" in sys.argv
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None)) or "--cmake-only" in sys.argv
 filtered_args = []
 for i, arg in enumerate(sys.argv):
-    if arg == "--cmake":
-        RERUN_CMAKE = True
-        continue
-    if arg == "--cmake-only":
-        # Stop once cmake terminates. Leave users a chance to adjust build
-        # options.
-        CMAKE_ONLY = True
+    if arg in ("--cmake", "--cmake-only"):
         continue
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
-    if arg == "develop":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                ".",
-                "-v",
-                "--no-build-isolation",
-            ],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
-    if arg == "install":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
+    if arg in ("develop", "install"):
+        # CMAKE_ONLY only runs cmake and exits (via sys.exit in build_deps)
+        # before setup() is called, so there's no need to go through pip.
+        # Replace the command with "build" so setuptools doesn't complain
+        # about an unrecognized command if we somehow reach setup().
+        if CMAKE_ONLY:
+            arg = "build"
+        else:
+            editable = arg == "develop"
+            print(
+                (
+                    f"WARNING: Redirecting 'python setup.py {arg}' to "
+                    f"'pip install {'-e ' if editable else ''}. -v --no-build-isolation',"
+                    " for more info see https://github.com/pytorch/pytorch/issues/152276"
+                ),
+                file=sys.stderr,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *(("-e", ".") if editable else (".",)),
+                    "-v",
+                    "--no-build-isolation",
+                ],
+                env={**os.environ},
+            )
+            sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -516,75 +504,6 @@ report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 cmake = CMake()
 
 
-def get_submodule_folders() -> list[Path]:
-    git_modules_file = CWD / ".gitmodules"
-    default_modules_path = [
-        THIRD_PARTY_DIR / name
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "onnx",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
-    if not git_modules_file.exists():
-        return default_modules_path
-    with git_modules_file.open(encoding="utf-8") as f:
-        return [
-            CWD / line.partition("=")[-1].strip()
-            for line in f
-            if line.strip().startswith("path")
-        ]
-
-
-def check_submodules() -> None:
-    def check_for_files(folder: Path, files: list[str]) -> None:
-        if not any((folder / f).exists() for f in files):
-            report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    def not_exists_or_empty(folder: Path) -> bool:
-        return not folder.exists() or (
-            folder.is_dir() and next(folder.iterdir(), None) is None
-        )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
-    folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
-    for folder in folders:
-        check_for_files(
-            folder,
-            [
-                "CMakeLists.txt",
-                "Makefile",
-                "setup.py",
-                "LICENSE",
-                "LICENSE.md",
-                "LICENSE.txt",
-            ],
-        )
-    check_for_files(
-        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
-        ["CMakeLists.txt"],
-    )
-
-
 # Windows has very bad support for symbolic links.
 # Instead of using symlinks, we're going to copy files over
 def mirror_files_into_torchgen() -> None:
@@ -637,7 +556,8 @@ def mirror_inductor_external_kernels() -> None:
     cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
     paths = [
         (
-            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
+            CWD
+            / "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/cutedsl_grouped_gemm.py",
             CWD
             / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
             True,
@@ -1037,7 +957,6 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -1471,21 +1390,7 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        for wildcard in filter(None, ignores.splitlines()):
-            if wildcard.strip().startswith("#"):
-                if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                    # Marker is found and stop reading .gitignore.
-                    break
-                # Ignore lines which begin with '#'.
-            else:
-                # Don't remove absolute paths from the system
-                wildcard = wildcard.lstrip("./")
-                for filename in glob.iglob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+        _clean()
 
 
 # Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
@@ -1740,6 +1645,7 @@ def main() -> None:
     torch_package_data = [
         "py.typed",
         "bin/*",
+        "bin/**/*",
         "test/*",
         "*.pyi",
         "**/*.pyi",

@@ -87,7 +87,7 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_bw_post_order: list[str] = []
         self.total_runtime: float = 0.0
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969
     # NB: returns fake tensors
     @classmethod
     def _maybe_run_and_benchmark_fallback_kernel(  # type: ignore[no-untyped-def]
@@ -198,9 +198,10 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert isinstance(cls.fake_mode, FakeTensorMode), (
-            "Initialize/Assign FakeTensorMode before using this function"
-        )
+        if not isinstance(cls.fake_mode, FakeTensorMode):
+            raise AssertionError(
+                "Initialize/Assign FakeTensorMode before using this function"
+            )
         mean_op_time = 0.0
         if func._overloadpacket not in _VIEW_OPS:
             try:
@@ -216,7 +217,7 @@ class RuntimeEstimator(TorchDispatchMode):
         res = func(*args, **kwargs or {})
         return (res, mean_op_time)
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589
     @classmethod
     def _roofline_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
@@ -232,9 +233,10 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert torch.cuda.is_available(), (
-            "Roofline estimation needs to access CUDA capabilities to make estimations"
-        )
+        if not torch.cuda.is_available():
+            raise AssertionError(
+                "Roofline estimation needs to access CUDA capabilities to make estimations"
+            )
 
         # Roofline Cost Model Explanation
 
@@ -357,9 +359,10 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
-        assert isinstance(fake_mode, FakeTensorMode), (
-            "No FakeTensorMode found, designed to used under FakeTensorMode"
-        )
+        if not isinstance(fake_mode, FakeTensorMode):
+            raise AssertionError(
+                "No FakeTensorMode found, designed to used under FakeTensorMode"
+            )
         RuntimeEstimator.fake_mode = fake_mode
         self.total_runtime = 0.0
         self.mod_runtimes = defaultdict(lambda: defaultdict(lambda: 0.0))

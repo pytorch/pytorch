@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -26,6 +26,7 @@ class NCCL_COLL(IntEnum):
     REDUCE_SCATTER = 2
     ALL_TO_ALL = 3
     UNSUPPORTED = 4
+    P2P = 5
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -61,6 +62,8 @@ def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
         return NCCL_COLL.REDUCE_SCATTER
     elif any(comm in kernel_name for comm in ("all_to_all", "alltoall")):
         return NCCL_COLL.ALL_TO_ALL
+    elif any(comm in kernel_name for comm in ("isend", "irecv", "batch_p2p")):
+        return NCCL_COLL.P2P
     else:
         return NCCL_COLL.UNSUPPORTED
 
@@ -83,7 +86,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = size_hint(numel, fallback=fallback)
+    result = optimization_hint(numel, fallback=fallback)
     return result
 
 
@@ -253,6 +256,9 @@ def estimate_nccl_collective_runtime_impl(
     if nRanks <= 1:
         return 0
 
+    if coll == NCCL_COLL.UNSUPPORTED:
+        return 0
+
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
     nccl_proto = NCCL_PROTO.LL
@@ -291,6 +297,9 @@ def estimate_nccl_collective_runtime_impl(
         nsteps = 2 * (nRanks - 1)
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nsteps = nRanks - 1
+    elif coll == NCCL_COLL.P2P:
+        # assume 1 hop per pair
+        nsteps = 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
     ratio = (1.0 * nRanks) / nsteps  # type: ignore[possibly-undefined]
@@ -308,6 +317,9 @@ def estimate_nccl_collective_runtime_impl(
             nInterSteps = 0
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nInterSteps = nNodes - 1
+    elif coll == NCCL_COLL.P2P:
+        # p2p may cross node bdry
+        nInterSteps = 1 if nNodes > 1 else 0
 
     # First compute latency in us; then at the end, convert it to ns
     latency = baseLat[nccl_algo][nccl_proto]
@@ -387,10 +399,18 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 
     output_val = fx_node.meta.get("val", None)
 
-    if input_bytes is None or not isinstance(output_val, torch.Tensor):
+    if input_bytes is None or output_val is None:
         return 0
 
-    output_bytes = tensor_bytes(output_val)
+    # Coalesced collectives return a list of tensors
+    if isinstance(output_val, (list, tuple)):
+        output_bytes = sum(
+            tensor_bytes(t) for t in output_val if isinstance(t, torch.Tensor)
+        )
+    elif isinstance(output_val, torch.Tensor):
+        output_bytes = tensor_bytes(output_val)
+    else:
+        return 0
 
     return input_bytes + output_bytes
 
@@ -455,19 +475,18 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> float | None:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        from torch.distributed.distributed_c10d import (
-            _get_pg_default_device,
-            _resolve_process_group,
-            Backend,
-        )
+        from torch.distributed.distributed_c10d import _resolve_process_group, Backend
 
         pg = _resolve_process_group(group_name)
         if torch.distributed.distributed_c10d.get_backend(pg) == Backend.FAKE:
             # nccl estimator requires real process group
             return None
 
-        device = _get_pg_default_device(pg)
-        backend = pg._get_backend(device)
+        device = torch.device("cuda")
+        try:
+            backend = pg._get_backend(device)
+        except RuntimeError:
+            return None
         if not backend.supports_time_estimate:
             return None
 
@@ -479,9 +498,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
                 dtype=dtype,
                 device=device,
             )
-
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         def to_real_tensor(e: Any) -> Any:
             if isinstance(e, torch.fx.Node):
@@ -495,9 +511,16 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
-        with torch.distributed._time_estimator(group=pg) as time_estimator:
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
             w = fn(*real_args, **real_kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
+            # Coalesced collectives return a list of tensors
+            if isinstance(w, (list, tuple)):
+                for t in w:
+                    torch.ops._c10d_functional.wait_tensor.default(t)
+            else:
+                torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time
         # -1000 constant is NCCL return in case of error during estimations.
         # Observed it for all_to_all estimations.

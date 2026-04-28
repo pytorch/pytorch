@@ -1,4 +1,5 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import contextlib
 import copy
@@ -14,14 +15,15 @@ import re
 import types
 import typing
 import warnings
-from collections.abc import Callable, Iterable, Iterator
+from collections import defaultdict
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _GraphBase, _NamespaceBase
+from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -36,8 +38,8 @@ log = logging.getLogger(__name__)
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
 if TYPE_CHECKING:
-    from ._symbolic_trace import Tracer  # noqa: F401
-    from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer
+    from .graph_module import GraphModule
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -71,7 +73,7 @@ class _CustomBuiltin(NamedTuple):
     # How to import this object from the standard library.
     import_str: str
     # The actual object, produced from that import string.
-    obj: Any
+    obj: object
 
 
 # Combined dict of disallowed variable names so we can check with one lookup
@@ -81,7 +83,7 @@ _illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
 _custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
-def _register_custom_builtin(name: str, import_str: str, obj: Any):
+def _register_custom_builtin(name: str, import_str: str, obj: object) -> None:
     _custom_builtins[name] = _CustomBuiltin(import_str, obj)
     _illegal_names[name] = obj
 
@@ -130,7 +132,7 @@ _torch_but_not_dynamo = re.compile(
 ).fullmatch
 
 
-def _is_from_torch(obj: Any) -> bool:
+def _is_from_torch(obj: object) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
         return _torch_but_not_dynamo(module_name) is not None
@@ -145,22 +147,85 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
-class _Namespace(_NamespaceBase):
+class _Namespace:
     """A context for associating names uniquely with objects.
 
     The following invariants are enforced:
     - Each object gets a single name.
     - Each name is unique within a given namespace.
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
-
-    This class is now implemented in C++ (_NamespaceBase) for performance.
-    See torch/csrc/fx/graph.cpp for the implementation.
     """
 
-    # Type annotations for the members (implemented in C++)
-    _obj_to_name: dict[Any, str]
-    _used_names: set[str]
-    _base_count: dict[str, int]
+    def __init__(self) -> None:
+        self._obj_to_name: dict[object, str] = {}
+        self._used_names: set[str] = set()
+        self._base_count: dict[str, int] = {}
+
+    def create_name(self, candidate: str, obj: object | None) -> str:
+        """Create a unique name.
+
+        Arguments:
+            candidate: used as the basis for the unique name, relevant to the user.
+            obj: If not None, an object that will be associated with the unique name.
+        """
+        if obj is not None and obj in self._obj_to_name:
+            return self._obj_to_name[obj]
+
+        # optimistically check if candidate is already a valid name
+        match = _name_regex.match(candidate)
+        if match is None:
+            # delete all characters that are illegal in a Python identifier
+            candidate = _illegal_char_regex.sub("_", candidate)
+
+            if not candidate:
+                candidate = "_unnamed"
+
+            if candidate[0].isdigit():
+                candidate = f"_{candidate}"
+
+            match = _name_regex.match(candidate)
+            if match is None:
+                raise AssertionError(
+                    f"Name regex failed to match candidate: {candidate}"
+                )
+
+        base, num = match.group(1, 2)
+        if num is None or candidate in self._used_names:
+            # Look up `base` to match the key used in the store on line below;
+            # using `candidate` misses when it has a numeric suffix, making
+            # the while-loop quadratic.
+            num = self._base_count.get(base, 0)
+            if _illegal_names.get(candidate, obj) is not obj:
+                num += 1
+                candidate = f"{base}_{num}"
+                # assume illegal names don't end in _\d so no need to check again
+        else:
+            num = int(num)
+
+        while candidate in self._used_names:
+            num += 1
+            candidate = f"{base}_{num}"
+
+        self._used_names.add(candidate)
+        self._base_count[base] = num
+        if obj is not None:
+            self._obj_to_name[obj] = candidate
+        return candidate
+
+    def associate_name_with_obj(self, name: str, obj: object) -> None:
+        """Associate a unique name with an object.
+
+        Neither `name` nor `obj` should be associated already.
+        """
+        maybe_existing = self._obj_to_name.setdefault(obj, name)
+        if maybe_existing is not name:
+            raise AssertionError("obj is already associated")
+
+    def _rename_object(self, obj: object, name: str) -> None:
+        if obj not in self._obj_to_name:
+            raise AssertionError(f"Object {obj} is not in _obj_to_name")
+        self._obj_to_name[obj] = name
+        self._used_names.add(name)
 
 
 @compatibility(is_backward_compatible=True)
@@ -176,7 +241,7 @@ class PythonCode:
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index. Line number starts at the prologue (i.e. forward()).
-    _lineno_map: Optional[dict[int, Optional[int]]]
+    _lineno_map: dict[int, int | None] | None
     # The line number of prologue in fn_code
     _prologue_start: int = 0
 
@@ -193,15 +258,46 @@ def _format_target(base: str, target: str) -> str:
 
 
 class _InsertPoint:
-    def __init__(self, graph, new_insert):
+    def __init__(self, graph: Graph, new_insert: Callable[..., None]) -> None:
         self.graph = graph
         self.orig_insert, graph._insert = graph._insert, new_insert
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def __exit__(self, type, value, tb):
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        tb: types.TracebackType | None,
+    ) -> None:
         self.graph._insert = self.orig_insert
+
+
+class _node_list:
+    def __init__(
+        self, graph: Graph, direction: Literal["_prev", "_next"] = "_next"
+    ) -> None:
+        if direction not in ("_next", "_prev"):
+            raise AssertionError(
+                f"direction must be '_next' or '_prev', got {direction}"
+            )
+        self.graph = graph
+        self.direction = direction
+
+    def __len__(self) -> int:
+        return self.graph._len
+
+    # TODO: These should return Iterator[Node], but doing so causes ~350
+    # downstream pyrefly errors because Node.target is typed as
+    # Callable[..., Any] | str and pyrefly can't narrow it based on
+    # node.op checks (e.g. `if node.op == "call_module": node.target`
+    # should be str but pyrefly doesn't support that narrowing).
+    def __iter__(self) -> Iterator[Any]:
+        return _NodeIter(self.graph._root, self.direction == "_prev")
+
+    def __reversed__(self) -> Iterator[Any]:
+        return _NodeIter(self.graph._root, self.direction == "_next")
 
 
 class _PyTreeInfo(NamedTuple):
@@ -211,7 +307,7 @@ class _PyTreeInfo(NamedTuple):
 
     orig_args: list[str]
     in_spec: pytree.TreeSpec
-    out_spec: Optional[pytree.TreeSpec]
+    out_spec: pytree.TreeSpec | None
 
 
 @dataclass(frozen=True)
@@ -225,14 +321,14 @@ class _ParsedStackTrace:
     name: str
     code: str
 
-    def get_summary_str(self):
+    def get_summary_str(self) -> str:
         return f"File: {self.file}:{self.lineno} in {self.name}, code: {self.code}"
 
 
 # get File:lineno code from stack_trace
 def _parse_stack_trace(
-    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
-):
+    stack_trace: str, filter_fn: Callable[[str, str, str], bool] | None = None
+) -> _ParsedStackTrace | None:
     if stack_trace is None:
         return None
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
@@ -258,10 +354,10 @@ def _parse_stack_trace(
 @compatibility(is_backward_compatible=False)
 class CodeGen:
     # This is an override hook so we can customize the SymNode printer.
-    _sym_repr: Callable[["torch.types.PySymType"], str] = lambda x: repr(x)
+    _sym_repr: Callable[[torch.types.PySymType], str] = lambda x: repr(x)
 
-    def __init__(self):
-        self._body_transformer: Optional[TransformCodeFunc] = None
+    def __init__(self) -> None:
+        self._body_transformer: TransformCodeFunc | None = None
         self._func_name: str = "forward"
 
     def _format_multiline_args(self, args: list[str]) -> str:
@@ -276,30 +372,43 @@ class CodeGen:
         else:
             return f"    {arg},\n"
 
-    def _get_delimiters(self, container) -> tuple[str, str]:
+    def _get_delimiters(self, container: Sequence[object]) -> tuple[str, str]:
         """Helper to get opening and closing delimiters for containers."""
         return ("(", ")") if isinstance(container, tuple) else ("[", "]")
 
-    def _format_multiline_container(self, items, descs=None, prefix="") -> str:
+    def _format_multiline_container(
+        self,
+        items: Sequence[object],
+        descs: Sequence[str] | None = None,
+        prefix: str = "",
+        repr_fn: Callable[[object], str] | None = None,
+    ) -> str:
         """Helper to format containers (lists/tuples) in multiline format."""
         ldelim, rdelim = self._get_delimiters(items)
         desc_trailers = self._get_desc_trailers(items, descs)
+        if repr_fn is None:
+            repr_fn = repr
 
         return (
             f"{prefix}{ldelim}\n"
             + "".join(
-                f"    {item},{trailer}\n" for item, trailer in zip(items, desc_trailers)
+                f"    {repr_fn(item)},{trailer}\n"
+                for item, trailer in zip(items, desc_trailers)
             )
             + f"{rdelim}"
         )
 
-    def _get_desc_trailers(self, items, descs):
+    def _get_desc_trailers(
+        self, items: Sequence[object], descs: Sequence[str] | None
+    ) -> list[str]:
         """Helper to generate description trailers for items."""
         if descs is None:
             return [""] * len(items)
         return [f"  # {desc}" for desc in descs]
 
-    def _call_method_with_signature_check(self, method, *args, **kwargs):
+    def _call_method_with_signature_check(
+        self, method: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
         """Helper to call a method with optional parameters based on signature."""
         sig = inspect.signature(method)
         # Filter kwargs to only include parameters that exist in the method signature
@@ -331,16 +440,24 @@ class CodeGen:
             return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(
-        self, output_args: Argument, *, descs: Optional[Any] = None
+        self,
+        output_args: Argument,
+        *,
+        descs: Sequence[str] | None = None,
+        repr_fn: Callable[[object], str] | None = None,
     ) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
         Note: The returned statement should not be indented.
         """
+        if repr_fn is None:
+            repr_fn = repr
         if descs is not None and isinstance(output_args, (list, tuple)):
-            return self._format_multiline_container(output_args, descs, "return ")
+            return self._format_multiline_container(
+                output_args, descs, "return ", repr_fn=repr_fn
+            )
         else:
-            return f"return {repr(output_args)}"
+            return f"return {repr_fn(output_args)}"
 
     def process_inputs(self, *args: Any) -> Any:
         """
@@ -370,7 +487,7 @@ class CodeGen:
 
     def _gen_python_code(
         self,
-        nodes,
+        nodes: _node_list,
         root_module: str,
         namespace: _Namespace,
         *,
@@ -381,7 +498,7 @@ class CodeGen:
         # Render each argument on its own line
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -398,7 +515,7 @@ class CodeGen:
         )
         include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
-        def add_global(name_hint: str, obj: Any):
+        def add_global(name_hint: str, obj: Any) -> str:
             """Add an obj to be tracked as a global.
 
             We call this for names that reference objects external to the
@@ -430,7 +547,7 @@ class CodeGen:
         for name, (_, obj) in _custom_builtins.items():
             add_global(name, obj)
 
-        def type_repr(o: Any):
+        def type_repr(o: object) -> str:
             if o == ():
                 # Empty tuple is used for empty tuple type annotation Tuple[()]
                 return "()"
@@ -472,7 +589,7 @@ class CodeGen:
             dim_blue = _identity
             blue = _identity
 
-        def _get_repr(arg: Any) -> str:
+        def _get_repr(arg: object) -> str:
             if isinstance(arg, Node):  # first because common
                 return repr(arg)
             elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
@@ -525,7 +642,7 @@ class CodeGen:
         node_to_last_use: dict[Node, Node] = {}
         user_to_last_uses: dict[Node, list[Node]] = {}
 
-        def register_last_uses(n: Node, user: Node):
+        def register_last_uses(n: Node, user: Node) -> None:
             if n not in node_to_last_use:
                 node_to_last_use[n] = user
                 user_to_last_uses.setdefault(user, []).append(n)
@@ -534,7 +651,7 @@ class CodeGen:
             for input_node in node._input_nodes:
                 register_last_uses(input_node, node)
 
-        def delete_unused_values(user: Node):
+        def delete_unused_values(user: Node) -> None:
             """
             Delete values after their last use. This ensures that values that are
             not used in the remainder of the code are freed and the memory usage
@@ -563,7 +680,7 @@ class CodeGen:
 
         prev_summary_str = None
 
-        def append_stacktrace_summary(node: Node):
+        def append_stacktrace_summary(node: Node) -> None:
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
@@ -573,7 +690,7 @@ class CodeGen:
             if node.op not in {"placeholder", "output"}:
                 additional_meta_str = ""
                 if additional_meta:
-                    parts = []
+                    parts: list[str] = []
                     for key in additional_meta:
                         if key in node.meta:
                             parts.append(f"{key}: {node.meta[key]}")
@@ -620,10 +737,10 @@ class CodeGen:
                     prev_summary_str = summary_str
                     body.append(summary_str)
 
-        def stringify_shape(shape: Iterable) -> str:
+        def stringify_shape(shape: Iterable[object]) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
 
-        def emit_node(node: Node):
+        def emit_node(node: Node) -> None:
             maybe_type_annotation = (
                 "" if node.type is None else f" : {type_repr(node.type)}"
             )
@@ -817,6 +934,7 @@ class CodeGen:
                         self.generate_output,
                         node.args[0],
                         descs=desc if expanded_def else None,
+                        repr_fn=_get_repr,
                     )
                 )
                 return
@@ -878,7 +996,7 @@ class CodeGen:
         )
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: dict[int, Optional[int]] = {}
+        lineno_map: dict[int, int | None] = {}
         prologue_len = prologue.count("\n") + 1
         new_lines: list[str] = []
         cur_idx = None
@@ -924,8 +1042,12 @@ class _BoxedCodeGen(CodeGen):
     """
 
     def gen_fn_def(
-        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
-    ):
+        self,
+        free_vars: list[str],
+        maybe_return_annotation: str,
+        *,
+        expanded_def: bool = False,
+    ) -> str:
         """
         Generate function definition for boxed calling convention.
 
@@ -953,7 +1075,7 @@ class _BoxedCodeGen(CodeGen):
 
 
 class _PyTreeCodeGen(CodeGen):
-    def __init__(self, pytree_info: _PyTreeInfo):
+    def __init__(self, pytree_info: _PyTreeInfo) -> None:
         super().__init__()
         self.pytree_info: _PyTreeInfo = pytree_info
 
@@ -984,7 +1106,9 @@ class _PyTreeCodeGen(CodeGen):
         else:
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
-    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+    def gen_var_bindings(
+        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
+    ) -> str:
         in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
@@ -1022,8 +1146,12 @@ class _PyTreeCodeGen(CodeGen):
         return bindings
 
     def gen_fn_def(
-        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
-    ):
+        self,
+        free_vars: list[str],
+        maybe_return_annotation: str,
+        *,
+        expanded_def: bool = False,
+    ) -> str:
         # Given a user function/model:
         #   myargs = [myargs0, myargs1]
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
@@ -1056,32 +1184,41 @@ class _PyTreeCodeGen(CodeGen):
             fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
         return fn_definition
 
-    def generate_output(self, output_args, *, descs: Optional[Any] = None):
+    def generate_output(
+        self,
+        output_args: Argument,
+        *,
+        descs: Sequence[str] | None = None,
+        repr_fn: Callable[[object], str] | None = None,
+    ) -> str:
+        if repr_fn is None:
+            repr_fn = repr
         if self.pytree_info and self.pytree_info.out_spec:
             if descs is not None and isinstance(output_args, (list, tuple)):
                 return (
                     self._format_multiline_container(
-                        output_args, descs, "return pytree.tree_unflatten("
+                        output_args,
+                        descs,
+                        "return pytree.tree_unflatten(",
+                        repr_fn=repr_fn,
                     )
                     + ", self._out_spec)"
                 )
             else:
-                return (
-                    f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
-                )
+                return f"return pytree.tree_unflatten({repr_fn(output_args)}, self._out_spec)"
         else:
-            return super().generate_output(output_args, descs=descs)
+            return super().generate_output(output_args, descs=descs, repr_fn=repr_fn)
 
 
 class _ExportCodeGen(_PyTreeCodeGen):
     def __init__(
         self,
         pytree_info: _PyTreeInfo,
-        in_shuffle_graph: "GraphModule",
-        out_shuffle_graph: "GraphModule",
+        in_shuffle_graph: GraphModule,
+        out_shuffle_graph: GraphModule,
         tree_leaf_names: list[str],
-        root: Optional[torch.nn.Module],
-    ):
+        root: torch.nn.Module | None,
+    ) -> None:
         super().__init__(pytree_info)
         self.in_shuffle_graph = in_shuffle_graph
         self.out_shuffle_graph = out_shuffle_graph
@@ -1101,11 +1238,13 @@ class _ExportCodeGen(_PyTreeCodeGen):
         ret = super().process_outputs(flat_outs)
         return ret
 
-    def gen_fn_def(self, *args, **kwargs) -> str:
+    def gen_fn_def(self, *args: Any, **kwargs: Any) -> str:
         fn_def = super().gen_fn_def(*args, **kwargs)
         return fn_def
 
-    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+    def gen_var_bindings(
+        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
+    ) -> str:
         without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
         fn_signature: str = f"{', '.join(fn_args)}"
         if self.root is not None:
@@ -1114,13 +1253,53 @@ class _ExportCodeGen(_PyTreeCodeGen):
     {", ".join(self.tree_leaf_names)}, = pytree.tree_leaves(({fn_signature},))
     {", ".join(without_annotation)}, = self._in_shuffle_graph({", ".join(self.tree_leaf_names)})"""
 
-    def generate_output(self, output_args, *args, **kwargs) -> str:
+    def generate_output(self, output_args: Argument, *args: Any, **kwargs: Any) -> str:
+        if not isinstance(output_args, (list, tuple)):
+            raise TypeError(
+                f"Expected list or tuple for output_args, got {type(output_args)}"
+            )
         output = f"self._out_shuffle_graph({', '.join(self.tree_leaf_names)}, {', '.join([str(a) for a in output_args])})"
         return f"return pytree.tree_unflatten({output}, self._out_spec)"
 
 
+class _FindNodesLookupTable:
+    """
+    Side table for the graph for the purpose of doing fast queries
+    """
+
+    def __init__(self) -> None:
+        self.table: dict[tuple[str, Target | None], dict[Node, None]] = defaultdict(
+            dict
+        )
+
+    def _key(self, node: Node) -> tuple[str, Target | None]:
+        return (node.op, node.target if node.op == "call_function" else None)
+
+    def __contains__(self, node: Node) -> bool:
+        return node in self.table[self._key(node)]
+
+    def insert(self, node: Node) -> None:
+        self.table[self._key(node)][node] = None
+
+    def remove(self, node: Node) -> None:
+        self.table[self._key(node)].pop(node)
+
+    # TODO: should return list[Node], see _node_list.__iter__ comment
+    def find_nodes(self, *, op: str, target: Target | None = None) -> list[Any]:
+        if op == "call_function":
+            if target is None:
+                raise AssertionError("target must not be None for call_function op")
+            return [*self.table[(op, target)].keys()]
+
+        if target is None:
+            return [*self.table[(op, None)].keys()]
+
+        # op is call_method, get_attr, call_module
+        return [node for node in self.table[(op, None)] if node.target == target]
+
+
 @compatibility(is_backward_compatible=True)
-class Graph(_GraphBase):
+class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
     It consists of a series of ``Node`` s, each representing callsites (or other
@@ -1171,30 +1350,47 @@ class Graph(_GraphBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        owning_module: Optional["GraphModule"] = None,
-        tracer_cls: Optional[type["Tracer"]] = None,
-        tracer_extras: Optional[dict[str, Any]] = None,
-    ):
+        owning_module: GraphModule | None = None,
+        tracer_cls: type[Tracer] | None = None,
+        tracer_extras: dict[str, Any] | None = None,
+    ) -> None:
         """
         Construct an empty Graph.
         """
-        # Call the C++ base class __init__ which initializes:
-        # - _find_nodes_lookup_table
-        # - _len = 0
-        # - _root = None (will be set below)
-        super().__init__()
         self._root: Node = Node(self, "", "root", "", (), {})
         self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
+        self._len = 0
         self._graph_namespace = _Namespace()
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
         self._co_fields: dict[str, Any] = {}
+        self._find_nodes_lookup_table = _FindNodesLookupTable()
 
-    # Note: owning_module and nodes properties are implemented in C++ (_GraphBase)
-    # See torch/csrc/fx/graph.cpp for the implementation.
+    @property
+    def owning_module(self) -> GraphModule | None:
+        return self._owning_module
+
+    @owning_module.setter
+    def owning_module(self, mod: GraphModule | None) -> None:
+        self._owning_module = mod
+
+    @property
+    def nodes(self) -> _node_list:
+        """
+        Get the list of Nodes that constitute this Graph.
+
+        Note that this ``Node`` list representation is a doubly-linked list. Mutations
+        during iteration (e.g. delete a Node, add a Node) are safe.
+
+        Returns:
+
+            A doubly-linked list of Nodes. Note that ``reversed`` can be called on
+            this list to switch iteration order.
+        """
+        return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
     def output_node(self) -> Node:
@@ -1204,9 +1400,10 @@ class Graph(_GraphBase):
         return output_node
 
     @compatibility(is_backward_compatible=False)
+    # TODO: should return list[Node], see _node_list.__iter__ comment
     def find_nodes(
-        self, *, op: str, target: Optional["Target"] = None, sort: bool = True
-    ):
+        self, *, op: str, target: Target | None = None, sort: bool = True
+    ) -> list[Any]:
         """
         Allows for fast query of nodes
 
@@ -1231,8 +1428,8 @@ class Graph(_GraphBase):
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(
-        self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
-    ) -> "Optional[Argument]":
+        self, g: Graph, val_map: dict[Node, Node], return_output_node: bool = False
+    ) -> Argument | None:
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -1258,7 +1455,7 @@ class Graph(_GraphBase):
             val_map[node] = self.node_copy(node, lambda n: val_map[n])
         return None
 
-    def __deepcopy__(self, memo=None) -> "Graph":
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Graph:
         """
         Explicitly implement __deepcopy__ to prevent excessive recursion depth
         from the default implementation. This uses graph_copy to copy the nodes
@@ -1268,7 +1465,11 @@ class Graph(_GraphBase):
         """
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
-        output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        output_vals = g.graph_copy(
+            self,
+            val_map=memo,  # pyrefly: ignore[bad-argument-type]
+            return_output_node=True,
+        )
         g._codegen = copy.deepcopy(self._codegen)
         if output_vals is not None:
             if not isinstance(output_vals, tuple):
@@ -1289,11 +1490,11 @@ class Graph(_GraphBase):
     def create_node(
         self,
         op: str,
-        target: "Target",
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
+        target: Target,
+        args: tuple[Argument, ...] | None = None,
+        kwargs: dict[str, Argument] | None = None,
+        name: str | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
@@ -1351,14 +1552,14 @@ class Graph(_GraphBase):
         return n
 
     @compatibility(is_backward_compatible=False)
-    def process_inputs(self, *args):
+    def process_inputs(self, *args: Any) -> Any:
         """
         Processes args so that they can be passed to the FX graph.
         """
         return self._codegen.process_inputs(*args)
 
     @compatibility(is_backward_compatible=False)
-    def process_outputs(self, out):
+    def process_outputs(self, out: Any) -> Any:
         return self._codegen.process_outputs(out)
 
     @compatibility(is_backward_compatible=True)
@@ -1403,7 +1604,7 @@ class Graph(_GraphBase):
         )
 
     @compatibility(is_backward_compatible=True)
-    def inserting_before(self, n: Optional[Node] = None):
+    def inserting_before(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
@@ -1428,7 +1629,7 @@ class Graph(_GraphBase):
         return _InsertPoint(self, n.prepend)
 
     @compatibility(is_backward_compatible=True)
-    def inserting_after(self, n: Optional[Node] = None):
+    def inserting_after(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
@@ -1456,7 +1657,7 @@ class Graph(_GraphBase):
     def placeholder(
         self,
         name: str,
-        type_expr: Optional[Any] = None,
+        type_expr: Any | None = None,
         default_value: Any = inspect.Signature.empty,
     ) -> Node:
         """
@@ -1486,7 +1687,7 @@ class Graph(_GraphBase):
         return self.create_node("placeholder", name, args=args, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
-    def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
+    def get_attr(self, qualified_name: str, type_expr: Any | None = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
         fetch of an attribute from the ``Module`` hierarchy.
@@ -1536,7 +1737,7 @@ class Graph(_GraphBase):
 
             return True
 
-        if self.owning_module and not _get_attr_reference_exists(
+        if self.owning_module is not None and not _get_attr_reference_exists(
             self.owning_module, qualified_name
         ):
             warnings.warn(
@@ -1557,9 +1758,9 @@ class Graph(_GraphBase):
     def call_module(
         self,
         module_name: str,
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
+        args: tuple[Argument, ...] | None = None,
+        kwargs: dict[str, Argument] | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Insert a ``call_module`` ``Node`` into the ``Graph``. A ``call_module`` node
@@ -1591,7 +1792,10 @@ class Graph(_GraphBase):
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if self.owning_module and self.owning_module.get_submodule(module_name) is None:
+        if (
+            self.owning_module is not None
+            and self.owning_module.get_submodule(module_name) is None
+        ):
             warnings.warn(
                 "Attempted to insert a call_module Node with "
                 "no underlying reference in the owning "
@@ -1607,9 +1811,9 @@ class Graph(_GraphBase):
     def call_method(
         self,
         method_name: str,
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
+        args: tuple[Argument, ...] | None = None,
+        kwargs: dict[str, Argument] | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
@@ -1646,10 +1850,10 @@ class Graph(_GraphBase):
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
-        name: Optional[str] = None,
+        args: tuple[Argument, ...] | None = None,
+        kwargs: dict[str, Argument] | None = None,
+        type_expr: Any | None = None,
+        name: str | None = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1686,7 +1890,7 @@ class Graph(_GraphBase):
 
     @compatibility(is_backward_compatible=True)
     def node_copy(
-        self, node: Node, arg_transform: Callable[[Node], "Argument"] = lambda x: x
+        self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x
     ) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -1722,7 +1926,10 @@ class Graph(_GraphBase):
         return result_node
 
     @compatibility(is_backward_compatible=True)
-    def output(self, result: "Argument", type_expr: Optional[Any] = None):
+    # TODO: should return Node, see _node_list.__iter__ comment
+    def output(  # pyrefly: ignore[unannotated-return]
+        self, result: Argument, type_expr: Any | None = None
+    ):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
         a ``return`` statement in Python code. ``result`` is the value that should
@@ -1744,7 +1951,7 @@ class Graph(_GraphBase):
             op="output", target="output", args=(result,), type_expr=type_expr
         )
 
-    def _target_to_str(self, target: Optional[Target]) -> str:
+    def _target_to_str(self, target: Target | None) -> str:
         if callable(target):
             op = target.__name__
         else:
@@ -1767,7 +1974,7 @@ class Graph(_GraphBase):
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1810,11 +2017,11 @@ class Graph(_GraphBase):
         # makes sense to reuse it. This way, it's easy to print something like
         # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
         # implemented cooperatively to allow this.
-        def node_repr(n: Node):
+        def node_repr(n: Node) -> str:
             return namespace.create_name(n.name, n)
 
         @contextmanager
-        def override_node_repr(graph: Graph):
+        def override_node_repr(graph: Graph) -> Generator[None, None, None]:
             orig_repr_fns = {}
             for node in graph.nodes:
                 orig_repr_fns[node] = node._repr_fn
@@ -1850,7 +2057,7 @@ class Graph(_GraphBase):
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1884,14 +2091,14 @@ class Graph(_GraphBase):
         return s
 
     @compatibility(is_backward_compatible=True)
-    def print_tabular(self):
+    def print_tabular(self) -> None:
         """
         Prints the intermediate representation of the graph in tabular
         format. Note that this API requires the ``tabulate`` module to be
         installed.
         """
         try:
-            from tabulate import tabulate
+            from tabulate import tabulate  # pyrefly: ignore[missing-import]
         except ImportError:
             print(
                 "`print_tabular` relies on the library `tabulate`, "
@@ -1906,7 +2113,7 @@ class Graph(_GraphBase):
         )
 
     @compatibility(is_backward_compatible=True)
-    def lint(self):
+    def lint(self) -> None:
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
@@ -1917,7 +2124,7 @@ class Graph(_GraphBase):
         """
 
         # Check topo order
-        def check_arg(arg: Node, n: Optional[Node] = None) -> None:
+        def check_arg(arg: Node, n: Node | None = None) -> None:
             context_str = f" of Node '{n}' " if n else " "
             if arg.graph is not self:
                 raise RuntimeError(
@@ -1987,7 +2194,7 @@ class Graph(_GraphBase):
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
-        self, is_impure_node: Optional[Callable[[Node], bool]] = None
+        self, is_impure_node: Callable[[Node], bool] | None = None
     ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
@@ -2040,7 +2247,7 @@ class Graph(_GraphBase):
         if torch._guards.TracingContext.try_get():
             impure_random = torch._inductor.config.fallback_random
 
-        def has_side_effect(node):
+        def has_side_effect(node: Node) -> bool:
             if is_impure_node is not None:
                 return is_impure_node(node)
             return node.is_impure(impure_random)
@@ -2075,14 +2282,14 @@ class Graph(_GraphBase):
         return changed
 
     @compatibility(is_backward_compatible=False)
-    def set_codegen(self, codegen: CodeGen):
+    def set_codegen(self, codegen: CodeGen) -> None:
         self._codegen = codegen
 
     @compatibility(is_backward_compatible=False)
     def on_generate_code(
         self,
-        make_transformer: Callable[[Optional[TransformCodeFunc]], TransformCodeFunc],
-    ):
+        make_transformer: Callable[[TransformCodeFunc | None], TransformCodeFunc],
+    ) -> contextlib.AbstractContextManager[None]:
         """Register a transformer function when python code is generated
 
         Args:
@@ -2155,7 +2362,7 @@ class Graph(_GraphBase):
         self._codegen._body_transformer = make_transformer(on_gen_code_old)
 
         @contextlib.contextmanager
-        def on_generate_code_context_manager():
+        def on_generate_code_context_manager() -> Generator[None, None, None]:
             try:
                 yield
             finally:
@@ -2171,8 +2378,8 @@ class Graph(_GraphBase):
 
 @contextmanager
 def _override_sym_repr(
-    override: Callable[["torch.types.PySymType"], str],
-) -> Iterator[None]:
+    override: Callable[[torch.types.PySymType], str],
+) -> Generator[None, None, None]:
     tmp = CodeGen._sym_repr
     try:
         CodeGen._sym_repr = override
@@ -2181,12 +2388,12 @@ def _override_sym_repr(
         CodeGen._sym_repr = tmp
 
 
-def _identity(x):
+def _identity(x: str) -> str:
     return x
 
 
-def _make_color_fn(code):
-    def f(s):
+def _make_color_fn(code: str) -> Callable[[str], str]:
+    def f(s: str) -> str:
         reset = "\033[0m"
         return f"{code}{s}{reset}"
 

@@ -2,6 +2,8 @@
 
 This rubric guides labeling decisions for PT2 oncall triage.
 
+**Every `oncall: pt2` issue MUST have at least one `module:` label.** The PT2 queue is too broad without one — the team needs to know which component is affected. Use the sections below to determine the right module label(s).
+
 ## 1. Component Isolation - Be Precise, Don't Over-Tag
 
 ### Dynamo vs Dynamic Shapes
@@ -32,6 +34,29 @@ When component isn't clear from the issue body:
 ---
 
 **This is critical** when you have identified an issue as inductor, and the failing device is "cpu" ONLY, then this is a CPU inductor issue, and should be redirected to `oncall: cpu inductor`
+
+### Silently Dropped Operations = Dynamo
+
+If torch.compile silently drops or ignores an operation that works in eager, the bug is in Dynamo's tracing.
+
+| Signal | Label |
+|--------|-------|
+| In-place mutation skipped under compile (`detach_()`, `requires_grad_()`) | `module: dynamo` |
+| Side-effect not captured (global state, tensor metadata) | `module: dynamo` |
+
+Don't apply `module: autograd` just because the dropped operation involves autograd. If eager works fine, the autograd engine is fine.
+
+### Decomposition Bugs
+
+If eager and traced results diverge numerically for a specific op, suspect a bad decomposition.
+
+| Signal | Label |
+|--------|-------|
+| Eager vs traced diverge for a specific op | `module: decompositions` |
+| Higher-order gradients wrong under tracing | `module: decompositions` |
+| `make_fx` symbolic tracing diverges from eager | `module: fx` + `module: decompositions` + `oncall: pt2` |
+
+---
 
 ## 3. Don't Over-Tag pt2-dispatcher
 
@@ -112,7 +137,34 @@ Check for existing labels before inventing categories:
 
 ---
 
-## 7. functorch + compile
+## 7. Helion Kernel Issues
+
+[Helion](https://github.com/pytorch/helion) is a high-level Python DSL for writing GPU kernels. Users write kernels with `@helion.kernel` and `helion.language` (`hl.tile()`, etc.) using standard PyTorch ops, and Helion compiles them to Triton. Helion kernels can also be fused into `torch.compile` graphs via inductor's template fusion hooks.
+
+### Identifying Helion Issues
+
+| Signal | Label |
+|--------|-------|
+| Issue mentions `helion`, `@helion.kernel`, `helion.language`, `hl.tile` | `module: helion` |
+| Error traceback includes `helion/` or `helion.` frames | `module: helion` |
+| Helion kernel produces wrong results (standalone, no torch.compile) | `module: helion` only |
+| Helion kernel fails or miscompiles under `torch.compile` | `module: helion` + `module: inductor` |
+| Inductor template fusion bug triggered by a Helion template | `module: helion` + `module: inductor` |
+
+### Routing
+
+- Helion issues get `oncall: pt2` — Helion is a PT2 component.
+- If the bug is purely in Helion's own compilation (standalone kernel, not under torch.compile), apply `module: helion` without `module: inductor`.
+- If the bug is in how inductor fuses or emits Helion templates, apply both `module: helion` and `module: inductor`.
+
+### Common Mistakes
+
+- **Don't confuse Helion with raw Triton**: If the user is writing Triton kernels directly (using `@triton.jit`, `tl.load`, etc.) without Helion, that's `module: inductor`, not `module: helion`.
+- **Don't apply `module: helion` for general inductor codegen bugs**: Just because inductor generates Triton code doesn't make it a Helion issue. Helion is a specific DSL — look for explicit `helion` imports or mentions.
+
+---
+
+## 8. Functorch + Compile
 
 | Situation | Labels |
 |-----------|--------|
@@ -121,7 +173,7 @@ Check for existing labels before inventing categories:
 
 ---
 
-## 8. High Priority Criteria
+## 9. High Priority Criteria
 
 **This is critical** You should not explicitly add `high priority` - add `triage review` instead
 so that it is reviewed at the next triage meeting by the oncall.
@@ -139,7 +191,7 @@ Mark `triage review` if ANY of these apply:
 
 ---
 
-## 9. Fuzzer Issues
+## 10. Fuzzer Issues
 
 For `topic: fuzzer` issues:
 
@@ -151,7 +203,7 @@ For `topic: fuzzer` issues:
 
 ---
 
-## 10. Quick Label Reference
+## 11. Quick Label Reference
 
 ### Core Components
 - `module: dynamo` - Tracing, bytecode, graph breaks
@@ -160,6 +212,7 @@ For `topic: fuzzer` issues:
 - `module: pt2-dispatcher` - AOT autograd, functionalization, FakeTensor
 - `module: cuda graphs` - CUDA graph capture/replay
 - `module: flex attention` - Flex attention API
+- `module: helion` - Helion DSL kernel authoring, compilation, and inductor fusion
 
 ### Holistic Areas
 - `module: compile ux` - Error messages, APIs, programming model

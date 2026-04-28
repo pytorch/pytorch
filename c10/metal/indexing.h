@@ -44,13 +44,45 @@ inline long offset_from_thread_index(
   return offset_from_coord(pos, strides, ndim);
 }
 
+// One thread per element. Used for small dense tensors where the ILP variant's
+// per-thread overhead isn't amortized (see ILP_DISPATCH_THRESHOLD on the host).
 template <typename T, typename F>
-kernel void unary_dense(
+kernel void unary_dense_scalar(
     device result_of<F, T>* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   output[index] = f(input[index]);
+}
+
+// Each thread loads ILP_PER_THREAD elements into thread-local memory, applies
+// the functor, then writes them back. Increases memory-level parallelism and
+// lets the compiler issue wide loads/stores when alignment permits.
+template <typename T, typename F>
+kernel void unary_dense(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant uint& numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<result_of<F, T>, ILP_PER_THREAD> tmp_out;
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      output[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      output[i] = f(input[i]);
+    }
+  }
 }
 
 template <typename T, typename F>
@@ -79,7 +111,14 @@ kernel void unary_strided(
       c10::metal::unary_dense<DTYPE0, NAME##_functor>(                         \
           device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
           constant DTYPE0 * input,                                             \
+          constant uint & numel,                                               \
           uint index);                                                         \
+  template                                                                     \
+      [[host_name(#NAME "_dense_scalar_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
+          c10::metal::unary_dense_scalar<DTYPE0, NAME##_functor>(              \
+              device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output, \
+              constant DTYPE0 * input,                                         \
+              uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
       c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
           device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
@@ -182,10 +221,16 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
       return cast_to<T>(val_at_offs<char>(ptr, offs));
     case ScalarType::Short:
       return cast_to<T>(val_at_offs<short>(ptr, offs));
+    case ScalarType::UInt16:
+      return cast_to<T>(val_at_offs<uint16_t>(ptr, offs));
     case ScalarType::Int:
       return cast_to<T>(val_at_offs<int>(ptr, offs));
+    case ScalarType::UInt32:
+      return cast_to<T>(val_at_offs<uint32_t>(ptr, offs));
     case ScalarType::Long:
       return cast_to<T>(val_at_offs<long>(ptr, offs));
+    case ScalarType::UInt64:
+      return cast_to<T>(val_at_offs<uint64_t>(ptr, offs));
     // Floats
     case ScalarType::Float:
       return cast_to<T>(val_at_offs<float>(ptr, offs));

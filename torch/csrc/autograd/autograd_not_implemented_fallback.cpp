@@ -618,7 +618,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       "input and the first output (the output can be a vector of tensors). Please change the "
       "order of your operator's parameters so that this is the case.");
   const bool is_view = aliased_input_idx.has_value();
-  size_t aliased_input_idx_val;
+  size_t aliased_input_idx_val = 0;
 
   // Save inputs before we redispatch down
   torch::jit::Stack non_tensor_stack;
@@ -657,13 +657,13 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
          "which does not have a derivative implemented is forbidden.");
     auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
 
-    const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
+    const auto erroring_rev_view_func =
+        [op_name = op_name](const at::Tensor&) -> at::Tensor {
       TORCH_CHECK(
           false,
           "Accessing the reverse view for ",
           op_name,
           " which does not have a derivative implemented is forbidden.");
-      return at::Tensor();
     };
 
     if (aliased_output_iv.isTensorList()) {

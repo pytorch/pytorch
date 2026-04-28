@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 from torch import Tensor
@@ -55,6 +55,7 @@ class Reducer:
         skip_all_reduce_unused_params: bool = ...,
         use_python_reducer: bool = ...,
         bucket_bytes_cap_list: list[int] = ...,
+        batched_grad_copy: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -146,7 +147,9 @@ class ReduceOp:
     # stub with zero members. There is a chance this is due to a recent change
     # in the semantics of enum membership. If so, use `member = value` to mark
     # an enum member, instead of `member: type`
-    class RedOpType(Enum): ...  # type: ignore[misc]
+    class RedOpType(Enum):
+        def __call__(self, factor: float | int | Tensor) -> ReduceOp:
+            """Create a PREMUL_SUM ReduceOp with the given factor. Only PREMUL_SUM supports this."""
 
 class BroadcastOptions:
     rootRank: int
@@ -158,7 +161,7 @@ class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
     asyncOp: bool
-    sparseIndices: Optional[Tensor]
+    sparseIndices: Tensor | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -218,7 +221,7 @@ class Store:
     @overload
     def wait(self, keys: list[str], timeout: timedelta) -> None: ...
     def queue_pop(self, key: str, block: bool = True) -> bytes: ...
-    def queue_push(self, key: str, value: Union[bytes, str]) -> None: ...
+    def queue_push(self, key: str, value: bytes | str) -> None: ...
     def queue_len(self, key: str) -> int: ...
     def list_keys(self) -> list[str]: ...
 
@@ -375,18 +378,18 @@ class ProcessGroup:
     def split_group(
         self,
         new_ranks: list[int],
-        timeout: Optional[timedelta] = None,
-        opts: Optional[Backend.Options] = None,
+        timeout: timedelta | None = None,
+        opts: Backend.Options | None = None,
         group_name: GroupName | None = None,
-        group_desc: Optional[str] = None,
-    ) -> Optional[ProcessGroup]: ...
+        group_desc: str | None = None,
+    ) -> ProcessGroup | None: ...
     def merge_remote_group(
         self,
         store: Store,
         size: int,
         timeout: timedelta,
         group_name: GroupName | None = None,
-        group_desc: Optional[str] = None,
+        group_desc: str | None = None,
     ) -> ProcessGroup: ...
     def abort(self) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
@@ -795,7 +798,9 @@ class _SymmetricMemory:
     @staticmethod
     def set_backend(name: str) -> None: ...
     @staticmethod
-    def get_backend(device: torch.device) -> Optional[str]: ...
+    def get_backend(device: torch.device) -> str | None: ...
+    @staticmethod
+    def is_symm_mem_tensor(tensor: torch.Tensor) -> bool: ...
     @staticmethod
     def get_mempool_allocator(device: torch.device) -> Any: ...
     signal_pad_size: int
@@ -893,3 +898,5 @@ class _Response:
 def _register_handler(
     name: str, handler: Callable[[_Request, _Response], None]
 ) -> None: ...
+def _set_comm_profiling_name(name: str) -> None: ...
+def _get_comm_profiling_name() -> str: ...

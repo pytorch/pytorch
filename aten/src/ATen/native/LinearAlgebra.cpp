@@ -476,7 +476,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
            : std::move(default_rtol);
   }
-  return std::make_tuple(atol, rtol);
+  return std::make_tuple(std::move(atol), std::move(rtol));
 }
 
 std::tuple<Tensor, Tensor> get_atol_rtol(
@@ -502,7 +502,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
   }
   auto atol_tensor = at::full({}, atol, options);
   auto rtol_tensor = at::full({}, rtol, options);
-  return std::make_tuple(atol_tensor, rtol_tensor);
+  return std::make_tuple(std::move(atol_tensor), std::move(rtol_tensor));
 }
 
 } // anonymous namespace
@@ -2623,6 +2623,7 @@ Tensor compute_T18_scale_square(
   // 3. Multiply remain matrices by 3 times and slice to acc[1:]
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
+  output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
   for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {
@@ -3702,7 +3703,8 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
   TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
   TORCH_CHECK(result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
   TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
@@ -3710,6 +3712,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
   TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
 
+  // Outer or inner dimension is 0
   if (result.numel() == 0 || self.size(1) == 0) {
     return result.zero_();
   }
@@ -3724,7 +3727,6 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     }
   }
   if (!dispatched) {
-    auto a = reinterpret_cast<int8_t*>(self.data_ptr());
     auto b = reinterpret_cast<int8_t*>(mat2.data_ptr());
     auto c = reinterpret_cast<int32_t*>(result.data_ptr());
     const int64_t m = result.size(0);
@@ -3735,18 +3737,26 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
-        auto row = i / n;
-        auto col = i % n;
-        c[row * ldc + col] = 0;
-        for (const auto k : c10::irange(k)) {
-          c[row * ldc + col] = c[row * ldc + col] +
-              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
-                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
-        }
-      }
+    #define COMPUTE_WITH_A_TYPE(a_type)                             \
+    auto a = reinterpret_cast<a_type*>(self.data_ptr());            \
+    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
+      for (const auto i : c10::irange(start, end)) {                \
+        auto row = i / n;                                           \
+        auto col = i % n;                                           \
+        c[row * ldc + col] = 0;                                     \
+        for (const auto k : c10::irange(k)) {                       \
+          c[row * ldc + col] = c[row * ldc + col] +                 \
+              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *    \
+                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]); \
+        }                                                           \
+      }                                                             \
     });
+
+    if (self.scalar_type() == at::kByte) {
+      COMPUTE_WITH_A_TYPE(uint8_t);
+    } else {
+      COMPUTE_WITH_A_TYPE(int8_t);
+    }
   }
   return result;
 }

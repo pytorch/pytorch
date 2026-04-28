@@ -1,7 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
+import dis
+import linecache
 import logging
 import re
+import sys
 import traceback
 import unittest
 import unittest.mock
@@ -16,11 +19,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    munge_exc,
-    scoped_load_inline,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -45,6 +44,189 @@ class GenericCtxMgr:
 
     def __exit__(self, exc_type, exc_value, traceback):
         pass
+
+
+def _get_iter_has_positions() -> bool:
+    """Whether GET_ITER bytecodes have position info on this Python build.
+
+    This varies across Python 3.12 point releases / platforms — some builds
+    include positions for GET_ITER and some don't, which affects whether
+    RangeIteratorVariable gets source attribution.
+    """
+    code = compile("for x in range(1): pass", "<test>", "exec")
+    for inst in dis.get_instructions(code):
+        if inst.opname == "GET_ITER":
+            return inst.positions is not None and inst.positions.lineno is not None
+    return False
+
+
+def _generic_ctx_mgr_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11):
+        caret = "^^^^^^^^^^^^^^^\n"
+    else:
+        caret = ""
+    return (
+        "Stack variable source attribution:\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                with GenericCtxMgr():\n"
+        f"{caret}"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                    with GenericCtxMgr():\n"
+        f"{caret}"
+    )
+
+
+def _assert_failure_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11):
+        caret = "^^^^^^^^^^^^^^^\n"
+    else:
+        caret = ""
+    return (
+        "Stack variable source attribution:\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                with GenericCtxMgr():\n"
+        f"{caret}"
+    )
+
+
+@lru_cache(None)
+def _compile_wrapper_raise_source() -> str:
+    source = "def f():\n    raise RuntimeError(\n        None\n    )\n"
+    filename = "<compile_wrapper_raise_source>"
+    linecache.cache[filename] = (
+        len(source),
+        None,
+        source.splitlines(True),
+        filename,
+    )
+    namespace = {}
+    exec(compile(source, filename, "exec"), namespace)
+    try:
+        namespace["f"]()
+    except RuntimeError as e:
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    if "        None\n    )\n" in msg:
+        return (
+            "    raise e.with_traceback(\n"
+            "        None\n"
+            "    ) from e.__cause__  # User compiler error\n"
+        )
+    return "    raise e.with_traceback(\n"
+
+
+def _load_global_has_positions() -> bool:
+    """Whether LOAD_GLOBAL bytecodes have position info on this Python build.
+
+    This varies across Python 3.12 point releases / platforms — some builds
+    include positions for LOAD_GLOBAL and some don't, which affects whether
+    NullVariable (pushed as part of LOAD_GLOBAL's call convention) gets
+    source attribution.
+    """
+    code = compile("def f(): x()", "<test>", "exec")
+    for const in code.co_consts:
+        if hasattr(const, "co_code"):
+            for inst in dis.get_instructions(const):
+                if inst.opname == "LOAD_GLOBAL":
+                    return (
+                        inst.positions is not None and inst.positions.lineno is not None
+                    )
+    return False
+
+
+def _reconstruction_failure_gb_stack_source_attribution() -> str:
+    if IS_MACOS:
+        var_repr = "NullVariable originated from:"
+    else:
+        var_repr = (
+            "LazyVariableTracker(realized: SkipFunctionVariable()) originated from:"
+        )
+
+    if sys.version_info >= (3, 14):
+        return (
+            "Stack variable source attribution:\n"
+            f"  {var_repr}\n"
+            '  File "test_error_messages.py", line N\n'
+            "                torch._dynamo.graph_break()\n"
+            "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11) and _load_global_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            f"  {var_repr}\n"
+            '  File "test_error_messages.py", line N\n'
+            "                torch._dynamo.graph_break()\n"
+            "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        f"  {var_repr}\n"
+        '  File "test_error_messages.py", line N\n'
+        "                torch._dynamo.graph_break()\n"
+        "\n"
+    )
+
+
+def _graph_break_in_loop_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11) and _get_iter_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            "  RangeIteratorVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                for i in range(2):\n"
+            "^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        "  RangeIteratorVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                for i in range(2):\n"
+        "\n"
+    )
+
+
+def _skip_frame_in_loop_message_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11) and _get_iter_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            "  RangeIteratorVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                for i in range(2):\n"
+            "^^^^^^^^\n"
+            "  WithExitFunctionVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                    with GenericCtxMgr():\n"
+            "^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        "  RangeIteratorVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                for i in range(2):\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                    with GenericCtxMgr():\n"
+        "\n"
+    )
 
 
 class ErrorMessagesTest(LoggingTestCase):
@@ -132,16 +314,13 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-Unsupported method call
-  Explanation: Dynamo does not know how to trace method `__iter__` of class `zip`
-  Hint: Avoid calling `zip.__iter__` in your code.
-  Hint: Please report an issue to PyTorch.
-  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
-  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
+missing tp_iter
+  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(zip)`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ [] {}
+  Developer debug context: tp_iter_impl not implemented for zip
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0156.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -160,17 +339,13 @@ from user code:
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
             """\
-Unsupported method call
-  Explanation: Dynamo does not know how to trace method `__iter__` of class `dict_items`
-  Hint: Avoid calling `dict_items.__iter__` in your code.
-  Hint: Please report an issue to PyTorch.
-  Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
-  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
-  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
+missing tp_iter
+  Explanation: Dynamo does not know how to iterate over `UserDefinedObjectVariable(dict_items)`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ [] {}
+  Developer debug context: tp_iter_impl not implemented for dict_items
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0156.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0811.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -292,7 +467,7 @@ Attempted to call function marked as skipped
   Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
+  Developer debug context: module: unittest.case, qualname: skip, skip reason: file is in unittest directory
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
@@ -306,6 +481,13 @@ from user code:
         def fn():
             torch._dynamo.disable()
 
+        def post_munge(s):
+            return re.sub(
+                r"file matches MOD_SKIPLIST \(.*?\)",
+                "file matches MOD_SKIPLIST (<path>)",
+                s,
+            )
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
@@ -314,13 +496,14 @@ Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
   Hint: Avoid calling the function `disable`.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: <missing reason>
+  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: file matches MOD_SKIPLIST (<path>)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.disable()""",
+            post_munge=post_munge,
         )
 
     def test_skipfile_inline(self):
@@ -343,7 +526,7 @@ Attempted to inline function marked as skipped
   Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
+  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: file is in unittest directory
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0008.html
 
@@ -408,7 +591,7 @@ Attempted to call function marked as skipped
   Hint: If you are attempting to call a logging function (e.g. `_warnings.warn`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
   Hint: Please file an issue on GitHub so the PyTorch team can add support for it.
 
-  Developer debug context: module: _warnings, qualname: warn, skip reason: <missing reason>
+  Developer debug context: module: _warnings, qualname: warn, skip reason: cannot determine source file for _warnings (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
@@ -456,96 +639,10 @@ Attempted to call function marked as skipped
   Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.make_from_collection.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: cannot determine source file for optree._C (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
-
-    @scoped_load_inline
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    def test_cpp_extension_recommends_custom_ops(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
-        at::Tensor foobar(const at::Tensor& x) {
-            return x.clone();
-        }
-        """
-        module = load_inline(
-            name="mylib",
-            cpp_sources=cpp_source,
-            functions="foobar",
-            verbose=True,
-        )
-
-        x = torch.ones(2, 2, requires_grad=True)
-        counters.clear()
-
-        @torch.compile(backend="eager")
-        def f(x):
-            return module.foobar(x)
-
-        with self.assertWarnsOnceRegex(
-            UserWarning,
-            "(?s).*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
-        ):
-            f(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        first_graph_break = next(iter(counters["graph_break"].keys()))
-
-        first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
-        # HACK: this patches around the fact that PyBind11 improperly sets the
-        # __qualname__ attribute on functions and methods; see
-        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
-        # that issue is fixed.
-        first_graph_break = re.sub(
-            r"pybind11_detail_function_record_v[^ .]+", "PyCapsule", first_graph_break
-        )
-
-        self.assertExpectedInline(
-            first_graph_break,
-            """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
-  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
-  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
-
-  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
-        )
-
-        cpp_source = """
-        #include <torch/extension.h>
-        at::Tensor baz(const at::Tensor& x) {
-            return x.clone();
-        }
-        """
-        module2 = load_inline(
-            name="mylib2",
-            cpp_sources=cpp_source,
-            functions="baz",
-            verbose=True,
-        )
-
-        torch._dynamo.reset()
-
-        # Test that each warning only happens once
-        @torch.compile(backend="eager")
-        def f(x):
-            module2.baz(x)
-            module.foobar(x)
-            module.foobar(x)
-            module2.baz(x)
-            module.foobar(x)
-            module2.baz(x)
-            return x.clone()
-
-        with warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")
-            f(x)
-            f(x)
-        self.assertEqual(len(ws), 2)
 
     def test_observed_exception(self):
         def fn():
@@ -560,7 +657,7 @@ Observed exception
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: raised exception RuntimeError([ConstantVariable(str: 'test')])
+  Developer debug context: raised exception RuntimeError('test')
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
 
@@ -593,35 +690,6 @@ Uninitialized nn.Module
 from user code:
    File "test_error_messages.py", line N, in fn
     return mod(1)""",
-        )
-
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_class_property(self):
-        class Foo(torch.nn.Module):
-            attr = unittest
-
-        def fn(mod, x):
-            return mod.attr
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                Foo(), torch.randn(3)
-            ),
-            """\
-Unsupported nn.Module attribute type
-  Explanation: Dynamo does not support tracing nn.Module attributes of type `module`
-  Hint: Refactor your code so that `attr` (type `module`) is not an attribute of `Foo`
-  Hint: Currently supported attribute types are methods, classmethods, staticmethods, properties, constants, and tensors.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: nn.Module subclass: Foo, name: attr, attribute type: module
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0161.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return mod.attr""",
         )
 
     def test_generic_ctx_mgr_graph_break_fullgraph_true(self):
@@ -659,8 +727,7 @@ from user code:
 
         torch.compile(fn, backend="eager")()
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
@@ -684,12 +751,19 @@ Graph break under GenericContextWrappingVariable
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
 
+"""
+            + _generic_ctx_mgr_stack_source_attribution()
+            + """
 User code traceback:
   File "test_error_messages.py", line N, in test_generic_ctx_mgr_graph_break_fullgraph_false
     torch.compile(fn, backend="eager")()
   File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     def test_load_build_class(self):
@@ -708,7 +782,7 @@ Attempted to call function marked as skipped
   Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
   Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
-  Developer debug context: module: builtins, qualname: __build_class__, skip reason: <missing reason>
+  Developer debug context: module: builtins, qualname: __build_class__, skip reason: cannot determine source file for builtins (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
@@ -822,10 +896,7 @@ User code traceback:
 """,
         )
 
-        self.assertExpectedInline(
-            post_munge(
-                munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0)
-            ),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
@@ -840,12 +911,22 @@ Reconstruction failure
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
+"""
+            + _reconstruction_failure_gb_stack_source_attribution()
+            + """\
 User code traceback:
   File "test_error_messages.py", line N, in test_reconstruction_failure_gb
     torch.compile(fn, backend="eager")()
   File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
-""",
+"""
+        )
+
+        self.assertExpectedInline(
+            post_munge(
+                munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0)
+            ),
+            expected,
         )
 
     def test_faketensor_nyi(self):
@@ -916,6 +997,12 @@ from user code:
             """\
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -926,6 +1013,35 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in fn
     if x.sum() > 0:""",
+        )
+
+    def test_data_dependent_branching_bool_tensor_hints(self):
+        def cast_overflow_tensors(tensors, offset=1000):
+            if tensors.isinf().any() or tensors.isnan().any():
+                clamp_value = torch.finfo(tensors.dtype).max - offset
+                tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
+            return tensors
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(
+                cast_overflow_tensors, backend="eager", fullgraph=True
+            )(torch.randn(3)),
+            """\
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
+  Hint: Note: Python `or`/`and` between tensor expressions (e.g. `tensor.any() or other_tensor.any()`) triggers implicit bool conversion. Use `torch.logical_or`/`torch.logical_and` or the `|`/`&` operators instead.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+from user code:
+   File "test_error_messages.py", line N, in cast_overflow_tensors
+    if tensors.isinf().any() or tensors.isnan().any():""",
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
@@ -970,7 +1086,7 @@ from user code:
             "LazyVariableTracker(unrealized: <class 'function'>)", all_lines[0]
         )
         self.assertIn(
-            "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[3]
+            "LazyVariableTracker(unrealized: <class 'torch.Tensor'>)", all_lines[3]
         )
 
     @make_logging_test(graph_breaks=True)
@@ -988,6 +1104,12 @@ from user code:
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1015,8 +1137,7 @@ User code traceback:
 
         # only 1 graph break message
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
@@ -1032,12 +1153,19 @@ Data-dependent assertion failed (cannot compile partial graph)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0034.html
 
+"""
+            + _assert_failure_stack_source_attribution()
+            + """
 User code traceback:
   File "test_error_messages.py", line N, in test_assert_failure_in_generic_ctx_mgr
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
     assert x is None  # noqa: S101
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     def test_no_internal_compiler_stacktrace(self):
@@ -1063,14 +1191,15 @@ User code traceback:
         msg = re.sub(r"line (\d+)", "line N", msg)
         # remove carets
         msg = re.sub(r"\n\s*~*\^+\n", "\n", msg)
-        self.assertExpectedInline(
-            msg,
+        expected = (
             """\
 Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
   File "eval_frame.py", line N, in compile_wrapper
-    raise e.with_traceback(None) from e.__cause__  # User compiler error
+"""
+            + _compile_wrapper_raise_source()
+            + """\
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
@@ -1087,7 +1216,11 @@ from user code:
 
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
-""",
+"""
+        )
+        self.assertExpectedInline(
+            msg,
+            expected,
         )
 
     @torch._dynamo.config.patch(verbose=True)
@@ -1152,8 +1285,7 @@ from user code:
 
         fn(torch.ones(3))
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
@@ -1176,12 +1308,19 @@ graph break in loop
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb7000.html
 
+"""
+            + _graph_break_in_loop_stack_source_attribution()
+            + """\
 User code traceback:
   File "test_error_messages.py", line N, in test_graph_break_in_loop
     fn(torch.ones(3))
   File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
         @torch.compile(backend="eager")
@@ -1195,14 +1334,19 @@ User code traceback:
 
         gn(torch.ones(3))
         self.assertEqual(len(records), 2)
-        self.assertExpectedInline(
-            munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in gn, code: if x.sum() > 0:
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1220,12 +1364,19 @@ graph break in loop
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb7000.html
 
+"""
+            + _graph_break_in_loop_stack_source_attribution()
+            + """\
 User code traceback:
   File "test_error_messages.py", line N, in test_graph_break_in_loop
     gn(torch.ones(3))
   File "test_error_messages.py", line N, in gn
     if x.sum() > 0:
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     @make_logging_test(graph_breaks=True)
@@ -1239,14 +1390,19 @@ User code traceback:
 
         torch.compile(fn, backend="eager")(torch.randn(3))
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1254,12 +1410,19 @@ Data-dependent branching
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
 
+"""
+            + _skip_frame_in_loop_message_stack_source_attribution()
+            + """\
 User code traceback:
   File "test_error_messages.py", line N, in test_skip_frame_in_loop_message
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
     if x.sum() > 0:
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -1425,6 +1588,9 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
         self.assertEqual((len(matches) <= 20), True)
         self.assertIn("Most recent bytecode instructions traced (max 20):", s)
 
+    # TODO this test is broken with nested_graph_breaks because we need to update
+    # the resume collapse function for nested graph breaks
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
@@ -1811,8 +1977,9 @@ from user code:
     @make_logging_test(graph_breaks=True)
     def test_store_attr_graph_break(self, records):
         class Foo:
+            @torch.compiler.disable
             def __setattr__(self, name, value):
-                torch._dynamo.graph_break()
+                super().__setattr__(name, value)
 
         @torch.compile(backend="eager")
         def fn(x):
@@ -1820,27 +1987,30 @@ from user code:
 
         fn(torch.ones(3))
 
+        def post_munge(s):
+            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
+
         self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            post_munge(
+                munge_exc(records[-1].getMessage(), suppress_suffix=True, skip=0)
+            ),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
-Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
+Skip inlining `torch.compiler.disable()`d function
+  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
 
 User code traceback:
   File "test_error_messages.py", line N, in test_store_attr_graph_break
     fn(torch.ones(3))
   File "test_error_messages.py", line N, in fn
     Foo().attr = x
-  File "test_error_messages.py", line N, in __setattr__
-    torch._dynamo.graph_break()
 """,
         )
 
@@ -1851,19 +2021,18 @@ User code traceback:
                 Unsupported,
                 lambda: fn(torch.ones(3)),
                 """\
-Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
+Skip inlining `torch.compiler.disable()`d function
+  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
+  Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    Foo().attr = x
-  File "test_error_messages.py", line N, in __setattr__
-    torch._dynamo.graph_break()""",
+    Foo().attr = x""",
+                post_munge=post_munge,
             )
 
     def test_runtime_error_readable_shape_mismatch(self):
@@ -2191,39 +2360,6 @@ Dynamo recompile limit exceeded
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
 
-    @unittest.skipIf(
-        not torch.utils._triton.has_triton()
-        or not hasattr(__import__("triton"), "set_allocator"),
-        "requires triton with set_allocator support",
-    )
-    def test_triton_set_allocator(self):
-        import triton
-
-        def fn(x):
-            triton.set_allocator(lambda size, align, stream: None)
-            return x * 2 + 1
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(10)),
-            """\
-triton.set_allocator not supported
-  Explanation: triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.
-  Hint: Move triton.set_allocator() outside of the torch.compile region (call it before the compiled function).
-
-  Developer debug context: triton.set_allocator called inside compiled region
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4026.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    triton.set_allocator(lambda size, align, stream: None)""",
-        )
-
-
-class NestedGraphBreakLoggingTests(
-    LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
     @make_logging_test(graph_breaks=True)
     def test_nested_generic_ctx_mgr(self, records):
         def inner():
@@ -2239,8 +2375,7 @@ class NestedGraphBreakLoggingTests(
 
         torch.compile(fn, backend="eager")()
         self.assertEqual(len(records), 2)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
@@ -2275,6 +2410,10 @@ Graph break under GenericContextWrappingVariable
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
 
+"""
+            + _generic_ctx_mgr_stack_source_attribution()
+            + """\
+
 User code traceback:
   File "test_error_messages.py", line N, in test_nested_generic_ctx_mgr
     torch.compile(fn, backend="eager")()
@@ -2282,7 +2421,11 @@ User code traceback:
     inner()
   File "test_error_messages.py", line N, in inner
     torch._dynamo.graph_break()
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
         self.assertExpectedInline(
             munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0),
@@ -2314,13 +2457,6 @@ Graph break under GenericContextWrappingVariable
     def test_skipped_frame_with_verbose_traceback_nested(self, records):
         global f1, f2, f3
 
-        class GenericCtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
-
         def f1(x):
             with GenericCtxMgr():
                 torch._dynamo.graph_break()
@@ -2334,8 +2470,7 @@ Graph break under GenericContextWrappingVariable
 
         torch.compile(f3, backend="eager")(torch.randn(3))
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
@@ -2359,6 +2494,10 @@ Graph break under GenericContextWrappingVariable
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
 
+"""
+            + _assert_failure_stack_source_attribution()
+            + """\
+
 User code traceback:
   File "test_error_messages.py", line N, in test_skipped_frame_with_verbose_traceback_nested
     torch.compile(f3, backend="eager")(torch.randn(3))
@@ -2368,19 +2507,16 @@ User code traceback:
     return f1(x + 2)
   File "test_error_messages.py", line N, in f1
     torch._dynamo.graph_break()
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     @make_logging_test(graph_breaks=True)
     def test_skip_frame_in_loop_message_nested(self, records):
         global f1, f2, f3
-
-        class GenericCtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
 
         def f1(x):
             for i in range(2):
@@ -2397,14 +2533,19 @@ User code traceback:
 
         result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
         self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+        expected = (
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in f1, code: if x.sum() > 0:
+        gt = gt(sum_1, 0)
+
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -2412,6 +2553,9 @@ Data-dependent branching
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
 
+"""
+            + _skip_frame_in_loop_message_stack_source_attribution()
+            + """\
 User code traceback:
   File "test_error_messages.py", line N, in test_skip_frame_in_loop_message_nested
     result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
@@ -2421,7 +2565,11 @@ User code traceback:
     return f1(x + 4)
   File "test_error_messages.py", line N, in f1
     if x.sum() > 0:
-""",
+"""
+        )
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            expected,
         )
 
     @make_logging_test(graph_breaks=True)

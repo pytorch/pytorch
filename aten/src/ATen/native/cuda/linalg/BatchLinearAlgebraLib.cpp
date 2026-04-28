@@ -899,52 +899,28 @@ static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, cons
   );
 }
 
-Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper) {
+void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({1}, self.options().dtype(at::kInt));
-  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
   at::Tensor A_column_major_copy = cloneBatchedColumnMajor(A);
 
-  const int64_t nrhs = self_working_copy.size(-1);
+  const int64_t nrhs = self.size(-1);
 
   // cusolverDn<t>potrsBatched only supports nrhs == 1
   if (batch_size > 1 && nrhs == 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs_batched", [&] {
-      apply_cholesky_cusolver_potrsBatched<scalar_t>(self_working_copy, A_column_major_copy, upper, infos);
+      apply_cholesky_cusolver_potrsBatched<scalar_t>(self, A_column_major_copy, upper, infos);
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs", [&] {
-      apply_cholesky_cusolver_potrs<scalar_t>(self_working_copy, A_column_major_copy, upper, infos);
+      apply_cholesky_cusolver_potrs<scalar_t>(self, A_column_major_copy, upper, infos);
     });
   }
 
   // info from potrs and potrsBatched only report if the i-th parameter is wrong, not about the matrix singularity, etc.
   // So we don't need to check it all the time.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.item().toInt() == 0);
-
-  return self_working_copy;
 }
-
-
-void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
-  at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
-  at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
-  result.fill_(0);
-  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri", [&] {
-    apply_cholesky_cusolver_potrs<scalar_t>(result, input_working_copy, upper, infos_gpu);
-  });
-
-  // Debug only: info of cusolver potrs only check if the i-th parameter is wrong
-  // Function argument `infos` is a CPU tensor, the following copy will cause a device-host sync.
-  // infos.copy_(infos_gpu);
-}
-
-Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
-  _cholesky_inverse_cusolver_potrs_based(result, infos, upper);
-  return result;
-}
-
 
 /*
   The geqrf function computes the QR decomposition of a m x n matrix A.
