@@ -1,6 +1,5 @@
 #include <torch/csrc/utils/pybind.h>
 
-#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 
 namespace {
@@ -9,7 +8,7 @@ namespace {
 size_t getVersionInt() {
   return CUSPARSELT_VERSION;
 }
-#elif defined(USE_ROCM)
+#elif defined(USE_HIPSPARSELT)
 #include <hipsparselt/hipsparselt-version.h>
 size_t getVersionInt() {
  int version = 0;
@@ -59,4 +58,3 @@ void initCusparseltBindings(PyObject* module) {
 }
 
 } // namespace torch::cuda::shared
-#endif
