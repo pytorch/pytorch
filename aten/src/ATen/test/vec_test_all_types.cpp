@@ -5,6 +5,8 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
+    class MemoryAllPatched : public ::testing::Test {};
+    template <typename T>
     class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
@@ -91,7 +93,15 @@ namespace {
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
+    // Types that exercise the Vectorized<T>::loadu(ptr, count) overloads
+    // patched for #181510. Excludes vqint8/vquint8/vqint because those
+    // route through vec256_qint.h, which has its own loadu overloads not
+    // touched by this PR.
+    using LoaduPatchedTypes = ::testing::Types<
+        vfloat, vdouble, vcomplex, vcomplexDbl,
+        vBFloat16, vHalf, vlong, vint, vshort>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
+    TYPED_TEST_SUITE(MemoryAllPatched, LoaduPatchedTypes);
     TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
@@ -178,6 +188,18 @@ namespace {
             // clear storage
             std::memset(storage, 0, sizeof storage);
         }
+    }
+    TYPED_TEST(MemoryAllPatched, LoaduPartialNullPointer) {
+        // Regression test for #181510: loadu(nullptr, 0) tripped UBSan
+        // (memcpy nonnull) before the partial-load branch was guarded.
+        using vec = TypeParam;
+        constexpr size_t b_size = vec::size() * sizeof(ValueType<TypeParam>);
+        CACHE_ALIGN unsigned char storage[b_size];
+        CACHE_ALIGN unsigned char zero_storage[b_size];
+        std::memset(storage, 0xff, b_size);
+        std::memset(zero_storage, 0x00, b_size);
+        vec::loadu(nullptr, 0).store(storage);
+        ASSERT_EQ(std::memcmp(storage, zero_storage, b_size), 0);
     }
     TYPED_TEST(SignManipulation, Absolute) {
         using vec = TypeParam;
