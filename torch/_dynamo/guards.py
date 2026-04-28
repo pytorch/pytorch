@@ -473,6 +473,15 @@ class GuardManagerWrapper:
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
                     if node.has_no_accessors() and not node.has_object_aliasing_guard():
                         node.mark_tag_safe()
+                elif any(
+                    a.repr() == "PythonLambdaGuardAccessor"
+                    for a in node.get_accessors()
+                ):
+                    # PythonLambdaGuardAccessor produces ephemeral objects
+                    # (e.g., ___from_numpy converts np.float64 to a temporary
+                    # tensor). These must not be stashed by the tag-safe
+                    # recording pass since they are freed after each check.
+                    pass
                 else:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), dict):
