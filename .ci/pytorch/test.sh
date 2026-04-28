@@ -2131,7 +2131,7 @@ test_operator_microbenchmark() {
 
   # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
   # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
-  if [[ "${ROCM_VERSION:-}" != "" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MIOPEN_FIND_MODE=FAST
   fi
 
