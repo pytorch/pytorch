@@ -652,10 +652,15 @@ class DTensor(torch.Tensor):
                 asynchronously or not. Default: False
             forward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
                 ``forward_dtype`` before redistributing the local tensor in its forward.
-                The result DTensor will be in ``forward_dtype`` Default: None.
+                The result DTensor will be in ``forward_dtype``. If ``None``, no dtype
+                conversion is performed and the result DTensor preserves the input
+                DTensor's local tensor dtype. Default: None
             backward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
                 ``backward_dtype`` before redistributing the local tensor in its backward.
-                The result DTensor gradient would be converted back to the current DTensor dtype. Default: None
+                The result DTensor gradient would be converted back to the current (input)
+                DTensor dtype. If ``None``, no dtype conversion is performed before backward
+                redistribution; the gradient is still converted to the input DTensor's local
+                tensor dtype after redistribution. Default: None
 
         Returns:
             A :class:`DTensor` object
