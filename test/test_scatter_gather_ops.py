@@ -169,15 +169,13 @@ class TestScatterGather(TestCase):
             src = make_tensor(tuple(src_size), device=device, dtype=dtype)
 
         base = make_tensor((m, n, o), device=device, dtype=dtype)
-        if reduction is not None:
-            if fn is torch.Tensor.scatter_reduce_:
-                actual = fn(base.clone(), dim, idx, src, reduce=reduction, include_self=include_self)
-            else:
-                actual = fn(base.clone(), dim, idx, src, reduce=reduction)
-        else:
-            actual = fn(base.clone(), dim, idx, src)
+        # for signed integers, avoid undefined behavior in expected output
+        use_int64_expected = (
+            dtype in (torch.int8, torch.int16, torch.int32)
+            and reduction in {"add", "sum", "multiply", "prod", "mean"}
+        )
+        expected = base.to(torch.int64, copy=True) if use_int64_expected else base.clone()
 
-        expected = base.clone()
         counts = torch.zeros(base.shape, dtype=torch.long, device=device) + include_self
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
@@ -191,6 +189,8 @@ class TestScatterGather(TestCase):
                         # or 'scatter_reduce_', the former two might have a reduction argument
                         # while the latter two always do
                         value = src if is_scalar else src[i, j, k]
+                        if use_int64_expected:
+                            value = int(value) if is_scalar else value.to(torch.int64)
 
                         if ((not include_self) and counts[tuple(ii)] == 0):
                             expected[tuple(ii)] = value
@@ -210,12 +210,40 @@ class TestScatterGather(TestCase):
 
                         counts[tuple(ii)] += 1
 
+        if use_int64_expected:
+            iinfo = torch.iinfo(dtype)
+            expected_out_of_range = torch.any(
+                (expected < iinfo.min) | (expected > iinfo.max)
+            )
+            if bool(expected_out_of_range.item()):
+                min_observed = expected.min().item()
+                max_observed = expected.max().item()
+                self.skipTest(
+                    f"Skipping {fn.__name__} reference case with {dtype=} and "
+                    f"{reduction=} because it would overflow {dtype}: observed "
+                    f"expected range [{min_observed}, {max_observed}], allowed "
+                    f"[{iinfo.min}, {iinfo.max}]"
+                )
+            else:
+                # note: this cast is not UB because we checked above
+                expected = expected.to(dtype)
+
         if (reduction == "mean"):
             counts.masked_fill_(counts == 0, 1)
             if (dtype.is_floating_point or dtype.is_complex):
                 expected /= counts
             else:
                 expected.div_(counts, rounding_mode="floor")
+
+        # note: only call `fn` once we know expected values in `base`
+        # are safe from signed overflow (UB). Otherwise, test is skipped above
+        if reduction is not None:
+            if fn is torch.Tensor.scatter_reduce_:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction, include_self=include_self)
+            else:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction)
+        else:
+            actual = fn(base.clone(), dim, idx, src)
 
         if dtype == torch.float16 or dtype == torch.bfloat16:
             # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
