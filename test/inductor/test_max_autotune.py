@@ -5098,6 +5098,8 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 aten_time=aten_time,
                 triton_time=triton_time,
                 epilogue_runtime=epilogue_runtime,
+                mock_fused_n_regs=32,
+                mock_n_spills=0,
             ):
                 compiled_fn = torch.compile(fn)
                 _, code = run_and_get_code(compiled_fn, x, w, bias, scale)
