@@ -17,6 +17,35 @@ __all__ = [
 _privateuse1_backend_name = "privateuseone"
 
 
+def _rename_profiler_activity(backend_name: str) -> None:
+    """Mirror the privateuse1 rename in ProfilerActivity so users can write e.g.
+    ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1."""
+    from torch._C._profiler import ProfilerActivity
+
+    alias = backend_name.upper()
+    setattr(ProfilerActivity, alias, ProfilerActivity.PrivateUse1)
+
+    pu1 = ProfilerActivity.PrivateUse1
+    original_repr = ProfilerActivity.__repr__
+    original_str = ProfilerActivity.__str__
+
+    def custom_repr(self):
+        if self == pu1:
+            return f"<ProfilerActivity.{alias}: {pu1.value}>"
+        return original_repr(self)
+
+    def custom_str(self):
+        if self == pu1:
+            return f"ProfilerActivity.{alias}"
+        return original_str(self)
+
+    ProfilerActivity.__repr__ = custom_repr
+    ProfilerActivity.__str__ = custom_str
+    ProfilerActivity.name = property(  # type: ignore[assignment]
+        lambda self: alias if self == pu1 else original_str(self).split(".")[-1]
+    )
+
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     Rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
@@ -76,25 +105,10 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         >>> a = torch.ones(2, device="foo")
 
     """
-    from torch._C._profiler import ProfilerActivity
-
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
-    # Mirror the rename in ProfilerActivity so users can write e.g.
-    # ProfilerActivity.<backend_name> instead of ProfilerActivity.PrivateUse1.
-    pu1 = ProfilerActivity.PrivateUse1
-    alias = backend_name.upper()
-    setattr(ProfilerActivity, alias, pu1)
-
-    original_repr = ProfilerActivity.__repr__
-
-    def custom_repr(self):
-        if self == pu1:
-            return f"<ProfilerActivity.{alias}: {pu1.value}>"
-        return original_repr(self)
-
-    ProfilerActivity.__repr__ = custom_repr
+    _rename_profiler_activity(backend_name)
 
 
 def _check_register_once(module, attr) -> None:
