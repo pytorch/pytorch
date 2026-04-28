@@ -26,6 +26,9 @@ from pathlib import Path
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
 SCRIPT_DIR = Path(__file__).parent
 LABELS_FILE = SCRIPT_DIR.parent / "labels.json"
+DISTRIBUTED_LABELS_FILE = (
+    SCRIPT_DIR.parent.parent / "distributed-triage" / "distributed-labels.json"
+)
 
 FORBIDDEN_PATTERNS = [
     r"^ciflow/",
@@ -68,22 +71,31 @@ def is_forbidden(label: str) -> bool:
     return label_lower in [f.lower() for f in FORBIDDEN_EXACT]
 
 
-def load_valid_labels() -> set[str]:
+def _load_labels_from_file(path: Path) -> set[str]:
     try:
-        with open(LABELS_FILE) as f:
+        with open(path) as f:
             data = json.load(f)
     except FileNotFoundError:
-        raise RuntimeError(f"labels.json not found at {LABELS_FILE}") from None
+        raise RuntimeError(f"Labels file not found at {path}") from None
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"labels.json contains invalid JSON: {e}") from None
+        raise RuntimeError(f"Labels file contains invalid JSON: {e}") from None
     except PermissionError:
-        raise RuntimeError("Cannot read labels.json: permission denied") from None
+        raise RuntimeError(
+            f"Cannot read labels file: permission denied: {path}"
+        ) from None
 
     labels_list = data.get("labels", [])
     try:
         return {label["name"] for label in labels_list}
     except (KeyError, TypeError) as e:
-        raise RuntimeError(f"labels.json has malformed entries: {e}") from None
+        raise RuntimeError(f"Labels file has malformed entries: {e}: {path}") from None
+
+
+def load_valid_labels() -> set[str]:
+    labels = _load_labels_from_file(LABELS_FILE)
+    if DISTRIBUTED_LABELS_FILE.exists():
+        labels |= _load_labels_from_file(DISTRIBUTED_LABELS_FILE)
+    return labels
 
 
 def strip_redundant(labels: list[str]) -> tuple[list[str], list[str]]:
