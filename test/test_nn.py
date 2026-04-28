@@ -1885,6 +1885,34 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    def test_loadu_partial_null_pointer_zero_numel(self):
+        # Regression test for #181510 covering all 9 vec256 Vectorized<T>::loadu
+        # overloads our fix touches. Each dtype corresponds to one specialization
+        # that used to trip UBSan via memcpy(nullptr, 0) in its partial-load branch
+        # when handed a zero-numel tensor's data_ptr().
+        #
+        # Float family uses the exact #181510 repro path (weight_norm).
+        # Complex and int dtypes use sum(), which also goes through CPU vec
+        # reductions; if a kernel takes an early-exit fast path for zero-numel
+        # inputs the test still passes (no crash), which is the regression
+        # boundary we care about.
+
+        # vec256_float.h, vec256_double.h, vec256_16bit_float.h (BFloat16, Half)
+        for dtype in [torch.float32, torch.float64, torch.bfloat16, torch.float16]:
+            m = torch.nn.utils.weight_norm(nn.Linear(0, 1).to(dtype=dtype))
+            x = torch.empty((1, 0), dtype=dtype)
+            self.assertEqual(m(x).shape, torch.Size([1, 1]))
+
+        # vec256_complex_float.h, vec256_complex_double.h
+        for dtype in [torch.complex64, torch.complex128]:
+            x = torch.empty((0,), dtype=dtype)
+            self.assertEqual(x.sum().item(), 0)
+
+        # vec256_int.h: Vectorized<int64_t>, <int32_t>, <int16_t>, Vectorized8<T>
+        for dtype in [torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8]:
+            x = torch.empty((0,), dtype=dtype)
+            self.assertEqual(x.sum().item(), 0)
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
