@@ -239,6 +239,20 @@ class NbBoolTests(TestCase):
         ):
             fn(Baz())
 
+    # --- Blocked slot: __bool__ = None ---
+
+    def test_user_defined_bool_none_raises(self):
+        class NoBool:
+            __bool__ = None
+
+        def fn(x, obj):
+            return x + 1 if bool(obj) else x - 1
+
+        with self.assertRaisesRegex(TypeError, "'NoneType' object is not callable"):
+            bool(NoBool())
+        with self.assertRaisesRegex(TypeError, "'NoneType' object is not callable"):
+            torch.compile(fn, backend="eager")(torch.randn(4), NoBool())
+
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
 
     def test_metaclass_bool(self):

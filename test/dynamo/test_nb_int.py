@@ -303,6 +303,25 @@ class NbIntTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
         self.assertEqual(result, 5)
 
+    # --- Blocked slot: __int__ = None ---
+
+    def test_user_defined_int_none_raises(self):
+        class NoInt:
+            __int__ = None
+
+        obj = NoInt()
+
+        def fn(x):
+            try:
+                return int(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertIn("NoneType", result)
+        self.assertEqual(result, eager_result)
+
     # --- SymNodeVariable ---
 
     def test_symnode_int(self):
