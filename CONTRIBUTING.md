@@ -1207,26 +1207,24 @@ Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issu
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy to perform additional
-formatting and semantic checking of code. We provide a pre-commit git hook for
-performing these checks, before a commit is created:
+PyTorch uses [lintrunner](https://github.com/pytorch/pytorch/wiki/lintrunner)
+for linting, which runs clang-tidy and other checks. You can lint your changes
+locally with:
 
-  ```bash
-  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
-  ```
+```bash
+make lint
+```
 
-If you have already committed files and
-CI reports `flake8` errors, you can run the check locally in your PR branch with:
+or use `spin` for finer control:
 
-  ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
-  ```
+```bash
+spin quicklint   # lint files changed in the latest commit and working directory
+spin quickfix    # auto-fix lint issues on changed files
+```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
+Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner).
 
-Fix the code so that no errors are reported when you re-run the above check again,
+Fix the code so that no errors are reported when you re-run the lint check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
