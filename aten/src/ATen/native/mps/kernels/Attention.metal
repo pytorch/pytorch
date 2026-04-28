@@ -802,8 +802,9 @@ template<typename T, int D>
         partial += float(dO_ptr[q_row * dos[2] + lane * EPL + e])
                  * float(O_ptr[q_row *  os[2]  + lane * EPL + e]);
 
+    float total = simd_sum(partial);
     if (lane == 0)
-        Dv[bh * qL + q_row] = simd_sum(partial);
+        Dv[bh * qL + q_row] = total;
 }
 
 // ── backward dQ ──────────────────────────────────────────────────────────────
