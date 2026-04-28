@@ -12928,7 +12928,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_out',
                    device_type='mps', dtypes=(torch.float32,),
-                   active_if=MACOS_VERSION <= 15.0,
+                   active_if=MACOS_VERSION < 26.0,
                ),
            ),
            sample_inputs_func=sample_inputs_bmm),
@@ -18149,7 +18149,11 @@ op_db: list[OpInfo] = [
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,),
+                   active_if=MACOS_VERSION < 26.0,
+               ),
            )),
     OpInfo('mode',
            op=torch.mode,
