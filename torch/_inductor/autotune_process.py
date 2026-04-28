@@ -691,45 +691,36 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             warmup_arg["warmup"] = False
 
         if out.device.type == "cpu":
-            device_interface = None
-            device_index = 0
+            stream = 0
         else:
             device_type = out.device.type
             device_interface = get_interface_for_device(device_type)
-            device_index = self.output_tensor_meta.device.index
+            stream = device_interface.get_raw_stream(
+                self.output_tensor_meta.device.index
+            )
 
-        is_debug_autotuner = isinstance(
+        if isinstance(
             getattr(mod, self.kernel_name),
             torch._inductor.runtime.triton_heuristics.DebugAutotuner,
-        )
-
-        # Resolve the stream at call time (not at closure-creation time) so that
-        # CUDA graph capture on a different stream works correctly.
-        def run_fn() -> None:
-            stream = (
-                0
-                if device_interface is None
-                else device_interface.get_raw_stream(device_index)
+        ):
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                out,
+                *extra_args,
+                **warmup_arg,
+                stream=stream,
             )
-            if is_debug_autotuner:
-                run_method(
-                    *input_tensors,
-                    out,
-                    *extra_args,
-                    **warmup_arg,
-                    stream=stream,
-                )
-            else:
-                run_method(
-                    *input_tensors,
-                    out,
-                    *extra_args,
-                    **warmup_arg,
-                    stream=stream,
-                    benchmark_run=True,
-                )
-
-        return run_fn
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                out,
+                *extra_args,
+                **warmup_arg,
+                stream=stream,
+                benchmark_run=True,
+            )
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
