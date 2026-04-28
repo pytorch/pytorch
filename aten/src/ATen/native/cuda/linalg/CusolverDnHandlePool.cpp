@@ -42,6 +42,18 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUSOLVER_CHECK(cusolverDnSetStream(handle, stream));
+
+  #if CUDA_VERSION >= 12900
+    cudaDeviceProp prop;
+    AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    // Emulation of FP32 via 9xBF16 is only available on CC 10 and 10.3
+    // See: https://docs.nvidia.com/cuda/cublas/#floating-point-emulation-support-overview
+    if (prop.major == 10 && (prop.minor == 0 || prop.minor == 3)) {
+      TORCH_CUSOLVER_CHECK(cusolverDnSetMathMode(handle, CUSOLVER_FP32_EMULATED_BF16X9_MATH));
+      TORCH_CUSOLVER_CHECK(cusolverDnSetEmulationStrategy(handle, CUDA_EMULATION_STRATEGY_PERFORMANT));
+    }
+  #endif
+
   return handle;
 }
 
