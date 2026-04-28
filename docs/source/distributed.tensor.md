@@ -191,11 +191,11 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 
 ```
 
-### SymmetricMemory-backed DTensor local tensors
+### SymmetricMemory-Backed DTensor Objects
 
-DTensor construction APIs can optionally allocate eligible CUDA local tensors
-from SymmetricMemory. This is useful for one-sided communication algorithms
-that need each rank's local shard or replica to be remotely addressable.
+DTensor can optionally use SymmetricMemory to allocate local tensors. This is
+useful for one-sided communication algorithms that need each rank's local shard
+or replica to be remotely addressable.
 
 This behavior is disabled by default. It can be enabled for a region of code
 with {meth}`torch.distributed.tensor.experimental.use_symmetric_memory`:
@@ -214,13 +214,11 @@ It can also be enabled process-wide by setting
 `TORCH_DTENSOR_USE_SYMMETRIC_MEMORY=1` environment variable.
 
 When enabled, DTensor factory functions and {meth}`distribute_tensor` allocate
-or copy eligible contiguous CUDA local tensors into SymmetricMemory. The
-SymmetricMemory backend is still selected through
+CUDA local tensor objects using SymmetricMemory. The SymmetricMemory backend
+should be selected as normal through the
 `torch.distributed._symmetric_memory` APIs. {meth}`DTensor.from_local` preserves
 the user-provided local tensor and does not implicitly copy it into
-SymmetricMemory. Arbitrary DTensor operator outputs are not guaranteed to use
-SymmetricMemory unless they are created by one of the supported construction
-APIs.
+SymmetricMemory.
 
 ### Random Operations
 
