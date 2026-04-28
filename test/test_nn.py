@@ -1913,6 +1913,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             x = torch.empty((0,), dtype=dtype)
             self.assertEqual(x.sum().item(), 0)
 
+    def test_loadu_partial_null_pointer_backward(self):
+        # Backward-path regression test. The forward-only test above covers
+        # weight_norm / sum; these backward kernels also reach
+        # vec::loadu(nullptr, 0) through map2_reduce_all / map3_reduce_all
+        # when an inner dimension is 0 and the outer dimension is > 0.
+
+        # layer_norm backward: M=2, N=0 dispatches into
+        # LayerNormBackwardKernelImpl with size=N=0 and nullptr data.
+        x = torch.randn(2, 0, requires_grad=True)
+        F.layer_norm(x, [0]).sum().backward()
+        self.assertEqual(x.grad.shape, x.shape)
+
+        # group_norm backward: N*C=4, HxW=0 dispatches parallel_for(0, 4)
+        # with size=0 and nullptr inner data.
+        x = torch.randn(1, 4, 0, requires_grad=True)
+        F.group_norm(x, 4).sum().backward()
+        self.assertEqual(x.grad.shape, x.shape)
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
