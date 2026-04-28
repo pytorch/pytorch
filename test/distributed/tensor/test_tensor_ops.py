@@ -1376,6 +1376,77 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
 
+    def test_detach_inplace(self):
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(12, 8, requires_grad=True)
+        for spec in ([Shard(0)], [Replicate()]):
+            dt = distribute_tensor(t, device_mesh, spec)
+            result = torch.ops.aten.detach_(dt)
+            self.assertFalse(result.requires_grad)
+            self.assertEqual(result.placements, tuple(spec))
+            self.assertEqual(result.full_tensor(), t.detach())
+
+    def test_mm_out(self):
+        device_mesh = self.build_device_mesh()
+        a = torch.randn(8, 12)
+        b = torch.randn(12, 4)
+        expected = torch.mm(a, b)
+
+        # S(0) x R -> S(0)
+        da = distribute_tensor(a, device_mesh, [Shard(0)])
+        db = distribute_tensor(b, device_mesh, [Replicate()])
+        out = torch.zeros(8, 4)
+        dout = distribute_tensor(out, device_mesh, [Shard(0)])
+        torch.ops.aten.mm.out(da, db, out=dout)
+        self.assertEqual(dout.placements, (Shard(0),))
+        self.assertEqual(dout.full_tensor(), expected)
+
+    def test_bmm_out(self):
+        device_mesh = self.build_device_mesh()
+        a = torch.randn(4, 8, 12)
+        b = torch.randn(4, 12, 4)
+        expected = torch.bmm(a, b)
+
+        # S(0) x S(0) -> S(0) (batch dim)
+        da = distribute_tensor(a, device_mesh, [Shard(0)])
+        db = distribute_tensor(b, device_mesh, [Shard(0)])
+        out = torch.zeros(4, 8, 4)
+        dout = distribute_tensor(out, device_mesh, [Shard(0)])
+        torch.ops.aten.bmm.out(da, db, out=dout)
+        self.assertEqual(dout.placements, (Shard(0),))
+        self.assertEqual(dout.full_tensor(), expected)
+
+    def test_addmm_out(self):
+        device_mesh = self.build_device_mesh()
+        bias = torch.randn(4)
+        a = torch.randn(8, 12)
+        b = torch.randn(12, 4)
+        expected = torch.addmm(bias, a, b)
+
+        # S(0) x R with replicated bias -> S(0)
+        da = distribute_tensor(a, device_mesh, [Shard(0)])
+        db = distribute_tensor(b, device_mesh, [Replicate()])
+        dbias = distribute_tensor(bias, device_mesh, [Replicate()])
+        out = torch.zeros(8, 4)
+        dout = distribute_tensor(out, device_mesh, [Shard(0)])
+        torch.ops.aten.addmm.out(dbias, da, db, out=dout)
+        self.assertEqual(dout.placements, (Shard(0),))
+        self.assertEqual(dout.full_tensor(), expected)
+
+    def test_add_out(self):
+        device_mesh = self.build_device_mesh()
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        expected = a + b
+
+        da = distribute_tensor(a, device_mesh, [Shard(0)])
+        db = distribute_tensor(b, device_mesh, [Shard(0)])
+        out = torch.zeros(8, 4)
+        dout = distribute_tensor(out, device_mesh, [Shard(0)])
+        torch.ops.aten.add.out(da, db, out=dout)
+        self.assertEqual(dout.placements, (Shard(0),))
+        self.assertEqual(dout.full_tensor(), expected)
+
 
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms

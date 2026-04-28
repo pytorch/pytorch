@@ -1160,7 +1160,6 @@ def index_single_dim_strategy(
 @register_single_dim_strategy(
     [
         aten.index_put.default,
-        aten.index_put_.default,
         aten.index_put.hacked_twin,
         aten._index_put_impl_.default,
     ],
@@ -1298,7 +1297,7 @@ def _index_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_fill.int_Scalar, aten.index_fill_.int_Scalar],
+    [aten.index_fill.int_Scalar],
     schema_info=RuntimeSchemaInfo(1),
 )
 def index_fill_scalar_single_dim_strategy(
@@ -1320,7 +1319,7 @@ def index_fill_scalar_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_fill.int_Tensor, aten.index_fill_.int_Tensor],
+    [aten.index_fill.int_Tensor],
     schema_info=RuntimeSchemaInfo(1),
 )
 def index_fill_tensor_single_dim_strategy(
@@ -1346,7 +1345,7 @@ def index_fill_tensor_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_reduce.default, aten.index_reduce_.default],
+    [aten.index_reduce.default],
     schema_info=RuntimeSchemaInfo(1),
 )
 def index_reduce_single_dim_strategy(

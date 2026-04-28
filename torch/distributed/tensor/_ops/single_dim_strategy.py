@@ -753,6 +753,141 @@ def register_single_dim_strategy(
     return wrapper
 
 
+def _find_variant_overloads(
+    base_op: OpOverload,
+) -> tuple[list[OpOverload], list[OpOverload]]:
+    """Given a base op, find its inplace and out-variant overloads.
+
+    Returns (inplace_ops, out_ops).
+
+    Inplace: same overload name on the ``foo_`` packet (e.g. add.Tensor → add_.Tensor).
+    Out: overloads on the same packet whose name is "out" or ends with "_out".
+    """
+    ns_name, rest = base_op.name().split("::")
+    base_name = rest.split(".")[0]
+    overload_name = rest.split(".")[1] if "." in rest else "default"
+    ns = getattr(torch.ops, ns_name)
+
+    # --- inplace ---
+    inplace_ops: list[OpOverload] = []
+    inplace_pkt = getattr(ns, base_name + "_", None)
+    if inplace_pkt is not None:
+        # Match by overload name: add.Tensor → add_.Tensor
+        if overload_name in inplace_pkt.overloads():
+            inplace_ops.append(getattr(inplace_pkt, overload_name))
+
+    # --- out ---
+    out_ops: list[OpOverload] = []
+    base_pkt = base_op.overloadpacket
+    for name in base_pkt.overloads():
+        if name == "out" or name.endswith("_out"):
+            out_ops.append(getattr(base_pkt, name))
+
+    return inplace_ops, out_ops
+
+
+def _make_out_strategy_fn(
+    base_fn: _SingleDimStrategyFunc,
+) -> _SingleDimStrategyFunc:
+    """Wrap a base strategy function to append the ``out`` kwarg placement.
+
+    Out-variant ops have an extra tensor kwarg ``out`` whose placement must
+    match the output placement (strategy[0]).
+    """
+
+    def out_strategy_fn(
+        op: OpOverload,
+        args_schema: ArgsType,
+        kwargs_schema: KwargsType,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        strategies = base_fn(op, args_schema, kwargs_schema)
+        # Append the out placement (= output placement = s[0]) for each rule
+        return [s + [s[0]] for s in strategies]
+
+    return out_strategy_fn
+
+
+def auto_register_inplace_and_out_variants() -> None:
+    """Extend single-dim strategies from base ops to their inplace/out variants.
+
+    For each base op registered in ``op_single_dim_strategy_funcs``, discovers
+    the inplace (``foo_``) and out (``foo.out``) overloads and registers them
+    with the same (or adapted) strategy.
+
+    Should be called once, after all base registrations are complete.
+    """
+    from torch.distributed.tensor._api import DTensor
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    registry = propagator.op_single_dim_strategy_funcs
+    schema_registry = propagator.op_to_schema_info_for_single_dim_strategy
+
+    # Snapshot the current base ops to avoid mutating dict during iteration.
+    base_entries = list(registry.items())
+    # Track which ops we've already extended in this run to avoid
+    # a later (less-specific) base overwriting an earlier (richer) one.
+    # E.g., mul.Tensor has binary partial rules while mul.Scalar has unary
+    # rules — both discover mul.out, but we want the richer one.
+    already_extended: set[OpOverload] = set()
+
+    for base_op, info in base_entries:
+        base_name = base_op.name().split("::")[1].split(".")[0]
+        # Skip ops that are themselves inplace or out variants.
+        if base_name.endswith("_") and not base_name.startswith("__"):
+            continue
+        overload = base_op.name().split(".")[1] if "." in base_op.name() else "default"
+        if overload == "out" or overload.endswith("_out"):
+            continue
+
+        inplace_ops, out_ops = _find_variant_overloads(base_op)
+        base_schema_info = schema_registry.get(base_op)
+
+        for ip_op in inplace_ops:
+            if ip_op not in already_extended:
+                propagator.register_single_dim_op_strategy(
+                    ip_op, info, base_schema_info
+                )
+                already_extended.add(ip_op)
+
+        if out_ops:
+            # Check if the base strategy already handles kwargs (e.g. from
+            # _register_single_dim_pointwise's wrapper which appends "out"
+            # placements). If so, reuse it directly; otherwise wrap.
+            base_handles_out_kwarg = (
+                base_schema_info is not None
+                and base_schema_info.static_kwargkey is not None
+                and "out" in base_schema_info.static_kwargkey
+            )
+            if base_handles_out_kwarg:
+                out_info = info
+                out_schema_info = base_schema_info
+            else:
+                out_info = _SingleDimStrategyInfo(
+                    func=_make_out_strategy_fn(info.func),
+                    allow_unbacked_sharding=info.allow_unbacked_sharding,
+                    allow_uneven_sharding=info.allow_uneven_sharding,
+                    different_mesh_args=info.different_mesh_args,
+                )
+                if base_schema_info is not None:
+                    existing_keys = list(base_schema_info.static_kwargkey or [])
+                    if "out" not in existing_keys:
+                        existing_keys.append("out")
+                    out_schema_info = RuntimeSchemaInfo(
+                        base_schema_info.static_argnum,
+                        static_kwargkey=existing_keys,
+                        needs_pytree=base_schema_info.needs_pytree,
+                    )
+                else:
+                    out_schema_info = RuntimeSchemaInfo(static_kwargkey=["out"])
+
+            for out_op in out_ops:
+                if out_op not in already_extended:
+                    propagator.register_single_dim_op_strategy(
+                        out_op, out_info, out_schema_info
+                    )
+                    already_extended.add(out_op)
+
+
 @dataclass(order=True)
 class _PQEntry:
     """Priority queue entry for the Dijkstra search in _dijkstra_expand_single_dim_strategy_to_mesh.

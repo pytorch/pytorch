@@ -2,6 +2,11 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    auto_register_inplace_and_out_variants,
+)
+
+auto_register_inplace_and_out_variants()
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (
     distribute_module,
