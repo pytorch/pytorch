@@ -126,9 +126,11 @@ static void sort_single_block(const Tensor& input,
                               int sort_size,
                               int64_t stride_sort,
                               int64_t stride_seg,
-                              int tptg) {
+                              int tptg,
+                              bool stable) {
   auto n_rows = static_cast<int>(input.numel() / sort_size);
-  const auto kernel = fmt::format("sort_block_{}_tptg{}", scalarToMetalTypeString(input), tptg);
+  const char* stable_sfx = stable ? "_stable" : "";
+  const auto kernel = fmt::format("sort_block_{}_tptg{}{}", scalarToMetalTypeString(input), tptg, stable_sfx);
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -150,7 +152,8 @@ static void sort_multi_block(const Tensor& input,
                              int64_t dim,
                              bool descending,
                              int sort_size,
-                             int tptg) {
+                             int tptg,
+                             bool stable) {
   const int elems_per_tg = tptg * TN;
   const int n_rows = static_cast<int>(input.numel() / sort_size);
   const int n_blocks = at::ceil_div(sort_size, elems_per_tg);
@@ -185,7 +188,9 @@ static void sort_multi_block(const Tensor& input,
 
   const auto type_str = scalarToMetalTypeString(values);
   const char* u16_sfx = use_u16 ? "_u16" : "";
-  const auto block_fn = fmt::format("mb_sort_block_{}_tptg{}{}", type_str, tptg, u16_sfx);
+  const char* stable_sfx = stable ? "_stable" : "";
+  // mb_sort_block has stable variants; mb_merge doesn't (stable on stable input).
+  const auto block_fn = fmt::format("mb_sort_block_{}_tptg{}{}{}", type_str, tptg, u16_sfx, stable_sfx);
   const auto merge_fn = fmt::format("mb_merge_{}_tptg{}{}", type_str, tptg, u16_sfx);
   const auto final_fn = fmt::format("mb_merge_final_{}_tptg{}{}", type_str, tptg, u16_sfx);
 
@@ -366,6 +371,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   const int tptg = select_tptg(sort_size, self.element_size(), n_rows);
   const int elems_per_tg = tptg * TN;
   const bool is_last_dim = (dim == self.ndimension() - 1);
+  const bool stable_kernel = stable.value_or(false);
 
   const bool use_mpsgraph = should_use_mpsgraph_fallback(sort_size, self.element_size(), elems_per_tg);
 
@@ -374,10 +380,17 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   } else {
     Tensor input = self.contiguous();
     if (is_last_dim && sort_size <= elems_per_tg) {
-      sort_single_block(
-          input, out_vals, out_inds, descending, sort_size, /*stride_sort=*/1, /*stride_seg=*/sort_size, tptg);
+      sort_single_block(input,
+                        out_vals,
+                        out_inds,
+                        descending,
+                        sort_size,
+                        /*stride_sort=*/1,
+                        /*stride_seg=*/sort_size,
+                        tptg,
+                        stable_kernel);
     } else {
-      sort_multi_block(input, out_vals, out_inds, dim, descending, sort_size, tptg);
+      sort_multi_block(input, out_vals, out_inds, dim, descending, sort_size, tptg, stable_kernel);
     }
   }
 
