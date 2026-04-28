@@ -12928,7 +12928,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_out',
                    device_type='mps', dtypes=(torch.float32,),
-                   active_if=MACOS_VERSION < 15.0,
+                   active_if=MACOS_VERSION <= 15.0,
                ),
            ),
            sample_inputs_func=sample_inputs_bmm),
