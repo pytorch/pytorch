@@ -3140,6 +3140,10 @@ Call this whenever a new thread is created in order to propagate values from
     c10::impl::FakeTensorModeTLS::reset_state();
   });
 
+  py_module.def("_is_cpp_fake_tensor_mode_active", []() -> bool {
+    return c10::impl::FakeTensorModeTLS::get_state() != nullptr;
+  });
+
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
