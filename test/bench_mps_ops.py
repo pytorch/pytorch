@@ -208,40 +208,44 @@ def bench_isin(
 
     f_c = torch.compile(f, dynamic=False, fullgraph=True)
 
-    for n_elements, n_test_elements in [
-        (1_024, 4),
-        (1_024, 32),
-        (1_024, 256),
-        (1_024, 4_096),
-        (8_192, 4),
-        (8_192, 32),
-        (8_192, 256),
-        (8_192, 4_096),
-        (65_536, 4),
-        (65_536, 32),
-        (65_536, 256),
-        (65_536, 4_096),
-        (500_000, 4),
-        (500_000, 32),
-        (500_000, 256),
-        (500_000, 4_096),
-        (1_000_000, 4),
-        (1_000_000, 32),
-        (1_000_000, 256),
-        (1_000_000, 4_096),
-    ]:
-        elements = torch.testing.make_tensor(n_elements, device=device, dtype=dtype)
-        test_elements = torch.testing.make_tensor(
-            n_test_elements, device=device, dtype=dtype
-        )
+    x_4 = torch.testing.make_tensor(4, device=device, dtype=dtype)
+    x_32 = torch.testing.make_tensor(32, device=device, dtype=dtype)
+    x_256 = torch.testing.make_tensor(256, device=device, dtype=dtype)
+    x_1k = torch.testing.make_tensor(1024, device=device, dtype=dtype)
+    x_4k = torch.testing.make_tensor(4_096, device=device, dtype=dtype)
+    x_65k = torch.testing.make_tensor(65_536, device=device, dtype=dtype)
+    x_1m = torch.testing.make_tensor(1_000_000, device=device, dtype=dtype)
+    x_5m = torch.testing.make_tensor(5_000_000, device=device, dtype=dtype)
+    x_4d = torch.testing.make_tensor((16, 3, 224, 224), device=device, dtype=dtype)
+    x_2d = torch.testing.make_tensor((1024, 1024), device=device, dtype=dtype)
+
+    cases = [
+        ("1d-4x1000000", x_4, x_1m),
+        ("1d-4x5000000", x_4, x_5m),
+        ("1d-32x1000000", x_32, x_1m),
+        ("1d-256x1000000", x_256, x_1m),
+        ("1d-4096x1000000", x_4k, x_1m),
+        ("1d-4096x65536", x_4k, x_65k),
+        ("1d-1000000x4", x_1m, x_4),
+        ("1d-5000000x4", x_5m, x_4),
+        ("1d-1000000x32", x_1m, x_32),
+        ("1d-1000000x256", x_1m, x_256),
+        ("1d-1000000x4096", x_1m, x_4k),
+        ("1d-65536x4096", x_65k, x_4k),
+        ("1d-65536x65536", x_65k, x_65k),
+        ("4d-16x3x224x224", x_4d, x_256),
+        ("4d-permuted", x_4d.permute(0, 2, 3, 1), x_256),
+        ("2d-transposed", x_2d.T, x_1k),
+    ]
+
+    for case_label, elements, test_elements in cases:
         r_e, r_c = f(elements, test_elements), f_c(elements, test_elements)
         if not torch.equal(r_e, r_c):
             warnings.warn(
-                f"Eager and compile isin do not match for {dtype} "
-                f"n_elements={n_elements} n_test_elements={n_test_elements}",
+                f"Eager and compile isin do not match for {dtype} case={case_label}",
                 stacklevel=2,
             )
-        sub_label = f"isin-{n_elements}x{n_test_elements} ({dtype_s})"
+        sub_label = f"isin-{case_label} ({dtype_s})"
         for label, fn in [("eager", f), ("compile", f_c)]:
             t = Timer(
                 stmt=f"f(elements, test_elements);{sync_cmd}",

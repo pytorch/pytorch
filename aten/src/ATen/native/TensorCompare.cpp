@@ -998,9 +998,12 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
   // Heuristic taken from numpy's implementation.
   // See
   // https://github.com/numpy/numpy/blob/fb215c76967739268de71aa4bda55dd1b062bc2e/numpy/lib/arraysetops.py#L575
-  if (test_elements.numel() <
-      static_cast<int64_t>(
-          10.0f * std::pow(static_cast<double>(elements.numel()), 0.145))) {
+  // MPS always takes the default-impl path: the sorting path regresses
+  // significantly on MPS relative to the native Metal kernel.
+  if (elements.is_mps() ||
+      test_elements.numel() <
+          static_cast<int64_t>(
+              10.0f * std::pow(static_cast<double>(elements.numel()), 0.145))) {
     out.fill_(invert);
     isin_default_stub(
         elements.device().type(), elements, test_elements, invert, out);
@@ -1029,13 +1032,13 @@ TORCH_IMPL_FUNC(isin_Scalar_Tensor_out)
  bool assume_unique,
  bool invert,
  const Tensor& out) {
-  // redispatch
+  // Wrap at the promoted dtype so a Python float scalar doesn't force the
+  // computation to float64 (and so backends without float64 support work).
+  auto promoted = at::native::result_type(test_elements, elements);
+  auto wrapped =
+      at::scalar_tensor(elements, test_elements.options().dtype(promoted));
   at::isin_out(
-      const_cast<Tensor&>(out),
-      wrapped_scalar_tensor(elements, test_elements.device()),
-      test_elements,
-      assume_unique,
-      invert);
+      const_cast<Tensor&>(out), wrapped, test_elements, assume_unique, invert);
 }
 
 TORCH_IMPL_FUNC(isposinf_out)(const Tensor& self, const Tensor& result) {

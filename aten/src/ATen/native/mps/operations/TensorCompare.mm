@@ -6,6 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/TensorCompare.h>
+#include <fmt/format.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -14,7 +15,6 @@
 #else
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
-#include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/where_native.h>
 #endif
@@ -28,57 +28,65 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
-static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
-                                       const Tensor& test_elements,
-                                       bool /*assume_unique*/,
-                                       bool invert,
-                                       const Tensor& out) {
-  if (elements.numel() == 0) {
-    return;
-  }
+static void isin_default_kernel_mps(const Tensor& elements,
+                                    const Tensor& test_elements,
+                                    bool invert,
+                                    const Tensor& out) {
+  TORCH_CHECK(elements.is_mps() && test_elements.is_mps(),
+              "Expected elements.is_mps() && test_elements.is_mps(), got ",
+              elements.device(),
+              " and ",
+              test_elements.device());
 
   if (test_elements.numel() == 0) {
-    if (invert) {
-      auto ones = ones_like(out);
-      out.copy_(ones);
-    } else {
-      auto zeros = zeros_like(out);
-      out.copy_(zeros);
-    }
     return;
   }
 
-  TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
-
   const auto common_type = at::result_type(elements, test_elements);
-  TORCH_CHECK(common_type == kFloat || common_type == kHalf || common_type == kBFloat16 || common_type == kInt ||
-                  common_type == kLong || common_type == kShort || common_type == kChar || common_type == kByte ||
-                  common_type == kBool,
-              "isin_mps: unsupported dtype ",
-              common_type);
-  const Tensor elements_c = elements.to(common_type).contiguous();
-  const Tensor test_elements_c = test_elements.to(common_type).contiguous();
-  Tensor out_c = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
+  const Tensor elements_contig = elements.to(common_type).contiguous();
+  const Tensor test_elements_contig = test_elements.to(common_type).contiguous();
+  Tensor output_contig = needsGather(out) ? at::empty_like(out, at::MemoryFormat::Contiguous) : out;
 
-  int64_t numel_test = test_elements_c.numel();
-  int64_t invert_i64 = invert ? 1 : 0;
+  const int64_t numel_elements = elements_contig.numel();
+  const int64_t numel_test = test_elements_contig.numel();
+  TORCH_CHECK(
+      numel_elements <= std::numeric_limits<uint32_t>::max() && numel_test <= std::numeric_limits<uint32_t>::max(),
+      "isin_mps: tensor too large, numel must fit in uint32_t");
 
-  MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+  int64_t num_chunks = std::max<int64_t>(1, (ISIN_TARGET_THREADGROUPS + numel_elements - 1) / numel_elements);
+  num_chunks = std::min<int64_t>(num_chunks, std::max<int64_t>(1, numel_test / ISIN_THREADS_PER_THREADGROUP));
+
+  IsinParams params{
+      static_cast<uint32_t>(numel_elements), static_cast<uint32_t>(numel_test), static_cast<uint32_t>(num_chunks)};
+
+  Tensor counts = at::zeros({numel_elements}, elements_contig.options().dtype(at::kInt));
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = "isin_" + scalarToMetalTypeString(common_type);
-      id<MTLComputePipelineState> isinPSO = lib.getPipelineStateForFunc(kernel);
-      getMPSProfiler().beginProfileKernel(isinPSO, kernel, {elements_c, test_elements_c, out_c});
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+
+      const std::string kernel_name = fmt::format("isin_{}", scalarToMetalTypeString(common_type));
+      id<MTLComputePipelineState> isinPSO = lib.getPipelineStateForFunc(kernel_name);
+      getMPSProfiler().beginProfileKernel(isinPSO, kernel_name, {elements_contig, test_elements_contig, counts});
       [computeEncoder setComputePipelineState:isinPSO];
-      mtl_setArgs(computeEncoder, elements_c, test_elements_c, out_c, numel_test, invert_i64);
-      mtl_dispatch1DJob(computeEncoder, isinPSO, elements_c.numel());
+      mtl_setArgs(computeEncoder, elements_contig, test_elements_contig, counts, params);
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(numel_elements * num_chunks, 1, 1)
+                     threadsPerThreadgroup:MTLSizeMake(ISIN_THREADS_PER_THREADGROUP, 1, 1)];
       getMPSProfiler().endProfileKernel(isinPSO);
+
+      const std::string invert_kernel_name = "isin_apply_invert";
+      id<MTLComputePipelineState> invertPSO = lib.getPipelineStateForFunc(invert_kernel_name);
+      getMPSProfiler().beginProfileKernel(invertPSO, invert_kernel_name, {counts, output_contig});
+      [computeEncoder setComputePipelineState:invertPSO];
+      mtl_setArgs(computeEncoder, counts, output_contig, invert);
+      mtl_dispatch1DJob(computeEncoder, invertPSO, numel_elements);
+      getMPSProfiler().endProfileKernel(invertPSO);
     }
   });
 
-  if (!out.is_contiguous()) {
-    out.copy_(out_c);
+  if (needsGather(out)) {
+    out.copy_(output_contig);
   }
 }
 
@@ -106,19 +114,6 @@ static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
   }
 }
 } // namespace mps
-
-// APIs exposed to at::native scope
-
-TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
-(const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
-  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out);
-}
-TORCH_IMPL_FUNC(isin_Scalar_Tensor_out_mps)
-(const Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
-  at::native::resize_output(out, {});
-  mps::isin_Tensor_Tensor_out_mps(
-      mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out);
-}
 
 static void where_kernel_mps(TensorIterator& iter) {
   const auto& condition = iter.input(0);
@@ -337,5 +332,6 @@ REGISTER_DISPATCH(clamp_stub, &clamp_kernel_mps)
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_mps)
+REGISTER_DISPATCH(isin_default_stub, &mps::isin_default_kernel_mps)
 
 } // namespace at::native

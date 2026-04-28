@@ -4,31 +4,80 @@
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
+using c10::metal::simdgroup_size;
 
 template <typename T>
 kernel void isin(
     constant T* elements [[buffer(0)]],
     constant T* test_elements [[buffer(1)]],
-    device bool* out [[buffer(2)]],
-    constant int64_t& numel_test [[buffer(3)]],
-    constant int64_t& invert [[buffer(4)]],
-    uint tid [[thread_position_in_grid]]) {
-  T elem = elements[tid];
-  bool found = false;
-  for (uint32_t j = 0, n = (uint32_t)numel_test; j < n; j++) {
-    found |= (elem == test_elements[j]);
+    device atomic_uint* out [[buffer(2)]],
+    constant IsinParams& params [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  uint elem_idx = tgid % params.numel_elements;
+  uint chunk = tgid / params.numel_elements;
+
+  T elem = elements[elem_idx];
+  uint chunk_size =
+      (params.numel_test + params.num_chunks - 1) / params.num_chunks;
+  uint start = chunk * chunk_size;
+  uint end = min(start + chunk_size, params.numel_test);
+
+  uint found = 0u;
+  for (uint j = start + tid; j < end; j += tptg) {
+    found |= (elem == test_elements[j]) ? 1u : 0u;
   }
-  out[tid] = (bool)(found != (bool)invert);
+
+  threadgroup uint shared[ISIN_THREADS_PER_THREADGROUP];
+  uint threads_remaining = tptg;
+  while (threads_remaining > 1) {
+    found = simd_or(found);
+    threads_remaining =
+        (threads_remaining + simdgroup_size - 1) / simdgroup_size;
+    if (threads_remaining > 1) {
+      if (simd_lane_id == 0) {
+        shared[simdgroup_id] = found;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (tid < threads_remaining) {
+        found = shared[tid];
+      } else {
+        return;
+      }
+    }
+  }
+
+  if (tid == 0 && found != 0u) {
+    atomic_fetch_or_explicit(&out[elem_idx], 1u, memory_order_relaxed);
+  }
+}
+
+// Casts the atomic-OR'd uint counts buffer (one slot per element) into the
+// bool output and applies the `invert` flag. Run as a separate kernel because
+// chunks may concurrently OR into the same slot, so the XOR with `invert` must
+// happen exactly once per output element after all chunks have completed.
+kernel void isin_apply_invert(
+    device const uint* counts [[buffer(0)]],
+    device bool* out [[buffer(1)]],
+    constant bool& invert [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  out[tid] = (counts[tid] != 0u) != invert;
 }
 
 #define REGISTER_ISIN_OP(T)                               \
   template [[host_name("isin_" #T)]] kernel void isin<T>( \
       constant T * elements [[buffer(0)]],                \
       constant T * test_elements [[buffer(1)]],           \
-      device bool* out [[buffer(2)]],                     \
-      constant int64_t& numel_test [[buffer(3)]],         \
-      constant int64_t& invert [[buffer(4)]],             \
-      uint tid [[thread_position_in_grid]]);
+      device atomic_uint * out [[buffer(2)]],             \
+      constant IsinParams & params [[buffer(3)]],         \
+      uint tid [[thread_position_in_threadgroup]],        \
+      uint tptg [[threads_per_threadgroup]],              \
+      uint tgid [[threadgroup_position_in_grid]],         \
+      uint simd_lane_id [[thread_index_in_simdgroup]],    \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
 REGISTER_ISIN_OP(float);
 REGISTER_ISIN_OP(half);
@@ -38,7 +87,6 @@ REGISTER_ISIN_OP(long);
 REGISTER_ISIN_OP(short);
 REGISTER_ISIN_OP(char);
 REGISTER_ISIN_OP(uchar);
-REGISTER_ISIN_OP(bool);
 
 struct clamp_functor {
   template <typename T>
