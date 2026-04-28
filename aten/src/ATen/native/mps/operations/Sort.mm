@@ -29,6 +29,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Sort_metallib.h>
 #endif
 
+// TODO: reuse DEFAULT_ILP from c10/metal/common.h
 static constexpr int TN = 4; // elements per thread
 
 static int select_tptg(int sort_size, size_t elem_size, int n_rows) {

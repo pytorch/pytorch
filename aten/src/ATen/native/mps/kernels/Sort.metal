@@ -554,15 +554,7 @@ kernel void mb_merge(
   }
 }
 
-// =============================================================================
-// Kernel instantiations
-//
-// Index storage: intermediate passes use uint (or ushort when sort_size fits
-// in 16 bits to halve tgmem/device traffic). The final merge pass emits long
-// directly via the `_final` variant to skip a separate index-widen copy.
-// =============================================================================
-
-// TODO: reuse DEFAULT_ILP from c10/metal/common.h for TN
+// TODO: reuse DEFAULT_ILP from c10/metal/common.h
 #define INSTANTIATE_SORT(T, TPTG, TN)                               \
   template [[host_name("sort_block_" #T "_tptg" #TPTG)]]            \
   kernel void sort_block<T, TPTG, TN>(                              \
