@@ -2341,7 +2341,7 @@ class CppBuilder:
                 relative_pch_obj = (
                     os.path.basename(pch_obj) if self._use_relative_path else pch_obj
                 )
-                    self._cflags_args += f'/Fo"{relative_pch_obj}" '  # codespell:ignore /Fo
+                self._cflags_args += f'/Fo"{relative_pch_obj}" '  # codespell:ignore /Fo
                 self._precompiled_header_object_file = normalize_path_separator(pch_obj)
             else:
                 self._sources_args = f"-x c++-header {sources[0]}"
