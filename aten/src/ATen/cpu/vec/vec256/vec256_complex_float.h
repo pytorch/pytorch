@@ -172,10 +172,12 @@ class Vectorized<c10::complex<float>> {
     for (const auto i : c10::irange(2 * size())) {
       tmp_values[i] = 0.0;
     }
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const float*>(ptr),
-        count * sizeof(c10::complex<float>));
+    if (count > 0) {
+      std::memcpy(
+          tmp_values,
+          reinterpret_cast<const float*>(ptr),
+          count * sizeof(c10::complex<float>));
+    }
     return _mm256_load_ps(tmp_values);
   }
   void store(void* ptr, int count = size()) const {

@@ -121,7 +121,9 @@ class Vectorized<int64_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    if (count > 0) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    }
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -271,7 +273,9 @@ class Vectorized<int32_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    if (count > 0) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    }
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -571,7 +575,9 @@ class Vectorized<int16_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    if (count > 0) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    }
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -919,7 +925,9 @@ class Vectorized8 : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(T));
+    if (count > 0) {
+      std::memcpy(tmp_values, ptr, count * sizeof(T));
+    }
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
