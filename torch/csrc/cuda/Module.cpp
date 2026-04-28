@@ -1648,9 +1648,7 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
   pybind11::gil_scoped_release no_gil;
   at::cuda::clearCublasWorkspaces();
   engine.execute_callback_on_device_threads(
-      c10::cuda::device_count(), [] {
-        at::cuda::clearCublasWorkspaces();
-      });
+      c10::cuda::device_count(), [] { at::cuda::clearCublasWorkspaces(); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
