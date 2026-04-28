@@ -137,9 +137,6 @@ class Benchmarker:
     inductor generated callables.
     """
 
-    def __init__(self: Self) -> None:
-        pass
-
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: torch.device | None = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
@@ -295,6 +292,7 @@ class Benchmarker:
     def benchmark_gpu_with_cuda_graph(
         self: Self,
         _callable: Callable[[], Any],
+        grad_to_none: list[torch.Tensor] | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -304,15 +302,33 @@ class Benchmarker:
         implementations.
         """
         # Warmup
+        torch.cuda.synchronize()
         _callable()
         torch.cuda.synchronize()
 
-        # Capture into CUDA graph
-        cuda_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
+        # Side-stream warmup then capture
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
             _callable()
+        stream.synchronize()
+
+        cuda_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            cuda_graph, stream=stream, capture_error_mode="thread_local"
+        ):
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            _callable()
+
+        torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
+        # grad clearing is captured in the graph, don't pass it through.
         return self.benchmark_gpu(cuda_graph.replay, **kwargs)
 
 
@@ -396,6 +412,10 @@ class TritonBenchmarker(Benchmarker):
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
+    def __init__(self: Self) -> None:
+        super().__init__()
+        self._in_cudagraph_benchmark = False
+
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -425,6 +445,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 for start_event, end_event in event_pairs
             ]
         )
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        grad_to_none: list[torch.Tensor] | None = None,
+        **kwargs: Any,
+    ) -> float:
+        # Prevent benchmark_gpu from re-entering this method
+        # when autotune_cudagraph_benchmarking is enabled.
+        self._in_cudagraph_benchmark = True
+        result = super().benchmark_gpu_with_cuda_graph(
+            _callable, grad_to_none=grad_to_none, **kwargs
+        )
+        self._in_cudagraph_benchmark = False
+        return result
 
     @may_distort_benchmarking_result
     @time_and_count
@@ -472,6 +508,27 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         if not is_vetted_benchmarking:
             may_ban_benchmarking()
+
+        if (
+            inductor_config.autotune_cudagraph_benchmarking
+            and not self._in_cudagraph_benchmark
+        ):
+            try:
+                return self.benchmark_gpu_with_cuda_graph(
+                    _callable,
+                    estimation_iters=estimation_iters,
+                    memory_warmup_iters=memory_warmup_iters,
+                    benchmark_iters=benchmark_iters,
+                    max_benchmark_duration=max_benchmark_duration,
+                    return_mode=return_mode,
+                    grad_to_none=grad_to_none,
+                )
+            except RuntimeError:
+                logger.debug(
+                    "CUDA graph capture failed during benchmarking, "
+                    "falling back to eager benchmarking",
+                    exc_info=True,
+                )
 
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
