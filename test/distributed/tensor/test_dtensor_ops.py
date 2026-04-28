@@ -26,7 +26,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    slowTest,
+    suppress_warnings,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -1021,6 +1026,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
         self.skipTest(f"Op {torch_op} failed to extract aten op")
 
+    @slowTest
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
