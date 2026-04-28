@@ -4974,6 +4974,38 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    def test_proxy_executor_error_message_preserved(self):
+        @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
+        def validate_input(x: torch.Tensor) -> torch.Tensor:
+            if x.isnan().any():
+                raise RuntimeError("NaN detected in input tensor")
+            return x.clone()
+
+        @validate_input.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        from torch._inductor.lowering import make_fallback
+
+        make_fallback(torch.ops.aoti_test.validate_input.default, warn=False)
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = torch.ops.aoti_test.validate_input(x)
+                return x * 2
+
+        m = M()
+        sample = torch.ones(3, device=self.device)
+        so_path = AOTIRunnerUtil.compile(m, (sample,))
+        aoti_module = torch._inductor.aoti_load_package(so_path)
+        result = aoti_module(sample)
+        self.assertTrue(torch.allclose(result, sample * 2))
+        nan_input = torch.tensor([1.0, float("nan"), 3.0], device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "NaN detected in input tensor"):
+            aoti_module(nan_input)
+        result2 = aoti_module(sample)
+        self.assertTrue(torch.allclose(result2, sample * 2))
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
