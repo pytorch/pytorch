@@ -1393,6 +1393,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or is_pybind11_enum_member(self.value):
             return self.value
 
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton.language as tl
+
+            if isinstance(self.value, tl.constexpr):
+                return self.value.value
+
         if self.is_pytree_constant_class and self.source:
             # NOTE pytree constants created in the torch.compile region will
             # NOT be guarded (even though they have a source set)

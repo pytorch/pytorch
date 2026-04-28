@@ -2748,6 +2748,32 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(expected, actual)
 
     @requires_gpu
+    def test_triton_kernel_constexpr_arg(self):
+        @triton.jit
+        def kernel(in_ptr, out_ptr, n, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 0:
+                out = tl.abs(x)
+            else:
+                out = x * x
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+            grid = (triton.cdiv(n, 1024),)
+            kernel[grid](x, out, n, MODE=CONSTANT_C, BLOCK_SIZE=1024)
+            return out
+
+        x = torch.randn(2048, device=GPU_TYPE)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(expected, actual)
+
+    @requires_gpu
     @unittest.skipIf(
         not triton_version_uses_attrs_dict(),
         "Test is only valid for new triton versions where attrs is represented by a raw dict",
