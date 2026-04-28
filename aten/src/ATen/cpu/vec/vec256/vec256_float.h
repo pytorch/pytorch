@@ -124,7 +124,9 @@ class Vectorized<float> {
     }
     if (count > 0) {
       std::memcpy(
-          tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
+          tmp_values,
+          reinterpret_cast<const float*>(ptr),
+          count * sizeof(float));
     }
     return _mm256_loadu_ps(tmp_values);
   }
