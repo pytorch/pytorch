@@ -409,8 +409,9 @@ class NCCLComm {
   // Device index for which the NCCL comm is created
   at::DeviceIndex deviceIndex_{-1};
 #ifdef NCCL_HAS_COMM_REGISTER
-  // Stores handlers for tensors registered by NCCL
-  std::unordered_map<void*, void*> registeredSegmentHandles_;
+  // Stores handlers for tensors registered by NCCL.
+  // Maps ptr -> (handle, is_window_registered).
+  std::unordered_map<void*, std::pair<void*, bool>> registeredSegmentHandles_;
 #endif // NCCL_HAS_COMM_REGISTER
 
  private:
