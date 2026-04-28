@@ -2079,6 +2079,45 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
+@clear_on_fresh_cache
+class CpuTritonKernelCache:
+    """AOTI counterpart of CudaKernelParamCache for CPU Triton kernels."""
+
+    cache: dict[str, dict[str, Any]] = {}
+    cache_clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(
+        cls,
+        key: str,
+        kernel_bytes: bytes,
+        launcher_bytes: bytes,
+        kernel_symbol: str,
+        signature: dict[str, Any],
+    ) -> None:
+        out_dir = split_aot_inductor_output_path(config.aot_inductor.output_path)[0]
+        _, kernel_so_path = write(
+            kernel_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        _, launcher_so_path = write(
+            launcher_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        cls.cache[key] = {
+            "kernel_so_path": kernel_so_path,
+            "launcher_so_path": launcher_so_path,
+            "kernel_symbol": kernel_symbol,
+            "signature": signature,
+        }
+
+    @classmethod
+    def get(cls, key: str) -> dict[str, Any] | None:
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def get_keys(cls) -> KeysView[str]:
+        return cls.cache.keys()
+
+
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
