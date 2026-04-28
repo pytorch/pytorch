@@ -455,6 +455,10 @@ endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+if(MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:torch_python> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 # Build the torch._C Python extension module from the thin stub that
 # forwards to torch_python.  This was historically built by setuptools;
 # building it here lets both setuptools and scikit-build-core use the
@@ -479,6 +483,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
       LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
     )
+    if(MSVC AND BUILD_SHARED_LIBS)
+      install(FILES $<TARGET_PDB_FILE:_C> DESTINATION "${SKBUILD_PLATLIB_DIR}/torch" OPTIONAL)
+    endif()
   endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
@@ -523,6 +530,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       install(TARGETS _nccl_ep
         RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
         LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+      if(MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:_nccl_ep> DESTINATION "${SKBUILD_PLATLIB_DIR}/torch" OPTIONAL)
+      endif()
     endif()
   endif()
 endif()
