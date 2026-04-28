@@ -13894,6 +13894,121 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
 
 
+
+class TestFlashAttentionMPS(TestCaseMPS):
+    """Tests for torch.ops.aten._scaled_dot_product_flash_attention_for_mps.
+
+    These ops are NOT auto-dispatched through F.scaled_dot_product_attention to
+    avoid regressions against the existing MPSGraph path.  Call them directly to
+    opt in to O(N) memory tiled attention on Apple Silicon.
+    """
+
+    _flash_op = torch.ops.aten._scaled_dot_product_flash_attention_for_mps
+    _flash_bwd_op = torch.ops.aten._scaled_dot_product_flash_attention_for_mps_backward
+
+    def _run_forward(self, B, H, S, D, kvH=None, dtype=torch.float16, causal=False):
+        """Run flash fwd and compare against CPU math reference."""
+        kvH = kvH or H
+        scale = 1.0 / (D ** 0.5)
+        torch.manual_seed(42)
+        q = torch.randn(B, H,   S, D, device="mps", dtype=dtype)
+        k = torch.randn(B, kvH, S, D, device="mps", dtype=dtype)
+        v = torch.randn(B, kvH, S, D, device="mps", dtype=dtype)
+
+        out, _ = self._flash_op(q, k, v, 0.0, causal, scale=scale)
+
+        # CPU reference: expand k/v for GQA
+        g = H // kvH
+        kc = k.cpu().float().repeat_interleave(g, dim=1)
+        vc = v.cpu().float().repeat_interleave(g, dim=1)
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            q.cpu().float(), kc, vc, is_causal=causal, scale=scale)
+
+        tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+        torch.testing.assert_close(out.cpu().float(), ref, atol=tol, rtol=tol)
+
+    def _run_backward(self, B, H, S, D, kvH=None, dtype=torch.float16, causal=False):
+        """Run flash fwd+bwd and compare gradients against CPU autograd reference."""
+        kvH = kvH or H
+        scale = 1.0 / (D ** 0.5)
+        torch.manual_seed(42)
+
+        q  = torch.randn(B, H,   S, D, device="mps", dtype=dtype, requires_grad=True)
+        k  = torch.randn(B, kvH, S, D, device="mps", dtype=dtype, requires_grad=True)
+        v  = torch.randn(B, kvH, S, D, device="mps", dtype=dtype, requires_grad=True)
+        qc = q.detach().cpu().float().requires_grad_(True)
+        kc = k.detach().cpu().float().requires_grad_(True)
+        vc = v.detach().cpu().float().requires_grad_(True)
+
+        # Flash fwd+bwd
+        out, _ = self._flash_op(q, k, v, 0.0, causal, scale=scale)
+        out.sum().backward()
+
+        # CPU reference (expand k/v for GQA)
+        g = H // kvH
+        kc_exp = kc.repeat_interleave(g, dim=1)
+        vc_exp = vc.repeat_interleave(g, dim=1)
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qc, kc_exp, vc_exp, is_causal=causal, scale=scale)
+        ref.sum().backward()
+
+        tol = 2e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-3
+        torch.testing.assert_close(q.grad.cpu().float(),  qc.grad,  atol=tol, rtol=tol)
+        # dK and dV are accumulated across gqa_factor q-heads; compare per kv-head
+        dk_ref = kc.grad.reshape(B, kvH, g, S, D).sum(dim=2)
+        dv_ref = vc.grad.reshape(B, kvH, g, S, D).sum(dim=2)
+        torch.testing.assert_close(k.grad.cpu().float(), dk_ref, atol=tol, rtol=tol)
+        torch.testing.assert_close(v.grad.cpu().float(), dv_ref, atol=tol, rtol=tol)
+
+    # ------------------------------------------------------------------
+    # Forward tests
+    # ------------------------------------------------------------------
+    def test_flash_fwd_fp16_noncausal_d64(self):
+        self._run_forward(2, 8, 512, 64, dtype=torch.float16, causal=False)
+
+    def test_flash_fwd_fp16_causal_d64(self):
+        self._run_forward(2, 8, 512, 64, dtype=torch.float16, causal=True)
+
+    def test_flash_fwd_bf16_noncausal_d128(self):
+        self._run_forward(2, 4, 256, 128, dtype=torch.bfloat16, causal=False)
+
+    def test_flash_fwd_fp32_noncausal_d64(self):
+        self._run_forward(1, 4, 128, 64, dtype=torch.float32, causal=False)
+
+    def test_flash_fwd_fp16_long_sequence(self):
+        self._run_forward(1, 4, 1024, 64, dtype=torch.float16, causal=False)
+
+    # ------------------------------------------------------------------
+    # GQA forward tests
+    # ------------------------------------------------------------------
+    def test_flash_fwd_gqa_factor4_d64(self):
+        self._run_forward(2, 8, 512, 64, kvH=2, dtype=torch.float16)
+
+    def test_flash_fwd_gqa_factor8_d128(self):
+        self._run_forward(2, 8, 256, 128, kvH=1, dtype=torch.float16)
+
+    # ------------------------------------------------------------------
+    # Backward tests
+    # ------------------------------------------------------------------
+    def test_flash_bwd_fp16_noncausal(self):
+        self._run_backward(2, 4, 256, 64, dtype=torch.float16, causal=False)
+
+    def test_flash_bwd_fp16_causal(self):
+        self._run_backward(2, 4, 256, 64, dtype=torch.float16, causal=True)
+
+    def test_flash_bwd_fp32_noncausal(self):
+        self._run_backward(1, 4, 128, 64, dtype=torch.float32, causal=False)
+
+    # ------------------------------------------------------------------
+    # GQA backward tests
+    # ------------------------------------------------------------------
+    def test_flash_bwd_gqa_factor4(self):
+        self._run_backward(2, 8, 256, 64, kvH=2, dtype=torch.float16)
+
+    def test_flash_bwd_gqa_factor8(self):
+        self._run_backward(2, 8, 128, 64, kvH=1, dtype=torch.float16)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -13908,6 +14023,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestFlashAttentionMPS)
 
 if __name__ == "__main__":
     run_tests()
