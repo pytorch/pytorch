@@ -72,6 +72,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
@@ -3094,13 +3095,45 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
+  // Callback for C++ FakeTensor fallback to call Python decompositions.
+  // Type-erased to avoid pulling OperatorHandle/Stack into c10 headers.
+  static auto tryPythonDecomp = [](const void* op_ptr, void* stack_ptr) -> bool {
+    const auto& op =
+        *static_cast<const c10::OperatorHandle*>(op_ptr);
+    auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
+
+    py::gil_scoped_acquire gil;
+
+    py::handle py_op = torch::detail::getTorchApiFunction(op);
+
+    static py::object decomp_table =
+        py::module::import("torch._decomp").attr("decomposition_table");
+
+    if (!decomp_table.contains(py_op)) {
+      return false;
+    }
+
+    py::object decomp_fn = decomp_table[py_op];
+
+    const auto& schema = op.schema();
+    auto arguments =
+        torch::jit::pop(*stack, schema.arguments().size());
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+    auto result =
+        decomp_fn(*args_kwargs.first, **args_kwargs.second);
+    pushPyOutToStack(op, stack, std::move(result), "decomposition");
+    return true;
+  };
+
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
 
   py_module.def(
       "_make_fake_tensor",
-      [](const at::Tensor& real, py::object source) -> at::Tensor {
+      [](const at::Tensor& real,
+         py::object source,
+         py::object symbolic_context) -> at::Tensor {
         auto mode = c10::impl::FakeTensorModeTLS::get_state();
         TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
 
@@ -3109,9 +3142,20 @@ Call this whenever a new thread is created in order to propagate values from
         auto shape_env = py::reinterpret_borrow<py::object>(
             mode->shape_env_->ptr(getPyInterpreter()));
 
-        auto meta_obj = converter.attr("to_meta_tensor")(
-            real, py::arg("shape_env") = shape_env, py::arg("source") = source);
-        at::Tensor meta_tensor = py::cast<at::Tensor>(meta_obj);
+        at::Tensor meta_tensor;
+        {
+          // Exclude Fake key so the internal empty_strided(device="meta")
+          // inside to_meta_tensor goes directly to the Meta kernel, matching
+          // Python FakeTensorConverter which uses no_dispatch().
+          c10::impl::ExcludeDispatchKeyGuard guard(
+              c10::DispatchKeySet(c10::DispatchKey::Fake));
+          auto meta_obj = converter.attr("to_meta_tensor")(
+              real,
+              py::arg("shape_env") = shape_env,
+              py::arg("source") = source,
+              py::arg("symbolic_context") = symbolic_context);
+          meta_tensor = py::cast<at::Tensor>(meta_obj);
+        }
 
         auto device = real.device();
         meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
@@ -3120,7 +3164,8 @@ Call this whenever a new thread is created in order to propagate values from
         return meta_tensor;
       },
       py::arg("real"),
-      py::arg("source") = py::none());
+      py::arg("source") = py::none(),
+      py::arg("symbolic_context") = py::none());
 
   py_module.def(
       "_create_and_enter_fake_tensor_mode",
@@ -3132,6 +3177,7 @@ Call this whenever a new thread is created in order to propagate values from
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
+        mode->decomp_fn_ = tryPythonDecomp;
         c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
       },
       py::arg("converter"),
