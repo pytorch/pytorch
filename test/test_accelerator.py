@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
@@ -290,6 +291,70 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+    def test_mempool_id(self):
+        pool1 = torch.accelerator.generate_graph_pool_handle()
+        self.assertGreater(pool1[1], 0)
+        self.assertEqual(pool1[0], 0)
+        pool2 = torch.accelerator.generate_graph_pool_handle()
+        self.assertGreater(pool2[1], pool1[1])
+        self.assertEqual(pool2[0], 0)
+
+    @unittest.skipIf(
+        not TEST_XPU,
+        "Requires accelerator graph support.",
+    )
+    def test_graph_three_successive(self):
+        gc.collect()
+        torch.accelerator.empty_cache()
+        size = 1000
+        acc = torch.accelerator.current_accelerator()
+
+        s = torch.Stream()
+        # Run once with independent graphs, then once with an explicit shared pool handle.
+        for pool in [None, torch.accelerator.generate_graph_pool_handle()]:
+            a = torch.ones((size,), device=acc)
+            g0 = torch.accelerator.Graph(pool=pool)
+            g1 = torch.accelerator.Graph(pool=pool)
+            g2 = torch.accelerator.Graph(pool=pool)
+            with s, g0:
+                b = a.clone()
+                c = b + 1
+                d = b + 2
+
+            with s, g1:
+                e = c + 3
+                del c
+
+            with s, g2:
+                f = d + 4
+
+            g0.replay()
+            g1.replay()
+            g2.replay()
+
+            self.assertEqual(e.sum().item(), size * 5)
+            self.assertEqual(f.sum().item(), size * 7)
+
+            # Replaying in a different order than captured is only safe when the graphs
+            # do not share memory pools.
+            g0.replay()
+            g2.replay()
+            g1.replay()
+
+            expect_corruption = pool is not None
+            # With a shared pool handle, the captures are allowed to reuse the same
+            # underlying memory. In this test, g2 may reuse the storage that g1's
+            # capture expects for `c`. Replaying g2 before g1 can therefore corrupt
+            # g1's outputs.
+            self.assertEqual(
+                e.sum().item(), size * (7 + 3) if expect_corruption else size * 5
+            )
+            self.assertEqual(f.sum().item(), size * 7)
+
+            del a, b, d, e, f, g0, g1, g2
+            gc.collect()
+            torch.accelerator.empty_cache()
 
 
 if __name__ == "__main__":
