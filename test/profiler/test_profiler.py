@@ -3806,9 +3806,9 @@ class TestProfilerEarlyAbort(TestCase):
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
             # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_kineto_stopped
-            # returns True so we override current_action to NONE.
+            # returns True so we override to DEVICE_STOPPED.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
     def test_step_early_abort_from_record(self):
@@ -3821,13 +3821,10 @@ class TestProfilerEarlyAbort(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD -> RECORD per schedule, but _is_kineto_stopped
-            # -> True overrides to RECORD_AND_SAVE (two-step wind-down).
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
-            # step 2 -> 3: RECORD_AND_SAVE -> NONE, fires stop_trace +
+            # -> True overrides to DEVICE_STOPPED. Transition fires stop_trace +
             # _trace_ready to save the collected data.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
     def test_step_early_abort_from_record_and_save(self):
@@ -3840,19 +3837,45 @@ class TestProfilerEarlyAbort(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD_AND_SAVE -> WARMUP (repeat), but
-            # _is_kineto_stopped -> True forces NONE
+            # _is_kineto_stopped -> True overrides to DEVICE_STOPPED. Transition
+            # fires stop_trace + _trace_ready to save the collected data.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+
+    def test_gpu_stopped_persists_through_cycle(self):
+        """Once in DEVICE_STOPPED, the profiler stays there until the schedule
+        moves to WARMUP (new cycle) or NONE (end)."""
+        p = self._make_profiler(wait=0, warmup=1, active=4, repeat=2)
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            # step 0 -> 1: WARMUP -> RECORD
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD -> DEVICE_STOPPED (early abort)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 2 -> 3: schedule says RECORD, stays DEVICE_STOPPED
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 3 -> 4: schedule says RECORD_AND_SAVE, stays DEVICE_STOPPED
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 4 -> 5: schedule rolls over to WARMUP (new cycle), exits
+            # DEVICE_STOPPED. The DEVICE_STOPPED -> WARMUP transition fires
+            # prepare_trace.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
 
     def test_step_no_abort_when_none(self):
         p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
-            # step 0 -> 1: NONE -> NONE. _is_kineto_stopped is True, but since
-            # the result is NONE either way, we can't distinguish whether the
-            # early abort path fired — we just verify the profiler lands in
-            # the expected state.
+            # step 0 -> 1: NONE -> NONE. prev_action is NONE so the early
+            # abort path does not fire.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
@@ -3867,9 +3890,8 @@ class TestProfilerEarlyAbort(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_kineto_stopped is True,
-            # but the schedule naturally transitions to NONE here too, so we
-            # can't distinguish the cause — we just verify the profiler lands
-            # in the expected state.
+            # but the schedule already transitions to NONE, so the early abort
+            # path does not fire (current_action != NONE guard).
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()

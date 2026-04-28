@@ -546,6 +546,7 @@ class ProfilerAction(Enum):
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
+    DEVICE_STOPPED = 4
 
 
 def schedule(
@@ -880,6 +881,7 @@ class profile(_KinetoProfile):
                 self.start_trace,
             ],
             (ProfilerAction.WARMUP, ProfilerAction.NONE): [
+                partial(warn, "Incorrect schedule: WARMUP followed by NONE"),
                 self.start_trace,
                 self.stop_trace,
             ],
@@ -917,6 +919,27 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
+            # DEVICE_STOPPED: entered when device collection stops early (e.g.
+            # CUPTI buffer overflow). Absorbs the remainder of the current
+            # profiling cycle, then exits when the schedule moves to WARMUP
+            # (new cycle) or NONE (end).
+            (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
+                self.start_trace,
+                self.stop_trace,
+            ],
+            (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
+                self.prepare_trace,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.NONE): [],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
@@ -924,6 +947,7 @@ class profile(_KinetoProfile):
                 self.stop_trace,
                 self._trace_ready,
             ],
+            (ProfilerAction.DEVICE_STOPPED, None): [],
         }
         # Start tracking increments to profiler step, this will be used
         # by Kineto
@@ -962,26 +986,30 @@ class profile(_KinetoProfile):
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
-        # If device collection was stopped (e.g. buffer overflow), force an
-        # early stop regardless of what the schedule says.
+        # DEVICE_STOPPED handling: when device collection stops early (e.g. CUPTI
+        # buffer overflow), we enter DEVICE_STOPPED and stay there for the
+        # remainder of the current profiling cycle.
         #
-        # Note that we have to be careful about what the previous and current
-        # action is:
+        # Once in DEVICE_STOPPED, the schedule continues to advance step_num but
+        # we override current_action to DEVICE_STOPPED until the schedule moves
+        # to WARMUP (new cycle — prepare_trace resets the stopped flag) or
+        # NONE (end of profiling).
         #
-        # - prev_action != NONE: if we already transitioned to NONE, the next
-        #   cycle must be allowed to start (NONE -> WARMUP calls prepare_trace
-        #   which resets the stopped flag). Blocking it would livelock.
-        #
-        # - current_action not NONE: if the schedule is already stopping us
-        #   (e.g. RECORD -> NONE), respect that. Without this, the RECORD
-        #   branch below would override NONE to RECORD_AND_SAVE, extending
-        #   profiling by a step when the schedule says to stop.
-        #
-        # When aborting from RECORD, we transition to RECORD_AND_SAVE rather
-        # than NONE so that the next step's RECORD_AND_SAVE -> NONE transition
-        # fires stop_trace + _trace_ready, saving the collected data. This
-        # costs one extra training step with profiling overhead.
-        if (
+        # Entry into DEVICE_STOPPED:
+        # - use_device must be set: a CPU-only profiler must not react to a
+        #   stale stopped flag from a previous device profiler.
+        # - prev_action must not be NONE or DEVICE_STOPPED: if we already
+        #   transitioned out, the next cycle must be allowed to start.
+        # - current_action must not be NONE: if the schedule is already
+        #   stopping us (e.g. RECORD_AND_SAVE -> NONE), respect that rather
+        #   than entering DEVICE_STOPPED.
+        if prev_action == ProfilerAction.DEVICE_STOPPED:
+            if self.current_action not in (
+                ProfilerAction.WARMUP,
+                ProfilerAction.NONE,
+            ):
+                self.current_action = ProfilerAction.DEVICE_STOPPED
+        elif (
             torch.autograd._is_kineto_stopped()
             and self.use_device is not None
             and prev_action
@@ -996,10 +1024,7 @@ class profile(_KinetoProfile):
                 "GPU activity collection was stopped early. "
                 f"Aborting profiling at step {self.step_num}."
             )
-            if prev_action == ProfilerAction.RECORD:
-                self.current_action = ProfilerAction.RECORD_AND_SAVE
-            else:
-                self.current_action = ProfilerAction.NONE
+            self.current_action = ProfilerAction.DEVICE_STOPPED
 
         self._transit_action(prev_action, self.current_action)
         if os.environ.get("KINETO_USE_DAEMON", "") or (
