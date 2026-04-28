@@ -4,6 +4,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #include <c10/util/FileSystem.h>
 
@@ -147,14 +148,23 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       get_num_outputs_func_(container_handle_, &num_outputs));
   std::vector<AtenTensorHandle> output_handles(num_outputs);
 
-  AOTI_RUNTIME_ERROR_CODE_CHECK(run_func_(
+  torch::aot_inductor::set_last_error(nullptr);
+  auto run_result = run_func_(
       container_handle_,
       input_handles.data(),
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
       reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
-      proxy_executor_handle_));
+      proxy_executor_handle_);
+  if (run_result != AOTI_RUNTIME_SUCCESS) {
+    const char* err = torch::aot_inductor::get_last_error();
+    if (err) {
+      throw std::runtime_error(err);
+    }
+    torch::headeronly::detail::throw_exception(
+        "run_func_(...)", __FILE__, __LINE__);
+  }
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
