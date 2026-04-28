@@ -1634,7 +1634,7 @@ static PyObject* THPModule_willEngineExecuteNode(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
   torch::autograd::Node* node = nullptr;
-  std::shared_ptr<torch::autograd::Node> node_sp;
+  c10::intrusive_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
     node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
     node = node_sp.get();
