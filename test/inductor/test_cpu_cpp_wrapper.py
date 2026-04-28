@@ -11,7 +11,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
-    IS_WINDOWS,
     slowTest,
     TEST_MKL,
     TEST_WITH_ROCM,
