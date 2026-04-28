@@ -745,10 +745,9 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
     } else {
       global_state->removeCallback();
     }
-    return;
-  }
-  ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
-  if (tls_state) {
+  } else {
+    ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
+    TORCH_CHECK(tls_state);
     if (enable) {
       auto scopes = profiler_state_info_ptr->scopes;
       pushTLSProfilingCallbacks(scopes);
@@ -774,10 +773,9 @@ static UNUSED void togglePythonCollectionDynamic(bool enable) {
     } else {
       global_state->pausePython();
     }
-    return;
-  }
-  KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
-  if (tls_state) {
+  } else {
+    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
+    TORCH_CHECK(tls_state);
     if (enable) {
       tls_state->resumePython();
     } else {
