@@ -12,7 +12,6 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
-    TEST_XPU,
     TestCase,
 )
 
@@ -301,7 +300,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(pool2[0], 0)
 
     @unittest.skipIf(
-        not TEST_XPU,
+        not torch.accelerator.is_graph_available(),
         "Requires accelerator graph support.",
     )
     def test_graph_three_successive(self):
