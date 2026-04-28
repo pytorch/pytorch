@@ -705,6 +705,13 @@ class OutputGraph(OutputGraphCommon):
         self.tracing_context.cudagraph_annotation = self.cudagraph_annotation
         self.traced_code = self.tracing_context.traced_code
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
+
+        if config.use_cpp_fake_tensor:
+            torch._C._create_and_enter_fake_tensor_mode(
+                fake_mode.fake_tensor_converter, shape_env
+            )
+            self.add_cleanup_hook(torch._C._exit_fake_tensor_mode)
+
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -4037,11 +4044,15 @@ class SubgraphTracer(fx.Tracer):
     ) -> fx.Proxy:
         if isinstance(example_value, torch.Tensor):
             self._input_versions_at_beginning.append(example_value._version)
+        if isinstance(example_value, torch.Tensor):
+            ev_str = f"{example_value.__class__.__name__}(..., size={tuple(example_value.shape)})"
+        else:
+            ev_str = example_value
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            example_value,
+            ev_str,
             self.debug_level,
             before,
         )

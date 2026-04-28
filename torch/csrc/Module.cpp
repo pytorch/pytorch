@@ -3190,6 +3190,18 @@ Call this whenever a new thread is created in order to propagate values from
     return c10::impl::FakeTensorModeTLS::get_state() != nullptr;
   });
 
+  py_module.def(
+      "_fake_tensor_belongs_to_active_mode",
+      [](const at::Tensor& t) -> bool {
+        if (!t.is_fake())
+          return false;
+        auto active_mode = c10::impl::FakeTensorModeTLS::get_state();
+        if (active_mode == nullptr)
+          return false;
+        auto tensor_mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+        return tensor_mode.get() == active_mode.get();
+      });
+
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});

@@ -746,6 +746,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
+# Use C++ FakeTensor mode (DispatchKey::Fake) instead of Python FakeTensorMode
+# for fake tensor propagation during dynamo tracing.
+use_cpp_fake_tensor = os.environ.get("TORCHDYNAMO_CPP_FAKE_TENSOR", "0") == "1"
+
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
 caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"

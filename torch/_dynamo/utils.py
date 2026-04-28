@@ -159,6 +159,20 @@ except ImportError:
     pass
 
 
+def is_fake_or_cpp_fake(x: object) -> bool:
+    """is_fake that also recognizes C++ fake tensors (DispatchKey::Fake)."""
+    if is_fake(x):
+        return True
+    if isinstance(x, torch.Tensor) and torch._C._is_fake_tensor(x):
+        return True
+    return False
+
+
+def cpp_fake_belongs_to_mode(t: torch.Tensor) -> bool:
+    """Check if a C++ fake tensor belongs to the currently active C++ FakeTensorMode."""
+    return torch._C._fake_tensor_belongs_to_active_mode(t)
+
+
 T = TypeVar("T")
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -3716,7 +3730,7 @@ def get_debug_dir() -> str:
 
 
 def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> Any:
-    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+    if "example_value" in node.meta and is_fake_or_cpp_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
         from torch._dynamo.exc import unimplemented
@@ -3734,7 +3748,7 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
-    if maybe_get_fake_mode(e) is not tx.fake_mode:
+    if maybe_get_fake_mode(e) is not tx.fake_mode or cpp_fake_belongs_to_mode(e):
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
         )
@@ -3848,7 +3862,7 @@ def _get_fake_value_impl(
     op = node.op
 
     # FX Node should always return the same fake value
-    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+    if "example_value" in node.meta and is_fake_or_cpp_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
     args, kwargs = get_fake_values_from_nodes(
@@ -3863,7 +3877,9 @@ def _get_fake_value_impl(
             tx, _get_flat_args(node, {}), allow_non_graph_fake
         )
         id_to_initial_version = {
-            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+            id(arg): arg._version
+            for arg in flat_args_kwargs
+            if is_fake_or_cpp_fake(arg)
         }
     else:
         # pyrefly: ignore [implicit-any]
@@ -3906,7 +3922,15 @@ def _get_fake_value_impl(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._C._is_cpp_fake_tensor_mode_active()
+        ):
+            log.debug("get_fake_value: using C++ fake tensor mode for %s", node.target)
+            fake_mode_ctx = contextlib.nullcontext()
+        else:
+            fake_mode_ctx = fake_mode
+        with fake_mode_ctx, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

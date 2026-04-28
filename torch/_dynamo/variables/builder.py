@@ -52,7 +52,9 @@ from torch._dynamo.graph_bytecode_inputs import (
     register_user_object,
 )
 from torch._dynamo.utils import (
+    cpp_fake_belongs_to_mode,
     get_metrics_context,
+    is_fake_or_cpp_fake,
     is_int_specialization_case,
     is_torch_sym,
     normalize_count_iter,
@@ -453,7 +455,7 @@ class GraphArg:
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
             self._example = TensorWeakRef(self._example)
-            if not is_fake(self.fake_tensor):
+            if not is_fake_or_cpp_fake(self.fake_tensor):
                 raise AssertionError("fake_tensor must be a FakeTensor")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2483,6 +2485,11 @@ class VariableBuilder:
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
             )
+        if cpp_fake_belongs_to_mode(value):
+            raise InternalTorchDynamoError(
+                "Cannot wrap a Tensor that has already been",
+                "wrapped by this instance of Dynamo",
+            )
 
     def wrap_tensor(self, value: torch.Tensor) -> VariableTracker:
         source = self.get_source()
@@ -2779,7 +2786,9 @@ class VariableBuilder:
         # Note: this information is conveyed via subclass_type now
         # type: ignore[attr-defined]
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
-        if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
+        if maybe_get_fake_mode(
+            fake_tensor_value
+        ) is not self.tx.fake_mode and not cpp_fake_belongs_to_mode(fake_tensor_value):
             raise InternalTorchDynamoError("Wrapped Tensor must be this graph's fake")
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
@@ -3121,14 +3130,18 @@ class VariableBuilder:
             )
         fake_tensor_value = None
         example_value = unspec_var.proxy.node.meta["example_value"]
-        if not is_fake(example_value):
+        if not is_fake_or_cpp_fake(example_value):
             raise AssertionError(
                 f"Expected fake tensor example_value, got {type(example_value)}"
             )
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+        if (
+            isinstance(fake_tensor_value, FakeTensor)
+            and fake_tensor_value.fake_mode is not self.tx.fake_mode
+            or not cpp_fake_belongs_to_mode(fake_tensor_value)
+        ):
             raise AssertionError(
                 f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
                 "({self.tx.fake_mode}) from InstructionTranslator"
@@ -3215,14 +3228,19 @@ class VariableBuilder:
             else:
                 # type: ignore[attr-defined]
                 example_value = unspec_var.proxy.node.meta["example_value"]
-            if not is_fake(example_value):
+
+            if not is_fake_or_cpp_fake(example_value):
                 raise AssertionError(
                     f"Expected fake tensor example_value, got {type(example_value)}"
                 )
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            if (
+                isinstance(fake_tensor_value, FakeTensor)
+                and fake_tensor_value.fake_mode is not self.tx.fake_mode
+                or not cpp_fake_belongs_to_mode(fake_tensor_value)
+            ):
                 raise AssertionError(
                     f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
                     "({self.tx.fake_mode}) from InstructionTranslator"
@@ -3269,7 +3287,7 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
-            isinstance(value, FakeTensor)
+            is_fake_or_cpp_fake(value)
             or (
                 # Is functional tensor fakeified by this instance of Dynamo
                 torch._is_functional_tensor(value)
@@ -3439,7 +3457,9 @@ def _wrap_fx_preexisting_tensor(
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
         # Handle recursive calls here
-        if maybe_get_fake_mode(tensor) is tx.fake_mode:
+        if maybe_get_fake_mode(tensor) is tx.fake_mode or cpp_fake_belongs_to_mode(
+            tensor
+        ):
             pass
         else:
             cache_real_value_when_export(tx, proxy, tensor)
@@ -3470,6 +3490,7 @@ def _wrap_fx_preexisting_tensor(
 
         if tensor.device.type != "meta" and (
             maybe_get_fake_mode(tensor) is not tx.fake_mode
+            and not cpp_fake_belongs_to_mode(tensor)
         ):
             raise InternalTorchDynamoError(
                 "`tensor` needs to be a `FakeTensor`"
@@ -3837,9 +3858,8 @@ def get_specialized_props(
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
-    ):
+        is_fake(example_value) and maybe_get_fake_mode(example_value) is tx.fake_mode
+    ) or cpp_fake_belongs_to_mode(example_value):
         if subclass_type:
             tensor_type = subclass_type
         elif isinstance(example_value, torch.nn.Parameter):
@@ -4445,13 +4465,30 @@ def _wrap_to_fake_tensor_and_record_impl(
         with enable_python_dispatcher():
             if tx.fake_mode is None:
                 raise AssertionError("tx.fake_mode must not be None")
-            fake_e = wrap_fake_exception(
-                lambda: tx.fake_mode.from_tensor(
-                    e,  # type: ignore[arg-type]
-                    source=source,
-                    symbolic_context=symbolic_context,
+            if (
+                config.use_cpp_fake_tensor
+                and torch._C._is_cpp_fake_tensor_mode_active()
+            ):
+                log.debug(
+                    "wrap_to_fake (C++ mode) %s %s",
+                    source.name if source else "(none)",
+                    tuple(e.shape),
                 )
-            )
+                fake_e = wrap_fake_exception(
+                    lambda: torch._C._make_fake_tensor(
+                        e,
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
+                )
+            else:
+                fake_e = wrap_fake_exception(
+                    lambda: tx.fake_mode.from_tensor(
+                        e,  # type: ignore[arg-type]
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
+                )
         if tensor_spec is not None:
             for dim_i in range(fake_e.dim()):
                 dim_spec = tensor_spec[dim_i]
