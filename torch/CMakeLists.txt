@@ -466,6 +466,10 @@ endif()
 if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
   target_link_libraries(_C PRIVATE torch_python)
+  if(MSVC AND CMAKE_BUILD_TYPE MATCHES Debug)
+    # Keep LIBCMTD out of the /MDd link.
+    target_link_options(_C PRIVATE "/NODEFAULTLIB:LIBCMTD.LIB")
+  endif()
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
     # libtorch_python.so is installed to lib/ relative to _C, so use
