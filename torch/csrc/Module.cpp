@@ -28,6 +28,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -3099,14 +3100,31 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_make_fake_tensor",
-      [](const at::Tensor& real,
-         py::object converter,
-         py::object shape_env,
-         py::object source) -> at::Tensor {
+      [](const at::Tensor& real, py::object source) -> at::Tensor {
+        auto mode = c10::impl::FakeTensorModeTLS::get_state();
+        TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+
+        auto converter = py::reinterpret_borrow<py::object>(
+            mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+        auto shape_env = py::reinterpret_borrow<py::object>(
+            mode->shape_env_->ptr(getPyInterpreter()));
+
         auto meta_obj = converter.attr("to_meta_tensor")(
             real, py::arg("shape_env") = shape_env, py::arg("source") = source);
         at::Tensor meta_tensor = py::cast<at::Tensor>(meta_obj);
 
+        auto device = real.device();
+        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
+        meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+
+        return meta_tensor;
+      },
+      py::arg("real"),
+      py::arg("source") = py::none());
+
+  py_module.def(
+      "_create_and_enter_fake_tensor_mode",
+      [](py::object converter, py::object shape_env) {
         Py_INCREF(shape_env.ptr());
         Py_INCREF(converter.ptr());
         auto mode = std::make_shared<c10::FakeTensorMode>(
@@ -3114,18 +3132,13 @@ Call this whenever a new thread is created in order to propagate values from
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
-
-        auto device = real.device();
-        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
-        meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(
-            std::move(mode));
-
-        return meta_tensor;
+        c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
       },
-      py::arg("real"),
       py::arg("converter"),
-      py::arg("shape_env") = py::none(),
-      py::arg("source") = py::none());
+      py::arg("shape_env") = py::none());
+  py_module.def("_exit_fake_tensor_mode", []() {
+    c10::impl::FakeTensorModeTLS::reset_state();
+  });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
