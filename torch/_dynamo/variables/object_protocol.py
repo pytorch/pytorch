@@ -142,6 +142,12 @@ def type_implements_nb_float(obj_type: type) -> bool:
     return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
 
 
+def type_implements_mp_subscript(obj_type: type) -> bool:
+    """Check whether obj_type has tp_as_mapping->mp_subscript."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
+
+
 def type_implements_tp_iter(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
@@ -180,6 +186,29 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
                 *graph_break_hints.DYNAMO_BUG,
             ],
         )
+
+
+def validate_sequence_index(
+    tx: "InstructionTranslator",
+    key: VariableTracker,
+    container_name: str,
+) -> VariableTracker:
+    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
+
+    ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
+    """
+    key_type = maybe_get_python_type(key)
+    if key_type not in (int, bool, slice):
+        if not type_implements_nb_index(key_type):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                ],
+            )
+        key = key.nb_index_impl(tx)
+    return key
 
 
 def vt_mapping_size(
@@ -266,19 +295,65 @@ def vt_getitem(
       3. PyType_Check(o)              (L183-203) — type[int] → GenericAlias/__class_getitem__
 
     Branch 1 is the common path (list, tuple, dict, range all have mp_subscript).
-    TODO(follow-up): use has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT) to gate
-    Branch 1 and has_slot(seq_slots, PySequenceSlots.SQ_ITEM) to gate Branch 2,
-    matching CPython's dispatch order.
-    TODO(follow-up): Branch 2 (sq_item) for C extension types that only have
-    tp_as_sequence (e.g. deque — Modules/_collectionsmodule.c:1888).
-    Branch 3 is handled by TypingVariable.mp_subscript_impl for typing module types
-    and by BuiltinVariable for builtin types like list[int].
-
-    Types that work via constant fold fallback (no dedicated mp_subscript_impl):
-    TODO(follow-up): str (unicode_subscript, Objects/unicodeobject.c:13809)
-    TODO(follow-up): bytes (bytes_subscript, Objects/bytesobject.c)
+    Branch 2 fires for types with only sq_item (e.g. deque).
+    Branch 3 delegates to mp_subscript_impl for type objects (__class_getitem__).
     """
-    return obj.mp_subscript_impl(tx, key)
+    obj_type = maybe_get_python_type(obj)
+    # Branch 1: mp_subscript
+    if type_implements_mp_subscript(obj_type):
+        return obj.mp_subscript_impl(tx, key)
+    # Branch 2: sq_item (only if mp_subscript is absent)
+    # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
+    #          → PySequence_GetItem (wraps negative, calls sq_item)
+    if type_implements_sq_item(obj_type):
+        key_type = maybe_get_python_type(key)
+        if type_implements_nb_index(key_type):
+            key = key.nb_index_impl(tx)
+            return vt_sequence_getitem(tx, obj, key)
+        raise_type_error(
+            tx,
+            f"{obj_type.__name__} indices must be integers, not {key_type.__name__}",
+        )
+    # Branch 3: PyType_Check → __class_getitem__ (abstract.c L183-203)
+    # In 3.10+ type.__getitem__ sets mp_subscript so this is normally caught
+    # by Branch 1, but we check explicitly for safety.
+    if issubclass(obj_type, type):
+        return obj.mp_subscript_impl(tx, key)
+    # CPython: abstract.c L205
+    raise_type_error(tx, f"'{obj_type.__name__}' object is not subscriptable")
+
+
+def vt_sequence_getitem(
+    tx: "InstructionTranslator",
+    obj: VariableTracker,
+    index: VariableTracker,
+) -> VariableTracker:
+    """CPython's PySequence_GetItem — always sq_item, never mp_subscript.
+
+    ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L1874-L1902
+
+    Called by PyObject_GetItem branch 2, reversed() fallback, and the old
+    iteration protocol.  Wraps negative indices via sq_length before
+    dispatching to sq_item.
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_sq_item(obj_type):
+        # Negative index wrapping (abstract.c L2175-2183)
+        if isinstance(index, ConstantVariable):
+            index_val = index.as_python_constant()
+            if isinstance(index_val, int) and index_val < 0:
+                if type_implements_sq_length(obj_type):
+                    length = obj.sq_length(tx)
+                    index = ConstantVariable.create(
+                        index_val + length.as_python_constant()
+                    )
+        return obj.sq_item_impl(tx, index)
+
+    if type_implements_mp_subscript(obj_type):
+        raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
+
+    raise_type_error(tx, f"'{obj.python_type_name()}' object does not support indexing")
 
 
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:

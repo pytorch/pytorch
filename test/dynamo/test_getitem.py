@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for mp_subscript_impl: unified __getitem__ dispatch via vt_getitem in Dynamo.
+"""Tests for vt_getitem: CPython PyObject_GetItem dispatch in Dynamo.
 
-Tests exercise the vt_getitem → mp_subscript_impl path via operator.getitem(),
-and the call_method("__getitem__") → mp_subscript_impl path via obj.__getitem__().
+Tests are organized by dispatch branch:
+  - Branch 1 (mp_subscript): list, tuple, range, size, dict, defaultdict, tensor, etc.
+  - Branch 2 (sq_item via vt_sequence_getitem): deque (natural), reversed str/bytes
+  - Branch 3 (__class_getitem__): type subscript
+  - Explicit __getitem__ dunder calls
 
 See TODO(follow-up) comments on each mp_subscript_impl override for remaining
 CPython behavioral gaps.
@@ -16,6 +19,10 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
+from torch._library.opaque_object import MemberType, OpaqueBase, register_opaque_type
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
 
@@ -612,12 +619,6 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # --- TorchScriptObjectVariable ---
 
     def test_opaque_object_getitem(self):
-        from torch._library.opaque_object import (
-            MemberType,
-            OpaqueBase,
-            register_opaque_type,
-        )
-
         class OpaqueScaler(OpaqueBase):
             def __init__(self, scale):
                 self.scale = scale
@@ -681,35 +682,6 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # CPython behavioral gaps — expectedFailure until implemented
     # ===================================================================
 
-    # GAP 1: deque has only sq_item (int index), no mp_subscript.
-    # CPython: deque[slice] → TypeError "sequence index must be integer, not 'slice'"
-    # Dynamo: DequeVariable inherits BaseListVariable.mp_subscript_impl which accepts slices.
-    # TODO: DequeVariable should override mp_subscript_impl to reject slices, matching
-    # CPython's deque which only has sq_item (Modules/_collectionsmodule.c:1888).
-    @unittest.expectedFailure
-    def test_deque_slice_should_reject(self):
-        """deque does not support slicing in CPython — only sq_item (int index)."""
-
-        def fn(x):
-            d = collections.deque([x, x + 1, x + 2])
-            return operator.getitem(d, slice(0, 2))
-
-        x = torch.randn(4)
-        with self.assertRaises(TypeError):
-            self._compile(fn, x)
-
-    # TODO: deque int index works but through the wrong dispatch path.
-    # CPython: PyObject_GetItem Branch 2 → _PyIndex_Check(key) → PyNumber_AsSsize_t → sq_item.
-    # Dynamo: inherited BaseListVariable.mp_subscript_impl (Branch 1 path).
-    # Result is correct, dispatch path diverges. Fix when sq_item branch is implemented.
-    def test_deque_int_index(self):
-        def fn(x):
-            d = collections.deque([x, x + 1, x + 2])
-            return operator.getitem(d, 1)
-
-        x = torch.randn(4)
-        self.assertEqual(fn(x), self._compile(fn, x))
-
     # GAP 2: dict_subscript calls _PyObject_HashFast → TypeError for unhashable keys.
     # TODO: ConstDictVariable.mp_subscript_impl should check tp_hash and raise TypeError
     # for unhashable keys, matching CPython's dict_subscript (Objects/dictobject.c:3680).
@@ -725,13 +697,12 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             self._compile(fn, x)
 
-    # TODO: str/bytes subscript works via constant fold fallback (base mp_subscript_impl
-    # raises Unsupported → _make_handler → operator.getitem("hello", 0) evaluates at
-    # Python level), not via a proper mp_subscript_impl override mirroring CPython's
-    # unicode_subscript / bytes_subscript. Should add dedicated overrides on
-    # ConstantVariable to match CPython's dispatch path.
+    # ===================================================================
+    # Branch 1 (mp_subscript): str/bytes
+    # ConstantVariable.mp_subscript_impl for str/bytes.
     # CPython: Objects/unicodeobject.c:13809 (unicode_subscript)
     # CPython: Objects/bytesobject.c (bytes_subscript)
+    # ===================================================================
 
     def test_str_subscript(self):
         def fn(x):
@@ -787,6 +758,302 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
+
+    # ===================================================================
+    # Branch 3: __class_getitem__ (type subscript)
+    # Exercises: MyClass[int] → type.__getitem__ → __class_getitem__
+    # In Python 3.10+, type.__getitem__ sets mp_subscript on type objects,
+    # so this goes through Branch 1 of vt_getitem.
+    # ===================================================================
+
+    def test_class_getitem_builtin(self):
+        """list[int] → GenericAlias via type.__getitem__."""
+
+        def fn(x):
+            alias = list[int]
+            return x + len(alias.__args__)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_class_getitem_custom(self):
+        """Custom class with __class_getitem__."""
+
+        class MyGeneric:
+            def __class_getitem__(cls, item):
+                return item
+
+        def fn(x):
+            result = MyGeneric[int]
+            return x + (1 if result is int else 0)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_not_subscriptable(self):
+        """Non-subscriptable object should raise TypeError."""
+
+        def fn(x):
+            return operator.getitem(42, 0)
+
+        x = torch.randn(4)
+        with self.assertRaises(TypeError):
+            torch.compile(fn, backend="eager")(x)
+
+    # ===================================================================
+    # Branch 2: sq_item via vt_sequence_getitem
+    #
+    # CPython's PyObject_GetItem branch 2: types with sq_item but no
+    # mp_subscript go through _PyIndex_Check → PySequence_GetItem → sq_item.
+    #
+    # Sub-sections:
+    #   (a) Natural dispatch — deque (only sq_item, no mp_subscript)
+    #   (b) reversed() → sq_item — str/bytes lack __reversed__, so
+    #       reversed() falls back to vt_sequence_getitem naturally
+    # ===================================================================
+
+    # --- (a) Natural dispatch: deque ---
+    # CPython's deque only has sq_item (Modules/_collectionsmodule.c:1888),
+    # not mp_subscript. vt_getitem dispatches to sq_item_impl directly.
+
+    def test_deque_int_index(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, 1)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_deque_negative_index(self):
+        """vt_sequence_getitem wraps negative indices via sq_length before sq_item."""
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, -1)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_deque_bool_index(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, True)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_deque_index_via_index_dunder(self):
+        class Idx:
+            def __index__(self):
+                return 2
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, Idx())
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_deque_slice_should_reject(self):
+        """deque[0:2] → TypeError — sq_item does not accept slices."""
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, slice(0, 2))
+
+        x = torch.randn(4)
+        with self.assertRaises(TypeError):
+            torch.compile(fn, backend="eager")(x)
+
+    def test_deque_invalid_index_type(self):
+        """deque['a'] → TypeError, matching CPython's branch 2 _PyIndex_Check."""
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, "a")
+
+        x = torch.randn(4)
+        with self.assertRaises(TypeError):
+            torch.compile(fn, backend="eager")(x)
+
+    def test_deque_out_of_range(self):
+        """deque[100] → IndexError('deque index out of range')."""
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return operator.getitem(d, 100)
+
+        x = torch.randn(4)
+        with self.assertRaises(IndexError):
+            torch.compile(fn, backend="eager")(x)
+
+    def test_deque_reversed(self):
+        """reversed(deque) uses __reversed__ (deque has it since 3.8)."""
+
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            items = list(reversed(d))
+            return items[0]
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- (b) iter/list/tuple/reversed on deque ---
+    # deque has __iter__, so these go through the normal iteration path
+    # (unpack_var_sequence), not the sq_item fallback in builtin.py.
+
+    def test_iter_deque(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return list(iter(d))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_list_deque(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return list(d)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_deque(self):
+        def fn(x):
+            d = collections.deque([x, x + 1, x + 2])
+            return tuple(d)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- (d) generic_getiter sequence protocol fallback ---
+    # User-defined class with __getitem__ + __len__ but no __iter__:
+    # CPython gives it both mp_subscript and sq_item via slot wrappers.
+    # generic_getiter (#178462) detects no tp_iter, falls back to
+    # pysequence_check → sequence_iterator polyfill → __getitem__.
+
+    def test_iter_seqonly(self):
+        """iter(SeqOnly) → generic_getiter → sequence_iterator → __getitem__."""
+
+        class SeqOnly:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, i):
+                return self.items[i]
+
+            def __len__(self):
+                return len(self.items)
+
+        def fn(x):
+            s = SeqOnly([1, 2, 3])
+            total = 0
+            for item in s:
+                total += item
+            return x + total
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_list_seqonly(self):
+        """list(SeqOnly) → generic_getiter → sequence_iterator → __getitem__."""
+
+        class SeqOnly:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, i):
+                return self.items[i]
+
+            def __len__(self):
+                return len(self.items)
+
+        def fn(x):
+            s = SeqOnly([1, 2, 3])
+            return x + sum(list(s))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_seqonly(self):
+        """tuple(SeqOnly) → generic_getiter → sequence_iterator → __getitem__."""
+
+        class SeqOnly:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, i):
+                return self.items[i]
+
+            def __len__(self):
+                return len(self.items)
+
+        def fn(x):
+            s = SeqOnly([1, 2, 3])
+            return x + sum(tuple(s))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # --- (e) Sequence protocol fallback (in operator) ---
+    # A user-defined class with __getitem__ + __len__ but no __iter__
+    # exercises the sequence protocol in CPython and the __getitem__
+    # fallback in Dynamo's CONTAINS_OP polyfill.
+
+    def test_contains_getitem_fallback(self):
+        """'in' operator works on types with __getitem__ but no __iter__."""
+
+        class SeqOnly:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, i):
+                return self.items[i]
+
+            def __len__(self):
+                return len(self.items)
+
+        def fn(x):
+            s = SeqOnly([1, 2, 3])
+            return x + (10 if 2 in s else 0)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_contains_getitem_fallback_missing(self):
+        """'in' returns False when item is not found via __getitem__ iteration."""
+
+        class SeqOnly:
+            def __init__(self, items):
+                self.items = items
+
+            def __getitem__(self, i):
+                return self.items[i]
+
+            def __len__(self):
+                return len(self.items)
+
+        def fn(x):
+            s = SeqOnly([1, 2, 3])
+            return x + (10 if 99 in s else 0)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    # ===================================================================
+    # sq_item_impl override checks
+    # These types have mp_subscript so Branch 1 always wins at runtime.
+    # Verify the defensive sq_item_impl overrides exist and aren't the
+    # base class fallback (which calls unimplemented).
+    # ===================================================================
+
+    def test_sq_item_impl_overrides(self):
+        """All sequence types override sq_item_impl from the base class."""
+        base = VariableTracker.sq_item_impl
+        for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
+            self.assertIsNot(
+                cls.sq_item_impl, base, f"{cls.__name__} must override sq_item_impl"
+            )
 
 
 if __name__ == "__main__":

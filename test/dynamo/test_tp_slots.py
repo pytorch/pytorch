@@ -6,6 +6,7 @@ Tests that get_type_slots correctly identifies which protocol methods
 (sequence, mapping, number, type) are implemented by various types.
 """
 
+import collections
 import collections.abc
 import dataclasses
 import enum
@@ -274,6 +275,52 @@ class TestTypeSlots(TestCase):
         self.assertTrue(has_slot(num_slots, PyNumberSlots.NB_ADD))
         self.assertTrue(has_slot(num_slots, PyNumberSlots.NB_SUBTRACT))
         self.assertTrue(has_slot(num_slots, PyNumberSlots.NB_MULTIPLY))
+
+    def test_deque_sq_item_only(self):
+        """deque has sq_item but NOT mp_subscript — vt_getitem dispatches to Branch 2."""
+        seq_slots, map_slots, _, _ = self._get_slot_info(collections.deque)
+        self.assertFalse(has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT))
+        self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_ITEM))
+
+    def test_nb_index_int_bool(self):
+        """int and bool have nb_index (pass _PyIndex_Check)."""
+        for t in [int, bool]:
+            _, _, num_slots, _ = self._get_slot_info(t)
+            self.assertTrue(
+                has_slot(num_slots, PyNumberSlots.NB_INDEX),
+                f"{t.__name__} should have nb_index",
+            )
+
+    def test_nb_index_absent(self):
+        """float, str, complex do NOT have nb_index (fail _PyIndex_Check)."""
+        for t in [float, str, complex]:
+            _, _, num_slots, _ = self._get_slot_info(t)
+            self.assertFalse(
+                has_slot(num_slots, PyNumberSlots.NB_INDEX),
+                f"{t.__name__} should NOT have nb_index",
+            )
+
+    def test_mp_subscript_on_subscriptable_types(self):
+        """All types with mp_subscript_impl overrides must have the C-level slot."""
+        import torch
+
+        for t in [
+            list,
+            tuple,
+            dict,
+            str,
+            bytes,
+            range,
+            collections.OrderedDict,
+            collections.defaultdict,
+            torch.Tensor,
+            torch.Size,
+        ]:
+            _, map_slots, _, _ = self._get_slot_info(t)
+            self.assertTrue(
+                has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
+                f"{t.__name__} should have mp_subscript",
+            )
 
 
 if __name__ == "__main__":
