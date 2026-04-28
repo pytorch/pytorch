@@ -83,7 +83,7 @@ def _should_allocate_symmetric(
     )
 
 
-def empty_local_tensor(
+def empty_symmetric_memory_local_tensor(
     global_shape: torch.Size,
     local_shape: torch.Size,
     device_mesh: "DeviceMesh",
@@ -92,6 +92,7 @@ def empty_local_tensor(
     dtype: torch.dtype | None,
     device: torch.device,
 ) -> torch.Tensor | None:
+    """Return a SymmetricMemory-backed local tensor, or None if ineligible."""
     if not _should_allocate_symmetric(device, device_mesh):
         return None
 
