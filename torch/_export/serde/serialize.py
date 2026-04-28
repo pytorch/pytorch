@@ -2578,11 +2578,21 @@ class GraphModuleDeserializer(metaclass=Final):
         output_node = self.graph.output(outputs)
 
         if serialized_graph.is_single_tensor_return:
-            output_node.meta["val"] = output_node.args[0].meta["val"]
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, torch.fx.Node):
+                raise AssertionError(
+                    f"Expected Node for single tensor return, got {type(first_arg)}"
+                )
+            output_node.meta["val"] = first_arg.meta["val"]
         else:
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, (tuple, list)):
+                raise AssertionError(
+                    f"Expected tuple/list for multi tensor return, got {type(first_arg)}"
+                )
             output_node.meta["val"] = tuple(
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in output_node.args[0]
+                for arg in first_arg
             )
 
         # recompute unbacked bindings

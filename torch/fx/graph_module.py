@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
     from typing import Self
 
+    from ._symbolic_trace import Tracer
+    from .experimental.symbolic_shapes import ShapeEnv
     from .node import Node
 
 import torch
@@ -607,7 +609,7 @@ class GraphModule(torch.nn.Module):
         # Locally defined Tracers are not pickleable. This is needed because torch.package will
         # serialize a GraphModule without retaining the Graph, and needs to use the correct Tracer
         # to re-create the Graph during deserialization.
-        self._tracer_cls = None
+        self._tracer_cls: type[Tracer] | None = None
         if (
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
@@ -626,7 +628,7 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable[[Node], object]] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable[[GraphModule], object]] = []
-        self.shape_env = None  # optional not always set even when dynamic shapes exist.
+        self.shape_env: ShapeEnv | None = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -975,7 +977,7 @@ class {module_name}(torch.nn.Module):
 
         self._recompile_submodules()
 
-        def call_wrapped(self, *args: Any, **kwargs: Any) -> Any:
+        def call_wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
             return self._wrapped_call(self, *args, **kwargs)
 
         cls.__call__ = call_wrapped  # type: ignore[method-assign]

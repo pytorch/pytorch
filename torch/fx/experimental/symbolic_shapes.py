@@ -1917,7 +1917,7 @@ def guard_float(a: FloatLikeType) -> float:
 
 
 # Given a GraphModule, return all the FakeTensors for all the placeholders
-def fx_placeholder_vals(gm: torch.fx.GraphModule) -> list[object]:
+def fx_placeholder_vals(gm: torch.fx.GraphModule) -> list[Any]:
     return [n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder"]
 
 
@@ -1934,7 +1934,9 @@ def eval_guards(
     if gm.shape_env is None:
         raise AssertionError("gm.shape_env must not be None")
     return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
-        fx_placeholder_vals(gm), args, ignore_static=ignore_static
+        fx_placeholder_vals(gm),
+        args,
+        ignore_static=ignore_static,
     )
 
 
