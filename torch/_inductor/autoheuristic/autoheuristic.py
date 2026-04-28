@@ -85,7 +85,7 @@ class AutoHeuristic:
         self.augment_context = augment_context
         self.metadata = AHMetadata(
             get_gpu_shared_memory(),
-            torch.cuda.get_device_capability(),
+            torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0),
             self.choices,
             self.name,
         )
