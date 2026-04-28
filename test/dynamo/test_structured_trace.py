@@ -450,6 +450,36 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_tlparse
+    def test_recompile_backend_match(self):
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x = torch.ones(10)
+
+        torch.compile(fn, backend="eager", dynamic=True)(x)
+
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(StructuredTraceTestingFilter("recompile_reasons"))
+        trace_log.addHandler(payload_handler)
+        try:
+            torch.compile(fn, backend="eager", dynamic=False)(x)
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+        payload = payload_buffer.getvalue()
+        self.assertIn("BACKEND_MATCH", payload)
+        self.assertIn("Cached backend:", payload)
+        self.assertIn("New backend:", payload)
+        self.assertIn("_TorchCompileWrapper", payload)
+        self.assertIn("dynamic=True", payload)
+        self.assertIn("dynamic=False", payload)
+
+        self.assertParses()
+
+    @requires_tlparse
     def test_example_fn(self):
         fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000))
