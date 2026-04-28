@@ -783,9 +783,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       int32_t device_id,
       void** out_stream) {
     try {
+      *out_stream = nullptr;
       const auto acc_type = at::accelerator::getAccelerator(false);
       if (!acc_type) {
-        *out_stream = nullptr;
         return 0;
       }
       if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
