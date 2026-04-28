@@ -1154,9 +1154,14 @@ def register_fake(hop, fn=None):
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
 
     def register(func: F) -> F:
+        from torch._C import DispatchKey
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(DispatchKey.Fake)
+        def fake_dispatch(*args, **kwargs):
+            return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         return func

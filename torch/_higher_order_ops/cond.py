@@ -430,6 +430,71 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
+@cond_op.py_impl(DispatchKey.Fake)
+def cond_fake_dispatch(pred, true_fn, false_fn, operands):
+    # C++ fake tensor mode is active in TLS — ops inside the subgraphs
+    # hit C++ fakeFallback directly.
+    flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+    flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+    if true_out_spec != false_out_spec:
+        raise RuntimeError(
+            "Unmatched output spec from torch.cond branches: "
+            f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+        )
+
+    merged_outs = []
+    for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        merged_outs.append(_merge_output_static(true_out, false_out))
+    return pytree.tree_unflatten(merged_outs, true_out_spec)
+
+
+def _merge_output_static(
+    a: torch.Tensor | int | None,
+    b: torch.Tensor | int | None,
+):
+    """Static-shape merge for cond branches under C++ fake tensor mode.
+
+    Unlike _merge_output, this does not create unbacked symints for differing
+    sizes — sizes, strides, dtype, and device must match exactly.
+    """
+    if a is None or b is None:
+        if not (a is None and b is None):
+            raise AssertionError(f"expected both a and b to be None, got a={a}, b={b}")
+        return None
+
+    if type(a) is int and type(b) is int:
+        if a != b:
+            raise RuntimeError(
+                f"Expected same int output from cond branches but got {a} and {b}"
+            )
+        return a
+
+    if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
+        raise AssertionError(
+            f"expected both a and b to be Tensor, got a={type(a)}, b={type(b)}"
+        )
+
+    check_tensor_meta_match(
+        a,
+        b,
+        ("dtype", "device", "layout", "dim", "is_quantized", "is_conj", "is_sparse"),
+        msg_prefix="When merging two branches' output in torch.cond, ",
+    )
+
+    if a.size() != b.size():
+        raise RuntimeError(
+            f"Expected same size from cond branches but got {a.size()} and {b.size()}. "
+            "Use symbolic tracing to support dynamic shapes in cond branches."
+        )
+    if a.stride() != b.stride():
+        raise RuntimeError(
+            f"Expected same stride from cond branches but got {a.stride()} and {b.stride()}. "
+            "Consider using contiguous() to make the two branches have the same contiguousness."
+        )
+
+    return a
+
+
 def check_tensor_meta_match(
     t1: torch.Tensor, t2: torch.Tensor, attr_names: tuple[str, ...], msg_prefix: str
 ) -> None:

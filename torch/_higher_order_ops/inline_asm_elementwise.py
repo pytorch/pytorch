@@ -255,6 +255,11 @@ def _(mode, *inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
         return _elementwise_output_like(*inputs, dtype=dtype)
 
 
+@inline_asm_elementwise.py_impl(DispatchKey.Fake)
+def _inline_asm_fake_dispatch(*inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
+    return _elementwise_output_like(*inputs, dtype=dtype)
+
+
 @inline_asm_elementwise.py_impl(ProxyTorchDispatchMode)
 def _(mode, *inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)

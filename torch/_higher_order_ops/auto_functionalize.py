@@ -994,6 +994,16 @@ def auto_functionalized_fake(
         return result
 
 
+@auto_functionalized.py_impl(DispatchKey.Fake)
+def auto_functionalized_fake_dispatch(
+    _mutable_op: OpOverload,
+    **kwargs: Any,
+) -> tuple[Any, tuple[Tensor, ...]]:
+    return auto_functionalized_dense(
+        _mutable_op, _only_clone_these_tensors=None, **kwargs
+    )
+
+
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
 def auto_functionalized_proxy(
     mode,
@@ -1142,6 +1152,16 @@ def auto_functionalized_v2_fake(
             _mutable_op, _only_clone_these_bases=None, **kwargs
         )
         return result
+
+
+@auto_functionalized_v2.py_impl(DispatchKey.Fake)
+def auto_functionalized_v2_fake_dispatch(
+    _mutable_op: _MutableOpType,
+    **kwargs: dict[str, Any],
+) -> tuple[Any, tuple[Tensor, ...]]:
+    return auto_functionalized_v2_dense(
+        _mutable_op, _only_clone_these_bases=None, **kwargs
+    )
 
 
 @auto_functionalized_v2.py_impl(ProxyTorchDispatchMode)

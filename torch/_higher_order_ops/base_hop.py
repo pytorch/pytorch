@@ -66,6 +66,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         self.py_functionalize_impl(self._call_Functionalize)
         self.py_impl(ProxyTorchDispatchMode)(self._call_ProxyTorchDispatchMode)
         self.py_impl(FakeTensorMode)(self._call_FakeTensorMode)
+        self.py_impl(DispatchKey.Fake)(self._call_Fake)
         self.py_impl(DispatchKey.CompositeExplicitAutograd)(
             self._call_CompositeExplicitAutograd
         )
@@ -131,6 +132,9 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         # TODO: this should probably route through FakeTensorMode to reuse caching
         with mode:
             return subgraph(*operands)
+
+    def _call_Fake(self, subgraph, *operands, **kwargs):
+        return subgraph(*operands)
 
     # NOTE [Support input mutation of hops]
     # To support input mutation, hop's subgraph must be functionalized because many inductor passes are

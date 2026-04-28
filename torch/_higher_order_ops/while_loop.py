@@ -605,6 +605,26 @@ def while_loop_fake_tensor_mode(
         )
 
 
+@while_loop_op.py_impl(DispatchKey.Fake)
+def while_loop_fake_dispatch(
+    cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+):
+    if stack_output:
+        raise NotImplementedError(
+            "while_loop with stack_output=True requires symbolic shapes (ShapeEnv), "
+            "which is not supported under C++ fake tensor mode."
+        )
+    body_outs = body_fn(*carried_inputs, *additional_inputs)
+    check_meta_consistency(
+        carried_inputs,
+        body_outs,
+        "carried_inputs",
+        "body_output",
+        include_contiguity=False,
+    )
+    return body_outs
+
+
 @while_loop_op.py_functionalize_impl
 def while_loop_func(
     ctx,
@@ -1001,6 +1021,10 @@ while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
 
 while_loop_stack_output_op.py_impl(FakeTensorMode)(
     functools.partial(while_loop_fake_tensor_mode, stack_output=True)
+)
+
+while_loop_stack_output_op.py_impl(DispatchKey.Fake)(
+    functools.partial(while_loop_fake_dispatch, stack_output=True)
 )
 
 while_loop_stack_output_op.py_functionalize_impl(

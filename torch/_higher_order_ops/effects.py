@@ -165,6 +165,16 @@ def with_effects_fake(
         return result
 
 
+@with_effects.py_impl(DispatchKey.Fake)
+def with_effects_fake_dispatch(
+    token: torch.Tensor,
+    op: torch._ops.OpOverload,
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    return with_effects_dense(token, op, *args, **kwargs)
+
+
 @with_effects.py_impl(ProxyTorchDispatchMode)
 def with_effects_proxy(
     mode,

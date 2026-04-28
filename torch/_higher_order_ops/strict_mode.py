@@ -85,6 +85,11 @@ def strict_mode_fake_tensor_mode(mode, callable, operands):
     return true_outs
 
 
+@strict_mode_op.py_impl(DispatchKey.Fake)
+def strict_mode_fake_dispatch(callable, operands):
+    return callable(*operands)
+
+
 @strict_mode_op.py_functionalize_impl
 def strict_mode_func(ctx, callable, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)

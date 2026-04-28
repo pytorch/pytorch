@@ -1406,6 +1406,18 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
         return None
 
 
+@triton_kernel_wrapper_mutation.py_impl(DispatchKey.Fake)
+def triton_kernel_wrapper_mutation_fake_dispatch(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    grid: list["TritonGridType"],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs: dict[str, Any],
+) -> None:
+    return None
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
 def _(
     *,
@@ -1584,6 +1596,23 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
             for key, val in kwargs.items()
             if key in tensors_to_clone
         }
+
+
+@triton_kernel_wrapper_functional.py_impl(DispatchKey.Fake)
+def triton_kernel_wrapper_functional_fake_dispatch(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    grid: list["TritonGridType"],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+) -> dict[str, Any]:
+    return {
+        key: clone_preserve_strides(val)
+        for key, val in kwargs.items()
+        if key in tensors_to_clone
+    }
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)

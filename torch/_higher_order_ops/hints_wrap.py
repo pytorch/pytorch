@@ -86,6 +86,12 @@ def hints_wrapper_fake_tensor_mode(mode, body_func, args, kwargs, hints):
         return body_func(*flat_args, **kwargs)
 
 
+@hints_wrapper.py_impl(DispatchKey.Fake)
+def hints_wrapper_fake_dispatch(body_func, args, kwargs, hints):
+    flat_args = pytree.tree_leaves(args)
+    return body_func(*flat_args, **kwargs)
+
+
 @hints_wrapper.py_functionalize_impl
 def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
     from torch._higher_order_ops.utils import _check_alias_and_mutation

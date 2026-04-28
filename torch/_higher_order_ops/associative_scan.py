@@ -864,6 +864,11 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
         return tuple(x.clone() for x in xs)
 
 
+@associative_scan_op.py_impl(DispatchKey.Fake)
+def associative_scan_fake_dispatch(combine_fn, xs, additional_inputs):
+    return tuple(x.clone() for x in xs)
+
+
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     from torch._higher_order_ops.utils import _check_alias_and_mutation

@@ -155,6 +155,15 @@ def out_dtype_fake_tensor_mode(
         return out_dtype_dense(op, output_dtype, *args)
 
 
+@out_dtype.py_impl(DispatchKey.Fake)
+def out_dtype_fake_dispatch(
+    op: torch._ops.OpOverload,
+    output_dtype: torch.dtype,
+    *args,
+):
+    return out_dtype_dense(op, output_dtype, *args)
+
+
 @out_dtype.py_functionalize_impl
 def out_dtype_func(ctx, op, output_dtype, *args):
     unwrapped_args = tuple(ctx.unwrap_tensors(arg) for arg in args)
