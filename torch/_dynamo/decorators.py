@@ -1095,7 +1095,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
 @dataclass(frozen=True, slots=True)
 class _DimRange:
     """
-    This represents an dimension of a tensor and the corresponding
+    This represents a dimension of a tensor and the corresponding
     min and max values it can take.  Don't create this
     class directly; instead, use :func:`mark_dynamic`.
     """
