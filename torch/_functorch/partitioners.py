@@ -2524,7 +2524,7 @@ def solve_min_cut(
                 joint_module.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
-                if joint_module
+                if joint_module is not None
                 else str(joint_graph)
             )
             # Always log to structured trace for production debugging
@@ -3141,7 +3141,9 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
+        aggressive_recomputation_saved_values
+    )
     if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 

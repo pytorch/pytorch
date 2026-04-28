@@ -158,7 +158,7 @@ class MetaAttribute(MetaProxy):
         self.root = root
         self.attr = attr
         self.tracer = root.tracer
-        self._node = None
+        self._node: Node | None = None
 
     @property
     def node(self):  # type: ignore[override]
