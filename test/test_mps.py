@@ -6213,6 +6213,7 @@ class TestMPS(TestCaseMPS):
     @parametrize("stable", [True, False])
     def test_sort_single_block_stable(self, dtype, descending, stable):
         max_ss = 1024 if dtype == torch.int64 else 4096
+
         def make(shape):
             return torch.randint(0, 4, shape).to(dtype)
         for cpu in [make((4, 4)), make((8, max_ss)), make((16, 32, 64)),
