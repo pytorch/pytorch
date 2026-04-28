@@ -18,7 +18,6 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 .PHONY: all
 all: magma-rocm72
 all: magma-rocm71
-all: magma-rocm70
 
 .PHONY:
 clean:
@@ -33,9 +32,4 @@ magma-rocm72:
 .PHONY: magma-rocm71
 magma-rocm71: DESIRED_ROCM := 7.1
 magma-rocm71:
-	$(DOCKER_RUN)
-
-.PHONY: magma-rocm70
-magma-rocm70: DESIRED_ROCM := 7.0
-magma-rocm70:
 	$(DOCKER_RUN)
