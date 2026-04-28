@@ -461,7 +461,25 @@ def split_module(
 
         counter = 0
 
+        # Process inputs that become placeholders before inputs that become
+        # get_attr nodes, so that all placeholders precede get_attr in the
+        # submodule graph.
+        placeholder_inputs: list[str] = []
+        get_attr_inputs: list[str] = []
         for inp in partition.inputs:
+            orig_node = orig_nodes[inp]
+            if (
+                orig_node.op == "get_attr"
+                and isinstance(orig_node.target, str)
+                and isinstance(
+                    _get_attr_from_qualname(m, orig_node.target), torch.nn.Module
+                )
+            ):
+                get_attr_inputs.append(inp)
+            else:
+                placeholder_inputs.append(inp)
+
+        for inp in placeholder_inputs + get_attr_inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
