@@ -873,6 +873,14 @@ void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
   warn_on_accumulate_grad_stream_mismatch_ = enabled;
 }
 
+bool Context::overrideStaleCaptureStream() const {
+  return override_stale_capture_stream_;
+}
+
+void Context::setOverrideStaleCaptureStream(bool enabled) {
+  override_stale_capture_stream_ = enabled;
+}
+
 bool Context::isDefaultMobileCPUAllocatorSet() {
   return prev_allocator_ptr_ != nullptr;
 }

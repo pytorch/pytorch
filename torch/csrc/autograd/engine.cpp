@@ -1065,8 +1065,19 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Locally set the current stream to func's associated stream
-  auto opt_parent_stream = (*func).stream();
+  // The parent stream was cached on the InputBuffer by InputBuffer::add()
+  // as the consuming node's canonical stream (possibly overridden by the
+  // stale-capture path when a stale non-capturing node stream collides
+  // with a capturing producer). Reading the cached value here keeps the
+  // override decision in one place and avoids re-running the detection
+  // per node visit. For code paths where InputBuffer::add() was never
+  // called with an accelerator input (e.g. CPU-only backward), fall back
+  // to the node's canonical stream. See
+  // InputBuffer::opt_overridden_consumer_stream for the invariant.
+  auto opt_parent_stream = inputs.opt_overridden_consumer_stream.has_value()
+      ? inputs.opt_overridden_consumer_stream
+      : func->stream();
+
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   // Ensure that the incoming gradients are ready
@@ -1194,13 +1205,11 @@ void Engine::evaluate_function(
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next.function->num_inputs());
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
           next.input_nr,
           std::move(output),
           opt_parent_stream,
-          opt_next_stream,
+          next.function->stream(),
           next.function.get());
 
       if (is_ready) {
@@ -1214,13 +1223,11 @@ void Engine::evaluate_function(
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
           next.input_nr,
           std::move(output),
           opt_parent_stream,
-          opt_next_stream,
+          next.function->stream(),
           next.function.get());
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
