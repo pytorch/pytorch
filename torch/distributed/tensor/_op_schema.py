@@ -657,6 +657,20 @@ class OpSchema:
 
 
 @dataclass
+class OpAlgorithm:
+    """
+    Logical DTensor algorithm selected for an operator.
+
+    This object is part of sharding propagation output, so it must contain only
+    cacheable metadata. Runtime tensor checks belong in the algorithm
+    implementation.
+    """
+
+    name: str
+    mesh_dim: int = 0
+
+
+@dataclass
 class OutputSharding:
     """
     OutputSharding is a data class that is used by the sharding propagation,
@@ -676,6 +690,8 @@ class OutputSharding:
     needs_redistribute: bool = False
     # flag to use values from `redistribute_schema`
     use_val_from_redistribute_schema: bool = False
+    # optional alternate implementation selected from logical op metadata
+    algorithm: OpAlgorithm | None = None
 
     @cached_property
     def mesh(self):

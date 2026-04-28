@@ -965,6 +965,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_spec)                                                    \
   _(_unwrap_to_op_info_impl)                                  \
   _(args_schema)                                              \
+  _(algorithm)                                                \
   _(compute_mesh)                                             \
   _(device_mesh)                                              \
   _(dtype)                                                    \
@@ -1385,7 +1386,8 @@ static bool get_local_results(
     torch::jit::Stack* stack) {
   if (participating) {
     // computation that happens in the current rank of the mesh, normal case
-    if (checked_istrue(
+    if (!output_sharding.attr(dtensor_interned_strings.algorithm).is_none() ||
+        checked_istrue(
             output_sharding.attr(dtensor_interned_strings.needs_redistribute)
                 .ptr()) ||
         is_random_op(op)) {
