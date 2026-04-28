@@ -505,7 +505,7 @@ class GuardManagerWrapper:
                 )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # Assumption: callers will not reassignthe attributes
+                # Assumption: callers will not reassign the attributes
                 #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
                 # Mutating the objects those attributes point to is fine;
                 # rebinding the attribute itself is not.
@@ -583,7 +583,7 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that that C++ side points to the updated diff guard manager.
+        # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
         # cache_entry attribute, so it relies on the CacheEntry constructor to
         # set the diff_guard_root in C++.  But once it is saved in the Dynamo
@@ -3488,7 +3488,7 @@ class GuardBuilder(GuardBuilderBase):
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     dynamic_indices = value._dynamo_dynamic_indices
-                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
                         dynamic_indices,
@@ -3515,7 +3515,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     shape_ids = getattr(value, "_dynamo_shape_ids", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=shape_ids: (
@@ -3534,7 +3534,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     unbacked_bounds = getattr(value, "_dynamo_unbacked_bounds", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=unbacked_bounds: (
@@ -4151,7 +4151,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             # doesn't exist.
             value = builder.get(guard)
             has_value = True
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             value = MISSING
             has_value = False
     is_global = get_global_source_name(guard.originating_source) is not None
@@ -4183,7 +4183,7 @@ def pickle_guards_state(
                 try:
                     type(base).__new__(type(base))
                     empty_values[id(base)] = base
-                except:  # noqa: E722, B001
+                except:  # noqa: E722
                     pass
         elif id(leaf) not in guard_tree_values:
             # TODO See if we have lift this branch as the first one.
@@ -4220,7 +4220,7 @@ class CheckFunctionManager:
         self,
         f_code: types.CodeType,
         output_graph: OutputGraphCommon,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         guard_fail_fn: Callable[[GuardFail], None] | None = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
@@ -4233,7 +4233,7 @@ class CheckFunctionManager:
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
         existing_diff_guard_sources = (
-            update_diff_guard_managers_for_existing_cache_entries(cache_entry)
+            update_diff_guard_managers_for_existing_cache_entries(cache_entries or [])
         )
         self.output_graph: OutputGraphCommon | None = output_graph
         assert self.output_graph is not None
@@ -5133,20 +5133,20 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reasons(
-    cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
     frame: DynamoFrameType,
     # pyrefly: ignore [implicit-any]
     backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
     """
-    Return the list of guard failure reasons using cache_entry.
+    Return the list of guard failure reasons using cache entries.
     Logs the recompilation reason if `recompiles` logging is enabled.
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
     # pyrefly: ignore [implicit-any]
     reasons = []
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         reason = get_guard_fail_reason(
             cache_entry.guard_manager,
             cache_entry.code,
@@ -5157,7 +5157,6 @@ def get_and_maybe_log_recompilation_reasons(
         )
         if reason:
             reasons.append(reason)
-        cache_entry = cache_entry.next
 
     code = frame.f_code
 
@@ -5202,27 +5201,22 @@ def get_and_maybe_log_recompilation_reasons(
 
 
 def update_diff_guard_managers_for_existing_cache_entries(
-    cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
 ) -> OrderedSet[str]:
-    first_cache_entry = cache_entry
-
     # On the first pass, go through the cache entries and accumulate the diff
     # guard sources. Different guard managers can fail with different sources.
     # So, we collect all of them first.
     acc_diff_guard_sources: OrderedSet[str] = OrderedSet()
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         acc_diff_guard_sources.update(
             cache_entry.guard_manager.collect_diff_guard_sources()
         )
-        cache_entry = cache_entry.next  # type: ignore[assignment]
 
     # On the second pass, set the diff_guard_sources for each cache line to the
     # accumulated value. And the re-populate the diff guard manager.
-    cache_entry = first_cache_entry
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
         cache_entry.guard_manager.populate_diff_guard_manager()
-        cache_entry = cache_entry.next  # type: ignore[assignment]
 
     # return the accumulated sources to set up the new cache line.
     return acc_diff_guard_sources
@@ -5247,7 +5241,7 @@ def guard_error_hook(
     for guard in guard_manager.code_parts:
         try:
             eval(guard, guard_manager.global_scope, local_scope)
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             print(f"Malformed guard:\n{guard}")
 
 

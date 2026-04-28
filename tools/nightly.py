@@ -288,7 +288,7 @@ class Venv:
             python=python,
             capture_output=True,
         ).stdout
-        # pyrefly: ignore [bad-argument-type, no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
@@ -723,7 +723,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
-    except BaseException as e:  # noqa: B036
+    except BaseException as e:
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.

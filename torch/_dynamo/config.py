@@ -900,6 +900,10 @@ enable_invoke_subgraph_regional_compile: bool = False
 # flat graph.
 inline_invoke_subgraph: bool = False
 
+# Inline invoke_subgraph HOPs that are referenced by exactly one call site.
+# Single-use subgraphs add overhead without deduplication benefit.
+inline_single_use_invoke_subgraph: bool = True
+
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
 # can block torch.utils.swap_tensors from working after compile.
@@ -910,7 +914,7 @@ inline_invoke_subgraph: bool = False
 invalidate_compile_context_weakrefs: bool | None = None
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
     def _make_closure_patcher(**changes: Any) -> Any: ...
 

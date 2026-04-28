@@ -546,7 +546,7 @@ class TensorVariable(VariableTracker):
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
             # in the event that TensorVariable returns NotImplemented
-            # BuiltinVariable.call_getattr returns GetAttrVariable
+            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
         except (AttributeError, ObservedAttributeError):
             ret_val = False
@@ -574,7 +574,7 @@ class TensorVariable(VariableTracker):
                 )
             elif name in self._strict_mode_conditional_banned_ops():
                 raise UnknownPropertiesDuringBackwardTrace(
-                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
         if name == "__class__":
@@ -1444,6 +1444,14 @@ class TensorVariable(VariableTracker):
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
 
+    def method_const_data_ptr(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(self, method_name="const_data_ptr")
+
     def method_record_stream(
         self,
         tx: "InstructionTranslator",
@@ -1632,10 +1640,13 @@ class TensorVariable(VariableTracker):
         """Sequence length for tensors (size along first dimension)."""
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
-    def method___iter__(self, tx: "InstructionTranslator") -> ListIteratorVariable:
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         return ListIteratorVariable(
             self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
         )
+
+    def method___iter__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.tp_iter_impl(tx)
 
     def method_addcmul_(
         self,
@@ -2675,18 +2686,72 @@ class UntypedStorageVariable(VariableTracker):
 
 
 class DataPtrVariable(VariableTracker):
+    _DATA_PTR_PRESERVING_TARGETS = {
+        ("call_method", "detach"),
+        ("call_function", torch.ops.aten.detach.default),
+    }
+
     def __init__(
         self,
         from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+        self.method_name = method_name
+        self.tensor_version = from_tensor._get_fake_version()
 
     def python_type(self) -> type:
         return int
 
+    @classmethod
+    def _strip_data_ptr_preserving_aliases(cls, node: torch.fx.Node) -> torch.fx.Node:
+        while (
+            isinstance(node, torch.fx.Node)
+            and (node.op, node.target) in cls._DATA_PTR_PRESERVING_TARGETS
+            and len(node.args) == 1
+            and isinstance(node.args[0], torch.fx.Node)
+        ):
+            node = node.args[0]
+        return node
+
+    def _is_same_data_ptr(self, other: "VariableTracker") -> bool:
+        if not isinstance(other, DataPtrVariable):
+            return False
+
+        if self.tensor_version is None or self.tensor_version != other.tensor_version:
+            return False
+
+        self_root = self._strip_data_ptr_preserving_aliases(
+            self.from_tensor.as_proxy().node
+        )
+        other_root = self._strip_data_ptr_preserving_aliases(
+            other.from_tensor.as_proxy().node
+        )
+        return self_root is other_root
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) == 1 and not kwargs and name in ("__eq__", "__ne__"):
+            same_data_ptr = self._is_same_data_ptr(args[0])
+            if same_data_ptr:
+                return ConstantVariable.create(name == "__eq__")
+            unimplemented(
+                gb_type="Data pointer comparison",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation="Dynamo can only trace data pointer comparisons "
+                "when it can prove both operands have the same data pointer.",
+                hints=[],
+            )
+        return super().call_method(tx, name, args, kwargs)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
-        codegen.load_method("data_ptr")
+        codegen.load_method(self.method_name)
         codegen.call_method(0)

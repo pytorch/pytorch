@@ -3697,7 +3697,7 @@ Tensor svd_backward(
   // canonical (real) inner product in C^{n x k} we get that the function is
   // invariant under action of U(1)^k iff Im(diag(U^H gU + V^H gV)) = 0
   //
-  // Using this in the derviaton for the forward AD, one sees that, with the
+  // Using this in the derivation for the forward AD, one sees that, with the
   // notation from those notes Using this and writing sym(X) = X + X^H, we get
   // that the forward AD for SVD in the complex case is given by dU = U (sym(dX
   // S) / E + i Im(diag(dX)) / (2S)) if m > n

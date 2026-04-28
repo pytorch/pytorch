@@ -1,4 +1,5 @@
 
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 
@@ -14,7 +15,7 @@ using namespace metal;
 // Radix is planned for a follow-up PR.
 //
 // File layout:
-//   1. Shared comparators & padding   (sort_lt, sort_compare, sort_init)
+//   1. Shared comparators & padding   (sort_compare, sort_init)
 //   2. Merge primitives               (merge_partition, merge_partition_global,
 //                                      merge_step)
 //   3. SIMD bitonic building blocks   (sort_shuffle_xor, bitonic_substage,
@@ -29,35 +30,37 @@ using namespace metal;
 // -----------------------------------------------------------------------------
 
 template <typename T>
-inline bool sort_lt(T a, T b) {
-  if constexpr (is_floating_point_v<T>) {
-    // NaN sorts last in ascending order
-    if (metal::isnan(a))
-      return false;
-    if (metal::isnan(b))
-      return true;
-  }
-  return a < b;
-}
-
-template <typename T>
 inline bool sort_compare(T a, T b, bool desc) {
-  return desc ? sort_lt(b, a) : sort_lt(a, b);
+  return desc ? c10::metal::less(b, a) : c10::metal::less(a, b);
 }
 
 // Padding value for out-of-range slots. Chosen to sort to the end of the
 // output (largest for asc, smallest for desc) so padding never lands among
-// real data. Floats use NaN on asc because sort_lt puts NaNs last.
-template <typename T>
+// real data. Floats use NaN on asc because c10::metal::less puts NaNs last.
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_same_v<T, bool>, bool> = true>
 inline T sort_init(bool desc) {
-  if constexpr (is_same_v<T, bool>) {
-    return !desc;
-  } else if constexpr (is_floating_point_v<T>) {
-    return desc ? T(-INFINITY) : T(NAN);
-  } else {
-    return desc ? metal::numeric_limits<T>::lowest()
-                : metal::numeric_limits<T>::max();
-  }
+  return !desc;
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<T, bool> && ::metal::is_floating_point_v<T>,
+        bool> = true>
+inline T sort_init(bool desc) {
+  return desc ? T(-INFINITY) : T(NAN);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<T, bool> && !::metal::is_floating_point_v<T>,
+        bool> = true>
+inline T sort_init(bool desc) {
+  return desc ? metal::numeric_limits<T>::lowest()
+              : metal::numeric_limits<T>::max();
 }
 
 // -----------------------------------------------------------------------------
@@ -141,69 +144,101 @@ inline void merge_step(
 // a lane use register swaps. substages across lanes use simd_shuffle_xor.
 // -----------------------------------------------------------------------------
 
-template <typename T>
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_same_v<T, bool>, bool> = true>
 inline T sort_shuffle_xor(T v, ushort delta) {
-  if constexpr (is_same_v<T, bool>) {
-    return bool(simd_shuffle_xor(uint(v), delta));
-  } else if constexpr (sizeof(T) == 1) {
-    uchar u = as_type<uchar>(v);
-    return as_type<T>(uchar(simd_shuffle_xor(uint(u), delta)));
-  } else if constexpr (sizeof(T) == 2) {
-    ushort u = as_type<ushort>(v);
-    return as_type<T>(ushort(simd_shuffle_xor(uint(u), delta)));
-  } else if constexpr (sizeof(T) == 8) {
-    ulong u = as_type<ulong>(v);
-    uint lo = simd_shuffle_xor(uint(u), delta);
-    uint hi = simd_shuffle_xor(uint(u >> 32), delta);
-    return as_type<T>(ulong(lo) | (ulong(hi) << 32));
-  } else {
-    return simd_shuffle_xor(v, delta);
-  }
+  return bool(simd_shuffle_xor(uint(v), delta));
 }
 
-template <typename T, typename IdxT, short TN, int K, int OFFSET>
+template <
+    typename T,
+    ::metal::enable_if_t<sizeof(T) == 1 && !::metal::is_same_v<T, bool>, bool> =
+        true>
+inline T sort_shuffle_xor(T v, ushort delta) {
+  uchar u = as_type<uchar>(v);
+  return as_type<T>(uchar(simd_shuffle_xor(uint(u), delta)));
+}
+
+template <typename T, ::metal::enable_if_t<sizeof(T) == 2, bool> = true>
+inline T sort_shuffle_xor(T v, ushort delta) {
+  ushort u = as_type<ushort>(v);
+  return as_type<T>(ushort(simd_shuffle_xor(uint(u), delta)));
+}
+
+template <typename T, ::metal::enable_if_t<sizeof(T) == 4, bool> = true>
+inline T sort_shuffle_xor(T v, ushort delta) {
+  return simd_shuffle_xor(v, delta);
+}
+
+template <typename T, ::metal::enable_if_t<sizeof(T) == 8, bool> = true>
+inline T sort_shuffle_xor(T v, ushort delta) {
+  ulong u = as_type<ulong>(v);
+  uint lo = simd_shuffle_xor(uint(u), delta);
+  uint hi = simd_shuffle_xor(uint(u >> 32), delta);
+  return as_type<T>(ulong(lo) | (ulong(hi) << 32));
+}
+
+template <
+    typename T,
+    typename IdxT,
+    short TN,
+    int K,
+    int OFFSET,
+    ::metal::enable_if_t<(OFFSET < TN), bool> = true>
 inline void bitonic_substage(
     thread T (&v)[TN],
     thread IdxT (&idx)[TN],
     uint lane,
     bool desc) {
-  if constexpr (OFFSET < TN) {
 #pragma unroll
-    for (short i = 0; i < TN; ++i) {
-      short pi = i ^ OFFSET;
-      if (pi > i) {
-        int global_p = int(lane) * TN + i;
-        bool ascending = (global_p & K) == 0;
-        T vi = v[i], vp = v[pi];
-        IdxT ii = idx[i], ip = idx[pi];
-        bool vi_first = sort_compare(vi, vp, desc);
-        bool do_swap = ascending ? !vi_first : vi_first;
-        v[i] = do_swap ? vp : vi;
-        v[pi] = do_swap ? vi : vp;
-        idx[i] = do_swap ? ip : ii;
-        idx[pi] = do_swap ? ii : ip;
-      }
-    }
-  } else {
-    constexpr ushort LANE_OFFSET = OFFSET / TN;
-    bool i_am_low = (lane & uint(LANE_OFFSET)) == 0;
-#pragma unroll
-    for (short i = 0; i < TN; ++i) {
-      T vi = v[i];
-      IdxT ii = idx[i];
-      T vp = sort_shuffle_xor(vi, LANE_OFFSET);
-      IdxT ip = sort_shuffle_xor(ii, LANE_OFFSET);
+  for (short i = 0; i < TN; ++i) {
+    short pi = i ^ OFFSET;
+    if (pi > i) {
       int global_p = int(lane) * TN + i;
       bool ascending = (global_p & K) == 0;
-      // Tie-break by lane so the two lanes agree on which keeps which element.
-      // without this, equal values make both lanes grab the same one (duplicate
-      // indices)
-      bool vi_first = sort_compare(vi, vp, desc) ||
-          (!sort_compare(vp, vi, desc) && i_am_low);
-      bool should_take = vi_first != (ascending == i_am_low);
-      v[i] = should_take ? vp : vi;
-      idx[i] = should_take ? ip : ii;
+      T vi = v[i], vp = v[pi];
+      IdxT ii = idx[i], ip = idx[pi];
+      bool vi_first = sort_compare(vi, vp, desc);
+      bool do_swap = ascending ? !vi_first : vi_first;
+      v[i] = do_swap ? vp : vi;
+      v[pi] = do_swap ? vi : vp;
+      idx[i] = do_swap ? ip : ii;
+      idx[pi] = do_swap ? ii : ip;
     }
+  }
+}
+
+template <
+    typename T,
+    typename IdxT,
+    short TN,
+    int K,
+    int OFFSET,
+    ::metal::enable_if_t<(OFFSET >= TN), bool> = true>
+inline void bitonic_substage(
+    thread T (&v)[TN],
+    thread IdxT (&idx)[TN],
+    uint lane,
+    bool desc) {
+  constexpr ushort LANE_OFFSET = OFFSET / TN;
+  bool i_am_low = (lane & uint(LANE_OFFSET)) == 0;
+#pragma unroll
+  for (short i = 0; i < TN; ++i) {
+    T vi = v[i];
+    IdxT ii = idx[i];
+    T vp = sort_shuffle_xor(vi, LANE_OFFSET);
+    IdxT ip = sort_shuffle_xor(ii, LANE_OFFSET);
+    int global_p = int(lane) * TN + i;
+    bool ascending = (global_p & K) == 0;
+    // Tie-break by lane so the two lanes agree on which keeps which element.
+    // without this, equal values make both lanes grab the same one (duplicate
+    // indices)
+    bool vi_first =
+        sort_compare(vi, vp, desc) || (!sort_compare(vp, vi, desc) && i_am_low);
+    bool should_take = vi_first != (ascending == i_am_low);
+    v[i] = should_take ? vp : vi;
+    idx[i] = should_take ? ip : ii;
   }
 }
 
@@ -527,6 +562,7 @@ kernel void mb_merge(
 // directly via the `_final` variant to skip a separate index-widen copy.
 // =============================================================================
 
+// TODO: reuse DEFAULT_ILP from c10/metal/common.h for TN
 #define INSTANTIATE_SORT(T, TPTG, TN)                               \
   template [[host_name("sort_block_" #T "_tptg" #TPTG)]]            \
   kernel void sort_block<T, TPTG, TN>(                              \

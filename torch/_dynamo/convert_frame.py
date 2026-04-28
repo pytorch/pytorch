@@ -101,9 +101,12 @@ from .cache_size import (
 )
 from .code_context import code_context
 from .eval_frame import (
+    _get_cache_entries_for_region,
+    _get_total_cache_entry_count,
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    get_eval_frame_isolate_recompiles_id,
     innermost_backend,
     innermost_fn,
     skip_code,
@@ -218,6 +221,28 @@ def _clear_fake_mode_weakrefs(
     describer = fake_mode.fake_tensor_converter.meta_converter.describer
     describer.lookup_tensor.clear()
     describer.lookup_storage.clear()
+
+
+def clear_compile_context_weakrefs(
+    tracer_output: DynamoTracerOutput | None,
+    compiler_fn: CompilerFn,
+) -> None:
+    """Clear WeakIdRef entries that can block swap_tensors after compile."""
+    should_clear = config.invalidate_compile_context_weakrefs
+    if should_clear is None:
+        should_clear = _is_registered_backend(innermost_backend(compiler_fn))
+    if not should_clear or not tracer_output:
+        return
+    # Use output_graph_for_cleanup which is set even on error paths
+    # (output_graph is None when the compilation errored).
+    output_graph = tracer_output.output_graph_for_cleanup
+    if output_graph is None:
+        return
+    tc = output_graph.tracing_context
+    tc.tensor_to_context.clear()
+    _clear_fake_mode_weakrefs(tc.fake_mode)
+    if hasattr(output_graph, "_old_fake_mode"):
+        _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
 
 
 class Tracker:
@@ -620,7 +645,19 @@ class ConvertFrameAssert:
         increment_frame()
         code = frame.f_code
 
-        cache_size = compute_cache_size(frame, cache_entry)
+        isolate_recompiles_id = get_eval_frame_isolate_recompiles_id()
+        cache_entries = _get_cache_entries_for_region(code, isolate_recompiles_id)
+        # For recompile-reason logging: lookup() also checks the default (-1)
+        # bucket for isolated regions, so include those entries here to avoid
+        # dropping their guard-failure reasons.
+        if isolate_recompiles_id >= 0:
+            cache_entries_for_reasons = cache_entries + _get_cache_entries_for_region(
+                code, -1
+            )
+        else:
+            cache_entries_for_reasons = cache_entries
+        total_count = _get_total_cache_entry_count(code)
+        cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
             return ConvertFrameReturn()
@@ -745,6 +782,8 @@ class ConvertFrameAssert:
                     self._export_constraints,
                     hooks,
                     cache_entry,
+                    cache_entries,
+                    cache_entries_for_reasons,
                     cache_size,
                     frame,
                     frame_state=frame_state,
@@ -944,7 +983,7 @@ class DynamoOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
@@ -952,7 +991,7 @@ class DynamoOutput:
         return CheckFunctionManager(
             code,
             output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -1091,13 +1130,13 @@ class GraphCaptureOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             self.output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -1513,7 +1552,7 @@ def compile_frame(  # type: ignore[return]
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
                 failed_tracer_output._cleanup_output_graph()
-            log.debug(  # noqa: G200
+            log.debug(
                 "Received signal to skip frame (without graph break): %s %s \
                 %s %s",
                 e,
@@ -1536,6 +1575,8 @@ def _compile(
     export_constraints: Any | None,
     hooks: Hooks,
     cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
+    cache_entries_for_reasons: list[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: DynamoFrameType | None = None,
     frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
@@ -1764,7 +1805,7 @@ def _compile(
                 code,
                 hooks=hooks,
                 save=package is not None,
-                cache_entry=cache_entry,
+                cache_entries=cache_entries,
             )
 
         if package is not None:
@@ -1821,7 +1862,7 @@ def _compile(
         recompile_reason: str | None = None
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, innermost_fn(compiler_fn)
+                cache_entries_for_reasons, frame, innermost_fn(compiler_fn)
             )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
@@ -1979,6 +2020,7 @@ def _compile(
                 if recompile_reason and "size mismatch at index" in recompile_reason:
                     _log_size_mismatch_recompile()
 
+            clear_compile_context_weakrefs(tracer_output, compiler_fn)
             return guarded_code
         except Exception as e:
             # NB: e's msg is mutated here to add user stack, but we DON'T want
@@ -2124,7 +2166,7 @@ def _compile(
                 )
 
             # Cleanup guards unless if in export, which will return guards
-            # Make sure to to do this after collecting metrics
+            # Make sure to do this after collecting metrics
             if (
                 tracer_output is not None
                 and tracer_output.output_graph is not None
@@ -2132,24 +2174,7 @@ def _compile(
             ):
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
-            # Clear WeakIdRef entries that can block swap_tensors after compile.
-            # Determine whether to clear based on config and backend type.
-            should_clear = config.invalidate_compile_context_weakrefs
-            if should_clear is None:
-                # Default: clear for registered backends, don't clear for custom
-                # Unwrap the compiler_fn to get the actual backend function
-                should_clear = _is_registered_backend(innermost_backend(compiler_fn))
-            if should_clear:
-                if tracer_output and tracer_output.output_graph:
-                    tc = tracer_output.output_graph.tracing_context
-                    tc.tensor_to_context.clear()
-                    # Clear both the current fake_mode and the old_fake_mode
-                    # (the original is stored before backend_fake_mode replaces it)
-                    _clear_fake_mode_weakrefs(tc.fake_mode)
-                    if hasattr(tracer_output.output_graph, "_old_fake_mode"):
-                        _clear_fake_mode_weakrefs(
-                            tracer_output.output_graph._old_fake_mode
-                        )
+            clear_compile_context_weakrefs(tracer_output, compiler_fn)
 
 
 class ConvertFrame:
@@ -2172,6 +2197,7 @@ class ConvertFrame:
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        # Used by DDPOptimizer to swap in its own backend.
         return lambda backend: convert_frame(
             backend,
             self._hooks,
@@ -2291,7 +2317,9 @@ class ConvertFrame:
                 isinstance(e, exc.TorchDynamoException)
                 and e.frame_exec_strategy is not None
             ):
-                return ConvertFrameReturn(frame_exec_strategy=e.frame_exec_strategy)
+                return ConvertFrameReturn(
+                    frame_exec_strategy=e.frame_exec_strategy,
+                )
 
         return ConvertFrameReturn()
 
@@ -2304,7 +2332,10 @@ def convert_frame(
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(
-        compiler_fn, hooks, package=package, recompile_limit=recompile_limit
+        compiler_fn,
+        hooks,
+        package=package,
+        recompile_limit=recompile_limit,
     )
 
 
@@ -2331,8 +2362,10 @@ def replay(filename: str) -> None:
                 export=False,
                 export_constraints=None,
                 hooks=Hooks(),
-                cache_size=CacheSizeRelevantForFrame(0, 0),
                 cache_entry=None,
+                cache_entries=[],
+                cache_entries_for_reasons=[],
+                cache_size=CacheSizeRelevantForFrame(0, 0),
                 frame=None,
                 frame_state={},
                 compile_id=CompileId(frame_id=42, frame_compile_id=999),

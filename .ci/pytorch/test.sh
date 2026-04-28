@@ -74,6 +74,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+# Bound Inductor compile-worker futures on ROCm so a stuck Triton compile
+# fails fast with a clear RuntimeError naming the kernel, instead of blocking
+# until the outer test timeout kills the shard and loses all context. Scoped
+# to ROCm because the known-bad cases (sort-with-index on gfx90a/gfx942) have
+# only been observed there; leaving CPU/CUDA jobs unbounded avoids regressing
+# any legitimately long compile on those backends.
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+fi
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -140,9 +150,7 @@ if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH
 fi
 
 # Get fully qualified path using realpath
-if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
-fi
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 
 # Reduce set of tests to include when running run_test.py
 if [[ -n $TESTS_TO_INCLUDE ]]; then
@@ -256,12 +264,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   timeout 30 xpu-smi discovery || true
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
-  # JIT C++ extensions require ninja (installed from requirements-ci.txt).
-  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
-  # but this script should be runnable by any user, including root
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+# JIT C++ extensions require ninja (installed from requirements-ci.txt).
+# ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+# but this script should be runnable by any user, including root
+export PATH="$HOME/.local/bin:$PATH"
 
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   # TODO: revisit this once the CI is stabilized on aarch64 linux
@@ -326,6 +332,17 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+    # Switch to TSan-instrumented CPython so that all subsequent python
+    # invocations (including the pre-test sanity checks below) use an
+    # interpreter that has the TSan runtime.
+    export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
+    python -m pip install "$(echo dist/*.whl)[opt-einsum]"
+    TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
+    export TSAN_OPTIONS
+    export PYTORCH_TEST_WITH_TSAN=1
+fi
+
 # The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
 # 1. The build is in debug mode
 # 2. The value 424242 is passed in
@@ -333,8 +350,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
     echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
-elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
-    # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
+else
     echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
     (cd test && python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 fi
@@ -344,6 +360,29 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
+
+test_tsan() {
+  # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
+  # script when BUILD_ENVIRONMENT matches *-tsan*.
+  local test_status=0
+  python test/test_tsan.py -v || test_status=$?
+
+  # TSan appends .<pid> to log_path. Merge all reports into a single
+  # file with the _toprint.log suffix so the CI "Print remaining test
+  # logs" step picks them up automatically.
+  TSAN_REPORT=$(pwd)/test/test-reports/tsan_toprint.log
+  if ls "${TSAN_REPORT}".* 1>/dev/null 2>&1; then
+    cat "${TSAN_REPORT}".* > "${TSAN_REPORT}"
+    rm -f "${TSAN_REPORT}".*
+  fi
+
+  if [ "$test_status" -ne 0 ]; then
+    echo "TSan tests failed with exit code $test_status"
+    exit "$test_status"
+  fi
+
+  assert_git_not_dirty
+}
 
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
@@ -430,7 +469,7 @@ _run_symm_mem_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
@@ -452,7 +491,7 @@ test_b200_symm_mem() {
 test_h100_cutlass_backend() {
   # cutlass backend tests for H100
   git submodule update --init --depth 1 third_party/cutlass
-  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
@@ -462,7 +501,7 @@ test_xpu_sycl_tla_backend() {
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
   rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
-  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
@@ -655,7 +694,8 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro inductor/test_triton_kernels \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+              inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
@@ -663,12 +703,14 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
   # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
   # Will drop this after AOTInductor also switches to lazy Triton compilation.
   TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \
@@ -935,6 +977,11 @@ test_perf_for_dashboard() {
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --deterministic "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_deterministic_perf_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --batch-invariant "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
     done
   done
@@ -1802,7 +1849,9 @@ EOF
     fi
 
     # Ensure invalid item is in the test output.
-    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
+    # Use a here-string instead of a pipe to avoid SIGPIPE when grep -q
+    # exits early on large output (causes exit code 141 with pipefail).
+    grep -q "${invalid_item_name}" <<< "${test_output}" && ret=$? || ret=$?
 
     if [ $ret -ne 0 ]; then
         cat << EOF
@@ -1946,77 +1995,6 @@ EOF
   assert_git_not_dirty
 }
 
-test_bazel() {
-  set -e -o pipefail
-
-  # bazel test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  get_bazel
-
-  if [[ "$CUDA_VERSION" == "cpu" ]]; then
-    # Test //c10/... without Google flags and logging libraries. The
-    # :all_tests target in the subsequent Bazel invocation tests
-    # //c10/... with the Google libraries.
-    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-      --no//c10:use_gflags --no//c10:use_glog //c10/...
-
-    # rnn_test uses a convergence-based training loop (test_RNN_xor) whose
-    # runtime varies across CPU microarchitectures.  On OSDC AVX-512 runners
-    # it can exceed 480s, so give extra headroom.
-    tools/bazel test --config=cpu-only --test_timeout=900 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
-  else
-    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
-    tools/bazel test --test_timeout=480 --test_output=errors \
-      //:any_test \
-      //:autograd_test \
-      //:dataloader_test \
-      //:dispatch_test \
-      //:enum_test \
-      //:expanding_array_test \
-      //:fft_test \
-      //:functional_test \
-      //:grad_mode_test \
-      //:inference_mode_test \
-      //:init_test \
-      //:jit_test \
-      //:memory_test \
-      //:meta_tensor_test \
-      //:misc_test \
-      //:moduledict_test \
-      //:modulelist_test \
-      //:modules_test \
-      //:namespace_test \
-      //:nested_test \
-      //:nn_utils_test \
-      //:operations_test \
-      //:ordered_dict_test \
-      //:parallel_benchmark_test \
-      //:parameterdict_test \
-      //:parameterlist_test \
-      //:sequential_test \
-      //:serialize_test \
-      //:special_test \
-      //:static_test \
-      //:support_test \
-      //:tensor_flatten_test \
-      //:tensor_indexing_test \
-      //:tensor_options_cuda_test \
-      //:tensor_options_test \
-      //:tensor_test \
-      //:torch_dist_autograd_test \
-      //:torch_include_test \
-      //:transformer_test \
-      //:test_bazel \
-      //c10/cuda/test:test \
-      //c10/test:core_tests \
-      //c10/test:typeid_test \
-      //c10/test:util/ssize_test \
-      //c10/test:util_base_tests
-  fi
-}
-
 test_benchmarks() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install "pytest-benchmark==3.2.3"
@@ -2154,7 +2132,7 @@ test_openreg() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -2342,8 +2320,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
-elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
-  test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
@@ -2366,6 +2342,8 @@ elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
+elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
+  test_tsan
 else
   install_torchvision
   install_monkeytype

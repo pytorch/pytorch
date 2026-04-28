@@ -57,26 +57,35 @@ def _has_user_phase_annotation(gm: fx.GraphModule) -> bool:
     )
 
 
-def _collect_backward_region_data(
-    gm: fx.GraphModule,
-) -> tuple[bool, int | None, int | None, int]:
-    use_phase = _has_user_phase_annotation(gm)
+def _collect_backward_regions(
+    gm: fx.GraphModule, use_phase: bool
+) -> list[tuple[int, int, bool]]:
+    """Returns (bwd_start, bwd_end, needs_remat) for each backward region.
+
+    Regions are maximal contiguous runs of backward nodes, as [start, end)
+    indices into the graph node list.
+    """
+    regions: list[tuple[int, int, bool]] = []
     bwd_start: int | None = None
-    bwd_end: int | None = None
-    num_regions = 0
-    in_backward = False
+    needs_remat = False
 
     for idx, node in enumerate(gm.graph.nodes):
-        is_bwd = _is_backward_node(node, use_phase=use_phase)
-        if is_bwd:
+        if _is_backward_node(node, use_phase=use_phase):
             if bwd_start is None:
                 bwd_start = idx
-            bwd_end = idx + 1
-            if not in_backward:
-                num_regions += 1
-        in_backward = is_bwd
+                needs_remat = False
+            if not needs_remat and any(
+                must_recompute(inp) for inp in node.all_input_nodes
+            ):
+                needs_remat = True
+        elif bwd_start is not None:
+            regions.append((bwd_start, idx, needs_remat))
+            bwd_start = None
 
-    return use_phase, bwd_start, bwd_end, num_regions
+    if bwd_start is not None:
+        regions.append((bwd_start, idx + 1, needs_remat))
+
+    return regions
 
 
 def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
@@ -88,37 +97,13 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     Dynamo traces torch.autograd.grad). When the user provides phase
     annotations, only those annotated regions are used.
 
-    Only a single contiguous backward region is supported. If multiple disjoint
-    backward regions are detected, an error is raised. Consecutive backward
-    operations without non-backward nodes between them are treated as a single
-    backward region.
+    The graph may contain multiple disjoint backward regions (e.g. chunked
+    loss). Regions that do not depend on recomputable forward nodes are
+    skipped. Only one region may require remat; if multiple do, we error
+    and ask the user to annotate which region to rematerialize.
     """
     if not has_recomputable_ops(gm):
         return gm
-
-    use_phase, bwd_start, bwd_end, num_regions = _collect_backward_region_data(gm)
-    if num_regions > 1:
-        if use_phase:
-            raise RuntimeError(
-                f"Detected {num_regions} disjoint backward regions annotated with "
-                'phase: "backward" but remat only supports a single backward region. '
-                "Please ensure only one contiguous region is annotated."
-            )
-        raise RuntimeError(
-            f"Detected {num_regions} disjoint backward regions in the graph but remat only supports "
-            "a single backward region. This can happen when non-backward computation appears "
-            "between backward sections. Please annotate the real backward with "
-            'torch.fx.traceback.annotate({"phase": "backward"}).'
-        )
-
-    if bwd_start is None:
-        return gm
-    if bwd_end is None:
-        raise AssertionError(
-            "backward region should end somewhere when there was explicit backward region start."
-        )
-
-    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     if has_recomputable_rng_ops(gm):
         raise RuntimeError(
@@ -132,6 +117,35 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
 
     force_save_bw_mutation_src(gm)
 
+    # must_recompute (used inside _collect_backward_regions) requires
+    # cleanup_recompute_tags to have run first.
+    use_phase = _has_user_phase_annotation(gm)
+    regions = _collect_backward_regions(gm, use_phase)
+    if not regions:
+        return gm
+
+    # User-annotated phase regions: multiple annotations is always an error.
+    if use_phase and len(regions) > 1:
+        raise RuntimeError(
+            f"Detected {len(regions)} disjoint backward regions annotated with "
+            'phase: "backward" but remat only supports a single backward region. '
+            "Please ensure only one contiguous region is annotated."
+        )
+
+    remat_regions = [(s, e) for s, e, needs in regions if needs]
+
+    if len(remat_regions) > 1:
+        raise RuntimeError(
+            f"Detected {len(remat_regions)} disjoint backward regions that require recomputation, "
+            "but remat only supports one such region in a forward-loss-backward graph."
+        )
+
+    if not remat_regions:
+        return gm
+
+    bwd_start, bwd_end = remat_regions[0]
+
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
     recomputed_nodes: dict[fx.Node, fx.Node] = {}

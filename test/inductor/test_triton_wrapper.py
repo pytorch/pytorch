@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -63,7 +63,7 @@ class TestTritonWrapper(TestCase):
         N = 10
         x = torch.rand(N).to(device=GPU_TYPE)
         y = torch.rand(N).to(device=GPU_TYPE)
-        f(x, y)  # noqa: F841
+        f(x, y)
 
         compiled_module = self.get_compiled_module()
 

@@ -16,7 +16,9 @@ computations.
 from __future__ import annotations
 
 import collections
+import dataclasses
 import functools
+import linecache
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
@@ -43,6 +45,28 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceLocation:
+    """Source position of the bytecode instruction that generated a VariableTracker."""
+
+    filename: str
+    lineno: int
+    end_lineno: int | None = None
+    col_offset: int | None = None
+    end_col_offset: int | None = None
+
+    def format(self) -> str:
+        line = linecache.getline(self.filename, self.lineno).rstrip()
+        result = f'  File "{self.filename}", line {self.lineno}\n'
+        if line:
+            result += f"    {line}\n"
+        if line and self.col_offset is not None and self.end_col_offset is not None:
+            num_carets = max(1, self.end_col_offset - self.col_offset)
+            result += "    " + " " * self.col_offset + "^" * num_carets + "\n"
+        return result
+
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
@@ -295,6 +319,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "value",
         "guards",
         "source",
+        "source_location",
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
@@ -458,6 +483,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Return True for TensorVariable instances"""
         return False
 
+    def get_handler_type_for_dispatch(self) -> type[VariableTracker]:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        This is used by BuiltinVariable to look up the appropriate handler for
+        a given set of arguments. Most VariableTrackers just return their own
+        type, but LazyConstantVariable returns ConstantVariable since it can
+        be treated as a constant for most builtin operations.
+
+        Subclasses that override this should install appropriate guards to
+        ensure the dispatched handler remains valid.
+        """
+        return type(self)
+
     def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
@@ -556,6 +594,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        """
+        Implements PyObject_GetIter semantics (tp_iter slot).
+        Subclasses override this to support iteration.
+        """
+        # PyObject_GetIter: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2847-L2870
+        # TODO: raise TypeError instead - Make sure the jit tests for ScriptDict/ScriptList works with
+        # this change
+        unimplemented(
+            gb_type="missing tp_iter",
+            context=f"tp_iter_impl not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to iterate over `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_function(
         self,
         tx: Any,
@@ -625,6 +678,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__iter__" and not args and not kwargs:
+            return self.tp_iter_impl(tx)
+        elif name == "__next__" and not args and not kwargs:
+            return self.tp_iternext_impl(tx)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -877,6 +934,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def set_name_hint(self, name: str) -> None:
         pass
 
+    def set_source_location(self, source_location: SourceLocation) -> None:
+        self.source_location = source_location
+
     def realize(self) -> VariableTracker:
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
@@ -889,13 +949,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx: Any) -> VariableTracker:
+    def tp_iternext_impl(self, tx: Any) -> VariableTracker:
+        """
+        Implements tp_iternext slot semantics.
+        Subclasses override this to support next(). Reaching this base is a
+        bug — it means tp_iternext is missing for that VariableTracker subclass.
+        """
         unimplemented(
-            gb_type="Unsupported next() call",
-            context=f"next({self})",
-            explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
-            hints=[*graph_break_hints.USER_ERROR],
+            gb_type="Missing tp_iternext",
+            context=f"next({self.python_type_name()})",
+            explanation=(
+                f"Dynamo does not support next() on {self.python_type_name()}."
+                " Add tp_iternext_impl to this VariableTracker subclass."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def next_variable(self, tx: Any) -> VariableTracker:
+        return self.tp_iternext_impl(tx)
 
     def is_strict_mode(self, tx: Any) -> bool:
         return bool(tx.strict_checks_fn and tx.strict_checks_fn(self))
@@ -1049,9 +1120,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source | None = None,
         mutation_type: MutationType | None = None,
+        source_location: SourceLocation | None = None,
     ) -> None:
         super().__init__()
         self.source = source
+        self.source_location = source_location
         self.mutation_type = mutation_type
 
         # NOTE sometimes mutation_type is set afterwards for implementation

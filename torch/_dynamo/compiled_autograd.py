@@ -491,7 +491,7 @@ class AutogradCompilerInstance:
             ctx_saved_tensors: Sequence[torch.Tensor],
             ctx_symints: Sequence[IntLikeType],
             ctx_opaque_objs: Sequence[Any],
-            *flat_args: Sequence[Any],
+            flat_args: Sequence[Any],
         ) -> Any:
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
@@ -499,7 +499,7 @@ class AutogradCompilerInstance:
                 ctx_opaque_objs,
                 metadata,
                 maybe_subclass_metadata,
-                *flat_args,
+                flat_args,
             )
             return out
 
@@ -511,7 +511,7 @@ class AutogradCompilerInstance:
                 psaved_tensors,
                 psymints,
                 popaque_objects,
-                *pinputs,
+                pinputs,
             ),
             kwargs={},
         )
@@ -681,6 +681,11 @@ class AutogradCompilerInstance:
                 opaque_object_indices,
             )
         else:
+            if getattr(ctx._forward_cls, "boxed_grads_call", False):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
+                    "is not supported with compiled autograd. "
+                )
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
                 target=call_backward,
@@ -986,7 +991,7 @@ class AutogradCompilerInstance:
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
         i: int | None = None
-        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 

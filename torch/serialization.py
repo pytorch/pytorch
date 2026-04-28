@@ -1480,10 +1480,10 @@ def load(
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
     force_weights_only_load = (
-        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
     force_no_weights_only_load = (
-        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
 
     if force_weights_only_load and force_no_weights_only_load:

@@ -171,7 +171,7 @@ class NbFloatTests(TestCase):
     def test_float_returning_non_float_raises(self):
         class Bad:
             def __float__(self):
-                return "not a float"  # noqa: PLE0305
+                return "not a float"
 
         obj = Bad()
 

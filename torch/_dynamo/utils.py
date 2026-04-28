@@ -2795,21 +2795,25 @@ def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
-    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
-        # Find if the arg would be realized as SymNodeVariable later on. If yes,
-        # realize it and specialize. Else return the arg.
+    if isinstance(arg, LazyVariableTracker):
+        if not arg.is_realized():
+            # Find if the arg would be realized as SymNodeVariable later on. If yes,
+            # realize it and specialize. Else return the arg.
 
-        source = arg.original_source()
-        value = arg.original_value()
+            source = arg.original_source()
+            value = arg.original_value()
 
-        is_symnode_vt = is_torch_sym(value) or (
-            not config.specialize_int
-            and type(value) is int
-            and not is_int_specialization_case(value, source)
-        )
+            is_symnode_vt = is_torch_sym(value) or (
+                not config.specialize_int
+                and type(value) is int
+                and not is_int_specialization_case(value, source)
+            )
 
-        if not is_symnode_vt:
-            return arg
+            if not is_symnode_vt:
+                return arg
+
+        # Realize to get the underlying variable (handles both realized and unrealized)
+        arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
@@ -3185,7 +3189,7 @@ def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
+from torch._subclasses import UnsupportedFakeTensorException
 
 
 def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
@@ -5346,11 +5350,30 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
+def is_pybind11_enum_member(value: Any) -> bool:
+    """Check if value is a pybind11 enum member (singleton with stable hash).
+
+    Pybind11 enums have __members__ on their type and each member is a singleton.
+    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
+    into the type's __dict__, which trips raise_on_overridden_hash. But these
+    are safe: members are singletons with hash == value, same as Python enums.
+    """
+    t = type(value)
+    members = getattr(t, "__members__", None)
+    if members is None:
+        return False
+    name = getattr(value, "name", None)
+    return name is not None and members.get(name) is value
+
+
 def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
     from . import graph_break_hints
     from .exc import unimplemented
 
     is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden and is_pybind11_enum_member(obj):
+        return
 
     if is_overridden:
         unimplemented(
