@@ -1026,7 +1026,7 @@ static bool checked_istrue(PyObject* obj) {
   return result;
 }
 
-// pybind11 does not not use PyObject_Vectorcall currently; it seems
+// pybind11 does not use PyObject_Vectorcall currently; it seems
 // to materialize a tuple of args instead.
 template <std::size_t N>
 static py::object checked_vectorcall(

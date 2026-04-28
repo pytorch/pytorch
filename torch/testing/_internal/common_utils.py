@@ -6008,7 +6008,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(
-        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)*',
         repl_frame,
         s,
     )

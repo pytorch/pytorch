@@ -3141,7 +3141,9 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
+        aggressive_recomputation_saved_values
+    )
     if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 

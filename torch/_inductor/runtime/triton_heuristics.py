@@ -725,7 +725,7 @@ class CachingAutotuner(KernelInterface):
                 )
         self.launchers = launchers
 
-    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any, Any]:
+    def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
         Returns a tuple of old values
@@ -737,6 +737,7 @@ class CachingAutotuner(KernelInterface):
             self.fn.repr,
             self.launchers,
             getattr(self.fn, "_hash_lock", None),
+            self.benchmark_failure_reasons,
         )
         self.fn.fn = None
         self.fn.__globals__ = None
@@ -744,12 +745,11 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         self._cached_launcher = None
+        self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
 
-    def restore_after_unpickle(
-        self, old_values: tuple[Any, Any, Any, Any, Any, Any] | None
-    ) -> None:
+    def restore_after_unpickle(self, old_values: tuple[Any, ...] | None) -> None:
         self._cached_launcher = None
         if old_values:
             (
@@ -759,6 +759,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn.repr,
                 self.launchers,
                 self.fn._hash_lock,
+                self.benchmark_failure_reasons,
             ) = old_values
         else:
             # even if we don't need/have specific values, we do need the
@@ -4694,10 +4695,10 @@ class GridExpr:
         at codegen time and are instead referenced by variable names.
         """
         meta: dict[str, Any] = {
-            "XBLOCK": f"{kernel_name}_result.xblock",
-            "YBLOCK": f"{kernel_name}_result.yblock",
-            "ZBLOCK": f"{kernel_name}_result.zblock",
-            "R0_BLOCK": f"{kernel_name}_result.r0block",
+            "XBLOCK": f"{kernel_name}_result.xblocks[0]",
+            "YBLOCK": f"{kernel_name}_result.yblocks[0]",
+            "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
+            "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
@@ -4886,6 +4887,15 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 
 class SequentialFlattenComboKernelGrid(GridExpr):
     """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
+
+    def generate_lazy(self, kernel_name: str) -> None:
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        num_kernels = combo_meta["num_kernels"]
+        meta: dict[str, Any] = {}
+        for i in range(num_kernels):
+            meta[f"XBLOCK_{i}"] = f"{kernel_name}_result.xblocks[{i}]"
+            meta[f"YBLOCK_{i}"] = f"{kernel_name}_result.yblocks[{i}]"
+        self.generate(meta, is_lazy=True)
 
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]

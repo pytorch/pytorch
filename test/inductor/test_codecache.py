@@ -65,6 +65,8 @@ from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
     CacheArtifactManager,
+    CacheArtifactRecorder,
+    CacheInfo,
 )
 from torch.testing._internal.common_cuda import (
     SM80OrLater,
@@ -3449,6 +3451,7 @@ class TestAutotuneCache(TestCase):
         super().setUp()
         counters.clear()
         PatchCaches.setUp()
+        CacheArtifactManager.clear()
 
     def tearDown(self):
         super().tearDown()
@@ -3458,6 +3461,69 @@ class TestAutotuneCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def test_remote_only_autotune_records_cache_artifacts(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        class RemoteCacheStub:
+            def __init__(self) -> None:
+                self.cache = {}
+
+            def get(self, key):
+                return self.cache.get(key)
+
+            def put(self, key, value) -> None:
+                self.cache[key] = value
+
+        class ConfigStub:
+            kwargs = {"BLOCK_M": 16, "BLOCK_N": 16}
+            num_warps = 4
+            num_stages = 3
+
+        remote_cache = RemoteCacheStub()
+        inductor_meta = {
+            "autotune_local_cache": False,
+            "autotune_remote_cache": True,
+            "backend_hash": "backend_hash",
+            "is_fbcode": False,
+        }
+
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            return_value=remote_cache,
+        ):
+            autotune_cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(cache_dir(), "aa", "kernel.py"),
+                "configs_hash",
+            )
+
+        self.assertIsNotNone(autotune_cache)
+        autotune_cache = cast(AutotuneCache, autotune_cache)
+        self.assertIsNone(autotune_cache.local_cache)
+        self.assertIsNotNone(autotune_cache.remote_cache)
+        self.assertIsNotNone(autotune_cache.artifact_recorder)
+        artifact_recorder = cast(
+            CacheArtifactRecorder, autotune_cache.artifact_recorder
+        )
+        expected_artifact_key = artifact_recorder.key
+
+        CacheArtifactManager.clear()
+        autotune_cache.save(ConfigStub(), time_taken_ns=1_000_000)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifacts = cast(tuple[bytes, CacheInfo], artifacts)
+        _, cache_info = artifacts
+        self.assertEqual(cache_info.autotune_artifacts, [expected_artifact_key])
+
+        CacheArtifactManager.clear()
+        self.assertIsNotNone(autotune_cache._read())
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifacts = cast(tuple[bytes, CacheInfo], artifacts)
+        _, cache_info = artifacts
+        self.assertEqual(cache_info.autotune_artifacts, [expected_artifact_key])
 
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
@@ -4140,11 +4206,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
         cache.local_cache = (mock_local_backend, "test_key")
         cache.remote_cache = None
 
-        # Mock AutotuneCacheBundler and CacheArtifactManager
-        with (
-            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
-            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
-        ):
+        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
             cache.save(config_with_extra, time_taken_ns=1000000)
 
         # Verify extra_options was included in the saved data
@@ -4180,11 +4242,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
         cache.local_cache = (mock_local_backend, "test_key")
         cache.remote_cache = None
 
-        # Mock AutotuneCacheBundler and CacheArtifactManager
-        with (
-            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
-            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
-        ):
+        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
             cache.save(config_without_extra, time_taken_ns=1000000)
 
         # Verify extra_options was NOT included in the saved data
