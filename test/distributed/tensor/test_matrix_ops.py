@@ -1186,6 +1186,25 @@ class DTensorOneSidedMMTest(DTensorTestBase):
         self.assertEqual(out.placements, (Shard(0),))
         self.assertEqual(out.full_tensor(), expected)
 
+    @with_comms
+    def test_mm_selection_depends_on_placements(self):
+        device_mesh = self.build_device_mesh()
+        lhs_full = torch.randn(6, 8, device=self.device_type)
+        rhs_full = torch.randn(8, 5, device=self.device_type)
+        expected = torch.mm(lhs_full, rhs_full)
+
+        with use_symmetric_memory():
+            lhs = distribute_tensor(lhs_full, device_mesh, [Shard(0)])
+            rhs = distribute_tensor(rhs_full, device_mesh, [Replicate()])
+
+        self.assertTrue(symm_mem.is_symm_mem_tensor(rhs.to_local()))
+        with patch.object(symm_mem, "get", wraps=symm_mem.get) as get_mock:
+            out = torch.mm(lhs, rhs)
+            self.assertEqual(get_mock.call_count, 0)
+
+        self.assertEqual(out.placements, (Shard(0),))
+        self.assertEqual(out.full_tensor(), expected)
+
 
 instantiate_parametrized_tests(DistMatrixOpsTest)
 
