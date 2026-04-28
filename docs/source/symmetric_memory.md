@@ -211,9 +211,9 @@ if dist.get_rank(group) == 0:
 
 `src` identifies the symmetric allocation to read from on the peer rank.
 `dst` may be a regular CUDA tensor or another symmetric tensor. Both tensors
-must be backed by contiguous memory, have the same dtype, be on the same device,
-and contain the same number of elements. The copy is issued on the current CUDA
-stream and returns `dst`.
+must be backed by contiguous memory, have the same dtype, and contain the same
+number of elements. The copy is issued on the current CUDA stream and returns
+`dst`.
 
 ## Scale out
 

@@ -2172,9 +2172,8 @@ def get(
     :func:`torch.distributed._symmetric_memory.empty` and rendezvoused with
     ``group``. ``dst`` can be a regular CUDA tensor or a symmetric-memory
     tensor. Both tensors must be backed by contiguous memory, have the same
-    dtype, be on the same device, and contain the same number of elements. The
-    copy is issued on the current CUDA stream and the returned tensor is
-    ``dst``.
+    dtype, and contain the same number of elements. The copy is issued on the
+    current CUDA stream and the returned tensor is ``dst``.
 
     Args:
         dst (Tensor): local destination tensor.
