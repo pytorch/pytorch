@@ -576,7 +576,6 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
   THPObjectPtr tuple(PyTuple_New(4));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
   THPObjectPtr _handle(Py_None);
-  Py_INCREF(Py_None);
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
 

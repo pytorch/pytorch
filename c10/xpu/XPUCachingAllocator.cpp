@@ -57,18 +57,16 @@ struct ZeIpcApi {
     }
   }
 
-  void init() {
-    lib_handle = dlopen("libze_loader.so.1", RTLD_LAZY | RTLD_LOCAL);
-    if (!lib_handle) {
-      lib_handle = dlopen("libze_loader.so", RTLD_LAZY | RTLD_LOCAL);
-    }
-    resolve(get_alloc_properties, "zeMemGetAllocProperties");
-    resolve(alloc_device, "zeMemAllocDevice");
-    resolve(free_device, "zeMemFree");
-  }
-
   bool dma_buf_available() {
-    std::call_once(init_once, [this]() { init(); });
+    std::call_once(init_once, [this]() {
+      lib_handle = dlopen("libze_loader.so.1", RTLD_LAZY | RTLD_LOCAL);
+      if (!lib_handle) {
+        lib_handle = dlopen("libze_loader.so", RTLD_LAZY | RTLD_LOCAL);
+      }
+      resolve(get_alloc_properties, "zeMemGetAllocProperties");
+      resolve(alloc_device, "zeMemAllocDevice");
+      resolve(free_device, "zeMemFree");
+    });
     return get_alloc_properties && alloc_device && free_device;
   }
 };
@@ -2124,6 +2122,8 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   ShareableHandle shareIpcHandle(void* ptr) override {
+    std::lock_guard<std::mutex> ipc_lock(IpcMutex);
+
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "invalid device pointer for XPU IPC: ", ptr);
     TORCH_CHECK(
@@ -2178,31 +2178,19 @@ class NativeCachingAllocator : public XPUAllocator {
   std::shared_ptr<void> getIpcDevPtr(
       std::string handle,
       c10::DeviceIndex device) override {
-    // Fast path: check if already in cache
-    {
-      std::lock_guard<std::mutex> lock(IpcMutex);
-      auto iter = ipcMemHandle_to_devptr.find(handle);
-      if (iter != ipcMemHandle_to_devptr.end()) {
-        auto devptr = iter->second.wp_.lock();
-        TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
-        return devptr;
-      }
-    }
-
-    MemHandleCacheEntry entry(device, handle);
-    entry.init();
-
-    // Slow path: insert into cache
     std::lock_guard<std::mutex> lock(IpcMutex);
     auto iter = ipcMemHandle_to_devptr.find(handle);
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
       TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
-      entry.clear();
       return devptr;
     }
 
+    MemHandleCacheEntry entry(device, handle);
+    entry.init();
+
     auto inserted = ipcMemHandle_to_devptr.emplace(handle, std::move(entry));
+    TORCH_INTERNAL_ASSERT(inserted.second);
     auto& inserted_entry = inserted.first->second;
     auto shared_handle = inserted.first->first;
 
