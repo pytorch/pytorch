@@ -257,14 +257,6 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
-            # Apply AC rematerialization to forward+loss+bwd graph
-            if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
-                from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
-                    remat_using_tags_for_fwd_loss_bwd_graph,
-                )
-
-                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
-
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
         from torch.fx.passes.regional_inductor import _needs_inductor_compile
@@ -462,6 +454,22 @@ def aot_stage2_inference(
             f"expected fw_module to be GraphModule, got {type(fw_module)}"
         )
     _apply_tensorify_python_scalars(fw_module)
+
+    # When trace_autograd_ops=True, the inference graph may contain fw/bw
+    # invoke_subgraph pairs from traced torch.autograd.grad/backward calls.
+    # Partition them before the remat pass so that remat duplicates the
+    # already-partitioned fw subgraphs (which produce saved tensors for bw).
+    fw_module = run_joint_graph_passes_on_hops(fw_module, None, aot_config)
+
+    # Apply AC rematerialization after HOP partitioning. This must happen
+    # after partitioning so remat duplicates the partitioned fw subgraphs
+    # (not the original unpartitioned ones).
+    if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
+        from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
+            remat_using_tags_for_fwd_loss_bwd_graph,
+        )
+
+        fw_module = remat_using_tags_for_fwd_loss_bwd_graph(fw_module)
 
     compiled_fw = _aot_stage2b_inference_compile(
         fw_module,
@@ -727,11 +735,10 @@ def _get_partition_fn(
     See Note [InvokeSubgraphHOP Partitioner]
     """
     used_hop_custom_partition = False
-    if aot_config.partition_fn is None:
-        raise AssertionError("aot_config.partition_fn must not be None")
-    partition_fn: Callable[..., tuple[torch.fx.GraphModule, torch.fx.GraphModule]] = (
-        aot_config.partition_fn
-    )
+
+    # Check for HOP-specific partition function first. This is needed because
+    # run_joint_graph_passes_on_hops can be called before aot_config.partition_fn
+    # is set (e.g., in aot_stage1_graph_capture before the remat pass).
     if (
         fw_hop_node.target == torch._higher_order_ops.invoke_subgraph
         and "custom" in fw_hop_node.meta
@@ -740,28 +747,30 @@ def _get_partition_fn(
         hop_partition_fn = fw_hop_node.meta["custom"][
             "nested_region_config"
         ].partitioner
-        if hop_partition_fn is None:
-            # inherit the parent paritioner
-            return used_hop_custom_partition, partition_fn
-
-        if callable(hop_partition_fn):
-            partition_fn = hop_partition_fn  # pyrefly: ignore [bad-assignment]
-            used_hop_custom_partition = True
-        else:
+        if hop_partition_fn is not None:
+            if callable(hop_partition_fn):
+                return True, hop_partition_fn  # pyrefly: ignore[bad-return]
             if not isinstance(hop_partition_fn, str):
                 raise AssertionError(
                     f"expected hop_partition_fn to be str, got {type(hop_partition_fn)}"
                 )
             match hop_partition_fn:
                 case "default_partition":
-                    partition_fn = torch._functorch.partitioners.default_partition
+                    return True, torch._functorch.partitioners.default_partition
                 case "min_cut_rematerialization_partition":
-                    partition_fn = torch._functorch.partitioners.min_cut_rematerialization_partition
+                    return (
+                        True,
+                        torch._functorch.partitioners.min_cut_rematerialization_partition,
+                    )
                 case _:
                     raise ValueError(
                         f"Unknown HOP partitioner config: {hop_partition_fn}"
                     )
-    return used_hop_custom_partition, partition_fn
+
+    # Fall back to the parent partitioner from aot_config
+    if aot_config.partition_fn is None:
+        raise AssertionError("aot_config.partition_fn must not be None")
+    return used_hop_custom_partition, aot_config.partition_fn
 
 
 def run_joint_graph_passes_on_hops(

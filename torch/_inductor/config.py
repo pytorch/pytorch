@@ -628,6 +628,14 @@ def _nvgemm_max_profiling_configs_default() -> int | None:
 
 nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
+# When enabled, adds supplement kernel configs that nvMatmulHeuristics
+# doesn't explore (certain tile/cluster combos that empirically beat
+# cuBLAS on decode shapes). These are added on top of the heuristic
+# picks, increasing the total number of configs benchmarked.
+nvgemm_supplement_configs: bool = (
+    os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
+)
+
 
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
@@ -681,9 +689,7 @@ use_pre_grad_passes: bool = True
 #   requires custom passes to implement uuid() for the cache key.
 # "default": resolves to "late" when possible (no custom pass, or custom pass
 #   with uuid), falls back to "early" otherwise.
-pre_grad_pass_timing: Literal["early", "late", "default"] = (
-    "late" if is_fbcode() else "default"
-)
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
 
 
 use_joint_graph_passes: bool = True
@@ -1241,6 +1247,29 @@ class aten_distributed_optimizations:
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
 
+    # Pre-bucket FSDP collectives before overlap scheduling.
+    # Merges per-parameter FSDP collectives into buckets sized to
+    # saturate the process group's network bandwidth.
+    pre_bucketing_fsdp_collectives: bool = True
+
+    # Override bucket cap in MB for pre-bucketing. When None, auto-computes
+    # from the NCCL analytical model using the configs below.
+    pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None
+
+    # Floor for auto-computed bucket cap in MB.
+    pre_bucketing_fsdp_collectives_min_bucket_cap_mb: float = 10.0
+
+    # Ceiling for auto-computed bucket cap in MB.
+    pre_bucketing_fsdp_collectives_max_bucket_cap_mb: float = 500.0
+
+    # Verbose logging: per-collective sizes and bucket composition
+    # via logger and trace_structured.
+    pre_bucketing_fsdp_collectives_verbose: bool = False
+
+    # Multiplier on the empirical saturation model's output.
+    # With the empirical profiles this should be 1.0; kept for manual tuning.
+    pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1513,6 +1542,16 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
+
+# Per-future timeout (seconds) for AsyncCompile._wait_futures. 0 (the
+# default) means no timeout; a positive value raises a RuntimeError naming
+# the kernel when a compile worker does not finish in time. CI sets this
+# via TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT (300s) so a stuck compile
+# doesn't burn the whole shard budget, while non-CI users with legitimately
+# long compiles are not affected.
+compile_worker_wait_timeout: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT", "0")
+)
 
 enable_autograd_for_aot: bool = False
 
