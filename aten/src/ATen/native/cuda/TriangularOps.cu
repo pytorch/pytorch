@@ -19,6 +19,10 @@
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+//#if defined(USE_ROCM)
+#define USE_ROLL_LOOP 1
+//#endif
+
 #define BOOL_SWITCH(COND, CONST_NAME, ...)      \
   [&] {                                         \
     if (COND) {                                 \
@@ -44,7 +48,7 @@ __global__ void triu_tril_kernel(
     const int64_t k,
     const int64_t N_padded,
     const IndexType last_dim_padded) {
-#if !defined(USE_ROCM)
+#if !defined(USE_ROLL_LOOP)
   int64_t linear_idx = (((int64_t)blockIdx.x) * blockDim.x + threadIdx.x) * elements_per_thread;
   if (linear_idx >= N_padded) {
     return;
@@ -56,7 +60,7 @@ __global__ void triu_tril_kernel(
        linear_idx_retained += blockDim.x * gridDim.x * elements_per_thread)
   {
     int64_t linear_idx { linear_idx_retained }; // linear_idx_retained persists for the next iteration
-#endif // !defined(USE_ROCM)
+#endif // !defined(USEROLL_LOOP)
 
     auto dims = self_info.dims;
 
@@ -68,7 +72,7 @@ __global__ void triu_tril_kernel(
     if constexpr (inplace) {
       bool mask_all_true = upper ? (col - row >= k) : (col + elements_per_thread - row <= k);
       if (mask_all_true)
-#if !defined(USE_ROCM)
+#if !defined(USE_ROLL_LOOP)
         return;
 #else
         // The strided loop must proceed on ROCm
@@ -120,9 +124,9 @@ __global__ void triu_tril_kernel(
       for (int i = 0; i < elements_per_thread && col + i < self_info.sizes[dims - 1]; i++)
         result_info.data[result_offset + i * result_info.strides[dims - 1]] = frag[i];
     }
-#if defined(USE_ROCM)
+#if defined(USE_ROLL_LOOP)
   } // end of the strided loop on ROCm
-#endif // !defined(USE_ROCM)
+#endif // !defined(USE_ROLL_LOOP)
 }
 
 template <bool upper>
