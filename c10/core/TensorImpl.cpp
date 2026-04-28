@@ -432,6 +432,12 @@ c10::Device TensorImpl::device_custom() const {
     }
     return *extra_meta_->fake_device_;
   }
+  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
+    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+      return device_default();
+    }
+    return *extra_meta_->fake_device_;
+  }
   return device_default();
 }
 
