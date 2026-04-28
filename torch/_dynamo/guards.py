@@ -4994,6 +4994,49 @@ def format_user_stack_trace(
     return "\n".join(lines)
 
 
+def describe_backend(backend: Callable[..., object] | None) -> str:
+    """Return a human-readable string describing a backend callable for debugging."""
+    if backend is None:
+        return "None"
+
+    # _TorchCompileWrapper is the internal wrapper created by torch.compile().
+    # It has structured fields that are more informative than generic introspection.
+    from torch import _TorchCompileWrapper
+
+    if isinstance(backend, _TorchCompileWrapper):
+        details = f"compiler={backend.compiler_name!r}, dynamic={backend.dynamic!r}"
+        if backend.kwargs:
+            details += f", kwargs={backend.kwargs!r}"
+        return f"_TorchCompileWrapper({details}) (id={id(backend):#x})"
+
+    actual = backend
+    prefix = ""
+    if isinstance(actual, functools.partial):
+        prefix = "functools.partial wrapping "
+        actual = actual.func
+
+    qualname = getattr(actual, "__qualname__", None)
+    module = getattr(actual, "__module__", None)
+
+    if qualname and module:
+        name = f"{module}.{qualname}"
+    elif qualname:
+        name = qualname
+    elif hasattr(actual, "__name__"):
+        name = actual.__name__
+    else:
+        name = type(actual).__name__
+
+    code = getattr(actual, "__code__", None)
+    location = (
+        f" defined at {code.co_filename}:{code.co_firstlineno}"
+        if code is not None
+        else ""
+    )
+
+    return f"{prefix}{name}{location} (id={id(backend):#x})"
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
@@ -5047,8 +5090,12 @@ def get_guard_fail_reason_helper(
             user_stack_str = format_user_stack_trace(guard_debug_info.user_stack)
     elif cache_entry_backend != backend:
         # None of the guard entries failed - a backend match issue
+        cached_desc = describe_backend(cache_entry_backend)
+        new_desc = describe_backend(backend)
         reason = (
-            "BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f"BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f" Cached backend: {cached_desc}."
+            f" New backend: {new_desc}."
             " If this is unexpected, wrap your backend in functools.partial (or reuse the"
             " same cached backend) to avoid creating a new backend function each time."
             " More details: https://github.com/pytorch/pytorch/issues/168373"
