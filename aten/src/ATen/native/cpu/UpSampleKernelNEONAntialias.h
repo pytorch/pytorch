@@ -112,7 +112,13 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
       }
 
       // Block 4: handle 4 pixels that didn't fit in a block of 8
-      for (; i + 4 <= ids_size; i += 4) {
+      // We also use vld3_u8 here, which still loads 8 pixels, but we only use
+      // the lower half - so the computation is correct.
+      // On all rows except the last one, reading 8 pixels is safe (the tensors
+      // are channels-last). But on the last row, we have to be careful not to
+      // read past the buffer, hence the extra boundary check.
+      const uint8_t* block_of_4_safe_load_end = input_p + yin * xin_stride - 24;
+      for (; i + 4 <= ids_size && lineIn_min + num_channels * i <= block_of_4_safe_load_end; i += 4) {
         uint8x8x3_t rgb = vld3_u8(lineIn_min + num_channels * i);
         int16x4_t weights4 = vld1_s16(&k[i]);
 

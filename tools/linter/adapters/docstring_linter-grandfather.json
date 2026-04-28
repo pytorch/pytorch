@@ -15,6 +15,14 @@
     "class MixedMMH100": 133,
     "def MixedMMH100.get_best_choices()": 86
   },
+  "torch/_inductor/autoheuristic/artifacts/_PadMMA100.py": {
+    "class PadMMA100": 249,
+    "def PadMMA100.get_best_choices()": 221
+  },
+  "torch/_inductor/autoheuristic/artifacts/_PadMMH200.py": {
+    "class PadMMH200": 159,
+    "def PadMMH200.get_best_choices()": 131
+  },
   "torch/_inductor/bounds.py": {
     "class ValueRangeAnalysis": 108
   },

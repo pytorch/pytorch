@@ -41,13 +41,12 @@ class ProgramRunner:
                 devices = [str(i) for i in range(num_gpus)]
             except ImportError:
                 devices = []
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         if devices:
             selected_device = random.choice(devices)
-            env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = selected_device
             print(f"Selected CUDA_VISIBLE_DEVICES={selected_device}")
-        else:
-            env = None  # No GPU available or torch not installed
 
         try:
             result = subprocess.run(
@@ -101,13 +100,12 @@ class ProgramRunner:
                     devices = [str(i) for i in range(num_gpus)]
             except ImportError:
                 devices = []
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         if devices:
             selected_device = random.choice(devices)
-            env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = selected_device
             print(f"Selected CUDA_VISIBLE_DEVICES={selected_device}")
-        else:
-            env = None
 
         try:
             result = subprocess.run(

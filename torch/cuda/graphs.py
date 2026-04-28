@@ -111,7 +111,7 @@ class CUDAGraph(_CUDAGraph):
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
                 unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
-        """  # noqa: B950
+        """
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self) -> None:
@@ -168,14 +168,14 @@ class CUDAGraph(_CUDAGraph):
         r"""Returns the underlying cudaGraph_t. ``keep_graph`` must be True.
 
         See the following for APIs for how to manipulate this object: `Graph Managmement <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html>`_ and `cuda-python Graph Management bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-management>`_
-        """  # noqa: B950
+        """
         return super().raw_cuda_graph()
 
     def raw_cuda_graph_exec(self) -> int:
         r"""Returns the underlying cudaGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_cuda_graph_exec()``, the previously returned cudaGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
 
         See the following for APIs for how to manipulate this object: `Graph Execution <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH__EXEC.html>`_ and `cuda-python Graph Execution bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-execution>`_
-        """  # noqa: B950
+        """
         return super().raw_cuda_graph_exec()
 
 
@@ -197,6 +197,12 @@ class graph:
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
             actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
             unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+        enable_annotations (bool, optional): If ``True``, enables kernel annotation
+            recording on entry and automatically calls
+            :func:`~torch.cuda._graph_annotations.resolve_pending_annotations` before
+            the capture ends.  Annotations are **not** cleared on exit so that multiple
+            graphs in the same workload can accumulate annotations.
+            Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -207,7 +213,7 @@ class graph:
 
     .. _cudaStreamCaptureMode:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-    """  # noqa: B950
+    """
 
     default_capture_stream: torch.cuda.Stream | None = None
 
@@ -217,6 +223,7 @@ class graph:
         pool: _POOL_HANDLE | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
+        enable_annotations: bool = False,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -233,6 +240,7 @@ class graph:
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
+        self._enable_annotations = enable_annotations
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -250,6 +258,11 @@ class graph:
         # pyrefly: ignore [missing-attribute]
         torch._C._host_emptyCache()
 
+        if self._enable_annotations:
+            from torch.cuda._graph_annotations import enable_annotations as _enable_ann
+
+            _enable_ann()
+
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
@@ -262,8 +275,18 @@ class graph:
         )
 
     def __exit__(self, *args: object) -> None:
+        if self._enable_annotations:
+            from torch.cuda._graph_annotations import resolve_pending_annotations
+
+            resolve_pending_annotations()
+
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(*args)
+
+        if self._enable_annotations:
+            from torch.cuda._graph_annotations import remap_to_exec_graph
+
+            remap_to_exec_graph(self.cuda_graph)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 

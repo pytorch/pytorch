@@ -1891,7 +1891,7 @@ class _ExceptionRaisingThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             self.exception = e
 
     def join(self, timeout=None):

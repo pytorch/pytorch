@@ -40,6 +40,10 @@
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
 #include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e4m3fnuz.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Float8_e5m2fnuz.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/complex.h>
 
@@ -683,6 +687,10 @@ int32_t aoti_torch_dtype() = delete;
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2, float8_e5m2)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e4m3fn, float8_e4m3fn)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2fnuz, float8_e5m2fnuz)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e4m3fnuz, float8_e4m3fnuz)
 DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)

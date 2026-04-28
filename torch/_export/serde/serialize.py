@@ -153,6 +153,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
     torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
+    torch.uint32: ScalarType.UINT32,
+    torch.uint64: ScalarType.UINT64,
 }
 
 
@@ -2576,11 +2578,21 @@ class GraphModuleDeserializer(metaclass=Final):
         output_node = self.graph.output(outputs)
 
         if serialized_graph.is_single_tensor_return:
-            output_node.meta["val"] = output_node.args[0].meta["val"]
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, torch.fx.Node):
+                raise AssertionError(
+                    f"Expected Node for single tensor return, got {type(first_arg)}"
+                )
+            output_node.meta["val"] = first_arg.meta["val"]
         else:
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, (tuple, list)):
+                raise AssertionError(
+                    f"Expected tuple/list for multi tensor return, got {type(first_arg)}"
+                )
             output_node.meta["val"] = tuple(
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in output_node.args[0]
+                for arg in first_arg
             )
 
         # recompute unbacked bindings

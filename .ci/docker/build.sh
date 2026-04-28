@@ -112,6 +112,7 @@ case "$tag" in
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
+    INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
@@ -248,9 +249,9 @@ case "$tag" in
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
+    CUDA_VERSION=13.0.2
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
@@ -277,6 +278,7 @@ case "$tag" in
       then
         ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
         PYTHON_FREETHREADED=1
+        TSAN=yes
       fi
     fi
     if [[ "$image" == *cuda* ]]; then
@@ -343,6 +345,7 @@ docker buildx build \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
        --build-arg "TPU=${TPU}" \
+       --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "ACL=${ACL:-}" \

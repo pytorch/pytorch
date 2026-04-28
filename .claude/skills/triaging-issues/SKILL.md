@@ -34,7 +34,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
-**Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, and deprecated labels.
+**Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
 
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
@@ -66,6 +66,7 @@ Use these GitHub MCP tools for triage:
 | `ci-*`, `ci:*` | CI infrastructure controls |
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
+| `actionable` | Requires human decision |
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 

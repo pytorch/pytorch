@@ -2228,6 +2228,7 @@ class ReduceOpTest(TestCase):
             self.assertTrue(
                 isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
             )
+            self.assertTrue(isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp))
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):

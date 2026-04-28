@@ -2,7 +2,6 @@
 import abc
 import functools
 import inspect
-import unittest
 import weakref
 
 import torch
@@ -254,8 +253,12 @@ user_stack=None)
         guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
         self.assertTrue(guard(foo))
 
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+
         try:
-            torch.set_default_device("cuda")
+            device = torch.accelerator.current_accelerator()
+            torch.set_default_device(device)
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -445,10 +448,14 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_call_function_no_args_guard(self):
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+
         root = RootGuardManager()
-        x = torch.cuda.current_device()
+        device = torch.accelerator.current_accelerator()
+        # Use device.index which is device-agnostic (works on all accelerators)
+        x = device.index if device.index is not None else 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
@@ -1066,19 +1073,23 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
     def test_immutable_tag_safe(self):

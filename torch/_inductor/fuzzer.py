@@ -179,8 +179,18 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "group_linear": {"require_fbgemm": True},
         },
     ],
-    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
-    "autoheuristic_use": ["pad_mm", "mixed_mm"],
+    "autoheuristic_collect": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
+    "autoheuristic_use": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
 }
@@ -509,6 +519,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
         "inductor_choices_class": DEFAULT,  # Typing
+        "cudagraph_policy": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing

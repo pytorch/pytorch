@@ -46,7 +46,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "", input);
+  op.call(symmMemTensor, "sum", groupName_, input);
   return input;
 }
 
@@ -65,7 +65,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "");
+  op.call(symmMemTensor, "sum", groupName_);
   input.copy_(symmMemTensor);
   return input;
 }

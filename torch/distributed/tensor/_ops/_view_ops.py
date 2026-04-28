@@ -720,6 +720,12 @@ class _ViewShardingPropagator:
                 isinstance(p, Shard | _StridedShard)
                 and not self.shard_allowed[p.dim][mesh_dim]
             ):
+                if self.strict_view:
+                    raise RuntimeError(
+                        f"This operation would remove or reshape sharded "
+                        f"dimension {p.dim}, which requires redistribution. "
+                        f"Please redistribute the input first."
+                    )
                 input_tgt_placements.append(Replicate())
             else:
                 input_tgt_placements.append(p)
@@ -1291,12 +1297,17 @@ def register_op_strategy_map(
                 placements=tuple(input_tgt_placements),
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
+                use_strided_shard_as_shard_order=False,
             )
             redistribute_costs: list[list[float]] = [
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
-            output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
+            output_spec = DTensorSpec(
+                mesh=mesh,
+                placements=tuple(output_placements),
+                use_strided_shard_as_shard_order=False,
+            )
             output_strategy.strategies.append(
                 OpSpec(
                     output_specs=output_spec,
@@ -1308,19 +1319,31 @@ def register_op_strategy_map(
         return output_strategy
 
 
-register_op_strategy_map(aten.squeeze.default, torch.squeeze)
-register_op_strategy_map(aten.squeeze_.default, torch.squeeze)
+register_op_strategy_map(aten.squeeze.default, torch.squeeze, strict_view=True)
+register_op_strategy_map(aten.squeeze_.default, torch.squeeze, strict_view=True)
 register_op_strategy_map(
-    aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+    aten.squeeze_.dim,
+    torch.squeeze,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
-    aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+    aten.squeeze.dim,
+    torch.squeeze,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
-    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+    aten.squeeze.dims,
+    torch.squeeze,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
-    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+    aten.squeeze_.dims,
+    torch.squeeze,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
     aten.view.default,

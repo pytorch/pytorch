@@ -188,6 +188,8 @@
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.range_end
+    nvtx.range_start
 ```
 
 ## Jiterator (beta)
@@ -308,7 +310,11 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.nvtx
+.. automodule:: torch.cuda.nvtx
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nvtx
 ```
 
 ```{eval-rst}
