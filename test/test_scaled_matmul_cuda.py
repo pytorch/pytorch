@@ -1811,7 +1811,6 @@ class TestFP8Matmul(TestCase):
                     ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                capability = torch.cuda.get_device_capability()
                 if SM100OrLater:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
