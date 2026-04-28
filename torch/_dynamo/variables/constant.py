@@ -155,9 +155,27 @@ its type to `common_constant_types`.
     def getitem_const(
         self, tx: InstructionTranslator, arg: VariableTracker
     ) -> VariableTracker:
+        if isinstance(self.value, (str, bytes)):
+            from .object_protocol import validate_sequence_index
+
+            container_name = "string" if isinstance(self.value, str) else "bytes"
+            arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
+
+    def sq_item_impl(
+        self, tx: InstructionTranslator, key: VariableTracker
+    ) -> VariableTracker:
+        # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
+        # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
+        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
+        index = key.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value[index])
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
 
     @staticmethod
     def is_base_literal(obj: object) -> bool:
