@@ -6475,7 +6475,7 @@ def multi_head_attention_forward(
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
+            be ignored by the attention. This is a binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
             Default: `True`

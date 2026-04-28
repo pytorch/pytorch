@@ -2816,7 +2816,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
         _buffer, layout = as_storage_and_layout(x, freeze=False)
-        # pad the stride here so we will NOT claim an tensor as contiguous
+        # pad the stride here so we will NOT claim a tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
             assert isinstance(layout, FlexibleLayout), type(layout)

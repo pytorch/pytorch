@@ -883,7 +883,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for k, v in commit.additions.items():
                 for f in v["fields"]:
                     reason += (
-                        f"Field {k}.{f} is added to schema.py as an compatible change "
+                        f"Field {k}.{f} is added to schema.py as a compatible change "
                         + "which still requires minor version bump.\n"
                     )
             next_version = [
@@ -894,7 +894,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for k, v in commit.subtractions.items():
                 for f in v["fields"]:
                     reason += (
-                        f"Field {k}.{f} is removed from schema.py as an compatible change "
+                        f"Field {k}.{f} is removed from schema.py as a compatible change "
                         + "which still requires minor version bump.\n"
                     )
             next_version = [
