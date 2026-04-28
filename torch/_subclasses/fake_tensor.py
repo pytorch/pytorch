@@ -553,6 +553,26 @@ class FakeTensorConverter:
         # NB: meta_converter set the memo
         return out
 
+    def to_meta_tensor(self, t, shape_env=None, source=None, symbolic_context=None):
+        """Convert a real tensor to a meta tensor without FakeTensor wrapper."""
+        # ShapeEnv._create_symbolic_sizes_strides_storage_offset requires a
+        # non-None source for TensorPropertySource construction.
+        effective_shape_env = shape_env if source is not None else None
+
+        def identity_callback(make_meta_t, device):
+            return make_meta_t()
+
+        out = self.meta_converter(
+            t,
+            shape_env=effective_shape_env,
+            callback=identity_callback,
+            source=source,
+            symbolic_context=symbolic_context,
+        )
+        if out is NotImplemented:
+            raise UnsupportedFakeTensorException("meta converter nyi")
+        return out
+
     # If you specify the device, it MUST be a meta tensor.
     def from_meta_and_device(
         self,
