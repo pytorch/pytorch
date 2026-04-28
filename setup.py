@@ -990,6 +990,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
+            # Copy PDB alongside the pyd for debugger symbol resolution.
+            # setuptools places the PDB in build_lib next to the pyd; copy it
+            # into the source tree so LLDB/MSVC debuggers can find it.
+            if build_type.is_debug() or build_type.is_rel_with_deb_info():
+                pyd_rel = self.get_ext_filename("torch._C")
+                pdb_rel = os.path.splitext(pyd_rel)[0] + ".pdb"
+                src_pdb = Path(self.build_lib) / pdb_rel
+                dst_pdb = Path(pdb_rel)
+                if src_pdb.exists():
+                    dst_pdb.parent.mkdir(parents=True, exist_ok=True)
+                    self.copy_file(str(src_pdb), str(dst_pdb))
+
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
