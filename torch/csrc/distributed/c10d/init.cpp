@@ -3687,7 +3687,15 @@ Example::
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupXCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupXCCL instance.)");
+              R"(Return the options used to create this ProcessGroupXCCL instance.)")
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupXCCL>& self,
+                 bool enable_nan_check) {
+                self->setEnableNanCheck(enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
+              py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL, "Options", backendOptions)
