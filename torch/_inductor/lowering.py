@@ -3191,10 +3191,18 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+def constrain_to_fx_strides_if_fallback_random(fx_node, *args, **kwargs):
+    if not config.fallback_random:
+        return args, kwargs
+    return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
 # native_dropout uses empty_like(input) internally, so bernoulli_ consumes
 # RNG values in the input's stride order. Constrain input strides to match
 # the FX graph (i.e. eager) so the dropout mask is identical.
-add_layout_constraint(aten.native_dropout.default, constrain_to_fx_strides)
+add_layout_constraint(
+    aten.native_dropout.default, constrain_to_fx_strides_if_fallback_random
+)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
