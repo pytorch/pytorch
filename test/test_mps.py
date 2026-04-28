@@ -8140,6 +8140,33 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(TypeError, "UntypedStorage"):
             torch.mps._host_alias_storage(torch.empty(4, device="mps"))
 
+    def test_pin_memory_cpu_alias(self):
+        # torch.empty(..., device="cpu", pin_memory=True) should stay on CPU
+        # while being backed by a unified-memory MTLBuffer (issue #181374).
+        x = torch.empty((4, 4), device="cpu", pin_memory=True)
+
+        self.assertEqual(x.device, torch.device("cpu"))
+        self.assertTrue(x.is_pinned())
+
+        # Pinning an existing CPU tensor returns a CPU tensor too.
+        y = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+        yp = y.pin_memory()
+        self.assertEqual(yp.device, torch.device("cpu"))
+        self.assertTrue(yp.is_pinned())
+        self.assertEqual(yp, y)
+
+        # CPU writes are visible on the GPU side via .to("mps").
+        yp.fill_(7.0)
+        self.assertEqual(yp.to("mps"), torch.full((4, 4), 7.0, device="mps"))
+
+        # numpy view shares storage with the pinned tensor.
+        np_view = yp.numpy()
+        np_view[0, 0] = 1.5
+        self.assertEqual(yp[0, 0].item(), 1.5)
+
+        # Non-pinned CPU tensors are not reported as pinned.
+        self.assertFalse(torch.empty(4).is_pinned())
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged

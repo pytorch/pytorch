@@ -862,6 +862,78 @@ MPSAllocator& _getSharedAllocator() {
   return s_mps_shared_alloc;
 }
 
+// Allocator returned by MPSHooks::getPinnedMemoryAllocator(). Backs each
+// allocation with a shared (unified-memory) MTLBuffer from the MPS allocator
+// but exposes the buffer's host-visible pointer as a CPU-device DataPtr, so
+// `torch.empty(..., device="cpu", pin_memory=True)` and `tensor.pin_memory()`
+// stay on the CPU device while still being zero-copy reachable from the GPU.
+class MPSPinnedAllocator final : public c10::Allocator {
+ public:
+  c10::DataPtr allocate(size_t nbytes) override {
+    if (nbytes == 0) {
+      return {nullptr, nullptr, &deleter, c10::Device(c10::DeviceType::CPU)};
+    }
+    auto& shared = _getSharedAllocator();
+    TORCH_CHECK(shared.isSharedStorageSupported(), "MPS pinned memory requires a unified-memory device");
+    c10::DataPtr mps_dp = shared.allocate(nbytes);
+    auto host_ptr_pair = shared.getSharedBufferPtr(mps_dp.get());
+    TORCH_INTERNAL_ASSERT(host_ptr_pair.first, "MPS pinned allocator: failed to map shared buffer");
+    void* cpu_ptr = const_cast<void*>(host_ptr_pair.first);
+    // Hold a refcount on the source MPS storage so the MTLBuffer stays alive
+    // for as long as the host alias is in use.
+    c10::Storage mps_storage(c10::Storage::use_byte_size_t(),
+                             nbytes,
+                             std::move(mps_dp),
+                             /*allocator=*/nullptr,
+                             /*resizable=*/false);
+    auto* ctx = new PinnedCtx{std::move(mps_storage), cpu_ptr};
+    {
+      std::lock_guard<std::mutex> lk(s_mutex);
+      s_pinned_ptrs.insert(cpu_ptr);
+    }
+    return {cpu_ptr, ctx, &deleter, c10::Device(c10::DeviceType::CPU)};
+  }
+  c10::DeleterFnPtr raw_deleter() const override {
+    return &deleter;
+  }
+  void copy_data(void* dest, const void* src, size_t count) const final {
+    default_copy_data(dest, src, count);
+  }
+  static bool isPinned(const void* ptr) {
+    if (!ptr) {
+      return false;
+    }
+    std::lock_guard<std::mutex> lk(s_mutex);
+    return s_pinned_ptrs.find(ptr) != s_pinned_ptrs.end();
+  }
+
+ private:
+  struct PinnedCtx {
+    c10::Storage mps_storage;
+    void* cpu_ptr;
+  };
+  static void deleter(void* ctx) {
+    if (!ctx) {
+      return;
+    }
+    auto* pinned = static_cast<PinnedCtx*>(ctx);
+    {
+      std::lock_guard<std::mutex> lk(s_mutex);
+      s_pinned_ptrs.erase(pinned->cpu_ptr);
+    }
+    delete pinned;
+  }
+  static std::mutex s_mutex;
+  static std::unordered_set<const void*> s_pinned_ptrs;
+};
+std::mutex MPSPinnedAllocator::s_mutex;
+std::unordered_set<const void*> MPSPinnedAllocator::s_pinned_ptrs;
+
+MPSPinnedAllocator& _getPinnedAllocator() {
+  static MPSPinnedAllocator s_mps_pinned_alloc;
+  return s_mps_pinned_alloc;
+}
+
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator() {
@@ -872,12 +944,19 @@ IMPSAllocator* getIMPSAllocator() {
   return nullptr;
 }
 
+c10::Allocator* getMPSPinnedAllocator() {
+  if (!_getSharedAllocator().isSharedStorageSupported()) {
+    return nullptr;
+  }
+  return &_getPinnedAllocator();
+}
+
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
 bool isMPSPinnedPtr(const void* data) {
-  return at::mps::_getSharedAllocator().isSharedBuffer(data);
+  return MPSPinnedAllocator::isPinned(data) || at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 
 } // namespace at::mps
