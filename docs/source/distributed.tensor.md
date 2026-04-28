@@ -220,6 +220,10 @@ should be selected as normal through the
 the user-provided local tensor and does not implicitly copy it into
 SymmetricMemory.
 
+DTensor may use SymmetricMemory-backed operands to run one-sided implementations
+for supported operator and placement combinations. Unsupported combinations fall
+back to the existing DTensor collective-based implementation.
+
 ### Random Operations
 
 DTensor provides distributed RNG functionality to ensure that random operations on sharded tensors get unique values, and random operations on replicated tensors get the same values. This system requires that all participating
