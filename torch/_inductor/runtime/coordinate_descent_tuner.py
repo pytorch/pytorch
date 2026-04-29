@@ -227,22 +227,17 @@ class CoordescTuner:
             return xblock <= split_size
         return True
 
-    def check_all_tuning_directions(
+    def get_all_tuning_directions(
         self,
         # pyrefly: ignore [missing-attribute]
-        func: Callable[["triton.Config"], float],
-        best_config,
-        best_timing,
-    ):
-        """
-        Check all directions. We only do this once the regular coordinate
-        descent tuning find no better choices any more.
-        We only have a few tunable fields, so this should be fine.
-        """
+        config: "triton.Config",
+    ) -> list["triton.Config"]:  # pyrefly: ignore [missing-attribute]
+        """Return the Cartesian product of neighbour values across every
+        tunable field, as a list of valid candidate configs."""
         candidate_values_list = []
         effective_fields = []
         for field in self.tunable_fields:
-            old_value = get_field(best_config, field)
+            old_value = get_field(config, field)
             if old_value is None:
                 continue
             radius = self.inductor_meta.get("coordinate_descent_search_radius", 1)
@@ -255,15 +250,30 @@ class CoordescTuner:
             candidate_values_list.append(candidate_values)
             effective_fields.append(field)
 
-        choices = itertools.product(*candidate_values_list)
-        improved = False
-        for choice in choices:
+        configs = []
+        for choice in itertools.product(*candidate_values_list):
             assert len(choice) == len(effective_fields)
-            candidate_config = copy.deepcopy(best_config)
+            candidate = copy.deepcopy(config)
             for new_val, field in zip(choice, effective_fields):
-                set_field(candidate_config, field, new_val)
-            if not self.is_valid_config(candidate_config):
-                continue
+                set_field(candidate, field, new_val)
+            if self.is_valid_config(candidate):
+                configs.append(candidate)
+        return configs
+
+    def check_all_tuning_directions(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        func: Callable[["triton.Config"], float],
+        best_config,
+        best_timing,
+    ):
+        """
+        Check all directions. We only do this once the regular coordinate
+        descent tuning find no better choices any more.
+        We only have a few tunable fields, so this should be fine.
+        """
+        improved = False
+        for candidate_config in self.get_all_tuning_directions(best_config):
             cmp_res, candidate_timing = self.compare_config(
                 func, candidate_config, best_config, best_timing
             )
