@@ -20,6 +20,7 @@
 
 #ifndef NDEBUG
 #include <iostream>
+// @allow-raw-throw
 #endif
 
 namespace c10 {

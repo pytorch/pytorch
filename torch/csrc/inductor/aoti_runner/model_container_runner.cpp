@@ -18,6 +18,7 @@
 #else // !_WIN32
 #include <sys/mman.h>
 #include <unistd.h>
+// @allow-raw-throw
 #endif // _WIN32
 
 namespace torch::inductor {

@@ -6,6 +6,7 @@
 #include <climits>
 #include <memory>
 #include <type_traits>
+// @allow-raw-throw
 
 namespace pybind11 {
 template <typename, typename...>

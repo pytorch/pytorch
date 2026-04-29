@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+// @allow-raw-throw
 using namespace c10;
 
 // Check that no bytes are wasted and everything is well-aligned.

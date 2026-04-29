@@ -19,6 +19,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
+// @allow-raw-throw
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;

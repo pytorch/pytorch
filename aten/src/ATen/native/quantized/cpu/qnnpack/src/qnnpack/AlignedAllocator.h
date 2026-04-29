@@ -12,6 +12,7 @@
 #include <limits>
 
 #include <stdlib.h>
+// @allow-raw-throw
 
 template <typename T, size_t Alignment>
 class AlignedAllocator;

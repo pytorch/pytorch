@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <miopen/version.h>
+// @allow-raw-throw
 
 namespace at { namespace native {
 

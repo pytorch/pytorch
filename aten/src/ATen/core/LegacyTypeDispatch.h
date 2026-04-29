@@ -9,6 +9,7 @@
 // TODO: Clean up what remains here
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
+// @allow-raw-throw
 
 namespace at {
 

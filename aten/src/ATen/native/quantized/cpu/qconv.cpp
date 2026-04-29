@@ -46,6 +46,7 @@
 #endif
 
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 namespace {
 // To have a sanity check for maximum matrix size.

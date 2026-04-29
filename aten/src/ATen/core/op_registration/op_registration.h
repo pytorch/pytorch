@@ -1,4 +1,5 @@
 #pragma once
+// @allow-raw-throw
 
 /**
  * Include this file if you want to register operators. It includes all

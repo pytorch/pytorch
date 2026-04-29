@@ -1,6 +1,7 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <string>
+// @allow-raw-throw
 
 // This is a utility macro that can be used to throw an exception when a Metal
 // API function produces a NSError. The exception will contain a message with

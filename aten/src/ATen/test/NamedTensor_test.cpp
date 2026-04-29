@@ -5,6 +5,7 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 using at::Dimname;
 using at::DimnameList;

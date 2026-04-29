@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+// @allow-raw-throw
 
 namespace torch::distributed::autograd {
 

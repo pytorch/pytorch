@@ -217,6 +217,7 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace at::meta {
 

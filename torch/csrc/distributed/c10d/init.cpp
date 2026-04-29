@@ -67,6 +67,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/custom_class.h>
+// @allow-raw-throw
 
 namespace {
 

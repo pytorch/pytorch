@@ -60,6 +60,7 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
+// @allow-raw-throw
 #endif
 
 using namespace torch::aot_inductor;

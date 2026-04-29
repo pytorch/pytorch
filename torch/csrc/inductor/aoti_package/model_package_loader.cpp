@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #else
 #include <filesystem>
+// @allow-raw-throw
 namespace fs = std::filesystem;
 #endif
 

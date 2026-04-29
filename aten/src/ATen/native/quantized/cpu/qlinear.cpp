@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <string>
+// @allow-raw-throw
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>

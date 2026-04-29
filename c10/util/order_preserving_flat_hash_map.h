@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+// @allow-raw-throw
 
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__

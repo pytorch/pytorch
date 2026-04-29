@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
+// @allow-raw-throw
 
 namespace at {
 namespace native {

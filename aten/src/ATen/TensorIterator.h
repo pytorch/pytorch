@@ -13,6 +13,7 @@
 
 #include <array>
 #include <bitset>
+// @allow-raw-throw
 
 namespace at {
 class Tensor;

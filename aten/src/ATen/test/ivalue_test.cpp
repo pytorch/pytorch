@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+// @allow-raw-throw
 
 // Snippets for checking assembly.
 c10::IValue inspectTupleConstruction() {

@@ -1,4 +1,5 @@
 #include <c10/util/TypeCast.h>
+// @allow-raw-throw
 
 namespace c10 {
 

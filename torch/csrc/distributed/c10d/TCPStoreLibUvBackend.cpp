@@ -17,6 +17,7 @@
 
 #ifdef TORCH_USE_LIBUV
 #include <uv.h>
+// @allow-raw-throw
 #endif
 
 namespace c10d::detail {

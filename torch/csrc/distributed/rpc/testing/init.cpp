@@ -10,6 +10,7 @@
 #include <pybind11/chrono.h>
 
 #include <utility>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc::testing {
 

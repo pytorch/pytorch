@@ -14,6 +14,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <exception>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc {
 

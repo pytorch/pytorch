@@ -26,6 +26,7 @@
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
 #include <torch/csrc/utils/python_numbers.h>
+// @allow-raw-throw
 
 #define ZE_CHECK(status)                                                  \
   {                                                                       \

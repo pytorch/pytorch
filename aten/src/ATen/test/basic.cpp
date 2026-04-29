@@ -6,6 +6,7 @@
 #include <ATen/test/test_assert.h>
 #include <c10/util/irange.h>
 #include <c10/util/CallOnce.h>
+// @allow-raw-throw
 
 // for TH compat test only...
 struct THFloatTensor;

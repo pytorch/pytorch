@@ -531,10 +531,6 @@ exclude_patterns = [
     # Vendored code
     'third_party/concurrentqueue/**',
     # Remaining burn-down
-    'aten/src/**',
-    'c10/util/**',
-    'torch/csrc/distributed/**',
-    'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
 ]
 command = [

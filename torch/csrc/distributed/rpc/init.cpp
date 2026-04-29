@@ -19,6 +19,7 @@
 
 #include <pybind11/chrono.h>
 #include <pybind11/operators.h>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc {
 

@@ -36,6 +36,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/torch.h>
 #include <optional>
+// @allow-raw-throw
 
 namespace c10d {
 

@@ -1,5 +1,6 @@
 #include <c10/util/DeadlockDetection.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc {
 

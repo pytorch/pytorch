@@ -8,6 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 template <class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {

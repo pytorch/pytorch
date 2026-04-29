@@ -4,6 +4,7 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
+// @allow-raw-throw
 
 at::Tensor run_with_control_flow(
     at::Tensor input,

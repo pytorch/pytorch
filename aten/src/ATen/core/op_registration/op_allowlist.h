@@ -3,6 +3,7 @@
 // TODO: unify to C10_MOBILE. In theory this header could be used in OSS.
 #ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
+// @allow-raw-throw
 #endif
 
 /**

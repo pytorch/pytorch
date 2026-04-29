@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <optional>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc {
 

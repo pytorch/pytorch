@@ -14,6 +14,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+// @allow-raw-throw
 
 namespace c10d {
 namespace detail {

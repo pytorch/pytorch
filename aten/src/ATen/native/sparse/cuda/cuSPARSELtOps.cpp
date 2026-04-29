@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <string_view>
+// @allow-raw-throw
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {

@@ -1,6 +1,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
+// @allow-raw-throw
 
 using namespace torch::aot_inductor;
 

@@ -6,6 +6,7 @@
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+// @allow-raw-throw
 
 namespace c10d::control_plane {
 

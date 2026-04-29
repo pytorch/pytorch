@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
+// @allow-raw-throw
 
 namespace torch::distributed::autograd {
 

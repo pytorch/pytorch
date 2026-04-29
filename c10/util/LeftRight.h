@@ -6,6 +6,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+// @allow-raw-throw
 
 namespace c10 {
 

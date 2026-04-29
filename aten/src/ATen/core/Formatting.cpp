@@ -1,4 +1,5 @@
 #include <ATen/core/Formatting.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <fmt/compile.h>
 #include <fmt/format.h>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+// @allow-raw-throw
 
 namespace c10 {
 std::ostream& operator<<(std::ostream& out, Backend b) {
@@ -34,7 +36,7 @@ std::ostream& operator<<(std::ostream& out, const Scalar& s) {
   if (s.isIntegral(false)) {
     return out << s.toLong();
   }
-  throw std::logic_error("Unknown type in Scalar");
+  TORCH_CHECK(false, "Unknown type in Scalar");
 }
 
 std::string toString(const Scalar& s) {

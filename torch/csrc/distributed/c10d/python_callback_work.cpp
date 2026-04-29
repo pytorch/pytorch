@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
+// @allow-raw-throw
 
 namespace c10d {
 

@@ -1,4 +1,5 @@
 #pragma once
+// @allow-raw-throw
 
 // See https://github.com/pytorch/pytorch/issues/161660
 // This compile flag is intended to be passed in to CppExtensions that rely on

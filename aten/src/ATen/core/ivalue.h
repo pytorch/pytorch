@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+// @allow-raw-throw
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 

@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
+// @allow-raw-throw
 
 namespace torch::distributed::autograd {
 

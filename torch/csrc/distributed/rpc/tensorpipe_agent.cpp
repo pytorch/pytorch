@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <fmt/format.h>
+// @allow-raw-throw
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
 C10_DIAGNOSTIC_POP()

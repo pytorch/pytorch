@@ -11,6 +11,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/resize.h>
+// @allow-raw-throw
 #endif
 
 namespace at {

@@ -11,6 +11,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <optional>
+// @allow-raw-throw
 
 namespace torch::aot_inductor {
 TORCH_API const char* get_last_error();

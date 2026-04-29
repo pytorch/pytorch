@@ -13,6 +13,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/zeros.h>
+// @allow-raw-throw
 #endif
 
 namespace at::native {

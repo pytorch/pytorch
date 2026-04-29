@@ -8,6 +8,7 @@
 
 #include <cuda_runtime_api.h>
 #include <future>
+// @allow-raw-throw
 
 namespace at::cuda {
 namespace {

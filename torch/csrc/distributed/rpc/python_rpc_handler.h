@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
+// @allow-raw-throw
 
 namespace torch::distributed::rpc {
 

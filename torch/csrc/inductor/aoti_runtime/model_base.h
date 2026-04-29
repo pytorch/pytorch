@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+// @allow-raw-throw
 
 #define PROT_READ 0x1
 #define PROT_WRITE 0x2

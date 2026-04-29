@@ -10,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+// @allow-raw-throw
 
 namespace c10d {
 

@@ -12,6 +12,7 @@
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #include <thread>
+// @allow-raw-throw
 #endif
 
 struct NumThreadsGuard {

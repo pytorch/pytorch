@@ -24,6 +24,7 @@
 #endif
 
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 namespace at::native {
 

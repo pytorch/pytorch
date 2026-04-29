@@ -7,6 +7,7 @@
 #include <ATen/test/allocator_clone_test.h>
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+// @allow-raw-throw
 
 std::unordered_map<void*, size_t> allocation_sizes;
 

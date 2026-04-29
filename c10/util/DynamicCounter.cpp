@@ -1,11 +1,13 @@
 #include <c10/util/DynamicCounter.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/Synchronized.h>
 
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
+// @allow-raw-throw
 
 namespace c10::monitor {
 
@@ -40,8 +42,8 @@ struct DynamicCounter::Guard {
             [](auto& backends) { return backends; })} {
     registeredCounters().withLock([&](auto& registeredCounters) {
       if (!registeredCounters.insert(std::string(key)).second) {
-        throw std::logic_error(
-            "Counter " + std::string(key) + " already registered");
+        TORCH_CHECK(
+            false, "Counter ", std::string(key), " already registered");
       }
     });
 

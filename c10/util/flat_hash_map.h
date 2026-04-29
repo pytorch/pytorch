@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+// @allow-raw-throw
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")

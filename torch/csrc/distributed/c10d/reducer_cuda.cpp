@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/DeviceGuard.h>
+// @allow-raw-throw
 
 namespace c10d {
 namespace {

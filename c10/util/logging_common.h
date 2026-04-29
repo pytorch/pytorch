@@ -4,6 +4,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/StringUtil.h>
 #include <sstream>
+// @allow-raw-throw
 
 namespace c10 {
 

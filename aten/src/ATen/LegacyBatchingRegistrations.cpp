@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 
 #include <utility>
+// @allow-raw-throw
 
 namespace at {
 

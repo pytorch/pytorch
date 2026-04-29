@@ -58,6 +58,7 @@
 
 #include <cinttypes>
 #include <c10/util/Exception.h>
+// @allow-raw-throw
 
 using namespace gemm_kernel_utils;
 

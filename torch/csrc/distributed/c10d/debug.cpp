@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/debug.h>
 
@@ -12,6 +13,7 @@
 #include <string>
 
 #include <torch/csrc/distributed/c10d/logging.h>
+// @allow-raw-throw
 
 namespace c10d {
 namespace detail {
@@ -41,7 +43,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw std::invalid_argument(
+    TORCH_CHECK(
+        false,
         "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 

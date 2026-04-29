@@ -13,6 +13,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime_api.h>
+// @allow-raw-throw
 
 #define AOTI_RUNTIME_CUDA_CHECK(EXPR)                      \
   do {                                                     \

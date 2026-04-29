@@ -4,6 +4,7 @@
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapTransforms.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 using namespace at;
 

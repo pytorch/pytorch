@@ -9,6 +9,7 @@
 #include <optional>
 #include <torch/all.h>
 #include <stdexcept>
+// @allow-raw-throw
 
 using namespace at;
 

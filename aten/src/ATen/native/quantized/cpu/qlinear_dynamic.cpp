@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <string>
 #include <type_traits>
+// @allow-raw-throw
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
