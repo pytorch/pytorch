@@ -92,11 +92,11 @@ op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
 @contextmanager
 def _temp_test_configs(obj, **configs):
     backup = {k: getattr(obj, k, None) for k in configs}
-    obj.register_test_configs(**configs)
+    obj.set_test_configs(**configs)
     try:
         yield
     finally:
-        obj.register_test_configs(**backup)
+        obj.set_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
