@@ -1627,9 +1627,7 @@ TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') ==
 # TODO: Remove PYTORCH_TEST_WITH_HIPDNN once hipdnn is enabled by default on ROCm.
 # Opt-in: enable hipDNN globally for the test session. Existing CUDA conv tests
 # (numerics, gradcheck, channels_last, decomp, OpInfo) then run against hipdnn
-# instead of MIOpen on ROCm without per-test changes. Activation happens in
-# TestCase.run() via torch.backends.hipdnn.flags(), since direct mutation of the
-# global flag is forbidden after disable_global_flags() above.
+# instead of MIOpen on ROCm without per-test changes.
 TEST_WITH_HIPDNN: bool = TestEnvironment.def_flag(
     "TEST_WITH_HIPDNN",
     env_var="PYTORCH_TEST_WITH_HIPDNN",

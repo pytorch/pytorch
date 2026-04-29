@@ -410,32 +410,9 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
 }
 
 inline at::MemoryFormat hipdnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
-    return at::MemoryFormat::Contiguous;
-  }
-
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-  auto weight_ndim = weight.ndimension();
-
-  bool can_use_channels_last_2d = (weight_ndim == 4) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
-  if (can_use_channels_last_2d) {
-    return at::MemoryFormat::ChannelsLast;
-  }
-
-  bool can_use_channels_last_3d = (weight_ndim == 5) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
-  if (can_use_channels_last_3d) {
-    return at::MemoryFormat::ChannelsLast3d;
-  }
-
-  return at::MemoryFormat::Contiguous;
+  bool enabled = at::detail::getCUDAHooks().compiledWithHipDNN() &&
+      input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
+  return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
 // deprecated, but to remove would be BC-breaking
