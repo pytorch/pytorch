@@ -44,6 +44,7 @@ SystemEnv = namedtuple(
         "is_xpu_available",
         "pip_version",  # 'pip' or 'pip3'
         "pip_packages",
+        "uv_packages",
         "conda_packages",
         "hip_compiled_version",
         "hip_runtime_version",
@@ -654,6 +655,24 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
+def get_uv_packages(run_lambda, patterns=None):
+    """Return `uv pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
+    if patterns is None:
+        patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS + ONEAPI_PATTERNS
+
+    out = run_and_read_all(
+        run_lambda, ["uv", "pip", "list", "--format=freeze"]
+    )
+    if out is None:
+        return out
+
+    filtered_out = "\n".join(
+        line for line in out.splitlines() if any(name in line for name in patterns)
+    )
+
+    return filtered_out
+
+
 def get_cachingallocator_config() -> _Dict[str, str]:
     """Return the caching allocator configuration from environment variables.
     """
@@ -705,6 +724,7 @@ def get_env_info():
     """
     run_lambda = run
     pip_version, pip_list_output = get_pip_packages(run_lambda)
+    uv_list_output = get_uv_packages(run_lambda)
 
     if TORCH_AVAILABLE:
         version_str = torch.__version__
@@ -763,6 +783,7 @@ def get_env_info():
         miopen_runtime_version=miopen_runtime_version,
         pip_version=pip_version,
         pip_packages=pip_list_output,
+        uv_packages=uv_list_output,
         conda_packages=conda_packages,
         os=get_os(run_lambda),
         libc_version=get_libc_version(),
@@ -806,6 +827,7 @@ CPU:
 
 Versions of relevant libraries:
 {pip_packages}
+{uv_packages}
 {conda_packages}
 """.strip()
 
@@ -877,13 +899,18 @@ def pretty_str(envinfo):
 
     # If either of these are '', replace with 'No relevant packages'
     mutable_dict["pip_packages"] = replace_if_empty(mutable_dict["pip_packages"])
+    mutable_dict["uv_packages"] = replace_if_empty(mutable_dict["uv_packages"])
     mutable_dict["conda_packages"] = replace_if_empty(mutable_dict["conda_packages"])
 
-    # Tag conda and pip packages with a prefix
+    # Tag pip, uv, and conda packages with a prefix
     # If they were previously None, they'll show up as ie '[conda] Could not collect'
     if mutable_dict["pip_packages"]:
         mutable_dict["pip_packages"] = prepend(
             mutable_dict["pip_packages"], "[{}] ".format(envinfo.pip_version)
+        )
+    if mutable_dict["uv_packages"]:
+        mutable_dict["uv_packages"] = prepend(
+            mutable_dict["uv_packages"], "[uv] "
         )
     if mutable_dict["conda_packages"]:
         mutable_dict["conda_packages"] = prepend(
