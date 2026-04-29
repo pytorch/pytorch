@@ -75,7 +75,6 @@ class CoordescTuner:
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
-        self._combo_tunable_fields: list[str] = []
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -107,8 +106,8 @@ class CoordescTuner:
         return timing
 
     @property
-    def tunable_fields(self):
-        out = [
+    def tunable_fields(self) -> list[str]:
+        out: list[str] = [
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
@@ -137,7 +136,15 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
-        out = self._combo_tunable_fields + out
+        # Combo-kernel per-subkernel block fields (e.g. XBLOCK_0/1, YBLOCK_0/1)
+        # come from the worker-side metadata in ``inductor_meta``. Prepend
+        # them so coordesc iterates them alongside the base fields. Read
+        # live each call so any post-construction mutation of
+        # ``inductor_meta`` is observed.
+        combo_fields: list[str] = self.inductor_meta.get(
+            "combo_coordesc_field_order", []
+        )
+        out = combo_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
@@ -310,6 +317,28 @@ class CoordescTuner:
             return True, candidate_timing
         return False, candidate_timing
 
+    def get_neighbour_configs(
+        self,
+        # pyrefly: ignore [missing-attribute]
+        config: "triton.Config",
+        field: str,
+    ) -> list["triton.Config"]:  # pyrefly: ignore [missing-attribute]
+        """Return every valid neighbour of ``config`` along ``field``
+        only — the per-axis counterpart of ``get_neighbour_values``.
+
+        Precondition: ``field`` must be present on ``config``. Callers
+        iterating ``tunable_fields`` against arbitrary configs must
+        filter empty fields up front; ``autotune`` does."""
+        cur_val = get_field(config, field)
+        assert cur_val is not None, f"field {field!r} not present on config"
+        neighbours = []
+        for next_val in self.get_neighbour_values(field, cur_val):
+            candidate = copy.deepcopy(config)
+            set_field(candidate, field, next_val)
+            if self.is_valid_config(candidate):
+                neighbours.append(candidate)
+        return neighbours
+
     def autotune(
         self,
         # pyrefly: ignore [missing-attribute]
@@ -335,32 +364,20 @@ class CoordescTuner:
         best_config = baseline_config
         best_timing = baseline_timing
 
-        self._combo_tunable_fields = self.inductor_meta.get(
-            "combo_coordesc_field_order", []
-        )
-
-        tunable_fields = self.tunable_fields
-
         while improved:
             improved = False
 
-            for name in tunable_fields:
-                cur_val = get_field(best_config, name)
-                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
-                if cur_val is None:
+            # Gauss-Seidel: walk one field at a time, applying any
+            # improvement immediately so subsequent fields see the
+            # updated working point.
+            for field in self.tunable_fields:
+                # Some kernels don't have R0_BLOCK / YBLOCK / ZBLOCK,
+                # so the field may be absent from ``best_config``.
+                # Filter here so ``get_neighbour_configs`` can assume
+                # the field is present.
+                if get_field(best_config, field) is None:
                     continue
-
-                # It's possible that candidate_values is empty.
-                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
-                # We would not try either larger or smaller XBLOCK in this case.
-                candidate_values = self.get_neighbour_values(name, cur_val)
-
-                for next_val in candidate_values:
-                    candidate_config = copy.deepcopy(best_config)
-                    set_field(candidate_config, name, next_val)
-
-                    if not self.is_valid_config(candidate_config):
-                        continue
+                for candidate_config in self.get_neighbour_configs(best_config, field):
                     cmp_res, candidate_timing = self.compare_config(
                         func, candidate_config, best_config, best_timing
                     )
