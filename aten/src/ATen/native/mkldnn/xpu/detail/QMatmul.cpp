@@ -261,9 +261,10 @@ void quantized_matmul(
   m2_usr_md = dnnl::memory::desc(m2_dims, m2_usr_dt, m2_strides);
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -276,7 +277,9 @@ void quantized_matmul(
   at::Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      matmul_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   if (attr.with_binary())
@@ -286,7 +289,7 @@ void quantized_matmul(
   args.insert({DNNL_ARG_WEIGHTS, m2_m});
   args.insert({DNNL_ARG_DST, dst_m});
   if (b.defined()) {
-    auto b_m = make_onednn_memory(b_md, engine, b.data_ptr());
+    auto b_m = make_onednn_memory(b_md, engine, b.const_data_ptr());
     args.insert({DNNL_ARG_BIAS, b_m});
   }
 
@@ -297,7 +300,8 @@ void quantized_matmul(
       get_onednn_dims(weight_scales),
       dnnl::memory::data_type::f32,
       dnnl::memory::format_tag::x);
-  m2_sc_m = make_onednn_memory(m2_sc_md, engine, weight_scales.data_ptr());
+  m2_sc_m =
+      make_onednn_memory(m2_sc_md, engine, weight_scales.const_data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, m2_sc_m});
 
   dnnl::memory m1_sc_m, m1_zp_m;
@@ -505,13 +509,15 @@ sycl::event scaled_matmul(
   // 2. Prepare memory
 
   // Create memory
-  auto src_usr_m = make_onednn_memory(src_md, engine, mat1.data_ptr());
-  auto weights_usr_m = make_onednn_memory(weights_md, engine, mat2.data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_md, engine, result.data_ptr());
+  auto src_usr_m = make_onednn_memory(src_md, engine, mat1.const_data_ptr());
+  auto weights_usr_m =
+      make_onednn_memory(weights_md, engine, mat2.const_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_md, engine, result.mutable_data_ptr());
   dnnl::memory b_usr_m;
   if (with_bias) {
-    b_usr_m =
-        make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
+    b_usr_m = make_onednn_memory(
+        bias_md, engine, possible_reshaped_bias.const_data_ptr());
   }
 
   // Prepare runtime scale memories (flat 1-D views) using the specs
@@ -527,11 +533,11 @@ sycl::event scaled_matmul(
         prepared.numel());
     dnnl::memory::desc scale_md(
         {prepared.numel()}, spec.dtype, dnnl::memory::format_tag::x);
-    return make_onednn_memory(scale_md, engine, prepared.data_ptr());
+    return make_onednn_memory(scale_md, engine, prepared.const_data_ptr());
   };
 
-  auto scratchpad =
-      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
+  auto scratchpad = make_onednn_memory(
+      matmul_pd.scratchpad_desc(), engine, static_cast<void*>(nullptr));
 
   // 3. Setup Args for exec
   std::unordered_map<int, dnnl::memory> args;
@@ -556,7 +562,7 @@ sycl::event scaled_matmul(
     dnnl::memory::desc dst_sc_md(
         {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
     auto dst_sc_mem =
-        make_onednn_memory(dst_sc_md, engine, dst_scale_f32.data_ptr());
+        make_onednn_memory(dst_sc_md, engine, dst_scale_f32.const_data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_mem});
   }
 

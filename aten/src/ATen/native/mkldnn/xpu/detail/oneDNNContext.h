@@ -18,6 +18,18 @@ dnnl::memory make_onednn_memory(
     dnnl::engine& engine,
     void* ptr);
 
+// Overload for Input-only arguments(see uxlfoundation/oneDNN#4843).
+inline dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr) {
+  TORCH_CHECK(
+      ptr != nullptr,
+      "make_onednn_memory: null pointer passed for Input-only argument");
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
+}
+
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 

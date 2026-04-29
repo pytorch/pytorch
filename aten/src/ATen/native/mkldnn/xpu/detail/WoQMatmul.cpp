@@ -65,9 +65,11 @@ void woq_matmul_int4_impl(
   dst_usr_md = dnnl::memory::desc(dst_usr_dims, dst_usr_dt, dst_usr_strides);
 
   // create usr memory
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
-  auto scale_usr_m = make_onednn_memory(scale_usr_md, engine, scale.data_ptr());
-  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp.data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
+  auto scale_usr_m =
+      make_onednn_memory(scale_usr_md, engine, scale.const_data_ptr());
+  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp.const_data_ptr());
 
   // Construct md for primitive creation
   // The xxx_md describes what kinds of matmul the oneDNN does.
@@ -109,8 +111,8 @@ void woq_matmul_int4_impl(
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
 
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
 
   void* handle_b = m2_usr_m.get_data_handle();
   // reinterpret m2_usr_memory as u4
@@ -158,7 +160,9 @@ void woq_matmul_int4_impl(
   Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      matmul_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   args.insert({DNNL_ARG_SRC, m1_m});
@@ -262,38 +266,39 @@ void woq_matmul_int4_impl_cache(
   matmul_ext.set_attribute(
       arg_off++,
       DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
-      scale.data_ptr(),
+      const_cast<void*>(scale.const_data_ptr()),
       [&]() {
         return make_onednn_memory(
-            get_onednn_md(scale), engine, scale.data_ptr());
+            get_onednn_md(scale), engine, scale.const_data_ptr());
       });
 
   // set zp_md for asymmetric quantization
   matmul_ext.set_attribute(
       arg_off++,
       DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
-      zp.data_ptr(),
+      const_cast<void*>(zp.const_data_ptr()),
       [&]() {
         int num_groups = k / group_size;
-        memory zp_usr_m(
-            {{num_groups, n}, memory::data_type::s8, {n, 1}},
-            engine,
-            zp.data_ptr());
-        return zp_usr_m;
+        auto zp_md =
+            memory::desc({num_groups, n}, memory::data_type::s8, {n, 1});
+        return make_onednn_memory(zp_md, engine, zp.const_data_ptr());
       });
 
   // set general args
   std::vector<std::pair<int, void*>> arg_handles;
   arg_handles.reserve(8);
 
-  arg_handles.emplace_back(DNNL_ARG_SRC, mat1.data_ptr());
-  arg_handles.emplace_back(DNNL_ARG_WEIGHTS, mat2.data_ptr());
-  arg_handles.emplace_back(DNNL_ARG_DST, result.data_ptr());
+  arg_handles.emplace_back(
+      DNNL_ARG_SRC, const_cast<void*>(mat1.const_data_ptr()));
+  arg_handles.emplace_back(
+      DNNL_ARG_WEIGHTS, const_cast<void*>(mat2.const_data_ptr()));
+  arg_handles.emplace_back(DNNL_ARG_DST, result.mutable_data_ptr());
 
   int scratchpad_size = matmul_ext.get_scratchpad_size();
   Tensor scratchpad_tensor = at::empty(
       {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
-  arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
+  arg_handles.emplace_back(
+      DNNL_ARG_SCRATCHPAD, scratchpad_tensor.mutable_data_ptr());
 
   auto& strm = GpuStreamManager::Instance().get_stream();
   auto qint4_matmul_event =
