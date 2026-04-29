@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -421,6 +422,55 @@ class TestPythonRegistration(TestCase):
 
         # lib's finalizer should not have a reference anymore
         self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt)
+
+    @skipIfTorchDynamo(
+        "dynamo's tracing keeps a reference to `lib`, so `del lib` doesn't "
+        "trigger the finalizer; this test is exclusively about gc-driven "
+        "Library teardown."
+    )
+    def test_finalizer_clears_torch_ops_cache(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181765:
+        # `del lib` (running the finalizer) must clear the cached
+        # OpOverloadPacket on torch.ops.<ns>, otherwise iterating ops in that
+        # namespace later raises AttributeError.
+        lib = Library(self.test_ns, "DEF")  # noqa: TOR901
+        lib.define("my_func() -> None")
+
+        @impl(lib, "my_func", "")
+        def my_func():
+            pass
+
+        torch.ops._test_python_registration.my_func()
+        del lib
+        gc.collect()
+
+        namespace = torch.ops._test_python_registration
+        self.assertNotIn("my_func", namespace._dir)
+        from torch._export.utils import _collect_all_valid_cia_ops_for_namespace
+
+        _collect_all_valid_cia_ops_for_namespace(namespace)
+
+    def test_register_check_mem_op_survives_gc(self):
+        # Regression guard for the autorevert of #181785: inductor's
+        # `register_check_mem_op` is an lru_cache-decorated registration whose
+        # `lib` is a local variable. Once the finalizer started clearing the
+        # torch.ops cache (this PR), the op vanished from torch.ops as soon as
+        # the registration function returned, so later access to
+        # `torch.ops._inductor_debug.check_memory_step.default` raised
+        # AttributeError. The fix is in debug_utils.py (keep `lib` alive); this
+        # test guards that the contract holds end-to-end.
+        from torch._inductor.runtime import debug_utils
+
+        debug_utils.register_check_mem_op.cache_clear()
+        debug_utils.register_check_mem_op()
+        gc.collect()
+
+        self.assertTrue(hasattr(torch.ops, "_inductor_debug"))
+        self.assertTrue(
+            hasattr(torch.ops._inductor_debug, "check_memory_step"),
+            "register_check_mem_op must keep its Library alive so the op "
+            "remains in torch.ops after the finalizer would otherwise fire.",
+        )
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
