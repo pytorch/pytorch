@@ -9,6 +9,7 @@
 #include <utility>
 
 #include <torch/serialize.h>
+// @allow-raw-throw
 
 namespace torch::data::datasets {
 

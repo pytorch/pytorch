@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <memory>
+// @allow-raw-throw
 
 using namespace at;
 

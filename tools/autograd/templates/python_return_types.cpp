@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/generated/python_return_types.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/Exceptions.h"
+// @allow-raw-throw
 
 namespace torch { namespace autograd { namespace generated {
 

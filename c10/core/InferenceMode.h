@@ -5,6 +5,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Export.h>
+// @allow-raw-throw
 
 namespace c10 {
 

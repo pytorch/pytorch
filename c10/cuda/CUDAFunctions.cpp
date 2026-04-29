@@ -3,6 +3,7 @@
 #include <c10/util/WaitCounter.h>
 
 #include <limits>
+// @allow-raw-throw
 
 namespace c10::cuda {
 

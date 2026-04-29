@@ -5,6 +5,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+// @allow-raw-throw
 
 namespace torch {
 

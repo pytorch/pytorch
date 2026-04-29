@@ -12,6 +12,7 @@
 #include <ATen/cuda/Exceptions.h> // for CUDNN_CHECK
 #include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
 #include <ATen/cudnn/Handle.h> // for getCudnnHandle
+// @allow-raw-throw
 
 // Name of function in python module and name used for error messages by
 // torch::check* functions.

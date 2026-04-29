@@ -1,4 +1,5 @@
 #include "OpenRegException.h"
+// @allow-raw-throw
 
 void orCheckFail(
     const char* func,

@@ -45,6 +45,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+// @allow-raw-throw
 #else
 $ops_headers
 #include <ATen/ops/_local_scalar_dense.h>
@@ -86,7 +87,7 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   }
   auto& self_ = THPVariable_Unpack(self);
   if (self_.requires_grad()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Can't call apply_() on Variable that requires grad. Use "
         "var.detach().apply_() instead.");
   }
@@ -856,10 +857,10 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   // should we throw if requires_grad is true?  var.requires_grad = True throws here
   // but it's nice to let this be a no-op.
   if (!self_.is_leaf() && !requires_grad) {
-    throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
+    TORCH_CHECK(false, autograd::utils::requires_grad_leaf_error(requires_grad));
   }
   if (requires_grad && ! isDifferentiableType(at::typeMetaToScalarType(self_.dtype()))) {
-    throw std::runtime_error("only Tensors of floating point dtype can require gradients");
+    TORCH_CHECK(false, "only Tensors of floating point dtype can require gradients");
   }
   self_.set_requires_grad(requires_grad);
   return THPVariable_Wrap(self_);
@@ -923,7 +924,7 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
 
   Variable other = r.tensor(0);
   if (self_.requires_grad() || other.requires_grad()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
@@ -952,7 +953,7 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
   Variable x = r.tensor(0);
   Variable y = r.tensor(1);
   if (self_.requires_grad() || x.requires_grad() || y.requires_grad()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }

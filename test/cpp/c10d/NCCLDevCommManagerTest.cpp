@@ -10,6 +10,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
+// @allow-raw-throw
 
 using namespace c10d::symmetric_memory;
 

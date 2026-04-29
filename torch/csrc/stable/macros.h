@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+// @allow-raw-throw
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

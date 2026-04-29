@@ -1,6 +1,7 @@
 #include <c10/util/LeftRight.h>
 #include <gtest/gtest.h>
 #include <vector>
+// @allow-raw-throw
 
 using c10::LeftRight;
 using std::vector;

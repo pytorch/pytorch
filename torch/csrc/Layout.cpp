@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <string>
+// @allow-raw-throw
 
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
   auto type = &THPLayoutType;

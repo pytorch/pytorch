@@ -14,6 +14,7 @@
 #include "TestUtils.hpp"
 
 #include <gtest/gtest.h>
+// @allow-raw-throw
 
 using namespace c10d::test;
 

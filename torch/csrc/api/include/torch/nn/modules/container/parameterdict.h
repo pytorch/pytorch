@@ -5,6 +5,7 @@
 #include <torch/ordered_dict.h>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::nn {
 

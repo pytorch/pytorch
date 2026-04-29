@@ -21,6 +21,7 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+// @allow-raw-throw
 
 using namespace torch::data; // NOLINT
 

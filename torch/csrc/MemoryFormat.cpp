@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <string>
+// @allow-raw-throw
 
 PyObject* THPMemoryFormat_New(
     at::MemoryFormat memory_format,

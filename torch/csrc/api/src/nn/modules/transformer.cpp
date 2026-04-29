@@ -5,6 +5,7 @@
 #include <torch/nn/modules/transformerlayer.h>
 
 #include <limits>
+// @allow-raw-throw
 
 namespace F = torch::nn::functional;
 

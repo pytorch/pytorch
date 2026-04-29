@@ -52,6 +52,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+// @allow-raw-throw
 
 using namespace torch;
 

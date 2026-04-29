@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 
 #include <string>
+// @allow-raw-throw
 
 namespace c10::cuda {
 

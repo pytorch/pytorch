@@ -100,13 +100,13 @@ void registerUpgrader(
 
   while (std::getline(ss, component, '.')) {
     if (component.empty()) {
-      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
+      TORCH_CHECK(false, "Empty component in keypath: " + dot_keypath);
     }
     keypath_vector.push_back(component);
   }
 
   if (keypath_vector.empty()) {
-    throw std::invalid_argument("Empty keypath provided");
+    TORCH_CHECK(false, "Empty keypath provided");
   }
 
   registerUpgrader(version, std::move(keypath_vector), upgrade_func);
@@ -146,13 +146,13 @@ bool deregisterUpgrader(int version, const std::string& dot_keypath) {
 
   while (std::getline(ss, component, '.')) {
     if (component.empty()) {
-      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
+      TORCH_CHECK(false, "Empty component in keypath: " + dot_keypath);
     }
     keypath_vector.push_back(component);
   }
 
   if (keypath_vector.empty()) {
-    throw std::invalid_argument("Empty keypath provided");
+    TORCH_CHECK(false, "Empty keypath provided");
   }
 
   return deregisterUpgrader(version, keypath_vector);

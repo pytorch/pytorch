@@ -28,9 +28,11 @@ void THCPGreenContext_init(PyObject* module) {
                 scope =
                     static_cast<int32_t>(at::cuda::WorkqueueScope::Balanced);
               } else {
-                throw std::invalid_argument(
-                    "workqueue_scope must be 'device_ctx' or 'balanced', got '" +
-                    s + "'");
+                TORCH_CHECK(
+                    false,
+                    "workqueue_scope must be 'device_ctx' or 'balanced', got '",
+                    s,
+                    "'");
               }
             }
             return at::cuda::GreenContext::create(

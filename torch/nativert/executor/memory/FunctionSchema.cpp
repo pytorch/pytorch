@@ -1,4 +1,5 @@
 #include <torch/nativert/executor/memory/FunctionSchema.h>
+// @allow-raw-throw
 
 namespace torch::nativert {
 

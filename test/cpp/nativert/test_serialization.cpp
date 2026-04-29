@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/nativert/graph/Serialization.h>
+// @allow-raw-throw
 
 namespace torch::nativert {
 

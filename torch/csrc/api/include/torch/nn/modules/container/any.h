@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::nn {
 

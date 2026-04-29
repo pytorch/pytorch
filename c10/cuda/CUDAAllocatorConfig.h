@@ -6,6 +6,7 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+// @allow-raw-throw
 
 namespace c10::cuda::CUDACachingAllocator {
 

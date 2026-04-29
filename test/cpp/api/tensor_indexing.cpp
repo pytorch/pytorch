@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
+// @allow-raw-throw
 
 using namespace torch::indexing;
 using namespace torch::test;

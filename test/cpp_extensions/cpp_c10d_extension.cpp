@@ -1,6 +1,7 @@
 #include "cpp_c10d_extension.hpp"
 
 #include <map>
+// @allow-raw-throw
 
 namespace c10d {
 

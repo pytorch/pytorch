@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/torch.h>
+// @allow-raw-throw
 
 // Tests go in torch::jit
 namespace torch {

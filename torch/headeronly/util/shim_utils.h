@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <stdexcept>
+// @allow-raw-throw
 
 #define TORCH_SUCCESS 0
 #define TORCH_FAILURE 1

@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <system_error>
+// @allow-raw-throw
 
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
 // `errno` to `EINVAL` in child process on some macos

@@ -3,6 +3,7 @@
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
+// @allow-raw-throw
 
 namespace torch {
 namespace jit {

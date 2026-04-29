@@ -15,6 +15,7 @@
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
+// @allow-raw-throw
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 

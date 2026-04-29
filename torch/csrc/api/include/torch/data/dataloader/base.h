@@ -19,6 +19,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::data {
 template <typename Dataset, typename Batch, typename BatchRequest>

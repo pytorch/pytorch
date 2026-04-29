@@ -12,6 +12,7 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+// @allow-raw-throw
 
 struct THPSize {
   PyTupleObject tuple;

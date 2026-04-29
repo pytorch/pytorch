@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
+// @allow-raw-throw
 
 namespace torch {
 namespace jit {

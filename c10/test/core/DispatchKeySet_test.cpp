@@ -6,6 +6,7 @@
 
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 using namespace c10;
 

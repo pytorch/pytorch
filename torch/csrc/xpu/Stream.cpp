@@ -7,6 +7,7 @@
 #include <torch/csrc/xpu/Stream.h>
 
 #include <structmember.h>
+// @allow-raw-throw
 
 PyObject* THXPStreamClass = nullptr;
 

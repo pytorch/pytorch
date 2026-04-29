@@ -5,6 +5,7 @@
 
 #ifdef LAE_USE_CUDA
 #include <cuda_runtime.h>
+// @allow-raw-throw
 #endif
 
 using torch::stable::Tensor;

@@ -10,6 +10,7 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+// @allow-raw-throw
 
 namespace torch::data {
 namespace detail {

@@ -1,6 +1,7 @@
 #include <c10/util/Exception.h>
 #include <gtest/gtest.h>
 #include <stdexcept>
+// @allow-raw-throw
 
 using c10::Error;
 

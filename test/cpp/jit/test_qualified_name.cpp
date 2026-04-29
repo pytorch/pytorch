@@ -2,6 +2,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
+// @allow-raw-throw
 
 using c10::QualifiedName;
 

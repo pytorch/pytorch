@@ -12,6 +12,7 @@
 
 #include <limits>
 #include <sstream>
+// @allow-raw-throw
 
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = &THPFInfoType;

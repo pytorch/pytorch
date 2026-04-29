@@ -42,6 +42,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to

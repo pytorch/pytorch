@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+// @allow-raw-throw
 
 using namespace torch::jit;
 

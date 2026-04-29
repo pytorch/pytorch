@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <test/cpp/common/support.h>
+// @allow-raw-throw
 
 using namespace torch::test;
 

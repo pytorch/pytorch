@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <optional>
 #include <vector>
+// @allow-raw-throw
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+

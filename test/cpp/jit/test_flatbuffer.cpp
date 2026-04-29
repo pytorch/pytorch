@@ -30,6 +30,7 @@
 
 #if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
+// @allow-raw-throw
 namespace flatbuffers = flatbuffers_fbsource;
 #define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
 #else

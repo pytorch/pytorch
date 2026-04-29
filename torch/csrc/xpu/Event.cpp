@@ -9,6 +9,7 @@
 #include <torch/csrc/xpu/Module.h>
 
 #include <structmember.h>
+// @allow-raw-throw
 
 PyObject* THXPEventClass = nullptr;
 

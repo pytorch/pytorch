@@ -70,6 +70,7 @@
 #include <ostream>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::lazy {
 

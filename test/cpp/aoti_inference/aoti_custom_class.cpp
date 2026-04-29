@@ -6,6 +6,7 @@
 #endif
 
 #include "aoti_custom_class.h"
+// @allow-raw-throw
 
 namespace torch::aot_inductor {
 

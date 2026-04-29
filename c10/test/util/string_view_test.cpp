@@ -1,6 +1,7 @@
 #include <c10/util/string_view.h>
 
 #include <gmock/gmock.h>
+// @allow-raw-throw
 
 // NOLINTBEGIN(modernize*, readability*, bugprone-string-constructor)
 using string_view = c10::c10_string_view;

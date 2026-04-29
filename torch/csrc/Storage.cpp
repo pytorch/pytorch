@@ -22,6 +22,7 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
+// @allow-raw-throw
 
 using torch::utils::PyObjectPreservation;
 

@@ -10,6 +10,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+// @allow-raw-throw
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP, Real, Utils_, NAME)
 

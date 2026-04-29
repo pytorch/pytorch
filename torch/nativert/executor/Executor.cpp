@@ -9,6 +9,7 @@
 #include <torch/nativert/executor/Weights.h>
 #include <torch/nativert/kernels/C10Kernel.h>
 #include <torch/nativert/kernels/KernelFactory.h>
+// @allow-raw-throw
 
 namespace torch::nativert {
 

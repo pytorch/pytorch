@@ -11,6 +11,7 @@
 #include <c10/util/hash.h>
 #include <structmember.h>
 #include <cstdint>
+// @allow-raw-throw
 
 PyTypeObject* THPStreamClass = nullptr;
 

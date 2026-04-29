@@ -3,6 +3,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+// @allow-raw-throw
 
 namespace torch {
 namespace jit {

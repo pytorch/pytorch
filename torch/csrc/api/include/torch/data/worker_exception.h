@@ -3,6 +3,7 @@
 #include <exception>
 #include <string>
 #include <utility>
+// @allow-raw-throw
 
 namespace torch::data {
 

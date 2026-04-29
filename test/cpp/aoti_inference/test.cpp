@@ -24,6 +24,7 @@
 #endif
 #include <torch/script.h>
 #include <torch/torch.h>
+// @allow-raw-throw
 
 #define STR_VALUE(x) #x
 #define STRINGIZE(x) STR_VALUE(x)

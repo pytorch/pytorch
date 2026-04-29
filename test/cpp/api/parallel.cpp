@@ -17,6 +17,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 using namespace torch::autograd;
 using namespace torch::nn;

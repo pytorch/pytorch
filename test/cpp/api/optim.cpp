@@ -12,6 +12,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 using namespace torch::nn;
 using namespace torch::optim;

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
+// @allow-raw-throw
 
 struct Node {};
 
