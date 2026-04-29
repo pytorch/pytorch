@@ -56,20 +56,17 @@ using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tenso
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
 
 
-// hipDNN forward (why are the other forward methods removed? TODO: resolve post merge).
+// hipDNN forward needs a stub since it isn't passed through via frontend aten ops.
+// No separate depthwise forward typedef required for hipDNN.
 using hipdnn_convolution_fn = at::Tensor(*)(
     const at::Tensor&, const at::Tensor&, const std::optional<at::Tensor>&,
     at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool);
 using hipdnn_convolution_transpose_fn = at::Tensor(*)(
     const at::Tensor&, const at::Tensor&, const std::optional<at::Tensor>&,
     at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool);
-// hipDNN backward.
-using hipdnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-using hipdnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+// hipDNN backward shapes match miopen's. Aliased to avoid duplicate typedefs.
+using hipdnn_convolution_backward_fn = miopen_convolution_backward_fn;
+using hipdnn_convolution_transpose_backward_fn = miopen_convolution_transpose_backward_fn;
 
 // MKLDNN forward transpose (not a backward).
 using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const std::optional<Tensor>&,

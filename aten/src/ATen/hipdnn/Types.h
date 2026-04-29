@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/hipdnn/hipdnn-wrapper.h>
+#include <hipdnn_frontend.hpp>
 #include <c10/macros/Export.h>
 
 namespace at::native {
