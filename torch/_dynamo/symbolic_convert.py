@@ -159,7 +159,6 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
-    UserMethodVariable,
 )
 from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
@@ -180,6 +179,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.object_protocol import generic_bool
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -897,54 +897,25 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            try:
-                x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
-            except exc.ObservedAttributeError:
-                exc.handle_observed_exception(self)
-                # if __bool__ is missing, trying __len__ to infer a truth value.
-                try:
-                    x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
-                except exc.ObservedAttributeError:
-                    exc.handle_observed_exception(self)
-                    x = None
-
-            # __bool__ or __len__ is function
-            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
-                result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
-                method_name = getattr(getattr(x, "fn", None), "__name__", None)
-                if result.is_python_constant():
-                    result_value = result.as_python_constant()
-                    if method_name == "__bool__" and not isinstance(result_value, bool):
-                        exc.raise_observed_exception(
-                            TypeError,
-                            self,
-                            args=[
-                                f"__bool__ should return bool, returned {type(result_value).__name__}"
-                            ],
-                        )
-                    if isinstance(result_value, (bool, int)) and truth_fn(result_value):
-                        if push:
-                            self.push(value)
-                        self.jump(inst)
-                elif isinstance(result, SymNodeVariable):
-                    if result.evaluate_expr():
-                        if push:
-                            self.push(value)
-                        self.jump(inst)
-                else:
-                    unimplemented(
-                        gb_type="Data-dependent branching with non-constant __bool__",
-                        context=f"method: {x}, result: {result}",
-                        explanation="Attempted to perform data-dependent branching on a user-defined "
-                        "object with a __bool__ method that did not return a constant.",
-                        hints=[],
-                    )
-            # __bool__ or __len__ is non-function or not existed in the user defined object
-            else:
-                if truth_fn(True):
+            result = generic_bool(self, value)  # type: ignore[arg-type]
+            if result.is_python_constant():
+                if truth_fn(result.as_python_constant()):
                     if push:
                         self.push(value)
                     self.jump(inst)
+            elif isinstance(result, SymNodeVariable):
+                if truth_fn(result.evaluate_expr()):
+                    if push:
+                        self.push(value)
+                    self.jump(inst)
+            else:
+                unimplemented(
+                    gb_type="Data-dependent branching with non-constant __bool__",
+                    context=f"value: {value}, result: {result}",
+                    explanation="Attempted to perform data-dependent branching on a user-defined "
+                    "object with non-constant truthiness.",
+                    hints=[],
+                )
         elif not value.is_tensor() and value.has_unpack_var_sequence(self):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 if push:
