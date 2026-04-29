@@ -8561,12 +8561,20 @@ def _meta_grouped_mm_common(
                     # We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
                     G, K, N = mat.shape
                     block_size = 32
-                    blocked_K = round_up(K / block_size, 4)
-                    blocked_N = round_up(N, 128)
-                    torch._check(
-                        scale.shape[0] == G and scale.shape[1] == blocked_K * blocked_N,
-                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",
-                    )
+                    if torch.version.xpu:
+                        blocked_K = round_up(K, block_size)
+                        blocked_N = round_up(N, 1)
+                        torch._check(
+                            scale.shape[0] == G and scale.shape[1] == blocked_K and scale.shape[2] == blocked_N,
+                            lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K},{blocked_N}), but got {scale.shape}",
+                        )
+                    else:
+                        blocked_K = round_up(K / block_size, 4)
+                        blocked_N = round_up(N, 128)
+                        torch._check(
+                            scale.shape[0] == G and scale.shape[1] == blocked_K * blocked_N,
+                            lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",
+                        )
                 else:
                     torch._check(
                         scale.dim() == 2,

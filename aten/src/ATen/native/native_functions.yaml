@@ -7401,12 +7401,14 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
+    XPU: _scaled_grouped_mm_xpu
   tags: needs_exact_strides
 
 - func: _scaled_grouped_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2
+    XPU: _scaled_grouped_mm_xpu_v2
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -7414,6 +7416,7 @@
   dispatch:
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
+    XPU: _grouped_mm_xpu
 
 # NOTE [ Sparse: autograd and API ]
 #

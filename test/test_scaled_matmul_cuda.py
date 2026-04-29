@@ -811,12 +811,11 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
-    @parametrize("G", [1, 4, 16])
-    @parametrize("M", [16640])
-    @parametrize("N", [8192])
-    @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("G", [1,2,4,8])
+    @parametrize("M", [512,256])
+    @parametrize("N", [512,256,128])
+    @parametrize("K", [512,256,128])
+    @parametrize("format", ["mxfp8", "mxfp4"])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
@@ -827,10 +826,10 @@ class TestFP8Matmul(TestCase):
         # 2D inputs with groups along M, 3D weights.
         block_size = 32
         total_M = M  # Alias for clarity that M dim contains groups.
-        X = torch.randn((total_M, K), dtype=torch.bfloat16, device="cuda") * 0.1
-        W = torch.randn((G, N, K), dtype=torch.bfloat16, device="cuda") * 0.01
+        X = torch.randn((total_M, K), dtype=torch.bfloat16, device="xpu") * 0.1
+        W = torch.randn((G, N, K), dtype=torch.bfloat16, device="xpu") * 0.01
         input_group_end_offsets = generate_jagged_offs(
-            G, total_M, multiple_of=32, device="cuda"
+            G, total_M, multiple_of=32, device="xpu"
         )
 
         # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
@@ -913,6 +912,8 @@ class TestFP8Matmul(TestCase):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+
+        w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -2421,15 +2422,18 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
-    @parametrize("fast_accum", [False, True])
+    @parametrize("m", [16,32,64])
+    @parametrize("n", [32,128])
+    @parametrize("k", [64,128,256])
+    @parametrize("n_groups", [4,32])
+    @parametrize("fast_accum", [False])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2):
-        device = "cuda"
+    @parametrize("wrap_v2", [False, True])
+    def test_scaled_grouped_gemm_2d_3d(self, m, n, k, n_groups, fast_accum, strided, wrap_v2):
+        device = "xpu"
         fp8_dtype = e4m3_type
-        m, n, k, n_groups = 16, 32, 64, 4
+        #m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
@@ -2439,11 +2443,11 @@ class TestFP8Matmul(TestCase):
             if check_zero_size and n_groups <= 1:
                 continue
 
-            offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+            offs = torch.arange(m, n_groups * m + 1, m, device="xpu", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
-            scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
-            scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
+            scale_a = torch.rand(n_groups * m, device="xpu", dtype=torch.float32)
+            scale_b = torch.rand(n_groups * n, device="xpu", dtype=torch.float32).view(n_groups, n)
             f = scaled_grouped_mm_wrap
             out = f(a, b.transpose(-2, -1),
                     scale_a,

@@ -197,6 +197,9 @@ file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR
 file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
 file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
+file(GLOB native_xpu_cpp "native/xpu/*.cpp")
+file(GLOB native_xpu_h "native/xpu/*.h")
+
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
@@ -522,6 +525,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_xpu_cpp})
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
@@ -935,7 +939,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${native_xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
