@@ -1494,7 +1494,7 @@ def use_deterministic_algorithms(
         will use some heuristics to pick the most promising configs rather
         than do autotuning.
       - Skip autotuning for reduction in coordinate descent tuning.
-      - Don't benchmarking for the computation/communication reordering pass
+      - Don't benchmark for the computation/communication reordering pass
       - Disable the feature that dynamically scale down RBLOCK triton config for higher
         occupancy.
 

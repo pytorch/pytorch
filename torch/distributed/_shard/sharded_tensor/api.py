@@ -406,7 +406,7 @@ class ShardedTensor(ShardedTensorBase):
             dst(int): The rank where full tensor is constructed.
                 Default: 0
             out (:class `torch.Tensor`, optional): The output full tensor.
-                Must to be provided ONLY on ``dst`` rank.
+                Must be provided ONLY on ``dst`` rank.
                 Default: ``None``
             enforce_dtype (bool): Deprecated, please use dtype instead.  Force the
                 gathered tensors to be the same type as input and output.
