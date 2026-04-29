@@ -482,7 +482,7 @@ assume_dunder_attributes_remain_unchanged = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = True
+use_recursive_dict_tags_for_guards = False
 
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
