@@ -164,6 +164,7 @@ VERY_FAST_LINTERS = {
     "PYPROJECT",
     "RAWCUDA",
     "RAWCUDADEVICE",
+    "RAWTHROW",
     "ROOT_LOGGING",
     "TABS",
     "TESTOWNERS",
@@ -240,16 +241,14 @@ def _check_linters():
     unknown_linters = linters - ALL_LINTERS
     missing_linters = ALL_LINTERS - linters
     if unknown_linters:
-        click.secho(
+        raise click.ClickException(
             f"Unknown linters found; please add them to the correct category "
-            f"in .spin/cmds.py: {', '.join(unknown_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(unknown_linters))}"
         )
     if missing_linters:
-        click.secho(
+        raise click.ClickException(
             f"Missing linters found; please update the corresponding category "
-            f"in .spin/cmds.py: {', '.join(missing_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(missing_linters))}"
         )
     return unknown_linters, missing_linters
 
