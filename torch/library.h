@@ -916,7 +916,7 @@ void initialize_torch_libraries();
 /// \private
 /// Get the C++ symm_mem args registry. This is used internally by Python
 /// to merge C++ and Python registrations.
-TORCH_API const std::unordered_map<std::string, std::vector<std::string>>&
+TORCH_API std::unordered_map<std::string, std::vector<std::string>>
 getCppSymmMemArgsRegistry();
 
 namespace detail {

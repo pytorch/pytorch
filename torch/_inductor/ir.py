@@ -8919,14 +8919,20 @@ class FallbackKernel(ExternKernelAlloc):
         symm_mem_args = entry.symm_mem_args.get()
         if symm_mem_args is None:
             return
-        schema = kernel._schema
-        arg_names = [arg.name for arg in schema.arguments]
 
-        all_args: dict[str, Any] = {}
-        for i, arg_value in enumerate(args):
-            if i < len(arg_names):
-                all_args[arg_names[i]] = arg_value
-        all_args.update(kwargs)
+        from torch.fx.operator_schemas import normalize_function
+
+        normalized = normalize_function(
+            kernel, args, kwargs, normalize_to_only_use_kwargs=True
+        )
+        if normalized is None:
+            log.warning(
+                "Failed to normalize arguments for symm_mem realization: %s",
+                qualname,
+            )
+            return
+
+        _, all_args = normalized
 
         group_name = all_args.get("group_name")
         if group_name is None:

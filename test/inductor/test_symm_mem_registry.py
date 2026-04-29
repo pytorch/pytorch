@@ -261,15 +261,23 @@ class TestFunctionalOpCompile(TestCase):
 
         @torch.library.impl(lib, "my_functional_op", "CUDA")
         def cuda_impl(input, group_name):
-            return input.clone()
+            return input + 1.0
 
-        @torch.compile(backend="inductor")
-        def f(x):
+        def f_eager(x):
+            return torch.ops.test_func_symm.my_functional_op(x, "test_group")
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f_compiled(x):
             return torch.ops.test_func_symm.my_functional_op(x, "test_group")
 
         x = torch.randn(4, 4, device="cuda")
-        result = f(x)
-        self.assertEqual(result, x)
+
+        eager_result = f_eager(x.clone())
+        compiled_result = f_compiled(x.clone())
+        torch.testing.assert_close(compiled_result, eager_result)
+
+        expected = x + 1.0
+        torch.testing.assert_close(compiled_result, expected)
 
         # Verify the registration is visible in the registry
         entry = singleton.find("test_func_symm::my_functional_op")
@@ -292,16 +300,25 @@ class TestFunctionalOpCompile(TestCase):
 
         @torch.library.impl(lib, "my_multi_arg_op", "CUDA")
         def cuda_impl(input, out, group_name):
-            return input.clone()
+            # use both symm_mem args to verify functionality
+            return input + out
 
-        @torch.compile(backend="inductor")
-        def f(x, y):
+        def f_eager(x, y):
+            return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f_compiled(x, y):
             return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
 
         x = torch.randn(4, 4, device="cuda")
         y = torch.randn(4, 4, device="cuda")
-        result = f(x, y)
-        self.assertEqual(result, x)
+
+        eager_result = f_eager(x.clone(), y.clone())
+        compiled_result = f_compiled(x.clone(), y.clone())
+        torch.testing.assert_close(compiled_result, eager_result)
+
+        expected = x + y
+        torch.testing.assert_close(compiled_result, expected)
 
         # Verify both args are registered
         entry = singleton.find("test_func_multi::my_multi_arg_op")

@@ -325,6 +325,7 @@ namespace {
 struct SymmMemArgsRegistry {
   // Mapping from op qualname to names of args requiring symmetric memory.
   std::unordered_map<std::string, std::vector<std::string>> registry;
+  mutable std::mutex mutex;
 
   // Singleton accessor.
   static SymmMemArgsRegistry& get() {
@@ -333,10 +334,12 @@ struct SymmMemArgsRegistry {
   }
 
   void registerArgs(const std::string& qualname, const std::vector<std::string>& args) {
+    std::lock_guard<std::mutex> lock(mutex);
     registry[qualname] = args;
   }
 
-  const std::unordered_map<std::string, std::vector<std::string>>& getAll() const {
+  std::unordered_map<std::string, std::vector<std::string>> getAll() const {
+    std::lock_guard<std::mutex> lock(mutex);
     return registry;
   }
 };
@@ -366,7 +369,7 @@ Library& Library::register_symm_mem_args(
 }
 
 // Function to access the C++ registry from Python
-const std::unordered_map<std::string, std::vector<std::string>>&
+std::unordered_map<std::string, std::vector<std::string>>
 getCppSymmMemArgsRegistry() {
   return SymmMemArgsRegistry::get().getAll();
 }

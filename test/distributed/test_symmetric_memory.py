@@ -1436,8 +1436,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_0 = torch.compile(func_0, fullgraph=True)
         code_0 = run_and_get_triton_code(compiled_0, arg)
 
-        self.assertIn("one_shot_all_reduce", code_0)
-        self.assertNotIn("return (buf0", code_0)
+        FileCheck().check("one_shot_all_reduce").run(code_0)
+        FileCheck().check_not("return (buf0").run(code_0)
+
+        eager_result_0 = func_0(arg.clone())
+        compiled_result_0 = compiled_0(arg.clone())
+        torch.testing.assert_close(eager_result_0, compiled_result_0)
 
         # All-reduce on a slice view
         def func_1(x):
@@ -1449,8 +1453,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_1 = torch.compile(func_1, fullgraph=True)
         code_1 = run_and_get_triton_code(compiled_1, arg)
 
-        self.assertIn("one_shot_all_reduce", code_1)
-        self.assertNotIn("return (buf0", code_1)
+        FileCheck().check("one_shot_all_reduce").run(code_1)
+        FileCheck().check_not("return (buf0").run(code_1)
+
+        eager_result_1 = func_1(arg.clone())
+        compiled_result_1 = compiled_1(arg.clone())
+        torch.testing.assert_close(eager_result_1, compiled_result_1)
 
         # All-reduce on input
         def func_2(x):
@@ -1460,7 +1468,11 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_2 = torch.compile(func_2, fullgraph=True)
         code_2 = run_and_get_triton_code(compiled_2, arg)
 
-        self.assertNotIn("one_shot_all_reduce", code_2)
+        FileCheck().check_not("one_shot_all_reduce").run(code_2)
+
+        eager_result_2 = func_2(arg.clone())
+        compiled_result_2 = compiled_2(arg.clone())
+        torch.testing.assert_close(eager_result_2, compiled_result_2)
 
         # All-reduce on matmul output
         def func_3(x):
@@ -1471,8 +1483,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_3 = torch.compile(func_3, fullgraph=True)
         code_3 = run_and_get_triton_code(compiled_3, arg)
 
-        self.assertIn("one_shot_all_reduce", code_3)
-        self.assertNotIn("return (buf0", code_3)
+        FileCheck().check("one_shot_all_reduce").run(code_3)
+        FileCheck().check_not("return (buf0").run(code_3)
+
+        eager_result_3 = func_3(arg.clone())
+        compiled_result_3 = compiled_3(arg.clone())
+        torch.testing.assert_close(eager_result_3, compiled_result_3)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
@@ -1769,6 +1785,9 @@ class LoweringTest(MultiProcContinuousTest):
 
         @torch.library.impl(lib, "my_collective", "CUDA")
         def cuda_impl(input, reduce_op, group_name):
+            assert symm_mem.is_symm_mem_tensor(input), (
+                f"Expected input to be a symmetric memory tensor, but got {type(input)}"
+            )
             return input.clone()
 
         def func(x):
@@ -1779,12 +1798,11 @@ class LoweringTest(MultiProcContinuousTest):
         x = torch.rand(4, 4, device=self.device)
         code = run_and_get_triton_code(compiled, x)
 
-        self.assertIn(
+        FileCheck().check_count(
             "empty_strided_p2p",
-            code,
-            "torch.compile did not allocate symmetric memory for custom op "
-            "with registered symm_mem_args",
-        )
+            1,
+            exactly=True,
+        ).run(code)
 
 
 class SymmMemSingleProcTest(TestCase):

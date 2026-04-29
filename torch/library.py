@@ -549,8 +549,6 @@ class Library:
                 pass
 
         entry = torch._library.simple_registry.singleton.find(qualname)
-
-        # Register the symm_mem args
         entry.symm_mem_args.register(arg_names, op_overload=op_overload)
 
     def fallback(self, fn, dispatch_key="", *, with_keyset=False):

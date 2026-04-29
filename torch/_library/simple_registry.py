@@ -53,7 +53,23 @@ class SimpleLibraryRegistry:
         return res
 
     def _apply_cpp_symm_mem(self, qualname: str, entry: "SimpleOperatorEntry") -> None:
+        if entry.symm_mem_args._symm_mem_args is not None:
+            return
+
         cpp_args = self._cpp_symm_mem_args.pop(qualname, None)
+
+        # If not found in cache, check C++ registry directly (for late-loaded extensions)
+        if cpp_args is None:
+            try:
+                import torch._C
+
+                cpp_registry = (
+                    torch._C._get_cpp_symm_mem_args_registry()
+                )  # pyrefly: ignore [missing-attribute]
+                cpp_args = cpp_registry.get(qualname, None)
+            except ImportError:
+                pass
+
         if cpp_args is not None:
             entry.symm_mem_args._symm_mem_args = OrderedSet(cpp_args)
 
@@ -170,6 +186,19 @@ class SymmMemArgsHolder:
                 raise ValueError(
                     f"Invalid argument names for {self.qualname}: {invalid_args}. "
                     f"Valid arguments are: {sorted(schema_arg_names)}"
+                )
+
+            # Warn if group_name is missing (it's needed for automatic realization)
+            if "group_name" not in schema_arg_names:
+                import logging
+
+                log = logging.getLogger(__name__)
+                log.warning(
+                    "Operator %s is missing 'group_name' argument. "
+                    "Automatic symmetric memory realization will not work at compile time. "
+                    "Available arguments: %s",
+                    self.qualname,
+                    sorted(schema_arg_names),
                 )
         except AttributeError:
             import logging
