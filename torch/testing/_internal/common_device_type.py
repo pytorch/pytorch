@@ -356,7 +356,7 @@ class DeviceTypeTestBase(TestCase):
     #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
     #       "TestClassB": "*",                    # Global: Skips the entire class
     #   }
-    test_exclusions: ClassVar[dict[str, Collection[str]]]
+    test_exclusions: ClassVar[dict[str, Collection[str]] | None] = None
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
