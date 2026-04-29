@@ -179,7 +179,7 @@ class Vectorized<float> {
       std::memcpy(
           tmp_values,
           reinterpret_cast<const float*>(ptr),
-          count * sizeof(float));
+          std::min<int64_t>(count, size()) * sizeof(float));
       return vld1q_f32(reinterpret_cast<const float*>(tmp_values));
     }
   }
@@ -189,7 +189,8 @@ class Vectorized<float> {
     } else {
       float tmp_values[size()];
       vst1q_f32(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(float));
     }
   }
   // Very slow implementation of indexing.

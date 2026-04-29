@@ -110,7 +110,7 @@ class Vectorized<c10::complex<double>> {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
-        count * sizeof(c10::complex<double>));
+        std::min<int64_t>(count, size()) * sizeof(c10::complex<double>));
     return _mm256_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -119,7 +119,10 @@ class Vectorized<c10::complex<double>> {
     } else if (count > 0) {
       double tmp_values[2 * size()];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<double>));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(c10::complex<double>));
     }
   }
   const c10::complex<double>& operator[](int idx) const = delete;
