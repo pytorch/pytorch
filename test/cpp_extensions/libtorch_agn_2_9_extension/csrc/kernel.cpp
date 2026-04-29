@@ -13,7 +13,6 @@
 #endif
 
 #include <optional>
-#include <utility>
 
 void inline sgd_math(
   float* param_ptr,
@@ -393,7 +392,9 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
 int64_t test_device_guard(int64_t device_index) {
   using torch::stable::accelerator::DeviceGuard;
 
-  STD_TORCH_CHECK(std::in_range<int32_t>(device_index),
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
       "Device index is out of range of DeviceIndex (int32_t).");
 
   DeviceGuard guard(device_index);
@@ -415,7 +416,9 @@ int64_t test_device_guard_set_index() {
 }
 
 int64_t test_stream(int32_t device_index) {
-  STD_TORCH_CHECK(std::in_range<int32_t>(device_index),
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
       "Device index is out of range of DeviceIndex (int32_t).");
 
   return torch::stable::accelerator::getCurrentStream(device_index).id();

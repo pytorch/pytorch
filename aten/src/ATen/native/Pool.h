@@ -51,7 +51,9 @@ template <typename dest_t, typename src_t>
 inline dest_t
 safe_downcast(src_t v)
 {
-  TORCH_CHECK(std::in_range<dest_t>(v), "integer out of range");
+  TORCH_CHECK(std::numeric_limits<dest_t>::min() <= v && v <= std::numeric_limits<dest_t>::max(),
+              "integer out of range");
+
   return static_cast<dest_t>(v);
 }
 
