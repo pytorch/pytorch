@@ -4591,7 +4591,15 @@ class Scheduler:
                         # pyrefly: ignore [bad-argument-type]
                         with multi_node.swap_as_triton_caller(choice):
                             future_choices.append(
-                                (choice, *self.compile_kernel(node_list_fused))
+                                (
+                                    choice,
+                                    *self.compile_kernel(
+                                        node_list_fused,
+                                        hint_override=getattr(
+                                            choice, "hint_override", None
+                                        ),
+                                    ),
+                                )
                             )
                     elif is_nvgemm:
                         # pyrefly: ignore [missing-attribute]
