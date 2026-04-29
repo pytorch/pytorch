@@ -43,7 +43,7 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUSOLVER_CHECK(cusolverDnSetStream(handle, stream));
 
-  #if CUDA_VERSION >= 12900
+  #if CUDA_VERSION >= 12090
     cudaDeviceProp prop;
     AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
     // Emulation of FP32 via 9xBF16 is only available on CC 10 and 10.3
