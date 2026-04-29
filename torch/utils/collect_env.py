@@ -660,9 +660,13 @@ def get_uv_packages(run_lambda, patterns=None):
     if patterns is None:
         patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS + ONEAPI_PATTERNS
 
-    out = run_and_read_all(
-        run_lambda, ["uv", "pip", "list", "--format=freeze"]
-    )
+    try:
+        out = run_and_read_all(
+            run_lambda, ["uv", "pip", "list", "--format=freeze"]
+        )
+    except FileNotFoundError:
+        out = None
+
     if out is None:
         return out
 
