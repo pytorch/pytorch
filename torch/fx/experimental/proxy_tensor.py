@@ -1133,6 +1133,61 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _maybe_propagate_constant(
+    func: OpOverload,
+    args: tuple[object, ...],
+    f_flat_args_kwargs: list[object],
+    all_constant: bool,
+    out: object,
+    spec: pytree.TreeSpec,
+) -> object | None:
+    """Compute a constant value for the output if all inputs are known constants.
+
+    This enables item() calls on traced tensors whose values are statically
+    known (e.g. from torch.tensor(1)).  Only propagates for small tensors
+    (numel <= CONSTANT_NUMEL_LIMIT) to avoid materializing large constants.
+    Factory functions like torch.arange are excluded because they can produce
+    large tensors. Nondeterministic ops are also excluded.
+    """
+    any_constant = any(
+        t.constant is not None
+        for t in f_flat_args_kwargs
+        if isinstance(t, _ProxyTensor)
+    )
+
+    # For lift_fresh_copy (from torch.tensor), the input is guaranteed
+    # to be a freshly allocated constant — keep a copy for later item() calls.
+    if (
+        func is torch.ops.aten.lift_fresh_copy.default
+        and out.numel() <= CONSTANT_NUMEL_LIMIT  # pyrefly: ignore[missing-attribute]
+    ):
+        with unset_fake_temporarily():
+            if not isinstance(args[0], (Proxy, Tensor)):
+                raise AssertionError(f"Expected Proxy or Tensor, got {type(args[0])}")
+            return args[0].clone()
+
+    # General case: all inputs are constant, output is small, op is deterministic
+    if (
+        torch.Tag.nondeterministic_seeded not in func.tags
+        and all_constant
+        and any_constant
+        and pytree.tree_all_only(
+            Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out
+        )
+    ):
+        with unset_fake_temporarily():
+            const_flat_args_kwargs = [
+                t.constant if isinstance(t, _ProxyTensor) else t
+                for t in f_flat_args_kwargs
+            ]
+            const_args, const_kwargs = pytree.tree_unflatten(
+                const_flat_args_kwargs, spec
+            )
+            return func(*const_args, **const_kwargs)
+
+    return None
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1140,6 +1195,7 @@ def proxy_call(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
+    # --- Check that all tensor inputs are types we can handle ---
     unrecognized_types: list[type] = []
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1151,8 +1207,6 @@ def proxy_call(
             unrecognized_types.append(type(x))
         return r
 
-    # If there are any tensor subclasses, we need to handle those tensor subclasses first
-    # TODO: we could use types to test this
     if not all(can_handle_tensor(x) for x in flat_args_kwargs if isinstance(x, Tensor)):
         not_implemented_log.debug(
             "ProxyTensorMode tensors without proxy had unrecognized subclasses: %s",
@@ -1160,12 +1214,13 @@ def proxy_call(
         )
         return NotImplemented
 
+    # --- Try user-specified decompositions ---
     r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
     if r is not NotImplemented:
         _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
-    # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
+    # --- Try CompositeImplicitAutograd decomposition (post-dispatch only) ---
     if (
         not pre_dispatch
         and func
@@ -1181,6 +1236,7 @@ def proxy_call(
             if r is not NotImplemented:
                 return r
 
+    # --- Special case: is_nonzero ---
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
             torch._check(
@@ -1189,13 +1245,14 @@ def proxy_call(
             )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
+    # --- Fetch proxies for all tensor/SymInt inputs ---
     tracer = proxy_mode.tracer
     f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant = (
         _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
     )
 
+    # --- Handle data-dependent ops ---
     if torch.Tag.data_dependent_output in func.tags:
-        # Check if all of the Tensor inputs are constants
         if all_constant:
             const_flat_args_kwargs = [
                 t.constant if isinstance(t, _ProxyTensor) else t
@@ -1206,9 +1263,6 @@ def proxy_call(
             )
             with unset_fake_temporarily():
                 return func(*const_args, **const_kwargs)
-        # If any of the Tensor inputs are "real" (not FakeTensor), we may
-        # incorrectly burn in constants by allowing this access.  Raise
-        # an error in this case
         if proxy_mode._error_on_data_dependent_ops and pytree.tree_all_only(
             Tensor, lambda t: not is_fake(t), (args, kwargs)
         ):
@@ -1221,42 +1275,15 @@ def proxy_call(
 
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
-    # When we trace through a torch.tensor invocation, you never actually
-    # see a torch.ops.aten.tensor call. Instead, the way this function is
-    # implemented internally is that we allocate a plain tensor (this is
-    # *guaranteed* to be a plain tensor, we disable all modes when doing
-    # so), and then call at::lift_fresh on it (to give modes a chance to do
-    # their stuff).  Furthermore, the tensor argument to lift_fresh is guaranteed
-    # to be freshly allocated, so we want lift_fresh to be a no-op (directly
-    # returning the input argument).
-    #
-    # Here is the basic problem: when we trace this sequence of executions
-    # into an FX graph, what happens to this call sequence?  Traditionally,
-    # tensor constants get interned as buffers on the FX GraphModule.  But
-    # this is dangerous.  Consider:
-    #
-    #       x = torch.tensor(1)
-    #       x.add_(2)
-    #
-    # Naively, this traces into:
-    #
-    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
-    #       x = torch.ops.aten.lift_fresh(t)
-    #       x.add_(2)
-    #
-    # If lift_fresh returns t directly, the subsequent add_ call will
-    # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the argument to lift is fresh.  So what we should
-    # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
-    #
-    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
-    #       x = torch.ops.aten.lift_fresh_copy(t)
-    #       x.add_(2)
-    #
-    # This is what the overload modification does.
+    # --- Rewrite lift_fresh -> lift_fresh_copy to preserve freshness invariant ---
+    # When tracing torch.tensor(x), the runtime allocates a fresh tensor and
+    # calls aten.lift_fresh on it. We rewrite to lift_fresh_copy so that the
+    # traced graph doesn't share the buffer with the constant (which would
+    # be mutated by subsequent inplace ops).
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+    # --- Create graph node and execute the real op ---
     proxy_out = proxy_mode.tracer.create_proxy(
         "call_function",
         func,
@@ -1268,68 +1295,12 @@ def proxy_call(
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 
-    # In some circumstances, we will be tracing in a situation where a tensor
-    # is *statically* known to be a constant (currently, this only happens if
-    # you run torch.tensor; deterministic factory functions like torch.arange
-    # don't get this treatment).  When the tensor in question is small, it's
-    # helpful to due constant propagation in case we call item() (in which
-    # case we can return the constant value that is known, rather than give
-    # an error.)  The logic here tests if constant propagation is possible
-    # (because all of the inputs are constant).  If so, we disable fake tensor
-    # mode (if it is on) and do true compute on the constant.
-    #
-    # It's worth highlighting that we're making a policy decision here.
-    # There is a potential that the tensor is actually quite large, and we
-    # don't actually want to run the compute.  The tensor being quite large
-    # is one of the reasons why factory functions don't get this treatment
-    # (since they can be quite large; if a parameter is initialized to a
-    # constant value it will be!)  Similarly, there is also a potential
-    # to run an operator that blows up the size of a small tensor; we don't
-    # protect against this case, but we could force, e.g., only single
-    # element constant computation by testing the numel of the result before
-    # propagating const-ness.  Similarly, we don't require the constant to
-    # live on CPU, but we could.
-    any_constant = any(
-        t.constant is not None
-        for t in f_flat_args_kwargs
-        if isinstance(t, _ProxyTensor)
+    # --- Constant propagation ---
+    constant = _maybe_propagate_constant(
+        func, args, f_flat_args_kwargs, all_constant, out, spec
     )
 
-    constant = None
-
-    def tensor_numel_in_limit(t: Tensor) -> bool:
-        return t.numel() <= CONSTANT_NUMEL_LIMIT
-
-    # If this is a lift, the input tensor is guaranteed to be a
-    # constant, so we keep a copy of the original argument along so
-    # we can query it if we're asked to item() it at some later point
-    if (
-        func is torch.ops.aten.lift_fresh_copy.default
-        and out.numel() <= CONSTANT_NUMEL_LIMIT
-    ):
-        with unset_fake_temporarily():
-            if not isinstance(args[0], (Proxy, Tensor)):
-                raise AssertionError(f"Expected Proxy or Tensor, got {type(args[0])}")
-            constant = args[0].clone()
-    elif (
-        torch.Tag.nondeterministic_seeded not in func.tags
-        and all_constant
-        and any_constant
-        and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
-    ):
-        # NB: do NOT include factories as constants
-        with unset_fake_temporarily():
-            const_flat_args_kwargs = [
-                t.constant if isinstance(t, _ProxyTensor) else t
-                for t in f_flat_args_kwargs
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(
-                const_flat_args_kwargs, spec
-            )
-            constant = func(*const_args, **const_kwargs)
-    else:
-        constant = None
-
+    # --- Track outputs ---
     track_tensor_tree(
         out,
         proxy_out,
@@ -2589,6 +2560,35 @@ class _ModuleStackTracer(PythonKeyTracer):
 
 
 class _MakefxTracer:
+    """Orchestrates proxy tensor tracing to produce an FX GraphModule.
+
+    This is the internal implementation behind make_fx(). It sets up a stack of
+    dispatch modes that intercept tensor operations and record them into an FX
+    graph, then runs the user function under those modes.
+
+    Tracing modes:
+        "real"     - operations run on real tensors (no FakeTensorMode)
+        "fake"     - tensors are converted to FakeTensors with static shapes
+        "symbolic" - tensors are converted to FakeTensors with symbolic shapes
+                     (SymInts), enabling dynamic shape tracing
+
+    The mode stack entered during tracing (outermost to innermost):
+        1. decompose(decomposition_table) - sets active decomposition table
+        2. fake_tensor_mode              - FakeTensor dispatch (if fake/symbolic)
+        3. python_dispatcher_mode        - per-dispatch-key routing (if symbolic/pre_dispatch)
+        4. proxy_function_mode           - traces side-effectful torch functions (if pre_dispatch)
+        5. torch_fn_metadata_mode        - records which torch.* API was called
+        6. proxy_mode                    - core ProxyTorchDispatchMode that records ops
+        7. disable_autocast_cache        - prevents untracked tensors from autocast cache
+        8. _set_make_fx_tracer           - makes this tracer available for HOP subgraph tracing
+
+    Two initialization paths:
+        _init_modes_from_inputs - top-level tracing, creates modes from scratch
+        _init_modes_from_parent - subgraph tracing for higher-order ops, shares
+                                  fake_tensor_mode with parent but creates fresh
+                                  FX tracer and proxy modes
+    """
+
     def __init__(
         self,
         decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
@@ -2663,19 +2663,51 @@ class _MakefxTracer:
         self.python_dispatcher_mode = prev_python_dispatcher_mode
         self.torch_fn_metadata_mode = prev_torch_fn_metadata_mode
 
+    def _create_fake_tensor_mode(self, args: tuple[object, ...]) -> FakeTensorMode:
+        """Create or detect the FakeTensorMode for fake/symbolic tracing.
+
+        Tries to detect an existing FakeTensorMode from the args first.
+        If none is found, creates a new one. The key differences between modes:
+          - "fake":     static_shapes=True,  allow_fallback_kernels=True
+          - "symbolic": static_shapes=False, allow_fallback_kernels=False,
+                        requires shape_env to be set
+        """
+        import torch._dynamo
+        import torch._functorch.config as _config
+
+        from .symbolic_shapes import ShapeEnv
+
+        fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+        if fake_tensor_mode is None:
+            is_symbolic = self.tracing_mode == "symbolic"
+            with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                if is_symbolic:
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                    )
+                else:
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
+
+        if self.tracing_mode == "symbolic" and fake_tensor_mode.shape_env is None:
+            raise AssertionError("shape_env should be set if tracing with 'symbolic'")
+
+        return fake_tensor_mode
+
     @contextmanager
     def _init_modes_from_inputs(
         self, f: Callable[..., Any], args: tuple[object, ...]
     ) -> Generator[None, None, None]:
         prev_modes = self._checkpoint_modes()
         try:
-            # Avoid importing sympy at a module level
-            from .symbolic_shapes import ShapeEnv
-
             if hasattr(f, "_orig_mod") and self.record_module_stack:
                 scope_root = f._orig_mod
-                # _ModuleStackTracer always try to preserve stack trace
-                # in forward functions
                 self.fx_tracer = _ModuleStackTracer(scope_root)
             else:
                 self.fx_tracer = PythonKeyTracer()
@@ -2685,45 +2717,10 @@ class _MakefxTracer:
                 if self.fx_tracer.record_stack_traces:
                     self.fx_tracer._record_forward_stack_traces_only = True
 
-            if self.tracing_mode == "fake":
-                import torch._dynamo
-
-                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
-                if fake_tensor_mode is None:
-                    import torch._functorch.config as _config
-
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=True,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=ShapeEnv(),
-                            static_shapes=True,
-                        )
-                self.fake_tensor_mode = fake_tensor_mode
-            elif self.tracing_mode == "symbolic":
-                import torch._dynamo
-
-                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
-                if fake_tensor_mode is None:
-                    shape_env = ShapeEnv()
-                    import torch._functorch.config as _config
-
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=False,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=shape_env,
-                        )
-                if fake_tensor_mode.shape_env is None:
-                    raise AssertionError(
-                        "shape_env should be set if tracing with 'symbolic'"
-                    )
-                self.fake_tensor_mode = fake_tensor_mode
-            else:
-                if not self.tracing_mode == "real":
-                    raise AssertionError(
-                        f"Unexpected tracing type: {self.tracing_mode}"
-                    )
+            if self.tracing_mode in ("fake", "symbolic"):
+                self.fake_tensor_mode = self._create_fake_tensor_mode(args)
+            elif self.tracing_mode != "real":
+                raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
 
             self._construct_modes_with_fx_tracer(self.fx_tracer)
             yield
@@ -2830,35 +2827,47 @@ class _MakefxTracer:
 
         return pytree.tree_map(inner_wrap_fake, args)
 
-    def _trace_inner(self, f: Callable[..., Any], *args: object) -> GraphModule:
-        # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
-        # because dispatch_trace will introduce the lazy import of torch._dynamo,
-        # and some contexts set before calling dispatch_trace will cause problems with the import of torch._dynamo,
-        # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected
-        # by the context set before dispatch_trace.
-        import torch._dynamo
-
-        phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
-
-        args = self._convert_args_to_fake(args)
-
-        # FX doesn't support varargs, so we gotta fake up a wrapper
-        # TODO: Would be nice to fix this at the source...
-        func: Callable[..., Any] = f
+    @staticmethod
+    def _wrap_func_for_fx(f: Callable[_P, R], phs: Sequence[Any]) -> Callable[_P, R]:
+        """Wrap f with a fake signature if it uses *args (FX doesn't support varargs)."""
         if (
             not hasattr(inspect.unwrap(f), "__code__")
             or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS
         ):
-            func = fake_signature(f, len(phs))
-        # We disable the autocast cache as the autocast cache causes type conversions on parameters to
-        # check a cache, which introduces untracked tensors into the graph
-        #
-        # We also disable tracing by any other tensor proxy-based tracers except the current. The
-        # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
-        # thus irrelevant to any external functional trace.
-        proxy_mode: ProxyTorchDispatchMode = typing.cast(
-            ProxyTorchDispatchMode, self.proxy_mode
-        )
+            return fake_signature(f, len(phs))
+        return f
+
+    def _post_trace(self, t: GraphModule, args: tuple[object, ...]) -> GraphModule:
+        """Post-processing after dispatch_trace: runtime asserts and shape_env attachment."""
+        if (
+            self.is_hop_subgraph_tracer()
+            and (fake_mode := torch._guards.detect_fake_mode(args))
+            and fake_mode.shape_env is not None
+        ):
+            from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+            insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
+            t.recompile()
+
+        if self.tracing_mode == "symbolic":
+            if self.fake_tensor_mode is None:
+                raise AssertionError("fake_tensor_mode should not be None")
+            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+
+        return t
+
+    def _trace_inner(self, f: Callable[..., Any], *args: object) -> GraphModule:
+        # Must import torch._dynamo before dispatch_trace to avoid issues
+        # with lazy imports under active context managers.
+        import torch._dynamo
+
+        phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
+        args = self._convert_args_to_fake(args)
+        func = self._wrap_func_for_fx(f, phs)
+
+        proxy_mode = typing.cast(ProxyTorchDispatchMode, self.proxy_mode)
+
+        # Enter the mode stack (see class docstring for stacking order)
         with ExitStack() as stack:
             stack.enter_context(decompose(self.decomposition_table))
             if self.fake_tensor_mode:
@@ -2894,21 +2903,7 @@ class _MakefxTracer:
                 )
                 raise
 
-        if (
-            self.is_hop_subgraph_tracer()
-            and (fake_mode := torch._guards.detect_fake_mode(args))
-            and fake_mode.shape_env is not None
-        ):
-            from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
-
-            insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
-            t.recompile()
-        # TODO: kind of a bad way to do it, should maybe figure out a better way
-        if self.tracing_mode == "symbolic":
-            if self.fake_tensor_mode is None:
-                raise AssertionError("fake_tensor_mode should not be None")
-            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
-        return t
+        return self._post_trace(t, args)
 
     def trace(self, f: Callable[..., Any], *args: object) -> fx.GraphModule:
         with self._init_modes_from_inputs(f, args):
@@ -2933,8 +2928,18 @@ class _MakefxTracer:
             parent_tracer=self,
         )
 
-    def trace_subgraph(self, f: Callable[..., Any], *args: object) -> GraphModule:
-        sub_tracer = self._make_sub_tracer()
+    def trace_subgraph(
+        self,
+        f: Callable[..., Any],
+        *args: object,
+        decomp_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
+    ) -> GraphModule:
+        """Trace a subgraph during higher-order op tracing.
+
+        Creates a child tracer that shares this tracer's fake_tensor_mode
+        but gets a fresh FX graph.  Used by HOPs like torch.cond and torch.map.
+        """
+        sub_tracer = self._make_sub_tracer(decomp_table=decomp_table)
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
@@ -2944,11 +2949,7 @@ class _MakefxTracer:
         decomp_table: Mapping[OpOverload, Callable[..., Any]],
         *args: object,
     ) -> GraphModule:
-        if not isinstance(decomp_table, Mapping):
-            raise AssertionError(f"Expected Mapping, got {type(decomp_table)}")
-        sub_tracer = self._make_sub_tracer(decomp_table=decomp_table)
-        with sub_tracer._init_modes_from_parent(self):
-            return sub_tracer._trace_inner(f, *args)
+        return self.trace_subgraph(f, *args, decomp_table=decomp_table)
 
 
 _CURRENT_MAKE_FX_TRACER: _MakefxTracer | None = None
