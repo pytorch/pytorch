@@ -60,22 +60,24 @@ jobs:
                   "ghcr.io/github/github-mcp-server:v0.30.1"
                 ],
                 "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
                 }
               }
             }
           }
           EOF
 
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
       - name: Run Issue Triage
         timeout-minutes: 5
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIAGE_HOOK_DEBUG_LOG: /tmp/triage_hooks.log

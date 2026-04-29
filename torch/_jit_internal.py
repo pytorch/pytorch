@@ -10,6 +10,7 @@ import builtins
 import collections
 import contextlib
 import enum
+import functools
 import inspect
 import io
 import pickle
@@ -408,6 +409,7 @@ def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
+@functools.cache
 def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
@@ -1377,8 +1379,7 @@ def _disable_emit_hooks():
         torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
-    # noqa: F841
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:
     def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)

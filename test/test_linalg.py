@@ -6493,9 +6493,9 @@ class TestLinalg(TestCase):
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
             mm_key = 'Cijk'
-            events = prof.key_averages()
+            events = prof.events()
             for evt in events:
-                if mm_key in evt.key:
+                if mm_key in evt.name:
                     self.assertEqual(evt.count, 1)
                     kernel_count = kernel_count + 1
 
@@ -10221,6 +10221,44 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         nrhss = (1, 7)
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve_cpu_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
+        # malformed pivots used to be passed straight to Lapack SYTRS which
+        # would write past the end of the matrix and corrupt the heap; they
+        # should now surface as a clean RuntimeError.
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        hermitian = dtype.is_complex
+        n = 5
+        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
+        B = make_tensor((n, 1), dtype=dtype, device=device)
+        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+
+        # Sanity: the factorization output round-trips.
+        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
+
+        # Lapack uses 1-based pivot indices, so zero is invalid.
+        bad = pivots.clone()
+        bad[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Out-of-range positive pivot.
+        bad = pivots.clone()
+        bad[0] = n + 1
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
+        # must still be <= N.
+        bad = pivots.clone()
+        bad[0] = -(n + 1)
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
     @onlyCUDA
     @skipCUDAIfNoMagma

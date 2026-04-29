@@ -1499,8 +1499,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
-        # noqa: F841
-
         class TestModel(nn.Module):
             def __init__(
                 self,
@@ -2176,7 +2174,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(b(y), y.sin().cos()))
 
     @skipIfWindows(
-        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"  # noqa: B950
+        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"
     )
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
@@ -4208,7 +4206,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(inp1, inp2, inp3, inp4, c)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_torch_variable_type(self):
         # from torchvision
@@ -4899,7 +4897,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
-            (a, b) = arg  # noqa: F841
+            (a, b) = arg
 
         def fn():
             return myfn((1, 2, 3))
@@ -5436,17 +5434,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         obj = A()
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             fn(obj)
-        except Exception as e:
-            orig_str = str(e)
-        self.assertIn("no arguments", orig_str)
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             torch.compile(backend="eager")(fn)(obj)
-        except Exception as e:
-            compiled_str = str(e)
-        self.assertEqual(orig_str, compiled_str)
 
     def test_super_staticmethod(self):
         class Parent:
@@ -5990,6 +5982,34 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             )
             self.assertEqual(len(compile_nodes), 0)
             self.assertEqual(len(export_nodes), 0)
+
+    def test_multiheadattention_tracing_slowpath_matches_fastpath_layout(self):
+        class MHAWithView(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.hidden_dim = 64
+                self.attention = nn.MultiheadAttention(
+                    self.hidden_dim, 8, batch_first=True
+                )
+
+            def forward(self, x):
+                attn_output, _ = self.attention(x, x, x)
+                return attn_output.view(-1, self.hidden_dim)
+
+        with torch.no_grad():
+            model = MHAWithView().eval()
+            x = torch.randn(4, 32, model.hidden_dim)
+            eager = model(x)
+
+            backend = EagerAndRecordGraphs()
+            compiled_model = torch.compile(model, backend=backend, fullgraph=True)
+            compiled = compiled_model(x)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(compiled, eager)
+            self.assertEqual(len(compile_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
@@ -7258,6 +7278,39 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    def test_guard_tag_safe_tensor_metadata_segfault(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180741
+        # When a submodule becomes a tag-safe root, the recording pass stashes
+        # tensor pointers found during traversal.  PythonLambdaGuardAccessor
+        # (from ___from_numpy on the np.float64 attribute) creates a temporary
+        # tensor with refcount 1, which is freed after Py_DECREF.  The stashed
+        # raw pointer then dangles and check_tensor_metadata_fast segfaults.
+        import numpy as np
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.scale = np.float64(8.0)
+
+            def forward(self, x):
+                return self.linear(x) / self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer()])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        model = Model()
+        compiled = torch.compile(model, backend="eager")
+        out = compiled(torch.randn(2, 10))
+        self.assertEqual(out.shape, torch.Size([2, 10]))
+
     def test_deleted_compile_wrapper_segfault(self):
         def fn(x):
             return x + 1
@@ -8025,6 +8078,57 @@ SavedForBackwardsAOTOutput(idx=5)""",
         x = torch.randn(2)
         _ = fn(x)
         self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
+
+    def test_elementwise_dtypes_constant_fold(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randn(3))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_int_to_float(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randint(0, 10, (3,)))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_multi_args(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, y):
+            dt, _ = elementwise_dtypes(
+                x, y, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(
+            torch.randn(3, dtype=torch.float16),
+            torch.randn(3, dtype=torch.float32),
+        )
+        self.assertEqual(result.dtype, torch.float32)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

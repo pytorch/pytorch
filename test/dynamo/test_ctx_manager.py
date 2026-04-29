@@ -85,7 +85,7 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
-class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -577,7 +577,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
+        self.assertExpectedInline(str(cnts.op_count), """17""")
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_cuda_device(self):
@@ -1100,7 +1100,7 @@ class GraphModule(torch.nn.Module):
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
         else:
             self.assertExpectedInline(
@@ -1132,7 +1132,7 @@ class GraphModule(torch.nn.Module):
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
 
     def test__enter__exit_autocast_graph_break(self):
@@ -1178,7 +1178,7 @@ class GraphModule(torch.nn.Module):
 
         x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
         else:
             self.assertExpectedInline(
@@ -1200,7 +1200,7 @@ class GraphModule(torch.nn.Module):
 
         x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
 
         # Doesn't include autocast functions, see comment above
@@ -1228,7 +1228,7 @@ class GraphModule(torch.nn.Module):
 
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
         else:
             self.assertExpectedInline(
@@ -1251,7 +1251,7 @@ class GraphModule(torch.nn.Module):
 
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (x,)
-""",  # NOQA: B950
+""",
             )
 
     def test_autocast_low_level_api(self):
@@ -1348,7 +1348,7 @@ class GraphModule(torch.nn.Module):
 
         _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
         return (x,)
-""",  # NOQA: B950
+""",
         )
 
         # Recompiling will decompose the _enter_autocast and _exit_autocast calls to lower level autocast functions
@@ -1390,7 +1390,7 @@ class GraphModule(torch.nn.Module):
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (x,)
-""",  # NOQA: B950
+""",
         )
 
     @parametrize(
@@ -1634,9 +1634,13 @@ class GraphModule(torch.nn.Module):
 
     @requires_cuda
     def test_graph_break_inlining_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in ["cuda", "cpu", "xpu"]:
             if device == "cuda" and not (
                 torch.accelerator.is_available() and getattr(torch.get_device_module(device_type), "is_bf16_supported", lambda: False)()
+            ):
+                continue
+            if device == "xpu" and not (
+                torch.xpu.is_available() and torch.xpu.is_bf16_supported()
             ):
                 continue
             self._graph_break_inlining_autocast_test_helper(device)
@@ -1678,7 +1682,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
-""",  # NOQA: B950
+""",
         )
 
     def test_disable_saved_tensors_hooks_prev_disabled(self):
@@ -1721,7 +1725,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
-""",  # NOQA: B950
+""",
         )
 
     def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
@@ -1776,7 +1780,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
-""",  # NOQA: B950
+""",
         )
 
     def test_disable_saved_tensors_hooks_graph_break(self):
@@ -1791,7 +1795,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):  # noqa: F841
+        def check_graph(actual, expected):
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]
@@ -1809,7 +1813,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (y,)
-""",  # NOQA: B950
+""",
         )
 
         graph = eager.graphs[1]
@@ -1827,7 +1831,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (mul,)
-""",  # NOQA: B950
+""",
         )
 
     def test__saved_tensors_hooks_disable(self):
@@ -1857,7 +1861,7 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (y_1,)
-""",  # NOQA: B950
+""",
         )
 
     def test_context_wrapping_grad_mode_decorator(self):
@@ -2314,9 +2318,7 @@ class GraphModule(torch.nn.Module):
         self.assertGreater(len(counters["graph_break"]), 0)
 
 
-class ContextlibContextManagerTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
@@ -3342,13 +3344,13 @@ class GraphModule(torch.nn.Module):
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
         grad_input: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
-        grad_input_1: "f32[3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-        output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
+        grad_input_1: "f32[3, 3]" = torch._functorch.predispatch._unwrap_for_grad(grad_input, 1);  grad_input = None
+        output_1: "f32[]" = torch._functorch.predispatch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (grad_input_1,)
-""",  # NOQA: B950
+""",
         )
 
         d = {}

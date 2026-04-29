@@ -21,9 +21,13 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
-from ._utils import generate_rank_to_stage_mapping, generate_stage_to_rank_mapping
+from ._utils import (
+    generate_rank_to_stage_mapping,
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .stage import _PipelineStageBase
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -280,9 +284,11 @@ class _PipelineSchedule(ABC):
         self._internal_losses: list[torch.Tensor] = []
         logger.info("Using %s", self.__class__.__name__)
 
-    def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
+    def _maybe_compute_loss(
+        self, stage, output, target_mbs, mb_index, loss_kwargs=None
+    ):
         if stage.is_last and self._loss_fn is not None:
-            loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
+            loss = self._compute_loss(output, target_mbs[mb_index], loss_kwargs)  # type: ignore[index]
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
@@ -320,6 +326,137 @@ class _PipelineSchedule(ABC):
 
         self._internal_losses.clear()
 
+    def _warmup_p2p(
+        self,
+        stages: list[_PipelineStageBase],
+        has_backward: bool,
+        p2p_done: bool,
+    ) -> None:
+        """Run the P2P warm-up protocol for the given stages.
+
+        For ``PipelineStage`` instances this executes the forward/backward vote
+        protocol (which warms up 2-rank sub-communicators) and sets each
+        stage's ``_inference_mode``.  For other stage types it falls back to
+        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+
+        Args:
+            stages: The pipeline stages owned by this rank.
+            has_backward: Whether the schedule includes a backward pass.
+            p2p_done: ``True`` if P2P neighbours have already been initialised
+                (avoids redundant init on eval↔train mode switches).
+        """
+        if all(isinstance(stage, PipelineStage) for stage in stages):
+            acc: torch.Tensor | None = None
+            for stage in cast(list[PipelineStage], stages):
+                acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
+            result: torch.Tensor | None = acc
+            determined_mode: InferenceMode | None = None
+            for stage in reversed(cast(list[PipelineStage], stages)):
+                result = stage._warmup_backward_result(received_result=result)
+                if result is None:
+                    raise RuntimeError("P2P warm-up voting failed")
+                determined_mode = (
+                    InferenceMode.STATIC
+                    if result.item() == 1
+                    else InferenceMode.DYNAMIC
+                )
+                stage._inference_mode = determined_mode
+            logger.debug(
+                "Rank determined inference_mode=%s for %d stage(s)",
+                determined_mode.value if determined_mode else "None",
+                len(stages),
+            )
+        elif not p2p_done:
+            all_ops: list[dist.P2POp] = []
+            for stage in stages:
+                all_ops.extend(stage._get_init_p2p_neighbors_ops())
+            _wait_batch_p2p(_batch_p2p(all_ops))
+
+        # TODO: STATIC mode group communicator warm-up gap
+        # The vote protocol above warms up 2-rank sub-communicators
+        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
+        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
+        # `_forward_metadata_inference`) also warm up the *group* communicator
+        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
+        # inference is skipped, so the group communicator is NOT warmed up —
+        # it will be lazily created on the first mixed `_batch_p2p` call
+        # (e.g., 1F1B steady-state with both sends and recvs).
+        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
+        # vote, gated by `not p2p_done`.
+
+    def _initialize_pp_stages(
+        self,
+        stages: list[_PipelineStageBase],
+        args: tuple[Any, ...] | Any,
+        kwargs: dict[str, Any] | None,
+        target: Any,
+        fwd_initialized: bool,
+        bwd_initialized: bool,
+        loss_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool]:
+        """Common stage initialization shared by Single and Multi schedules.
+
+        Handles mode-change detection (eval↔train), P2P warm-up, RNG forking,
+        forward / backward metadata inference, and FSDP cleanup.
+
+        Returns the updated ``(fwd_initialized, bwd_initialized)`` flags.
+        """
+        # Detect eval↔train mode switch: if has_backward changed since last
+        # init, re-initialize both fwd (recv buffers need different
+        # requires_grad) and bwd.  p2p_done avoids redundant P2P warm-up.
+        p2p_done = fwd_initialized
+        if fwd_initialized and (self._has_backward != bwd_initialized):
+            fwd_initialized = False
+            bwd_initialized = False
+
+        needs_fwd = not fwd_initialized
+        needs_bwd = self._has_backward and not bwd_initialized
+
+        if not needs_fwd and not needs_bwd:
+            return fwd_initialized, bwd_initialized
+
+        if needs_fwd:
+            self._warmup_p2p(stages, self._has_backward, p2p_done)
+
+        # Fork RNG so metadata inference doesn't perturb training RNG.
+        devices = list(
+            {
+                torch.device(stage.device)
+                for stage in stages
+                if torch.device(stage.device).type != "cpu"
+            }
+        )
+        with torch.random.fork_rng(devices=devices):
+            if needs_fwd:
+                next_stage_args: Any = None
+                for stage in stages:
+                    stage_args = args if stage.is_first else next_stage_args
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches,
+                        stage_args,
+                        kwargs,
+                        has_backward=self._has_backward,
+                    )
+                fwd_initialized = True
+
+            if needs_bwd:
+                prev_stage_grad_meta: Any = None
+                for stage in reversed(stages):
+                    prev_stage_grad_meta = stage._prepare_backward_infra(
+                        self._n_microbatches,
+                        loss_fn=self._loss_fn,
+                        target=target,
+                        received_grad_meta=prev_stage_grad_meta,
+                        loss_kwargs=loss_kwargs,
+                    )
+                bwd_initialized = True
+
+        for stage in stages:
+            if isinstance(stage, PipelineStage):
+                stage._post_metadata_inference_cleanup()
+
+        return fwd_initialized, bwd_initialized
+
     @abstractmethod
     def _step_microbatches(
         self,
@@ -328,6 +465,7 @@ class _PipelineSchedule(ABC):
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -337,6 +475,7 @@ class _PipelineSchedule(ABC):
         Args:
             microbatches: list of microbatch args.
             return_outputs: whether to return the outputs from the last stage.
+            loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         raise NotImplementedError
 
@@ -347,6 +486,7 @@ class _PipelineSchedule(ABC):
         target=None,
         losses: list | None = None,
         return_outputs=True,
+        loss_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
         """
@@ -359,6 +499,7 @@ class _PipelineSchedule(ABC):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         raise NotImplementedError
 
@@ -420,8 +561,8 @@ class _PipelineSchedule(ABC):
 
         return arg_mbs, kwarg_mbs
 
-    def _compute_loss(self, output, target):
-        return self._loss_fn(output, target)  # type: ignore[misc]
+    def _compute_loss(self, output, target, loss_kwargs=None):
+        return self._loss_fn(output, target, **(loss_kwargs or {}))  # type: ignore[misc]
 
     def _split_inputs(
         self,
@@ -560,21 +701,19 @@ class PipelineScheduleSingle(_PipelineSchedule):
             self._get_pipeline_order()
         )
 
-    def _initialize_stage(self, args, kwargs):
-        if not self._stage_forward_initialized:
-            # Prepare the communication needed for the pipeline schedule execution
-            # This is needed because during execution we always perform a series of batch P2P ops
-            # The first call of the batched P2P needs to involve the global group
-            all_ops: list[dist.P2POp] = []
-            all_ops.extend(self._stage._get_init_p2p_neighbors_ops())
-            _wait_batch_p2p(_batch_p2p(all_ops))
-
-            self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-            self._stage_forward_initialized = True
-
-        if self._has_backward and not self._stage_backward_initialized:
-            self._stage._prepare_backward_infra(self._n_microbatches)
-            self._stage_backward_initialized = True
+    def _initialize_stage(self, args, kwargs, target=None, loss_kwargs=None):
+        (
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+        ) = self._initialize_pp_stages(
+            [self._stage],
+            args,
+            kwargs,
+            target,
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+            loss_kwargs=loss_kwargs,
+        )
 
     def step(
         self,
@@ -582,6 +721,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         target=None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
         """
@@ -594,6 +734,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
@@ -619,7 +760,12 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Run microbatches
         self._step_microbatches(
-            args_split, kwargs_split, targets_split, losses, return_outputs
+            args_split,
+            kwargs_split,
+            targets_split,
+            losses,
+            return_outputs,
+            loss_kwargs=loss_kwargs,
         )
 
         # Return merged results per original format
@@ -660,6 +806,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule
@@ -670,7 +817,8 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -711,6 +859,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -721,7 +870,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
             return_outputs: whether to return the outputs from the last stage.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -744,7 +896,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
-            self._maybe_compute_loss(self._stage, output, target_mbs, i)
+            self._maybe_compute_loss(self._stage, output, target_mbs, i, loss_kwargs)
 
         # Wait for all forward sends to finish
         # This should not have performance impact because by the time the first
@@ -855,6 +1007,7 @@ or equal to the number of stages ({self._num_stages})."
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Run one iteration of the pipeline schedule with list of microbatches.
@@ -863,9 +1016,13 @@ or equal to the number of stages ({self._num_stages})."
         Args:
             microbatches: list of microbatch args.
             return_outputs: whether to return the outputs from the last stage.
+            loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
         # first stage `num_stages` warmups
@@ -909,7 +1066,9 @@ or equal to the number of stages ({self._num_stages})."
             #   The last forward send is left for fuse with first 1B in 1B1F below
 
             # Compute loss
-            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+            self._maybe_compute_loss(
+                self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
+            )
             fwd_mb_index += 1
 
         # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
@@ -953,7 +1112,9 @@ or equal to the number of stages ({self._num_stages})."
             )  # type: ignore[index]
 
             # Compute loss
-            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+            self._maybe_compute_loss(
+                self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
+            )
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -1532,34 +1693,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
-    def _initialize_stages(self, args: tuple[Any, ...], kwargs):
-        if not self._stages_forward_initialized:
-            # Prepare the communication needed for the pipeline schedule execution
-            # This is needed because during execution we always perform a series of batch P2P ops
-            # The first call of the batched P2P needs to involve the global group
-            all_ops: list[dist.P2POp] = []
-            for stage in self._stages:
-                all_ops.extend(stage._get_init_p2p_neighbors_ops())
-            _wait_batch_p2p(_batch_p2p(all_ops))
-
-            # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
-            # or real value (if this stage and next stage are on the same device)
-            next_stage_args: tuple[Any, ...] = tuple()
-            for stage in self._stages:
-                if stage.is_first:
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches, args, kwargs
-                    )
-                else:
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches, next_stage_args, kwargs
-                    )
-            self._stages_forward_initialized = True
-
-        if self._has_backward and not self._stages_backward_initialized:
-            for stage in self._stages:
-                stage._prepare_backward_infra(self._n_microbatches)
-            self._stages_backward_initialized = True
+    def _initialize_stages(
+        self, args: tuple[Any, ...], kwargs, target=None, loss_kwargs=None
+    ):
+        (
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+        ) = self._initialize_pp_stages(
+            self._stages,
+            args,
+            kwargs,
+            target,
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+            loss_kwargs=loss_kwargs,
+        )
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[_Action | None]]
@@ -1606,6 +1754,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target=None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
         """
@@ -1618,6 +1767,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         return_outputs: whether to return the outputs from the last stage.
+        loss_kwargs: extra keyword arguments forwarded to the loss function.
         """
         if (
             self._has_backward
@@ -1649,7 +1799,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # Run microbatches
         self._step_microbatches(
-            args_split, kwargs_split, targets_split, losses, return_outputs
+            args_split,
+            kwargs_split,
+            targets_split,
+            losses,
+            return_outputs,
+            loss_kwargs=loss_kwargs,
         )
 
         # Return merged results per original format
@@ -1666,6 +1821,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Operate on the microbatches for looped schedules (multiple stages on each rank).
@@ -1674,8 +1830,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -1715,7 +1873,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             kwarg_mbs[mb_index],
                             save_forward_output=return_outputs,
                         )
-                        self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                        self._maybe_compute_loss(
+                            stage, output, target_mbs, mb_index, loss_kwargs
+                        )
                         ops.extend(stage.get_fwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.FULL_BACKWARD:
                         # perform backward computation
@@ -1834,7 +1994,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 # do the communication
                 _wait_batch_p2p(_batch_p2p(ops))
             except Exception as e:
-                logger.error(  # noqa: G200
+                logger.error(
                     "[Rank %s] pipeline schedule %s caught the following exception '%s' \
 at time_step %s when running action %s",
                     self.rank,
@@ -2052,6 +2212,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         target_mbs: list | None = None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_kwargs: dict[str, Any] | None = None,
     ):
         """
         Operate on the microbatches for looped schedules (multiple stages on each rank).
@@ -2060,7 +2221,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(
+            arg_mbs[0], kwarg_mbs[0], maybe_first_target, loss_kwargs
+        )
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -2170,7 +2334,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     kwarg_mbs[mb_index],  # type: ignore[index]
                     save_forward_output=return_outputs,
                 )
-                self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                self._maybe_compute_loss(
+                    stage, output, target_mbs, mb_index, loss_kwargs
+                )
 
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                 # see [Note: V-schedule special case]

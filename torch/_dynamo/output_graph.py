@@ -228,6 +228,7 @@ class AliasingInfo:
 class MutationInfo:
     has_mutation: bool
     msg: str
+    mutated_input_indices: tuple[int, ...] = ()
 
 
 def collect_reachable_grad_fns(
@@ -873,6 +874,62 @@ class OutputGraph(OutputGraphCommon):
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+        self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
+
+    def get_replayed_side_effect_source_refs(
+        self, *, populate_export_metadata: bool = False
+    ) -> list[str]:
+        """Return Python-side effect sources that Dynamo replays outside the FX graph."""
+        if (
+            not populate_export_metadata
+            and not self.side_effects.id_to_variable
+            and self._cached_replayed_side_effect_source_refs is not None
+        ):
+            return list(self._cached_replayed_side_effect_source_refs)
+
+        from torch.export._trace import _ExportModuleSpecTrackerDict
+
+        potential_side_effects = []
+        for var in self.side_effects._get_modified_vars():
+            if hasattr(var, "mutation_type"):
+                mut_type = var.mutation_type
+                # Skip codegen-specific mutations that never materialize as
+                # externally visible Python side effects.
+                if isinstance(
+                    mut_type, (AttributeMutationExisting, ValueMutationExisting)
+                ):
+                    if isinstance(var, UserDefinedDictVariable) and isinstance(
+                        var.value, _ExportModuleSpecTrackerDict
+                    ):
+                        if populate_export_metadata:
+                            assert var._base_vt is not None
+                            for (
+                                k,
+                                v,
+                            ) in (
+                                var._base_vt.items.items()  # pyrefly: ignore[missing-attribute]
+                            ):
+                                # pyrefly: ignore [implicit-any]
+                                specs = {}
+                                # pyrefly: ignore[missing-attribute]
+                                for k_spec, val in v.items.items():
+                                    specs[k_spec.vt.as_python_constant()] = (
+                                        val.as_python_constant()
+                                    )
+                                assert ["in_spec", "out_spec"] == list(specs.keys())
+                                self.export_metadata.module_call_spec[
+                                    # pyrefly: ignore[missing-attribute]
+                                    k.vt.as_python_constant()
+                                ] = specs
+                    # export uses tracepoint pass to dump submodule inp/out spec
+                    # into global state, so we filter it here
+                    if not (
+                        isinstance(var, UserDefinedDictVariable)
+                        and isinstance(var.value, _ExportModuleSpecTrackerDict)
+                    ):
+                        potential_side_effects.append(var)
+
+        return [_get_source_debug_name(var.source) for var in potential_side_effects]
 
     def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
         parts = path.split(".")
@@ -1280,17 +1337,20 @@ class OutputGraph(OutputGraphCommon):
 
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
+        gpu_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cuda"
+        )
         global_state["autocast_enabled"] = (
-            functools.partial(torch.set_autocast_enabled, "cuda"),
-            torch.is_autocast_enabled("cuda"),
+            functools.partial(torch.set_autocast_enabled, gpu_type),
+            torch.is_autocast_enabled(gpu_type),
         )
         global_state["autocast_cpu_enabled"] = (
             functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
         global_state["autocast_gpu_dtype"] = (  # type:ignore[assignment]
-            functools.partial(torch.set_autocast_dtype, "cuda"),
-            torch.get_autocast_dtype("cuda"),
+            functools.partial(torch.set_autocast_dtype, gpu_type),
+            torch.get_autocast_dtype(gpu_type),
         )
         global_state["autocast_cpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cpu"),
@@ -1489,7 +1549,7 @@ class OutputGraph(OutputGraphCommon):
             # HACKY CODE REGION BEGIN
             # WE ARE PIGGYBACKING ON EXISTING INFRA TO REGISTER ATTRS
             # This ultimately gets written to self.nn_modules, which is unfortunate
-            # Attrs that are tenors and symints and such need to be migrated to have their
+            # Attrs that are tensors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
 
@@ -2016,7 +2076,7 @@ class OutputGraph(OutputGraphCommon):
                         elif (
                             vt.source is not None
                             and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
-                            and source.is_input
+                            and getattr(source, "is_input", False)
                         ):
                             self.export_metadata.output_return_type[idx] = (
                                 "input",
@@ -2175,43 +2235,9 @@ class OutputGraph(OutputGraphCommon):
             )
 
         if torch._dynamo.config.side_effect_replay_policy in ["warn", "error"]:
-            from torch.export._trace import _ExportModuleSpecTrackerDict
-
-            potential_side_effects = []
-            for var in self.side_effects._get_modified_vars():
-                if hasattr(var, "mutation_type"):
-                    mut_type = var.mutation_type
-                    # Make sure to skip codegen specific mutations
-                    if isinstance(
-                        mut_type, (AttributeMutationExisting, ValueMutationExisting)
-                    ):
-                        if isinstance(var, UserDefinedDictVariable) and isinstance(
-                            var.value, _ExportModuleSpecTrackerDict
-                        ):
-                            for k, v in var.items.items():
-                                # pyrefly: ignore [implicit-any]
-                                specs = {}
-                                # pyrefly: ignore[missing-attribute]
-                                for k_spec, val in v.items.items():
-                                    specs[k_spec.vt.as_python_constant()] = (
-                                        val.as_python_constant()
-                                    )
-                                assert ["in_spec", "out_spec"] == list(specs.keys())
-                                self.export_metadata.module_call_spec[
-                                    # pyrefly: ignore[missing-attribute]
-                                    k.vt.as_python_constant()
-                                ] = specs
-                        # export uses tracepoint pass to dump submodule inp/out spec
-                        # into global state, so we filter it here
-                        if not (
-                            isinstance(var, UserDefinedDictVariable)
-                            and isinstance(var.value, _ExportModuleSpecTrackerDict)
-                        ):
-                            potential_side_effects.append(var)
-            side_effect_refs = [
-                _get_source_debug_name(var.source) for var in potential_side_effects
-            ]
-
+            side_effect_refs = self.get_replayed_side_effect_source_refs(
+                populate_export_metadata=True
+            )
             if side_effect_refs:
                 if torch._dynamo.config.side_effect_replay_policy == "warn":
                     warnings.warn(
@@ -2643,9 +2669,11 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             if self.package is not None:
-                gm._backend_id = name
+                gm._backend_id = name  # pyrefly: ignore[bad-argument-type]
 
+            # pyrefly: ignore[bad-argument-type]
             gm.compile_subgraph_reason = self.compile_subgraph_reason
+            # pyrefly: ignore[bad-argument-type]
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
@@ -2697,6 +2725,7 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            gm.graph.lint()
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
@@ -2912,12 +2941,15 @@ class OutputGraph(OutputGraphCommon):
             if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
-        if config.inline_invoke_subgraph:
-            from torch._higher_order_ops.passes.inline_invoke_subgraph import (
-                inline_invoke_subgraph,
-            )
+        from torch._higher_order_ops.passes.inline_invoke_subgraph import (
+            inline_invoke_subgraph,
+            inline_single_use_invoke_subgraph,
+        )
 
+        if config.inline_invoke_subgraph:
             gm = inline_invoke_subgraph(gm)
+        elif config.inline_single_use_invoke_subgraph:
+            gm = inline_single_use_invoke_subgraph(gm)
 
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
@@ -3266,6 +3298,9 @@ class OutputGraph(OutputGraphCommon):
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
+        self._cached_replayed_side_effect_source_refs = tuple(
+            self.get_replayed_side_effect_source_refs()
+        )
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
         self.mro_source_cache.clear()
@@ -3961,7 +3996,7 @@ class SubgraphTracer(fx.Tracer):
             #
             #  1. When create_graph_input for a tensor that has symbolic shapes,
             #     we look for basic symbols in its size and stride, we check if the symbol is bound
-            #     in current graph (i.e. bound_symbols), it it's not bound, we'll create a placeholder
+            #     in current graph (i.e. bound_symbols), if it's not bound, we'll create a placeholder
             #     for it then recursively check its parent, creates ph if not bound at parent until.
             #     reachting the top-level, where we require a source is attached to the proxy.
             #
@@ -4363,14 +4398,16 @@ class SubgraphTracer(fx.Tracer):
     def has_input_mutation(self) -> MutationInfo:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
+        tensor_placeholder_indices = []
 
         input_versions_at_end = []
-        for node in self.graph.nodes:
+        for placeholder_idx, node in enumerate(self.graph.nodes):
             if node.op == "placeholder":
                 example_value = node.meta["example_value"]
                 if isinstance(example_value, torch.Tensor):
                     input_versions_at_end.append(example_value._version)
                     input_nodes.append(node)
+                    tensor_placeholder_indices.append(placeholder_idx)
             else:
                 break
 
@@ -4384,10 +4421,13 @@ class SubgraphTracer(fx.Tracer):
 
         if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
+            mutated_input_indices = tuple(
+                tensor_placeholder_indices[i] for i in mutated_inputs
+            )
             msg = f"Input mutation detected at {mutated_nodes}"
-            return MutationInfo(True, msg)
+            return MutationInfo(True, msg, mutated_input_indices)
 
-        return MutationInfo(False, "")
+        return MutationInfo(False, "", ())
 
     def has_aliasing(self) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages

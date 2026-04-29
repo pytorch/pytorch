@@ -146,10 +146,16 @@ class TestRunnerDeterminatorIssueParser(TestCase):
         """
 
         users = rd.parse_users(settings_text)
-        self.assertDictEqual(
-            {"User1": ["lf"], "User2": ["lf", "otherExp"]},
-            users,
-            "Users not parsed correctly",
+        self.assertEqual(
+            [rd.UserExperimentConfig("lf", 100)],
+            users["User1"],
+        )
+        self.assertEqual(
+            [
+                rd.UserExperimentConfig("lf", 100),
+                rd.UserExperimentConfig("otherExp", 100),
+            ],
+            users["User2"],
         )
 
     def test_parse_users_without_settings(self) -> None:
@@ -161,10 +167,97 @@ class TestRunnerDeterminatorIssueParser(TestCase):
         """
 
         users = rd.parse_users(settings_text)
-        self.assertDictEqual(
-            {"User1": ["lf"], "User2": ["lf", "otherExp"]},
-            users,
-            "Users not parsed correctly",
+        self.assertEqual(
+            [rd.UserExperimentConfig("lf", 100)],
+            users["User1"],
+        )
+        self.assertEqual(
+            [
+                rd.UserExperimentConfig("lf", 100),
+                rd.UserExperimentConfig("otherExp", 100),
+            ],
+            users["User2"],
+        )
+
+    def test_parse_users_with_rollout_perc(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            arc:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,arc:10
+        @User2,arc:50
+        @User3,lf
+
+        """
+
+        users = rd.parse_users(settings_text)
+        self.assertEqual(
+            [
+                rd.UserExperimentConfig("lf", 100),
+                rd.UserExperimentConfig("arc", 10),
+            ],
+            users["User1"],
+        )
+        self.assertEqual(
+            [rd.UserExperimentConfig("arc", 50)],
+            users["User2"],
+        )
+        self.assertEqual(
+            [rd.UserExperimentConfig("lf", 100)],
+            users["User3"],
+        )
+
+    def test_parse_users_invalid_percentage_defaults_to_100(self) -> None:
+        """Non-numeric percentage like arc:abc should default to 100%."""
+        settings_text = """
+        @User1,arc:abc
+        """
+
+        users = rd.parse_users(settings_text)
+        self.assertEqual(
+            [rd.UserExperimentConfig("arc", 100)],
+            users["User1"],
+        )
+
+    def test_parse_users_negative_percentage_clamped_to_zero(self) -> None:
+        """Negative percentage like arc:-5 should be clamped to 0."""
+        settings_text = """
+        @User1,arc:-5
+        """
+
+        users = rd.parse_users(settings_text)
+        self.assertEqual(
+            [rd.UserExperimentConfig("arc", 0)],
+            users["User1"],
+        )
+
+    def test_parse_users_over_100_percentage_clamped(self) -> None:
+        """Percentage over 100 like arc:200 should be clamped to 100."""
+        settings_text = """
+        @User1,arc:200
+        """
+
+        users = rd.parse_users(settings_text)
+        self.assertEqual(
+            [rd.UserExperimentConfig("arc", 100)],
+            users["User1"],
+        )
+
+    def test_parse_users_opt_out_ignores_percentage(self) -> None:
+        """Opt-out entries like -lf should not parse a percentage."""
+        settings_text = """
+        @User1,-lf
+        """
+
+        users = rd.parse_users(settings_text)
+        self.assertEqual(
+            [rd.UserExperimentConfig("-lf", 100)],
+            users["User1"],
         )
 
 
@@ -507,6 +600,211 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         result = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
         self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=5)
+    def test_opted_in_user_with_rollout_perc_enabled(self, mock_uniform: Mock) -> None:
+        """User opted in with 10% rollout, random=5 -> enabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=50)
+    def test_opted_in_user_with_rollout_perc_disabled(self, mock_uniform: Mock) -> None:
+        """User opted in with 10% rollout, random=50 -> disabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+
+    def test_opted_in_user_without_rollout_perc_always_enabled(self) -> None:
+        """User opted in without percentage (default 100%) -> always enabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=15)
+    def test_multiple_requesters_uses_min_perc(self, mock_uniform: Mock) -> None:
+        """Two requesters with different rollout_percs, uses the minimum (10%)."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf:10
+        @User2,lf:50
+
+        """
+
+        # random=15, min_perc=10 -> 15 > 10 -> disabled
+        result = rd.get_runner_prefix(settings_text, ["User1", "User2"], USER_BRANCH)
+        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=5)
+    def test_multiple_requesters_uses_min_perc_enabled(
+        self, mock_uniform: Mock
+    ) -> None:
+        """Two requesters with different rollout_percs, min=10%, random=5 -> enabled."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf:10
+        @User2,lf:50
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1", "User2"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+
+    def test_opt_out_overrides_rollout_perc(self) -> None:
+        """Opt-out (-lf) wins over opt-in with rollout_perc (lf:50)."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+        ---
+
+        Users:
+        @User1,-lf,lf:50
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=5)
+    def test_opted_in_user_with_rollout_perc_two_experiments(
+        self, mock_uniform: Mock
+    ) -> None:
+        """User opted into lf at 100% and otherExp at 10%, random=5 -> both enabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,otherExp:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual(
+            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
+        )
+
+    @patch("random.uniform", return_value=50)
+    def test_opted_in_user_with_rollout_perc_partial_enable(
+        self, mock_uniform: Mock
+    ) -> None:
+        """User opted into lf at 100% and otherExp at 10%, random=50 -> only lf enabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,otherExp:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+
+    def test_opted_in_user_with_zero_rollout_perc(self) -> None:
+        """User opted in with 0% rollout -> never enabled"""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf:0
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+
+    @patch("random.uniform", return_value=5)
+    def test_arc_opted_in_user_with_rollout_perc_enabled(
+        self, mock_uniform: Mock
+    ) -> None:
+        """User opted into arc with 10% rollout, random=5 -> arc enabled"""
+        settings_text = """
+        experiments:
+            arc:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,arc:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
+
+    @patch("random.uniform", return_value=50)
+    def test_arc_opted_in_user_with_rollout_perc_disabled(
+        self, mock_uniform: Mock
+    ) -> None:
+        """User opted into arc with 10% rollout, random=50 -> arc disabled"""
+        settings_text = """
+        experiments:
+            arc:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,arc:10
+
+        """
+
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", result.prefix)
+        self.assertFalse(result.use_arc)
 
 
 class TestRunnerDeterminatorArcExperiment(TestCase):

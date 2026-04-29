@@ -92,6 +92,18 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC test.
+      export-profiler-trace:
+        description: |
+          If set to "1", export Chrome profiler traces from performance benchmarks.
+        required: false
+        type: string
+        default: ""
+      enable-torch-trace:
+        description: |
+          If set to "1", enable TORCH_TRACE structured logging and collect tlparse output.
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -267,9 +279,20 @@ jobs:
             echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
           fi
 
-          # Verify CUDA libraries are present
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
           echo "CUDA libraries:"
           ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conveniently
@@ -348,6 +371,8 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          EXPORT_PROFILER_TRACE: ${{ inputs.export-profiler-trace }}
+          ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           # Use offline mode by default, only enable online mode to refresh the models
@@ -457,6 +482,8 @@ jobs:
             -e HF_DATASETS_OFFLINE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
+            -e EXPORT_PROFILER_TRACE \
+            -e ENABLE_TORCH_TRACE \
             -e ARTIFACTS_FILE_SUFFIX \
             -e TORCH_TPU \
             -e TORCH_TPU_TEXT_FILE \
@@ -610,6 +637,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
         with:
           role-to-assume: arn:aws:iam::308535385114:role/arc
@@ -622,7 +651,7 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
-          use-gha: ${{ inputs.use-gha }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -664,9 +693,20 @@ jobs:
             echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
           fi
 
-          # Verify CUDA libraries are present
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
           echo "CUDA libraries:"
           ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conveniently
@@ -718,6 +758,7 @@ jobs:
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
+          SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
@@ -760,6 +801,8 @@ jobs:
           ${TEST_COMMAND}
 
       - name: Configure AWS credentials
+        id: aws-creds-benchmark
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
@@ -768,7 +811,7 @@ jobs:
       - name: Upload pytest cache if tests failed
         uses: pytorch/pytorch/.github/actions/pytest-cache-upload@main
         continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && steps.aws-creds-benchmark.outcome == 'success'
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
@@ -777,6 +820,7 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Upload the benchmark results
+        if: steps.aws-creds-benchmark.outcome == 'success'
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           benchmark-results-dir: test/test-reports

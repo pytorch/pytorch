@@ -127,17 +127,6 @@ function get_exit_code() {
   return $retcode
 }
 
-function get_bazel() {
-  # Download and use the cross-platform, dependency-free Python
-  # version of Bazelisk to fetch the platform specific version of
-  # Bazel to use from .bazelversion.
-  retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
-  shasum --algorithm=1 --check \
-    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
-  chmod u+x tools/bazel
-}
-
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
@@ -164,7 +153,7 @@ function detect_cuda_arch() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
+  retry pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -172,8 +161,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
-  pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
+  retry pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  retry pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -192,7 +181,7 @@ function install_torchvision() {
     export FORCE_CUDA=1
     export WITH_CUDA=1
   fi
-  pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+  retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}

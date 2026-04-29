@@ -131,7 +131,7 @@ class FSDPTestModel(nn.Module, ABC):
 
     @abstractmethod
     def get_input(self, device) -> tuple[torch.Tensor, ...]:
-        """Returns an input for the model as as tuple."""
+        """Returns an input for the model as a tuple."""
         ...
 
     @abstractmethod

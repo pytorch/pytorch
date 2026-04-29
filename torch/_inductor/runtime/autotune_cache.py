@@ -26,7 +26,6 @@ expensive autotuning operations when the same kernels are compiled multiple time
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import logging
 import os
 import os.path
@@ -39,10 +38,11 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.utils._triton import has_triton
 
+from ..cache_key import AUTOTUNE_CACHE_KEY_STRATEGY
 from ..remote_cache import (
     create_cache,
     JsonDataTy,
@@ -114,9 +114,14 @@ class AutotuneCacheArtifact(CacheArtifact):
 
 @dataclasses.dataclass
 class AutotuneCache:
+    """
+    Coordinates local and remote autotune cache access for a single kernel.
+    """
+
     configs_hash: str
     local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
     remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
+    artifact_recorder: CacheArtifactRecorder | None = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
@@ -125,8 +130,15 @@ class AutotuneCache:
     ) -> AutotuneCache | None:
         cache = AutotuneCache(configs_hash)
         key = AutotuneCache._prepare_key(filename)
+        local_cache_key = AutotuneCache._make_local_cache_key(
+            os.path.dirname(filename), key
+        )
+        cache.artifact_recorder = CacheArtifactRecorder(
+            AutotuneCacheArtifact.type(),
+            AutotuneCache._artifact_key_from_local_cache_key(local_cache_key),
+        )
 
-        cache._setup_local_cache(inductor_meta, os.path.dirname(filename), key)
+        cache._setup_local_cache(inductor_meta, local_cache_key)
         cache._setup_remote_autotune_cache(inductor_meta, key)
         if cache.local_cache or cache.remote_cache:
             return cache
@@ -139,7 +151,30 @@ class AutotuneCache:
 
         # base of filename is already sha256 hash the source contents
         key = f"{os.path.basename(filename)}:{cconfig.cache_key_tag}"
-        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return AUTOTUNE_CACHE_KEY_STRATEGY.key(key)
+
+    @staticmethod
+    def _make_local_cache_key(dirname: str, cache_key: str) -> str:
+        """
+        [Note: torch_key in autotune cache key]
+        Include torch_key() in the cache key so that different versions
+        of torch result in cache invalidation. This is important in case
+        of changes to the best_config format or other code changes that
+        are not backward compatible w.r.t. the cache.
+        """
+        from ..codecache import torch_key
+
+        updated_cache_key = AUTOTUNE_CACHE_KEY_STRATEGY.key(cache_key, torch_key())
+        return os.path.join(dirname, f"{updated_cache_key}.best_config")
+
+    @staticmethod
+    def _artifact_key_from_local_cache_key(local_cache_key: str) -> str:
+        return os.path.join(*local_cache_key.split(os.sep)[-2:])
+
+    def _record_artifact(self, data: JsonDataTy) -> None:
+        # Older pickled AutotuneCache instances may not have this field.
+        if recorder := getattr(self, "artifact_recorder", None):
+            recorder.record(data)
 
     # Read the best config options from the most local cache and return it.
     def _read(self) -> dict[str, JsonDataTy] | None:
@@ -147,12 +182,14 @@ class AutotuneCache:
             cache, key = local_cache
             if best_config := cache.get(key):
                 if isinstance(best_config, dict):
+                    self._record_artifact(best_config)
                     return best_config
 
         if remote_cache := self.remote_cache:
             cache, key = remote_cache
             if best_config := cache.get(key):
                 if isinstance(best_config, dict):
+                    self._record_artifact(best_config)
                     return best_config
 
         return None
@@ -170,28 +207,13 @@ class AutotuneCache:
 
     # Set up local filesystem caching information
     def _setup_local_cache(
-        self, inductor_meta: _InductorMetaTy, dirname: str, cache_key: str
+        self, inductor_meta: _InductorMetaTy, cache_key: str
     ) -> None:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        from ..codecache import torch_key
-
-        """
-        [Note: torch_key in autotune cache key]
-        Include torch_key() in the cache key so that different versions
-        of torch result in cache invalidation. This is important in case
-        of changes to the best_config format or other code changes that
-        are not backward compatible w.r.t. the cache.
-        """
-        hasher = hashlib.sha256()
-        hasher.update(cache_key.encode("utf-8"))
-        hasher.update(torch_key())
-        updated_cache_key = hasher.hexdigest()
-
-        cache_filename = f"{dirname}/{updated_cache_key}.best_config"
         local_cache = LocalAutotuneCache()
-        self.local_cache = (local_cache, cache_filename)
+        self.local_cache = (local_cache, cache_key)
 
     # Set up remote caching information
     def _setup_remote_autotune_cache(
@@ -213,8 +235,9 @@ class AutotuneCache:
 
         salt = "autotune-best-config-v2"
         # re: torch_key - see [Note: torch_key in autotune cache key]
-        key = torch_key().hex() + backend_hash + self.configs_hash + salt
-        key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        key = AUTOTUNE_CACHE_KEY_STRATEGY.key(
+            torch_key().hex(), backend_hash, self.configs_hash, salt
+        )
 
         remote_cache = create_cache(
             key,
@@ -274,7 +297,7 @@ class AutotuneCache:
         found_by_coordesc: bool = False,
         triton_cache_hash: str | None = None,
     ) -> None:
-        data = {
+        data: dict[str, JsonDataTy] = {
             # pyrefly: ignore [missing-attribute]
             **config.kwargs,
             # pyrefly: ignore [missing-attribute]
@@ -300,16 +323,14 @@ class AutotuneCache:
                 }
             )
 
+        self._record_artifact(data)
+
         if local_cache := self.local_cache:
             cache, key = local_cache
             # pyrefly: ignore [bad-argument-type]
             cache.put(key, data)
             # pyrefly: ignore [bad-argument-type]
             AutotuneCacheBundler.put(key, data)
-            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
-            CacheArtifactManager.record_artifact(
-                AutotuneCacheArtifact.type(), autotune_artifact_key, data
-            )
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -474,8 +495,7 @@ class AutotuneCacheBundler:
         # that info is basically present in the `code_hash` (since it's a
         # parameter to the pointwise decorator) - but is there other info we
         # need to include from inductor_meta?
-        key = code_hash + backend_hash + salt
-        key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        key = AUTOTUNE_CACHE_KEY_STRATEGY.key(code_hash, backend_hash, salt)
 
         bundler = _AutotuneCacheBundlerImpl(key, cache)
         if not bundler._load_cache():
@@ -648,10 +668,6 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
-            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
-            CacheArtifactManager.record_artifact(
-                AutotuneCacheArtifact.type(), autotune_artifact_key, result
-            )
         return result
 
     @override

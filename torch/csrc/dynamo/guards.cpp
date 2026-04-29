@@ -346,7 +346,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
     auto handle = py::handle(item);
-    if (item == Py_None) {
+    if (Py_IsNone(item)) {
       vec.emplace_back(std::nullopt);
     } else if (torch::is_symint(handle)) {
       vec.emplace_back(py::cast<c10::SymInt>(handle));
@@ -367,7 +367,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
 static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
     PyObject* dynamic_dims_py) {
   std::vector<std::vector<std::optional<c10::SymInt>>> per_tensor_dynamic_dims;
-  if (dynamic_dims_py != Py_None) {
+  if (!Py_IsNone(dynamic_dims_py)) {
     Py_ssize_t size = PyList_Size(dynamic_dims_py);
     for (Py_ssize_t i = 0; i < size; i++) {
       PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
@@ -538,13 +538,15 @@ PyObject* TensorGuards_check_verbose(
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(item));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
       fail_reason << "expected type of '" << tensor_check_names[i]
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return Py_BuildValue("s", fail_reason.str().c_str());
     }
@@ -1059,7 +1061,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-static PyObject* copy_misaligned(PyObject* dummy, PyObject* item) {
+static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
   /*
    * If the tensor's data pointer is not 16-byte aligned, return a
    * clone that preserves strides. Otherwise return the original
@@ -1223,7 +1225,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
-    {"copy_misaligned", copy_misaligned, METH_O, nullptr},
+    {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
     {"dict_version", dict_version, METH_O, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cpu_pinned",
@@ -1275,7 +1277,7 @@ bool is_immutable_object(py::handle example_value) {
     return true;
   }
 
-  return (example_value.ptr() == Py_None) ||
+  return (Py_IsNone(example_value.ptr())) ||
       PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
       PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
@@ -1874,7 +1876,7 @@ class NONE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_None;
+    return Py_IsNone(value);
   }
 };
 
@@ -1890,7 +1892,7 @@ class TRUE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_True;
+    return Py_IsTrue(value);
   }
 };
 
@@ -1906,7 +1908,7 @@ class FALSE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_False;
+    return Py_IsFalse(value);
   }
 };
 
@@ -2097,7 +2099,7 @@ class NOT_NONE : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value != Py_None;
+    return !Py_IsNone(value);
   }
 };
 
@@ -2831,7 +2833,7 @@ inline TensorCheck make_tensor_check(
 }
 
 struct RecordedTensorMetadata {
-  PyObject* tensor_ptr;
+  py::weakref tensor_weakref;
   TensorCheck check;
 };
 
@@ -3013,6 +3015,7 @@ class GuardManager {
       if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
         PyCapsule_SetName(e.cap, "DeadGuardManager");
       }
+      Py_DECREF(e.cap);
       Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
     _tag_safe_entries.clear();
@@ -3099,8 +3102,8 @@ class GuardManager {
 
   void stash_tensor_pointers(
       PyObject* value,
-      std::vector<PyObject*> tensor_pointers) {
-    _tensor_pointers[value] = tensor_pointers;
+      std::vector<py::weakref> tensor_pointers) {
+    _tensor_pointers[value] = std::move(tensor_pointers);
   }
 
   void stash_tensor_metadata(
@@ -3248,10 +3251,17 @@ class GuardManager {
       return true;
     }
     for (auto& recorded_tensor : it->second) {
-      if (!THPVariable_Check(recorded_tensor.tensor_ptr) ||
-          !recorded_tensor.check.check(
-              get_local_state(_root),
-              THPVariable_Unpack(recorded_tensor.tensor_ptr))) {
+      PyObject* tensor_ptr = nullptr;
+      if (PyWeakref_GetRef(recorded_tensor.tensor_weakref.ptr(), &tensor_ptr) ==
+          0) {
+        _disable_dict_tag_matching = true;
+        return false;
+      }
+      bool ok = THPVariable_Check(tensor_ptr) &&
+          recorded_tensor.check.check(
+              get_local_state(_root), THPVariable_Unpack(tensor_ptr));
+      Py_DECREF(tensor_ptr);
+      if (!ok) {
         return false;
       }
     }
@@ -3261,8 +3271,15 @@ class GuardManager {
   bool check_no_tensor_aliasing_guards_fast(PyObject* value) {
     std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
         get_no_tensor_aliasing_guard(_root);
-    for (auto* tensor_pointer : _tensor_pointers[value]) {
-      if (!no_tensor_aliasing_guard->check_nopybind(tensor_pointer)) {
+    for (auto& tensor_weakref : _tensor_pointers[value]) {
+      PyObject* tensor_ptr = nullptr;
+      if (PyWeakref_GetRef(tensor_weakref.ptr(), &tensor_ptr) == 0) {
+        _disable_dict_tag_matching = true;
+        return false;
+      }
+      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor_ptr);
+      Py_DECREF(tensor_ptr);
+      if (!ok) {
         return false;
       }
     }
@@ -3453,6 +3470,7 @@ class GuardManager {
       return false;
     }
     // These will be decrefed in destructor
+    Py_INCREF(capsule);
     _tag_safe_entries.push_back({wr, capsule});
     return true;
   }
@@ -3759,7 +3777,7 @@ class GuardManager {
   bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
       _dict_pointers;
-  std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
+  std::unordered_map<PyObject*, std::vector<py::weakref>> _tensor_pointers;
   std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
@@ -4056,12 +4074,13 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
-    _recorded_tensor_pointers.push_back(tensor_pointer);
+    _recorded_tensor_pointers.push_back(
+        py::weakref(py::handle(tensor_pointer)));
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
-        tensor_pointer,
+        py::reinterpret_borrow<py::object>(tensor_pointer),
         make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
     });
   }
@@ -4121,7 +4140,7 @@ class RootGuardManager : public GuardManager {
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
-  std::vector<PyObject*> _recorded_tensor_pointers;
+  std::vector<py::weakref> _recorded_tensor_pointers;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
 
@@ -4335,10 +4354,14 @@ class DictGuardManager : public GuardManager {
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
-    // If you are calling this, you probably want to go through a key, value
-    // child manager and then add a leaf guard on them. DictGuardManager already
-    // has TYPE_MATCH and LENGTH_CHECK built in.
-    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
+    // DictGuardManager handles TYPE_MATCH and LENGTH_CHECK inline.
+    // Most leaf guards should go on key/value child managers instead.
+    // ID_MATCH is the exception — it guards the container's identity,
+    // not its contents, and is needed when user code calls id() on a dict.
+    TORCH_CHECK(
+        dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr,
+        "DictGuardManager only supports ID_MATCH as a leaf guard");
+    GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr
@@ -4733,13 +4756,15 @@ class TENSOR_MATCH : public LeafGuard {
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(value));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
       fail_reason << "expected type of '" << _tensor_name
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }

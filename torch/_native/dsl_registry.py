@@ -4,7 +4,7 @@ import functools
 import logging
 from typing import Protocol
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
 from .registry import _OpFn
 

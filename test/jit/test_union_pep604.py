@@ -126,8 +126,8 @@ class TestUnion(JitTestCase):
             scripted(1)
 
     def test_union_in_class_constructor(self):
-        @torch.jit.script  # noqa: B903
-        class A:  # noqa: B903
+        @torch.jit.script
+        class A:
             def __init__(self, x: int | str) -> None:
                 self.x = x
 

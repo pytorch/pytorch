@@ -19,6 +19,8 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
+#include <c10/util/Semaphore.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -664,6 +666,12 @@ struct ThreadLocalResults {
 
   int active_frames_{0};
   int remaining_start_frames_{0};
+
+  // Guards against teardown racing with in-flight callbacks.
+  // pyProfileFn acquires this on entry and releases on exit.
+  // PythonTracer::stop() acquires each thread's semaphore after
+  // clearing the profiling callback to ensure all callbacks have finished.
+  c10::Semaphore profile_sem{1};
 };
 
 // ============================================================================
@@ -1163,6 +1171,18 @@ void PythonTracer::stop() {
   if (active_) {
     setprofileAllThreads(nullptr, nullptr);
 
+    // Wait for any in-flight pyProfileFn callbacks to finish. Threads inside
+    // pyProfileFn hold their thread's profile_sem. They may have temporarily
+    // released the GIL or parked mid-callback due to a stop-the-world event.
+    // Acquiring each semaphore here blocks until those callbacks complete.
+    {
+      pybind11::gil_scoped_release release;
+      for (auto& tls : thread_local_results_) {
+        tls.profile_sem.acquire();
+        tls.profile_sem.release();
+      }
+    }
+
 #if IS_PYTHON_3_12
     unregisterMonitoringCallback();
 #endif
@@ -1551,11 +1571,18 @@ int PythonTracer::pyProfileFn(
     PyFrameObject* frame,
     int what,
     PyObject* arg) {
+  HANDLE_TH_ERRORS
   auto* tracer = reinterpret_cast<TraceContext*>(obj)->tracer_;
   auto* local_results = tracer->findThreadLocalResults(PyThreadState_Get());
   if (C10_UNLIKELY(!local_results)) {
     return 0;
   }
+  bool acquired = local_results->profile_sem.tryAcquire();
+  TORCH_INTERNAL_ASSERT(acquired, "pyProfileFn: profile_sem unexpectedly held");
+  // RAII release: ensures the semaphore is released on both normal
+  // return and C++ exception paths (e.g. from pybind11 in ValueCache::store).
+  auto release_sem =
+      c10::make_scope_exit([&]() { local_results->profile_sem.release(); });
   switch (what) {
     case PyTrace_CALL:
       local_results->active_tracer_->recordPyCall(*local_results, frame, false);
@@ -1584,6 +1611,7 @@ int PythonTracer::pyProfileFn(
       break;
   }
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 std::unique_ptr<python_tracer::PythonTracerBase> getTracer(

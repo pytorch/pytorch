@@ -59,12 +59,15 @@ class TestDTensorLogging(TestCase):
         x_dt2 = DTensor.from_local(torch.randn(4, 4), mesh, [Shard(0)], run_check=False)
         x_dt2 + x_dt2
 
-        logs = log_string()
         mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
-        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
-        self.assertIn("sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
-        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on {mesh_str}) -> Spec(f32[4, 4](R))", logs)  # noqa: B950
-        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on {mesh_str}) -> Spec(f32[8, 4](S(0)))", logs)  # noqa: B950
+        self.assertExpectedInline(
+            log_string(),
+            f"""\
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))
+sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on {mesh_str}) -> Spec(f32[4, 4](R))
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on {mesh_str}) -> Spec(f32[8, 4](S(0)))""",
+        )
 
         # Test Python LRU cache, directly with ShardingPropagator
         log_records.clear()
@@ -85,10 +88,13 @@ class TestDTensorLogging(TestCase):
         )
         propagator.propagate_op_sharding(op_schema)  # Python cache miss
         propagator.propagate_op_sharding(op_schema)  # Python cache hit
-        logs = log_string()
         mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
-        self.assertIn(f"sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
-        self.assertIn(f"sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
+        self.assertExpectedInline(
+            log_string(),
+            f"""\
+sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))
+sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))""",
+        )
 
     def test_logging_level_change_resets_cpp_cache(self):
         """setLevel on the dispatch logger resets the C++ cached logging flag."""

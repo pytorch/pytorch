@@ -138,7 +138,6 @@ def regenerate_clangtidy_files():
 #: These linters are expected to need less than 3s cpu time total
 VERY_FAST_LINTERS = {
     "ATEN_CPU_GPU_AGNOSTIC",
-    "BAZEL_LINTER",
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
