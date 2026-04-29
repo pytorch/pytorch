@@ -1,0 +1,132 @@
+diff --git a/test/dynamo/cpython/3_13/test_deque.py b/test/dynamo/cpython/3_13/test_deque.py
+index 4679f297fd7..57aa863406a 100644
+--- a/test/dynamo/cpython/3_13/test_deque.py
++++ b/test/dynamo/cpython/3_13/test_deque.py
+@@ -1,7 +1,30 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_deque.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    skipIfTorchDynamo,
++    run_tests,
++)
++
++
++# ======= END DYNAMO PATCH =======
++
+ from collections import deque
+ import doctest
+ import unittest
+-from test import support, seq_tests
++from test import support
++import seq_tests
+ import gc
+ import weakref
+ import copy
+@@ -27,7 +50,7 @@ class MutateCmp:
+         self.deque.clear()
+         return self.result
+ 
+-class TestBasic(unittest.TestCase):
++class TestBasic(CPythonTestCase):
+ 
+     def test_basics(self):
+         d = deque(range(-5125, -5000))
+@@ -541,6 +564,7 @@ class TestBasic(unittest.TestCase):
+     def test_hash(self):
+         self.assertRaises(TypeError, hash, deque('abc'))
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_long_steadystate_queue_popleft(self):
+         for size in (0, 1, 2, 100, 1000):
+             d = deque(range(size))
+@@ -552,6 +576,7 @@ class TestBasic(unittest.TestCase):
+                     self.assertEqual(x, i-size)
+             self.assertEqual(list(d), list(range(BIG-size, BIG)))
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_long_steadystate_queue_popright(self):
+         for size in (0, 1, 2, 100, 1000):
+             d = deque(reversed(range(size)))
+@@ -564,6 +589,7 @@ class TestBasic(unittest.TestCase):
+             self.assertEqual(list(reversed(list(d))),
+                              list(range(BIG-size, BIG)))
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_big_queue_popleft(self):
+         pass
+         d = deque()
+@@ -575,6 +601,7 @@ class TestBasic(unittest.TestCase):
+             if x != i:
+                 self.assertEqual(x, i)
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_big_queue_popright(self):
+         d = deque()
+         append, pop = d.appendleft, d.pop
+@@ -585,6 +612,7 @@ class TestBasic(unittest.TestCase):
+             if x != i:
+                 self.assertEqual(x, i)
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_big_stack_right(self):
+         d = deque()
+         append, pop = d.append, d.pop
+@@ -596,6 +624,7 @@ class TestBasic(unittest.TestCase):
+                 self.assertEqual(x, i)
+         self.assertEqual(len(d), 0)
+ 
++    @skipIfTorchDynamo("slow Test")
+     def test_big_stack_left(self):
+         d = deque()
+         append, pop = d.appendleft, d.popleft
+@@ -758,7 +787,7 @@ class TestBasic(unittest.TestCase):
+         check(deque('a' * BLOCKLEN), basesize + 2 * blocksize)
+         check(deque('a' * (42 * BLOCKLEN)), basesize + 43 * blocksize)
+ 
+-class TestVariousIteratorArgs(unittest.TestCase):
++class TestVariousIteratorArgs(CPythonTestCase):
+ 
+     def test_constructor(self):
+         for s in ("123", "", range(1000), ('do', 1.2), range(2000,2200,5)):
+@@ -792,7 +821,7 @@ class DequeWithBadIter(deque):
+     def __iter__(self):
+         raise TypeError
+ 
+-class TestSubclass(unittest.TestCase):
++class TestSubclass(CPythonTestCase):
+ 
+     def test_basics(self):
+         d = Deque(range(25))
+@@ -898,7 +927,7 @@ class SubclassWithKwargs(deque):
+     def __init__(self, newarg=1):
+         deque.__init__(self)
+ 
+-class TestSubclassWithKwargs(unittest.TestCase):
++class TestSubclassWithKwargs(CPythonTestCase):
+     def test_subclass_with_kwargs(self):
+         # SF bug #1486663 -- this used to erroneously raise a TypeError
+         SubclassWithKwargs(newarg=1)
+@@ -1029,10 +1058,6 @@ h
+ 
+ __test__ = {'libreftest' : libreftest}
+ 
+-def load_tests(loader, tests, pattern):
+-    tests.addTest(doctest.DocTestSuite())
+-    return tests
+-
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
