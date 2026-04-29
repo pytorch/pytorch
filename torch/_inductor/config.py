@@ -2088,6 +2088,14 @@ class aot_inductor:
     Settings for Ahead-Of-Time Inductor Compilation
     """
 
+    # When True, each kernel in the autotune code allocates fresh tensors,
+    # runs, then immediately dels all tensors. Shared tensors are re-allocated
+    # for each consumer kernel. This prevents OOM from simultaneous live
+    # tensors in star-shaped graphs at the cost of more allocations during
+    # autotuning. When False (default), tensors are shared across kernels
+    # and del'd at their last consumer (faster but higher peak memory).
+    autotune_per_kernel_alloc: bool = False
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;

@@ -3390,11 +3390,10 @@ class PythonWrapperCodegen(CodeGen):
                     original_fxnode_name, None
                 )
 
+            _per_kernel = config.aot_inductor.autotune_per_kernel_alloc
+
             def get_autotune_deletion_call() -> str:
-                """After all the autotune kernel calls have been written (i.e.
-                self.kernel_autotune_example_args is complete), returns a deletion call
-                for all autotune example tensors that are unnecessary after kernel_name
-                is called."""
+                """Returns del for tensors whose last consumer is this kernel."""
                 tensors_to_delete = [
                     tensor
                     for tensor, kn in self.kernel_autotune_example_args.values()
@@ -3438,6 +3437,7 @@ class PythonWrapperCodegen(CodeGen):
                 return False
 
             all_args = []
+            tensor_arg_strs = []  # used only when _per_kernel is True
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
                 assert raw_keys is None, "keys are not None but args are"
@@ -3482,13 +3482,19 @@ class PythonWrapperCodegen(CodeGen):
                     # in `TritonKernel.call_kernel()`.
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
+                    elif _per_kernel:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg
+                        )
+                        tensor_arg_strs.append(arg_str)
                     elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
                             arg, arg_type, raw_arg
                         )
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
-                    self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
+                    if not _per_kernel:
+                        self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
 
@@ -3506,9 +3512,18 @@ class PythonWrapperCodegen(CodeGen):
             )
             self.kernel_autotune_calls.do_unindent()
 
-            self.kernel_autotune_calls.writeline(
-                DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
-            )
+            if _per_kernel and tensor_arg_strs:
+                self.kernel_autotune_calls.writeline(
+                    f"del {', '.join(tensor_arg_strs)}"
+                )
+            elif not _per_kernel:
+                self.kernel_autotune_calls.writeline(
+                    DelayReplaceLine(
+                        "<del_call>",
+                        get_autotune_deletion_call,
+                        "<del_call>",
+                    )
+                )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
