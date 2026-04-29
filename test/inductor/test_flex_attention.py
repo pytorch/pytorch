@@ -2205,12 +2205,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         run()
         torch._dynamo.reset()
         gc.collect()
-        torch._C._cuda_clearCublasWorkspaces()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch._C._cuda_clearCublasWorkspaces()
+        torch.accelerator.empty_cache()
         torch._dynamo.reset()
         gc.collect()
-        torch._C._cuda_clearCublasWorkspaces()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch._C._cuda_clearCublasWorkspaces()
+        torch.accelerator.empty_cache()
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
