@@ -2158,7 +2158,7 @@ def cat(inputs, dim=0):
         return count
 
     # as of inputs increase, possibility for register spilling also increases
-    # past a certain threshold of inputs we only fuse if the if the input kernels
+    # past a certain threshold of inputs we only fuse if the input kernels
     # are simple
     # not sure if we want to expose to users via config since logic may change in future
     MAX_COMPLEX_POINTWISE_CAT = 8
