@@ -19,8 +19,9 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
-from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-    to_cutlass_scale_mode,
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+    _create_gemm_arguments,
+    _get_scaled_gemm_modes,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
@@ -123,13 +124,34 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the NVIDIA Universal GEMM kernel."""
-        import cutlass_api
+        helper_kwargs: dict[str, Any] = {}
+        if self.variant == GemmVariant.SCALED_GEMM:
+            scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
+                _get_scaled_gemm_modes(
+                    self.scale_type_a,
+                    self.swizzle_type_a,
+                    self.scale_type_b,
+                    self.swizzle_type_b,
+                )
+            )
+            helper_kwargs = {
+                "scale_mode_a": scale_mode_a,
+                "swizzle_mode_a": swizzle_mode_a,
+                "scale_mode_b": scale_mode_b,
+                "swizzle_mode_b": swizzle_mode_b,
+            }
 
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
 
-        args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
+        args = _create_gemm_arguments(
+            self.variant.name,
+            input_tensors,
+            out,
+            self.accumulator_type,
+            **helper_kwargs,
+        )
 
         if self._compiled_artifact is None:
             self._compiled_artifact = self.kernel.compile(args)
@@ -157,45 +179,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             )
 
         return run_kernel
-
-    def _create_gemm_arguments(self, cutlass_api, input_tensors, out):
-        """Create the appropriate GemmArguments based on variant."""
-        if self.variant == GemmVariant.GROUPED_GEMM:
-            a, b, offsets = input_tensors
-            return cutlass_api.arguments.GroupedGemmArguments(
-                a,
-                b,
-                out,
-                accumulator_type=self.accumulator_type,
-                offsets=offsets,
-            )
-        elif self.variant == GemmVariant.SCALED_GEMM:
-            from cutlass_api.arguments import ScaledTensor
-
-            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
-                self.scale_type_a, self.swizzle_type_a
-            )
-            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
-                self.scale_type_b, self.swizzle_type_b
-            )
-
-            a, b, scale_a, scale_b = input_tensors
-            scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
-            scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
-            return cutlass_api.arguments.GemmArguments(
-                scaled_a,
-                scaled_b,
-                out,
-                accumulator_type=self.accumulator_type,
-            )
-        else:
-            a, b = input_tensors
-            return cutlass_api.arguments.GemmArguments(
-                a,
-                b,
-                out,
-                accumulator_type=self.accumulator_type,
-            )
 
     def cleanup_run_fn(self) -> None:
         self._workspace = None
@@ -472,8 +455,6 @@ def _add_nv_gemm_choices_impl(
         swizzle_type_a: SwizzleType for A (required for SCALED_GEMM)
         swizzle_type_b: SwizzleType for B (required for SCALED_GEMM)
     """
-    import cutlass_api
-
     from torch._inductor.utils import _ensure_fp4_dtype_registered
 
     _ensure_fp4_dtype_registered()
@@ -496,55 +477,33 @@ def _add_nv_gemm_choices_impl(
         log.debug("Failed to create dummy tensors for %s", variant.op_name)
         return
 
-    if variant == GemmVariant.GROUPED_GEMM:
-        a_tensor, b_tensor, offs_tensor = dummy_tensors
-        assert b_tensor is not None
-        args = cutlass_api.arguments.GroupedGemmArguments(
-            a_tensor,
-            b_tensor,
-            out_tensor,
-            accumulator_type=accumulator_type,
-            offsets=offs_tensor,
-        )
-    elif variant == GemmVariant.SCALED_GEMM:
-        from cutlass_api.arguments import ScaledTensor
-
-        scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
-            scale_type_a, swizzle_type_a
-        )
-        scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
-            scale_type_b, swizzle_type_b
-        )
-        if scale_mode_a is None or scale_mode_b is None:
+    helper_kwargs: dict[str, Any] = {}
+    if variant == GemmVariant.SCALED_GEMM:
+        try:
+            scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
+                _get_scaled_gemm_modes(
+                    scale_type_a,
+                    swizzle_type_a,
+                    scale_type_b,
+                    swizzle_type_b,
+                )
+            )
+        except NotImplementedError:
             return
+        helper_kwargs = {
+            "scale_mode_a": scale_mode_a,
+            "swizzle_mode_a": swizzle_mode_a,
+            "scale_mode_b": scale_mode_b,
+            "swizzle_mode_b": swizzle_mode_b,
+        }
 
-        a_tensor, b_tensor, scale_a_tensor, scale_b_tensor = dummy_tensors
-        scaled_a = ScaledTensor(
-            a_tensor,
-            scale_a_tensor,
-            scale_mode_a,
-            swizzle_mode_a,
-        )
-        scaled_b = ScaledTensor(
-            b_tensor,
-            scale_b_tensor,
-            scale_mode_b,
-            swizzle_mode_b,
-        )
-        args = cutlass_api.arguments.GemmArguments(
-            scaled_a,
-            scaled_b,
-            out_tensor,
-            accumulator_type=accumulator_type,
-        )
-    else:
-        a_tensor, b_tensor = dummy_tensors
-        args = cutlass_api.arguments.GemmArguments(
-            a_tensor,
-            b_tensor,
-            out_tensor,
-            accumulator_type=accumulator_type,
-        )
+    args = _create_gemm_arguments(
+        variant.name,
+        tuple(dummy_tensors),
+        out_tensor,
+        accumulator_type,
+        **helper_kwargs,
+    )
 
     cc = get_cuda_arch()
     if cc is None:

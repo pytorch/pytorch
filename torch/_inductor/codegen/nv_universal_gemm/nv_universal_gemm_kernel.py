@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
@@ -38,6 +39,159 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _VariantRenderSpec:
+    import_lines: tuple[str, ...] = ()
+    helper_kwargs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _EpilogueRenderSpec:
+    import_lines: tuple[str, ...] = ()
+    module_block: str | None = None
+    module_lines: tuple[str, ...] = ()
+    setup_arg_lines: tuple[str, ...] = ()
+    gemm_arg_kwargs: tuple[str, ...] = ()
+    kernel_lookup_kwargs: tuple[str, ...] = ()
+    enabled: bool = False
+
+
+def _get_scaled_gemm_modes(
+    scale_type_a: Any | None,
+    swizzle_type_a: Any | None,
+    scale_type_b: Any | None,
+    swizzle_type_b: Any | None,
+) -> tuple[Any, Any, Any, Any]:
+    scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(scale_type_a, swizzle_type_a)
+    scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(scale_type_b, swizzle_type_b)
+    if any(
+        mode is None
+        for mode in (scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b)
+    ):
+        raise NotImplementedError("Unsupported scale/swizzle mode for scaled GEMM")
+    return scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b
+
+
+def _create_gemm_arguments(
+    variant_name: str,
+    input_tensors,
+    out,
+    accumulator_type: Any,
+    *,
+    scale_mode_a: Any | None = None,
+    swizzle_mode_a: Any | None = None,
+    scale_mode_b: Any | None = None,
+    swizzle_mode_b: Any | None = None,
+    epilogue: Any | None = None,
+):
+    import cutlass_api
+
+    if epilogue is not None and variant_name != "GEMM":
+        raise NotImplementedError(
+            "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
+        )
+
+    if variant_name == "GROUPED_GEMM":
+        a, b, offsets = input_tensors
+        return cutlass_api.arguments.GroupedGemmArguments(
+            a,
+            b,
+            out,
+            accumulator_type=accumulator_type,
+            offsets=offsets,
+        )
+
+    if variant_name == "SCALED_GEMM":
+        from cutlass_api.arguments import ScaledTensor
+
+        if any(
+            mode is None
+            for mode in (scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b)
+        ):
+            raise NotImplementedError(
+                "Scaled GEMM requires supported scale and swizzle modes"
+            )
+
+        a, b, scale_a, scale_b = input_tensors
+        scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
+        scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
+        return cutlass_api.arguments.GemmArguments(
+            scaled_a,
+            scaled_b,
+            out,
+            accumulator_type=accumulator_type,
+        )
+
+    if variant_name == "GEMM":
+        a, b = input_tensors
+        kwargs = {"accumulator_type": accumulator_type}
+        if epilogue is not None:
+            kwargs["epilogue"] = epilogue
+        return cutlass_api.arguments.GemmArguments(a, b, out, **kwargs)
+
+    raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
+
+
+def _lookup_gemm_kernel(
+    kernel_name: str,
+    *,
+    epilogue_args: Any | None = None,
+    epilogue_source: str = "",
+):
+    if epilogue_args is None:
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            get_kernel_by_name,
+        )
+
+        kernel = get_kernel_by_name(kernel_name)
+        if kernel is None:
+            raise RuntimeError(f"Could not find kernel: {kernel_name}")
+        return kernel
+
+    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+        get_efc_kernel_with_epilogue,
+    )
+
+    kernel = get_efc_kernel_with_epilogue(
+        kernel_name,
+        epilogue_args,
+        epilogue_source=epilogue_source,
+    )
+    if kernel is None:
+        raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
+    return kernel
+
+
+def _create_gemm_cache_key(
+    variant_name: str,
+    input_tensors,
+    *,
+    has_epilogue: bool = False,
+    aux_tensors: tuple = (),
+):
+    if variant_name == "GROUPED_GEMM":
+        a, b, offsets = input_tensors
+        cache_key = (a.shape, a.dtype, b.shape, b.dtype, offsets.shape)
+    elif variant_name == "SCALED_GEMM":
+        a, b, scale_a, scale_b = input_tensors
+        cache_key = (a.shape, a.dtype, b.shape, b.dtype, scale_a.shape, scale_b.shape)
+    elif variant_name == "GEMM":
+        a, b = input_tensors
+        cache_key = (a.shape, a.dtype, b.shape, b.dtype)
+    else:
+        raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
+
+    if has_epilogue:
+        # Aux tensors from the epilogue change the kernel's compiled artifact
+        # (cutlass_api dispatches on their dtype/shape) but the base cache_key
+        # only fingerprints A/B. Without folding aux tensor metadata in, a
+        # wrapper invoked with the same A/B but a differently-shaped aux input
+        # (e.g. dynamic-shape bias) would silently reuse a stale artifact.
+        aux_sig = tuple((t.shape, t.dtype) for t in aux_tensors)
+        return (*cache_key, "epilogue", aux_sig)
+    return cache_key
 
 
 class NVUniversalGemmKernelWrapper:
@@ -104,151 +258,185 @@ class NVUniversalGemmKernel(Kernel):
             self._template_input_args.append((param_name, input_node))
             self._seen_input_args.add(param_name)
 
-    def render(self) -> str:
-        """Render the Python source for the NVGEMM kernel wrapper."""
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
-            GemmVariant,
+    @staticmethod
+    def _write_assign_call(
+        code: IndentedBuffer,
+        target: str,
+        fn_name: str,
+        args: tuple[str, ...] | list[str],
+    ) -> None:
+        code.writeline(f"{target} = {fn_name}(")
+        with code.indent():
+            for arg in args:
+                code.writeline(f"{arg},")
+        code.writeline(")")
+
+    def _build_variant_render_spec(self) -> _VariantRenderSpec:
+        if self.variant.name != "SCALED_GEMM":
+            return _VariantRenderSpec()
+
+        scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
+            _get_scaled_gemm_modes(
+                self.scale_type_a,
+                self.swizzle_type_a,
+                self.scale_type_b,
+                self.swizzle_type_b,
+            )
+        )
+        return _VariantRenderSpec(
+            import_lines=(
+                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode",
+            ),
+            helper_kwargs=(
+                f"scale_mode_a=ScaleMode.{scale_mode_a.name}",
+                f"swizzle_mode_a=ScaleSwizzleMode.{swizzle_mode_a.name}",
+                f"scale_mode_b=ScaleMode.{scale_mode_b.name}",
+                f"swizzle_mode_b=ScaleSwizzleMode.{swizzle_mode_b.name}",
+            ),
         )
 
-        kernel_name_str = self.kernel_metadata["kernel_name"]
-        is_grouped = self.variant == GemmVariant.GROUPED_GEMM
-        is_scaled = self.variant == GemmVariant.SCALED_GEMM
-        has_epilogue = bool(self.epilogue_fn_code)
+    def _build_epilogue_render_spec(self) -> _EpilogueRenderSpec:
+        if not self.epilogue_fn_code:
+            return _EpilogueRenderSpec()
 
-        if has_epilogue and (is_grouped or is_scaled):
+        if self.variant.name != "GEMM":
             raise NotImplementedError(
                 "Epilogue fusion is not yet supported for grouped or scaled GEMM variants"
             )
 
+        epilogue_arg_lines = ["epilogue_fn=_epilogue_fn"]
+        epilogue_kwargs = self._render_epilogue_kwargs()
+        if epilogue_kwargs:
+            epilogue_arg_lines.append(epilogue_kwargs)
+
+        source_hash = hashlib.sha256(self.epilogue_fn_code.encode()).hexdigest()
+        return _EpilogueRenderSpec(
+            import_lines=("from cutlass_api.arguments import EpilogueArguments",),
+            module_block=self.epilogue_fn_code,
+            module_lines=(f'_EPILOGUE_FN_SOURCE = "{source_hash}"',),
+            setup_arg_lines=tuple(epilogue_arg_lines),
+            gemm_arg_kwargs=("epilogue=epi_args",),
+            kernel_lookup_kwargs=(
+                "epilogue_args=epi_args",
+                "epilogue_source=_EPILOGUE_FN_SOURCE",
+            ),
+            enabled=True,
+        )
+
+    def render(self) -> str:
+        """Render the Python source for the NVGEMM kernel wrapper."""
+        kernel_name_str = self.kernel_metadata["kernel_name"]
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
         )
 
-        input_params = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        input_params = list(input_tensor_names)
         input_params.append("out_ptr0")
         input_params.extend(self.epilogue_reads)
         if self.workspace_size > 0:
             input_params.append("workspace")
         input_params.append("stream=None")
         params_str = ", ".join(input_params)
+        if len(input_tensor_names) == 1:
+            input_tensors_expr = f"({input_tensor_names[0]},)"
+        else:
+            input_tensors_expr = f"({', '.join(input_tensor_names)})"
 
         workspace_arg = "workspace" if self.workspace_size > 0 else "None"
         var_prefix = self.variant.op_name.upper()
         cache_var = f"_{var_prefix}_compiled_cache"
         kernel_name_var = f"_{var_prefix}_KERNEL_NAME"
-
-        extra_imports = ""
-        if is_grouped:
-            cache_key = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape)"
-            create_args = f"""    args = cutlass_api.arguments.GroupedGemmArguments(
-        in_ptr0, in_ptr1, out_ptr0,
-        accumulator_type={acc_dtype_str},
-        offsets=in_ptr2,
-    )"""
-        elif is_scaled:
-            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
-                self.scale_type_a, self.swizzle_type_a
-            )
-            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
-                self.scale_type_b, self.swizzle_type_b
-            )
-            extra_imports = (
-                "from cutlass_api.arguments import ScaledTensor\n"
-                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode"
-            )
-            cache_key = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
-            sma = scale_mode_a.name if scale_mode_a else ""
-            smb = scale_mode_b.name if scale_mode_b else ""
-            swa = swizzle_mode_a.name if swizzle_mode_a else ""
-            swb = swizzle_mode_b.name if swizzle_mode_b else ""
-            create_args = f"""    scaled_a = ScaledTensor(in_ptr0, in_ptr2, ScaleMode.{sma}, ScaleSwizzleMode.{swa})
-    scaled_b = ScaledTensor(in_ptr1, in_ptr3, ScaleMode.{smb}, ScaleSwizzleMode.{swb})
-    args = cutlass_api.arguments.GemmArguments(
-        scaled_a, scaled_b, out_ptr0,
-        accumulator_type={acc_dtype_str},
-    )"""
-        else:
-            cache_key = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
-            create_args = f"""    args = cutlass_api.arguments.GemmArguments(
-        in_ptr0, in_ptr1, out_ptr0,
-        accumulator_type={acc_dtype_str},
-    )"""
-
-        if has_epilogue:
-            assert self.epilogue_fn_code is not None  # narrowed by has_epilogue
-            epilogue_kwargs = self._render_epilogue_kwargs()
-            source_hash = hashlib.sha256(self.epilogue_fn_code.encode()).hexdigest()
-
-            kernel_cache_import = "from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_efc_kernel_with_epilogue"
-            epilogue_import = "from cutlass_api.arguments import EpilogueArguments"
-            epilogue_fn_def = (
-                self.epilogue_fn_code + f'\n_EPILOGUE_FN_SOURCE = "{source_hash}"'
-            )
-
-            epilogue_setup = f"""
-    epi_args = EpilogueArguments(epilogue_fn=_epilogue_fn, {epilogue_kwargs})
-"""
-            kernel_lookup = f"""    kernel = get_efc_kernel_with_epilogue({kernel_name_str!r}, epi_args, epilogue_source=_EPILOGUE_FN_SOURCE)
-    if kernel is None:
-        raise RuntimeError(f"Could not find EFC kernel: {{{kernel_name_var}}}")"""
-
-            create_args = f"""    args = cutlass_api.arguments.GemmArguments(
-        in_ptr0, in_ptr1, out_ptr0,
-        accumulator_type={acc_dtype_str},
-        epilogue=epi_args,
-    )"""
-            # Aux tensors from the epilogue change the kernel's compiled
-            # artifact (cutlass_api dispatches on their dtype/shape) but the
-            # base cache_key only fingerprints A/B. Without folding aux
-            # tensor metadata in, a wrapper invoked with the same A/B but a
-            # differently-shaped aux input (e.g. dynamic-shape bias) would
-            # silently reuse a stale artifact.
-            aux_sig = ", ".join(
-                f"{name}.shape, {name}.dtype" for name in self.epilogue_reads
-            )
-            if aux_sig:
-                cache_key = f'({cache_key}, "epilogue", {aux_sig})'
-            else:
-                cache_key = f'({cache_key}, "epilogue")'
-        else:
-            kernel_cache_import = "from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name"
-            epilogue_import = ""
-            epilogue_fn_def = ""
-            epilogue_setup = ""
-            kernel_lookup = f"""    kernel = get_kernel_by_name({kernel_name_var})
-    if kernel is None:
-        raise RuntimeError(f"Could not find kernel: {{{kernel_name_var}}}")"""
+        variant_spec = self._build_variant_render_spec()
+        epilogue_spec = self._build_epilogue_render_spec()
 
         code = IndentedBuffer()
-        code.splice(
-            f"""
-import cutlass
-import cutlass_api
-{kernel_cache_import}
-{epilogue_import}
-{extra_imports}
-
-{epilogue_fn_def}
-
-{kernel_name_var} = {kernel_name_str!r}
-{cache_var} = {{}}
-
-def {self.kernel_name}_main({params_str}):
-    global {cache_var}
-{epilogue_setup}
-{create_args}
-
-{kernel_lookup}
-
-    cache_key = {cache_key}
-    artifact = {cache_var}.get(cache_key)
-    if artifact is None:
-        artifact = kernel.compile(args)
-        {cache_var}[cache_key] = artifact
-
-    kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
-            """
+        code.writeline("import cutlass")
+        code.writeline(
+            "from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import ("
         )
+        with code.indent():
+            code.writeline("_create_gemm_arguments,")
+            code.writeline("_create_gemm_cache_key,")
+            code.writeline("_lookup_gemm_kernel,")
+        code.writeline(")")
+        for import_line in (*variant_spec.import_lines, *epilogue_spec.import_lines):
+            code.writeline(import_line)
+        code.writeline("")
+
+        if epilogue_spec.module_block is not None:
+            code.splice(epilogue_spec.module_block, strip=True)
+            for line in epilogue_spec.module_lines:
+                code.writeline(line)
+            code.writeline("")
+
+        code.writeline(f"{kernel_name_var} = {kernel_name_str!r}")
+        code.writeline(f"{cache_var} = {{}}")
+        code.writeline("")
+        code.writeline(f"def {self.kernel_name}_main({params_str}):")
+        with code.indent():
+            code.writeline(f"global {cache_var}")
+            code.writeline(f"input_tensors = {input_tensors_expr}")
+            if epilogue_spec.enabled:
+                self._write_assign_call(
+                    code,
+                    "epi_args",
+                    "EpilogueArguments",
+                    epilogue_spec.setup_arg_lines,
+                )
+            self._write_assign_call(
+                code,
+                "args",
+                "_create_gemm_arguments",
+                (
+                    f'variant_name="{self.variant.name}"',
+                    "input_tensors=input_tensors",
+                    "out=out_ptr0",
+                    f"accumulator_type={acc_dtype_str}",
+                    *variant_spec.helper_kwargs,
+                    *epilogue_spec.gemm_arg_kwargs,
+                ),
+            )
+            code.writeline("")
+            self._write_assign_call(
+                code,
+                "kernel",
+                "_lookup_gemm_kernel",
+                (kernel_name_var, *epilogue_spec.kernel_lookup_kwargs),
+            )
+            if epilogue_spec.enabled and self.epilogue_reads:
+                aux_arg = (
+                    "aux_tensors=("
+                    + ", ".join(f"{name}" for name in self.epilogue_reads)
+                    + ",)"
+                )
+                cache_key_args = (
+                    f'variant_name="{self.variant.name}"',
+                    "input_tensors=input_tensors",
+                    f"has_epilogue={epilogue_spec.enabled}",
+                    aux_arg,
+                )
+            else:
+                cache_key_args = (
+                    f'variant_name="{self.variant.name}"',
+                    "input_tensors=input_tensors",
+                    f"has_epilogue={epilogue_spec.enabled}",
+                )
+            self._write_assign_call(
+                code,
+                "cache_key",
+                "_create_gemm_cache_key",
+                cache_key_args,
+            )
+            code.writeline(f"artifact = {cache_var}.get(cache_key)")
+            code.writeline("if artifact is None:")
+            with code.indent():
+                code.writeline("artifact = kernel.compile(args)")
+                code.writeline(f"{cache_var}[cache_key] = artifact")
+            code.writeline("")
+            code.writeline(
+                f"kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"
+            )
 
         return code.getvalue()
 
