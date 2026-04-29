@@ -866,7 +866,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             if need_keep
         )
         # We need to the forward inputs to each iteration to compute the backward
-        # which is the concatenation of first iteraiton input i.e. ctx.carries and all iterations's
+        # which is the concatenation of first iteration input i.e. ctx.carries and all iterations'
         # output except the last iteration.
         fw_carries = [
             torch.cat([carry.unsqueeze(0), carries[:-1]])
