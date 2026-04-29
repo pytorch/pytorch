@@ -324,6 +324,9 @@ DEFINE_DISPATCH(
     clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     isin_default_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(
+    isin_sorting_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_NO_CPU_DISPATCH(isin_sorting_stub)
 
 bool allclose(
     const Tensor& self,
@@ -995,15 +998,25 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
     return;
   }
 
+  if (elements.is_mps()) {
+    out.fill_(invert);
+    if (elements.numel() <=
+        46.0 * std::pow(static_cast<double>(test_elements.numel()), 0.155)) {
+      isin_default_stub(
+          elements.device().type(), elements, test_elements, invert, out);
+    } else {
+      isin_sorting_stub(
+          elements.device().type(), elements, test_elements, invert, out);
+    }
+    return;
+  }
+
   // Heuristic taken from numpy's implementation.
   // See
   // https://github.com/numpy/numpy/blob/fb215c76967739268de71aa4bda55dd1b062bc2e/numpy/lib/arraysetops.py#L575
-  // MPS always takes the default-impl path: the sorting path regresses
-  // significantly on MPS relative to the native Metal kernel.
-  if (elements.is_mps() ||
-      test_elements.numel() <
-          static_cast<int64_t>(
-              10.0f * std::pow(static_cast<double>(elements.numel()), 0.145))) {
+  if (test_elements.numel() <
+      static_cast<int64_t>(
+          10.0f * std::pow(static_cast<double>(elements.numel()), 0.145))) {
     out.fill_(invert);
     isin_default_stub(
         elements.device().type(), elements, test_elements, invert, out);

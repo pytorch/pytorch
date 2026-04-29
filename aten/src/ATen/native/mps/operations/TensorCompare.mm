@@ -16,6 +16,7 @@
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/where_native.h>
 #endif
 
@@ -45,7 +46,7 @@ static void isin_default_kernel_mps(const Tensor& elements,
   const auto common_type = at::result_type(elements, test_elements);
   const Tensor elements_contig = elements.to(common_type).contiguous();
   const Tensor test_elements_contig = test_elements.to(common_type).contiguous();
-  Tensor output_contig = needsGather(out) ? at::empty_like(out, at::MemoryFormat::Contiguous) : out;
+  Tensor output_contig = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
   const int64_t numel_elements = elements_contig.numel();
   const int64_t numel_test = test_elements_contig.numel();
@@ -85,7 +86,55 @@ static void isin_default_kernel_mps(const Tensor& elements,
     }
   });
 
-  if (needsGather(out)) {
+  if (!out.is_contiguous()) {
+    out.copy_(output_contig);
+  }
+}
+
+static void isin_sorting_kernel_mps(const Tensor& elements,
+                                    const Tensor& test_elements,
+                                    bool invert,
+                                    const Tensor& out) {
+  TORCH_CHECK(elements.is_mps() && test_elements.is_mps(),
+              "Expected elements.is_mps() && test_elements.is_mps(), got ",
+              elements.device(),
+              " and ",
+              test_elements.device());
+
+  if (test_elements.numel() == 0) {
+    return;
+  }
+
+  const auto common_type = at::result_type(elements, test_elements);
+  const Tensor elements_contig = elements.to(common_type).contiguous();
+  const Tensor test_elements_contig = test_elements.to(common_type).contiguous();
+  Tensor output_contig = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
+
+  const Tensor sorted_test = std::get<0>(at::sort(test_elements_contig.flatten(), 0, /*descending=*/false));
+
+  const int64_t numel_elements = elements_contig.numel();
+  const int64_t numel_test = test_elements_contig.numel();
+  TORCH_CHECK(
+      numel_elements <= std::numeric_limits<uint32_t>::max() && numel_test <= std::numeric_limits<uint32_t>::max(),
+      "isin_mps: tensor too large, numel must fit in uint32_t");
+
+  IsinSortedParams params{static_cast<uint32_t>(numel_test), invert};
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+      const std::string kernel_name = fmt::format("isin_sorted_{}", scalarToMetalTypeString(common_type));
+      id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(kernel_name);
+      getMPSProfiler().beginProfileKernel(pso, kernel_name, {elements_contig, sorted_test, output_contig});
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, elements_contig, sorted_test, output_contig, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numel_elements);
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  if (!out.is_contiguous()) {
     out.copy_(output_contig);
   }
 }
@@ -333,5 +382,6 @@ REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_mps)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_mps)
 REGISTER_DISPATCH(isin_default_stub, &mps::isin_default_kernel_mps)
+REGISTER_DISPATCH(isin_sorting_stub, &mps::isin_sorting_kernel_mps)
 
 } // namespace at::native

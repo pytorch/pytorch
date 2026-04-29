@@ -9,6 +9,11 @@ struct IsinParams {
   uint32_t num_chunks;
 };
 
+struct IsinSortedParams {
+  uint32_t numel_test;
+  bool invert;
+};
+
 template <typename T>
 struct ClampScalarParams {
   T min;

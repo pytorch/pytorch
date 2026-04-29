@@ -88,6 +88,44 @@ REGISTER_ISIN_OP(short);
 REGISTER_ISIN_OP(char);
 REGISTER_ISIN_OP(uchar);
 
+template <typename T>
+kernel void isin_sorted(
+    constant T* elements [[buffer(0)]],
+    constant T* sorted_test [[buffer(1)]],
+    device bool* out [[buffer(2)]],
+    constant IsinSortedParams& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  T elem = elements[tid];
+  uint32_t lo = 0, hi = params.numel_test;
+  while (lo < hi) {
+    uint32_t mid = lo + (hi - lo) / 2;
+    if (sorted_test[mid] < elem) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  bool found = (lo < params.numel_test) && (sorted_test[lo] == elem);
+  out[tid] = found != params.invert;
+}
+
+#define REGISTER_ISIN_SORTED_OP(T)                                      \
+  template [[host_name("isin_sorted_" #T)]] kernel void isin_sorted<T>( \
+      constant T * elements [[buffer(0)]],                              \
+      constant T * sorted_test [[buffer(1)]],                           \
+      device bool* out [[buffer(2)]],                                   \
+      constant IsinSortedParams& params [[buffer(3)]],                  \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ISIN_SORTED_OP(float);
+REGISTER_ISIN_SORTED_OP(half);
+REGISTER_ISIN_SORTED_OP(bfloat);
+REGISTER_ISIN_SORTED_OP(int);
+REGISTER_ISIN_SORTED_OP(long);
+REGISTER_ISIN_SORTED_OP(short);
+REGISTER_ISIN_SORTED_OP(char);
+REGISTER_ISIN_SORTED_OP(uchar);
+
 struct clamp_functor {
   template <typename T>
   inline T operator()(const T a, const T b_min, const T c_max) {
