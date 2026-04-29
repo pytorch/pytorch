@@ -1804,6 +1804,10 @@ command = [
 code = 'STABLE_SHIM_USAGE'
 include_patterns = [
     'torch/csrc/stable/**/*.h',
+    # We're including the shim file because this linter writes a shim_function_versions.txt that it reads
+    # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want to
+    # update that file.
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
 ]
 command = [
     'python3',
