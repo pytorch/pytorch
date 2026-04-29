@@ -10,7 +10,6 @@ import inspect
 import io
 import itertools
 import logging
-import math
 import operator
 import os
 import platform
@@ -20,36 +19,31 @@ import statistics
 import sys
 import sysconfig
 import tempfile
-import textwrap
 import time
 import unittest
-import warnings
 from collections.abc import (
     Callable,
     Collection,
     Generator,
-    Iterator,
     Mapping,
     MutableMapping,
     MutableSet,
 )
 from datetime import datetime
 from functools import lru_cache
-from io import StringIO
 from typing import (
     Any,
     cast,
     Concatenate,
     Generic,
     Literal,
-    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
     TypeVar,
 )
-from typing_extensions import dataclass_transform, ParamSpec, Self
+from typing_extensions import dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
@@ -69,7 +63,6 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
-from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -79,7 +72,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence, ValuesView
+    from collections.abc import Iterable, Iterator, Sequence, ValuesView
     from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
@@ -124,11 +117,25 @@ from torch.utils._sympy.functions import (
     Identity,
     ModularIndexing,
 )
-from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
-from . import config
+from . import code_formatting as _code_formatting, config, sympy_utils as _sympy_utils
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
+
+DelayReplaceLine = _code_formatting.DelayReplaceLine
+DeferredLineBase = _code_formatting.DeferredLineBase
+FakeIndentedBuffer = _code_formatting.FakeIndentedBuffer
+IndentedBuffer = _code_formatting.IndentedBuffer
+LineContext = _code_formatting.LineContext
+restore_stdout_stderr = _code_formatting.restore_stdout_stderr
+ValueWithLineMap = _code_formatting.ValueWithLineMap
+
+SymT = _sympy_utils.SymT
+sympy_index_symbol = _sympy_utils.sympy_index_symbol
+sympy_index_symbol_with_prefix = _sympy_utils.sympy_index_symbol_with_prefix
+sympy_product = _sympy_utils.sympy_product
+sympy_subs = _sympy_utils.sympy_subs
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -444,10 +451,6 @@ def decode_device(device: torch.device | None | str) -> torch.device:
         device_interface = get_interface_for_device(device.type)
         return torch.device(device.type, index=device_interface.Worker.current_device())
     return device
-
-
-def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
-    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
@@ -1150,40 +1153,8 @@ def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
 
-def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
-    """
-    Used to generate an integer-nonnegative symbol.
-    """
-    # This should never be used for creating shape/stride symbols, as those
-    # should all be allocated before Inductor.
-    assert prefix != SymT.SIZE
-    # NOTE: shape symbols are positive (> 0), but index variables are only
-    # non-negative (>= 0).
-    return make_symbol(prefix, idx, integer=True, nonnegative=True)
-
-
 def generate_assert(check: bool) -> bool:
     return (check or config.debug_index_asserts) and config.assert_indirect_indexing
-
-
-def sympy_index_symbol(name: str) -> sympy.Symbol:
-    """
-    Used to generate an integer-nonnegative symbol.
-    """
-    # This should never be used for creating shape/stride symbols, as those
-    # should all be allocated before Inductor.
-    assert name[0] != "s"
-    # NOTE: shape symbols are positive (> 0), but index variables are only
-    # non-negative (>= 0).
-    return sympy.Symbol(name, integer=True, nonnegative=True)
-
-
-def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.Expr:
-    """
-    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
-    have the same replaced expression integer and nonnegative properties.
-    """
-    return _sympy_subs(expr, replacements)
 
 
 def is_symbolic(a: Any) -> TypeGuard[torch.SymInt | torch.Tensor]:
@@ -1461,236 +1432,6 @@ def get_dtype_size(dtype: torch.dtype) -> int:
     if dtype == torch.uint64:
         return 8
     return torch.empty((), dtype=dtype).element_size()
-
-
-class LineContext(NamedTuple):
-    context: Any
-
-
-@dataclasses.dataclass
-class ValueWithLineMap:
-    value: str
-    line_map: list[tuple[int, LineContext]]
-
-
-class IndentedBuffer:
-    tabwidth = 4
-
-    def __init__(self, initial_indent: int = 0) -> None:
-        self._lines: list[DeferredLineBase | LineContext | str] = []
-        self._indent = initial_indent
-
-    @contextlib.contextmanager
-    def set_tabwidth(self, tabwidth: int) -> Iterator[None]:
-        prev = self.tabwidth
-        try:
-            self.tabwidth = tabwidth
-            yield
-        finally:
-            self.tabwidth = prev
-
-    def getvaluewithlinemap(self) -> ValueWithLineMap:
-        buf = StringIO()
-        p = 1
-        linemap: list[tuple[int, LineContext]] = []
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                linemap.append((p, li.context))
-                continue
-            else:
-                line = li
-            assert isinstance(line, str)
-            buf.write(line)
-            buf.write("\n")
-            p += 1 + line.count("\n")
-        return ValueWithLineMap(buf.getvalue(), linemap)
-
-    def getvalue(self) -> str:
-        return self.getvaluewithlinemap().value
-
-    def getrawvalue(self) -> str:
-        buf = StringIO()
-        for li in self._lines:
-            if isinstance(li, DeferredLineBase):
-                line = li()
-                if line is None:
-                    continue
-            elif isinstance(li, LineContext):
-                continue
-            else:
-                line = li
-            assert isinstance(line, str)
-            # backslash implies line continuation
-            if line.endswith("\\"):
-                buf.write(line[:-1])
-            else:
-                buf.write(line)
-                buf.write("\n")
-        return buf.getvalue()
-
-    def get_lines_ref(self):
-        return self._lines
-
-    def clear(self) -> None:
-        self._lines.clear()
-
-    def __bool__(self) -> bool:
-        return bool(self._lines)
-
-    def prefix(self) -> str:
-        return " " * (self._indent * self.tabwidth)
-
-    def newline(self) -> None:
-        self.writeline("\n")
-
-    def writeline(self, line: LineContext | DeferredLineBase | str) -> None:
-        if isinstance(line, LineContext):
-            self._lines.append(line)
-        elif isinstance(line, DeferredLineBase):
-            self._lines.append(line.with_prefix(self.prefix()))
-        elif line.strip():
-            self._lines.append(f"{self.prefix()}{line}")
-        else:
-            self._lines.append("")
-
-    def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
-        for line in lines:
-            self.writeline(line)
-
-    def indent(self, offset: int = 1) -> contextlib.AbstractContextManager[None]:
-        @contextlib.contextmanager
-        def ctx() -> Iterator[None]:
-            self._indent += offset
-            try:
-                yield
-            finally:
-                self._indent -= offset
-
-        return ctx()
-
-    def do_indent(self, offset: int = 1) -> None:
-        self._indent += offset
-
-    def do_unindent(self, offset: int = 1) -> None:
-        self._indent -= offset
-
-    def splice(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
-        if isinstance(other_code, IndentedBuffer):
-            dedent = float("inf")
-
-            for line in other_code._lines:
-                if not isinstance(line, LineContext) and line:
-                    dedent = min(dedent, len(line) - len(line.lstrip()))
-            if math.isinf(dedent):
-                dedent = 0
-            for line in other_code._lines:
-                if isinstance(line, LineContext):
-                    self._lines.append(line)
-                else:
-                    IndentedBuffer.writeline(self, line[int(dedent) :])
-        else:
-            other_code = textwrap.dedent(other_code)
-            if strip:
-                other_code = other_code.lstrip()
-            if not other_code:
-                return
-            other_code = other_code.rstrip()
-            for s in other_code.split("\n"):
-                self.writeline(s)
-
-    def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
-        res = IndentedBuffer(initial_indent=self._indent)
-        res._lines = [func(line) for line in self._lines]
-        return res
-
-    def __repr__(self) -> str:
-        return f"{type(self)}({self.getvalue()})"
-
-    def __add__(self, other: Self) -> IndentedBuffer:
-        assert self._indent == other._indent
-        res = IndentedBuffer(initial_indent=self._indent)
-        # TODO(rec): or should this be self.__class__(initial_indent=self._indent)?
-        res.writelines(self._lines)
-        res.writelines(other._lines)
-        return res
-
-    def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
-        return new_line in self._lines
-
-
-class FakeIndentedBuffer(IndentedBuffer):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def __getattribute__(self, name: str) -> Any:
-        if name == "__class__":  # Allow access to the class attribute
-            return object.__getattribute__(self, name)
-        raise RuntimeError(
-            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
-            "is currently used on TritonTemplateKernel to prevent actual"
-            "writes to the body without explicitly specifying the body with"
-            "`TritonTemplateKernel.set_subgraph_body(name)`"
-        )
-
-
-@contextlib.contextmanager
-def restore_stdout_stderr() -> Iterator[None]:
-    initial_stdout, initial_stderr = sys.stdout, sys.stderr
-    try:
-        yield
-    finally:
-        sys.stdout, sys.stderr = initial_stdout, initial_stderr
-
-
-class DeferredLineBase:
-    """A line that can be 'unwritten' at a later time"""
-
-    def __init__(self, line: str):
-        if not line.strip():
-            line = ""
-        self.line = line
-
-    def __call__(self) -> str | None:
-        """Returns either self.line or None to indicate the line has been 'unwritten'"""
-        raise NotImplementedError
-
-    def _new_line(self, line: str) -> Self:
-        """Returns a new deferred line with the same condition"""
-        raise NotImplementedError
-
-    def with_prefix(self, prefix: str) -> Self:
-        return self._new_line(f"{prefix}{self.line}")
-
-    def lstrip(self) -> Self:
-        return self._new_line(self.line.lstrip())
-
-    def __getitem__(self, index: int | slice) -> Self:
-        return self._new_line(self.line[index])
-
-    def __bool__(self) -> bool:
-        return bool(self.line)
-
-    def __len__(self) -> int:
-        return len(self.line)
-
-
-class DelayReplaceLine(DeferredLineBase):
-    """At end of codegen call `line.replace(key, value_fn())`"""
-
-    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
-        super().__init__(line)
-        self.key = key
-        self.value_fn = value_fn
-
-    def __call__(self) -> str:
-        return self.line.replace(self.key, self.value_fn())
-
-    def _new_line(self, line: str) -> DelayReplaceLine:
-        return DelayReplaceLine(self.key, self.value_fn, line)
 
 
 @functools.cache
@@ -2174,51 +1915,9 @@ def use_blackwell_cutedsl_grouped_mm(
 
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
-    from .virtualized import V
+    from .codegen.cutlass.utils import use_cutlass_template as _use_cutlass_template
 
-    # TODO: Enable CUTLASS in non-AOT cpp_wrapper mode. The CUTLASS
-    # codegen (CUDATemplateKernel.call_kernel) already has cpp_wrapper-aware
-    # arg handling, but the other half is missing: the non-triton branch of
-    # CppWrapperGpu._generate_kernel_call_helper unconditionally emits
-    # `kernels.<name>(...)`, and that AOTInductorModelKernels struct only
-    # exists in AOT mode. Fixing this requires adding dlopen/dlsym loading
-    # for the compiled CUTLASS .so, similar to how the triton branch uses
-    # static CUfunction + loadKernel for non-AOT mode.
-    if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        warnings.warn(
-            "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend.",
-        )
-        return False
-
-    gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
-        return False
-    from .codegen.cutlass.utils import try_import_cutlass
-
-    # Do not use cutlass template on ROCm
-    if torch.version.hip:
-        return False
-
-    # output dtype
-    # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
-    res = (
-        _use_template_for_gpu(layout, layout_dtypes)
-        and (config.max_autotune or config.max_autotune_gemm)
-        and _use_autotune_backend("CUTLASS")
-    )
-
-    if res:
-        if not try_import_cutlass():
-            log.warning(
-                "Failed to import CUTLASS lib. Please check whether "
-                "_inductor.config.cutlass.cutlass_dir %s is set correctly. "
-                "Skipping CUTLASS backend for now.",
-                config.cutlass.cutlass_dir,
-            )
-            return False
-    return res
+    return _use_cutlass_template(layout, m, n, k)
 
 
 def use_nv_universal_gemm_template(
@@ -2442,64 +2141,29 @@ def try_import_ck_lib() -> tuple[
 
 
 def use_ck_template(layout: Layout) -> bool:
-    # config knobs check 1
-    if not (config.max_autotune or config.max_autotune_gemm):
-        return False
-    # platform check
-    if not torch.version.hip:
-        return False
-    # tensors must be on GPU
-    if layout.device.type != "cuda":
-        return False
-    # hardware check
-    # if config arch list is not specified, get the native arch from the device properties
-    native_arch = _rocm_native_device_arch_name(layout.device)
-    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
-        native_arch.split(":")[0]: native_arch
-    }
-    requested_supported_archs = [
-        requested_archs[k]
-        for k in requested_archs.keys() & config.rocm.ck_supported_arch
-    ]
-    if not requested_supported_archs:
-        return False
-    # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
-        return False
+    from .codegen.rocm.ck_template import use_ck_template as _use_ck_template
 
-    ck_package_dirname, _, _, _ = try_import_ck_lib()
-
-    if not ck_package_dirname:
-        log.warning("Please pip install Composable Kernel package")
-        return False
-
-    config.rocm.ck_dir = ck_package_dirname
-
-    return True
+    return _use_ck_template(layout)
 
 
 def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
-    from .virtualized import V
+    from .codegen.rocm.ck_template import use_ck_gemm_template as _use_ck_gemm_template
 
-    return (
-        _use_autotune_backend("CK")
-        and use_ck_template(layout)
-        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
-    )
+    return _use_ck_gemm_template(layout, m, n, k)
 
 
 def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
-    from .virtualized import V
-
-    return (
-        _use_autotune_backend("CKTILE")
-        and use_ck_template(layout)
-        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
+    from .codegen.rocm.ck_template import (
+        use_ck_tile_gemm_template as _use_ck_tile_gemm_template,
     )
+
+    return _use_ck_tile_gemm_template(layout, m, n, k)
 
 
 def use_ck_conv_template(layout: Layout) -> bool:
-    return _use_conv_autotune_backend("CK") and use_ck_template(layout)
+    from .codegen.rocm.ck_template import use_ck_conv_template as _use_ck_conv_template
+
+    return _use_ck_conv_template(layout)
 
 
 def _use_template_for_cpu(layout: Layout) -> bool:
@@ -2542,58 +2206,18 @@ def use_cpp_gemm_template(
     is_woq_int4: bool = False,
     q_group_size: int | None = None,
 ) -> bool:
-    from . import ir
-    from .codegen.cpp_micro_gemm import create_micro_gemm
-    from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
-    from .kernel.mm_common import mm_args
+    from .codegen.cpp_gemm_template import (
+        use_cpp_gemm_template as _use_cpp_gemm_template,
+    )
 
-    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
-        return False
-
-    if not config.cpp.weight_prepack:
-        return False
-
-    int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8, torch.int8]
-    m, n, k, layout, mat1, mat2 = mm_args(
+    return _use_cpp_gemm_template(
+        layout,
         mat1,
         mat2,
-        out_dtype=layout.dtype if int8_gemm else None,
         mat2_transposed=mat2_transposed,
-        use_4x2_dim=is_woq_int4,
-    )
-
-    # TODO(jgong5): support dynamic shapes for n or k
-    if has_free_symbols((n, k)):
-        return False
-
-    if isinstance(mat2, ir.BaseView):
-        mat2 = mat2.unwrap_view()
-
-    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
-    micro_gemm = create_micro_gemm(
-        "micro_gemm",
-        m,
-        n,
-        k,
-        input_dtype=mat1.get_dtype(),
-        input2_dtype=mat2.get_dtype(),
-        output_dtype=output_dtype,
-        num_threads=parallel_num_threads(),
-        use_ref=not is_woq_int4,
+        require_constant_mat2=require_constant_mat2,
+        is_woq_int4=is_woq_int4,
         q_group_size=q_group_size,
-    )
-
-    def is_last_dim_stride1(x: IRNode) -> bool:
-        x.freeze_layout()
-        return x.get_stride()[-1] == 1
-
-    return (
-        layout.dtype in layout_dtypes
-        and micro_gemm is not None
-        and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
-        and isinstance(mat2, ir.StorageBox)
-        and (mat2.is_module_buffer() or not require_constant_mat2)
     )
 
 
