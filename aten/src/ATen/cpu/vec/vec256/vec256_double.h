@@ -91,10 +91,12 @@ class Vectorized<double> {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0.0;
     }
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const double*>(ptr),
-        count * sizeof(double));
+    if (count > 0) {
+      std::memcpy(
+          tmp_values,
+          reinterpret_cast<const double*>(ptr),
+          count * sizeof(double));
+    }
     return _mm256_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
