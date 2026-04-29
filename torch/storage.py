@@ -352,11 +352,11 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: str | torch.device | None = None):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: None
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:
@@ -1164,11 +1164,11 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: str | torch.device | None = None):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: None
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
                 This argument is discouraged and subject to deprecated.
 
         Returns:

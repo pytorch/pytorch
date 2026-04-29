@@ -2567,6 +2567,14 @@ if __name__ == "__main__":
         graph.replay()
         self.assertTrue(torch.all(x == 6.0))
 
+    def test_is_pinned_xpu(self):
+        # Verify that copying an XPU storage to CPU with non_blocking=True
+        # allocates pinned memory (regression test for is_pinned on XPU).
+        t = torch.randn(10, device="xpu")
+        cpu_storage = t.untyped_storage().to(device="cpu", non_blocking=True)
+        torch.xpu.synchronize()
+        self.assertTrue(cpu_storage.is_pinned("xpu"))
+
 
 @contextlib.contextmanager
 def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
