@@ -589,6 +589,7 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    use_local_synchronization=use_hashed,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
