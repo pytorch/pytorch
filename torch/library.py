@@ -572,21 +572,28 @@ class Library:
         self._registration_handles.clear()
         global _impls
         _impls -= self._op_impls
-        for name in self._op_defs:
-            # Delete the cached torch.ops.ns.foo if it was registered.
-            # Otherwise, accessing it leads to a segfault.
-            # It's possible that we only registered an overload in this Library
-            # and another library owns an alive overload.
-            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
-            # recomputed to point at the right collection of overloads.
-            ns, name_with_overload = name.split("::")
-            name = name_with_overload.split(".")[0]
-            if not hasattr(torch.ops, ns):
-                continue
-            namespace = getattr(torch.ops, ns)
-            if not hasattr(namespace, name):
-                continue
-            delattr(namespace, name)
+        _clear_torch_ops_cache(self._op_defs)
+
+
+def _clear_torch_ops_cache(op_defs):
+    # Delete the cached torch.ops.ns.foo if it was registered.
+    # Otherwise, accessing it leads to a segfault, or to enumerations
+    # over the namespace (e.g. _collect_all_valid_cia_ops) tripping on
+    # an OpOverloadPacket whose underlying overload was just removed.
+    # It's possible that we only registered an overload in this Library
+    # and another library owns an alive overload.
+    # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+    # recomputed to point at the right collection of overloads.
+    for qualname in op_defs:
+        ns, name_with_overload = qualname.split("::")
+        name = name_with_overload.split(".")[0]
+        if not hasattr(torch.ops, ns):
+            continue
+        namespace = getattr(torch.ops, ns)
+        if not hasattr(namespace, name):
+            continue
+        delattr(namespace, name)
+        if name in namespace._dir:
             namespace._dir.remove(name)
 
 
@@ -617,6 +624,8 @@ def _del_library(
 
     if m is not None:
         m.reset()
+
+    _clear_torch_ops_cache(op_defs)
 
 
 @contextlib.contextmanager
