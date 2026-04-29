@@ -645,6 +645,22 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
 
   const auto fd = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 0));
   const auto alloc_size = THPUtils_unpackLong(PyTuple_GET_ITEM(_handle, 1));
+  TORCH_CHECK(fd >= 0, "invalid DMA-BUF fd for XPU IPC");
+  TORCH_CHECK(alloc_size > 0, "invalid DMA-BUF allocation size for XPU IPC");
+  TORCH_CHECK(
+      storage_offset_bytes >= 0, "invalid negative storage offset for XPU IPC");
+  const auto alloc_size_u64 = static_cast<uint64_t>(alloc_size);
+  const auto storage_offset_u64 = static_cast<uint64_t>(storage_offset_bytes);
+  const auto storage_size_u64 = static_cast<uint64_t>(storage_size);
+  TORCH_CHECK(
+      storage_offset_u64 <= alloc_size_u64,
+      "XPU IPC storage offset exceeds allocation size");
+  TORCH_CHECK(
+      storage_size_u64 <= alloc_size_u64,
+      "XPU IPC storage size exceeds allocation size");
+  TORCH_CHECK(
+      storage_offset_u64 <= alloc_size_u64 - storage_size_u64,
+      "XPU IPC storage range exceeds allocation size");
   std::string handle = std::string("dmabuf:") + std::to_string(fd) + ":" +
       std::to_string(alloc_size);
 

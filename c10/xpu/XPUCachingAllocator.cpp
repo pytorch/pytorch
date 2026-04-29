@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -1905,6 +1906,13 @@ class NativeCachingAllocator : public XPUAllocator {
           "Level Zero DMA-BUF IPC APIs are unavailable");
     }
 
+    ~MemHandleCacheEntry() {
+      if (fd_ >= 0) {
+        ::close(static_cast<int>(fd_));
+        fd_ = -1;
+      }
+    }
+
     void init() {
       if (initialized_) {
         return;
@@ -2138,6 +2146,15 @@ class NativeCachingAllocator : public XPUAllocator {
         reinterpret_cast<char*>(block->ptr) -
         reinterpret_cast<char*>(base_block->ptr));
 
+    size_t allocation_size_bytes = 0;
+    for (Block* cursor = base_block; cursor != nullptr; cursor = cursor->next) {
+      TORCH_CHECK(
+          allocation_size_bytes <=
+              std::numeric_limits<size_t>::max() - cursor->size,
+          "XPU IPC allocation size overflow");
+      allocation_size_bytes += cursor->size;
+    }
+
     auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
         xpu::get_device_context());
     auto& ze_ipc_api = get_ze_ipc_api();
@@ -2171,7 +2188,7 @@ class NativeCachingAllocator : public XPUAllocator {
         true,
         static_cast<int64_t>(export_fd.fd),
         true,
-        static_cast<int64_t>(base_block->size)};
+        static_cast<int64_t>(allocation_size_bytes)};
   }
 
   std::shared_ptr<void> getIpcDevPtr(
