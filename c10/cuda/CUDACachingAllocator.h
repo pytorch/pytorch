@@ -152,6 +152,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  // Notify the allocator that a CUDA stream capture has actually started /
+  // ended. Distinct from begin/endAllocateToPool, which only routes
+  // allocations into a private mempool and can be invoked without an active
+  // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
+  // registration, or inductor cudagraph_trees warmup).
+  virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
+  virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -385,6 +392,14 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
+}
+
+inline void markCaptureBegin(c10::DeviceIndex device) {
+  get()->markCaptureBegin(device);
+}
+
+inline void markCaptureEnd(c10::DeviceIndex device) {
+  get()->markCaptureEnd(device);
 }
 
 inline void recordHistory(
