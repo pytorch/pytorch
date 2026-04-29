@@ -810,6 +810,70 @@ class CUDADeviceVariable(ContextWrappingVariable):
         return torch.cuda.device
 
 
+class AcceleratorDeviceIndexVariable(ContextWrappingVariable):
+    """represents torch.accelerator.device_index"""
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslator", device: Any, **kwargs: Any
+    ) -> "AcceleratorDeviceIndexVariable":
+        var = AcceleratorDeviceIndexVariable(
+            target_values=[device],
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: Any,
+        initial_values: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        self.cleanup_assert()
+        if self.target_values[0] is not None:
+            tx.output.create_node(
+                "call_function",
+                torch._C._accelerator_maybeExchangeDevice,
+                (self.proxy,),
+                {},
+            )
+        return variables.ConstantVariable.create(False)
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        if self.target_values[0] is None:
+            self.set_cleanup_hook(tx, lambda: None)
+            return variables.ConstantVariable.create(None)
+
+        prev_idx = torch._C._accelerator_exchangeDevice(*self.target_values)
+        self.set_cleanup_hook(
+            tx, lambda: torch._C._accelerator_maybeExchangeDevice(prev_idx)
+        )
+        self.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._accelerator_exchangeDevice,
+            (*self.target_values,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self) -> str:
+        return "torch.accelerator"
+
+    def fn_name(self) -> str:
+        return "device_index"
+
+    def python_type(self) -> type:
+        return torch.accelerator.device_index
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 

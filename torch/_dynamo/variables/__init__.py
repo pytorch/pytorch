@@ -27,6 +27,7 @@ from .builtin import (
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
+    AcceleratorDeviceIndexVariable,
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,

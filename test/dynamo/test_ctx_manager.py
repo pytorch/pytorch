@@ -591,6 +591,31 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_device_index(self):
+        def fn_construct(x):
+            torch.accelerator.device_index(x.device.index)
+            return x + 1
+
+        def fn_with_ctx(x):
+            with torch.accelerator.device_index(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        def fn_with_none(x):
+            with torch.accelerator.device_index(None):
+                x = torch.cos(x + 1)
+            return x
+
+        device = torch.accelerator.current_accelerator()
+        x = torch.randn((2, 2), device=device)
+
+        for fn in (fn_construct, fn_with_ctx, fn_with_none):
+            ref = fn(x)
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda__exchange_device_args(self):
         @torch.compile(backend="eager", fullgraph=True)
