@@ -896,6 +896,20 @@ def invoke_leaf_function_fake(
         return fake_fn_callable(*args, **kwargs)
 
 
+def _detach_with_grad_dtype(arg):
+    # Tensor.detach() resets grad_dtype to the tensor's own dtype, dropping
+    # any caller-set grad_dtype (e.g. param.grad_dtype = torch.float32 on a
+    # bf16 weight). Propagate it back so the inner autograd graph accumulates
+    # the kernel's gradient at the requested dtype. grad_dtype is only
+    # meaningful on leaf tensors.
+    if not isinstance(arg, torch.Tensor):
+        return arg
+    detached = arg.detach()
+    if arg is not detached and arg.is_leaf and arg.grad_dtype != detached.grad_dtype:
+        detached.grad_dtype = arg.grad_dtype
+    return detached
+
+
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_leaf_function_dense(
     real_fn_callable,
@@ -911,9 +925,7 @@ def invoke_leaf_function_dense(
         arg._version if isinstance(arg, torch.Tensor) else 0 for arg in flat_args
     ]
 
-    flat_args = tuple(
-        arg.detach() if isinstance(arg, torch.Tensor) else arg for arg in flat_args
-    )
+    flat_args = tuple(_detach_with_grad_dtype(arg) for arg in flat_args)
     requires_grad_indices_set = _parse_mutated_arg_indices(requires_grad_indices)
     flat_args = tuple(
         arg.requires_grad_(True) if idx in requires_grad_indices_set else arg
