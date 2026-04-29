@@ -12555,6 +12555,76 @@ def ___make_guard_fn():
         for i in range(4):
             self.assertEqual(eager_result[i], compiled_result[i])
 
+    def test_frozen_dataclass_with_len_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __len__ inside
+        # torch.compile doesn't crash. Exercises the truthiness check in
+        # symbolic_convert.py call_function where `inner_fn and ...` would
+        # trigger __len__ on an uninitialized backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Layout:
+            shape: tuple
+            stride: tuple
+
+            def __len__(self):
+                if isinstance(self.shape, tuple):
+                    return len(self.shape)
+                return 1
+
+            def size(self):
+                result = 1
+                for s in self.shape:
+                    result *= s
+                return result
+
+            def __call__(self, idx):
+                # Map index through stride
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+            def cosize(self):
+                return self(self.size() - 1) + 1
+
+        def fn(x):
+            layout = Layout((2, 3), (3, 1))
+            return x + layout.cosize()
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_callable_with_hash_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __hash__ (auto from
+        # frozen=True) inside torch.compile doesn't crash when the object is
+        # callable. Exercises is_supported_random() which does
+        # `self.value in set(...)` triggering __hash__ on an uninitialized
+        # backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Config:
+            shape: tuple
+            stride: tuple
+
+            def __call__(self, idx):
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+        def fn(x):
+            cfg = Config((2, 3), (3, 1))
+            return x + cfg(2)
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
