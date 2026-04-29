@@ -1502,7 +1502,6 @@ def _add_send_recv(
 def _defer_recv_ops(
     actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
-    num_stages: int,
 ) -> dict[int, list[_Action]]:
     """
     Defers RECV operations to reduce interference with unrelated compute ops,
@@ -1583,7 +1582,12 @@ def _defer_recv_ops(
 
             new_actions.append(action)
 
-        new_actions.extend(deferred.values())
+        if deferred:
+            raise AssertionError(
+                f"Malformed input schedule on rank {rank}: leftover RECV ops "
+                f"with no consumer found: {list(deferred.values())}. "
+                "Every RECV must be consumed by a downstream compute op."
+            )
 
         result[rank] = new_actions
     return result
@@ -2242,7 +2246,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self.pipeline_order_with_comms = _defer_recv_ops(
                     self.pipeline_order_with_comms,
                     stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
-                    num_stages=self._num_stages,
                 )
         else:
             raise NotImplementedError(f"{format=} is not implemented")

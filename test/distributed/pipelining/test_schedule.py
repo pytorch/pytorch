@@ -976,6 +976,165 @@ class TestScheduleLowering(TestCase):
                 "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
                 "num_stages": 4,
             },
+            {
+                # Schedule using BACKWARD_INPUT (I) + BACKWARD_WEIGHT (W) split
+                # instead of FULL_BACKWARD (B). Verifies that BACKWARD_INPUT
+                # consumes RECV_B (like FULL_BACKWARD does) and that
+                # BACKWARD_WEIGHT does NOT trigger any RECV flushing.
+                "schedule": "simple_2_rank_2_stage_iw_split",
+                "input": {
+                    0: [
+                        # 0RECV_B0 placed early; flush rule (rank 0 < rank 1)
+                        # should move it to right before the next SEND_F to rank 1.
+                        "0RECV_B0",
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0I0",
+                        "0W0",
+                        "0RECV_B1",
+                        "0I1",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "1F0",
+                        "1I0",
+                        "1SEND_B0",
+                        "1W0",
+                        "1F1",
+                        "1I1",
+                        "1SEND_B1",
+                        "1W1",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # 0RECV_B0 deferred until just before 0SEND_F0 (flush
+                        # required: rank 0 < peer rank 1). 0RECV_B1 deferred
+                        # to immediately before its consumer 0I1 (BACKWARD_INPUT
+                        # consumes RECV_B).
+                        "0F0",
+                        "0RECV_B0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "0I0",
+                        "0W0",
+                        "0RECV_B1",
+                        "0I1",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > peer rank 0: no flush. RECV_Fs deferred to
+                        # right before their forward consumers. BACKWARD_WEIGHT
+                        # (1W0/1W1) does not consume any RECV.
+                        "1RECV_F0",
+                        "1F0",
+                        "1I0",
+                        "1SEND_B0",
+                        "1W0",
+                        "1RECV_F1",
+                        "1F1",
+                        "1I1",
+                        "1SEND_B1",
+                        "1W1",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: stage_idx,
+                "num_stages": 2,
+            },
+            {
+                # Schedule containing an OVERLAP_F_B compound action whose
+                # sub_actions consume both a deferred RECV_F (forward sub) and
+                # a deferred RECV_B (backward sub). Verifies that RECV
+                # flushing iterates over sub_actions correctly.
+                "schedule": "v_2_rank_4_stage_overlap_f_b",
+                "input": {
+                    0: [
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        "1RECV_F0",
+                        "1RECV_F1",
+                        "2RECV_B0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "(1F1;2B0)OVERLAP_F_B",
+                        "2W0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1W0",
+                    ],
+                },
+                "expected": {
+                    0: [
+                        # Rank 0 < peer rank 1, but every RECV is already
+                        # adjacent to its consumer; no movement.
+                        "0F0",
+                        "0SEND_F0",
+                        "0F1",
+                        "0SEND_F1",
+                        "3RECV_F0",
+                        "3F0",
+                        "3B0",
+                        "3SEND_B0",
+                        "3RECV_F1",
+                        "3F1",
+                        "3B1",
+                        "3SEND_B1",
+                        "0RECV_B0",
+                        "0B0",
+                        "3W0",
+                        "0RECV_B1",
+                        "0B1",
+                        "3W1",
+                        "0W0",
+                        "0W1",
+                    ],
+                    1: [
+                        # Rank 1 > peer rank 0, no flush. 1RECV_F0 moves to
+                        # before 1F0; 1RECV_F1 and 2RECV_B0 are both flushed
+                        # immediately before the OVERLAP_F_B that consumes
+                        # them via its sub_actions.
+                        "1RECV_F0",
+                        "1F0",
+                        "2F0",
+                        "2SEND_F0",
+                        "1RECV_F1",
+                        "2RECV_B0",
+                        "(1F1;2B0)OVERLAP_F_B",
+                        "2W0",
+                        "1B0",
+                        "1SEND_B0",
+                        "1W0",
+                    ],
+                },
+                "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
+                "num_stages": 4,
+            },
         ],
     )
     def test_defer_recv_ops(self, test_info):
@@ -989,9 +1148,7 @@ class TestScheduleLowering(TestCase):
             for rank in test_info["expected"]
         }
 
-        result_sch = _defer_recv_ops(
-            input_sch, test_info["stage_to_rank"], test_info["num_stages"]
-        )
+        result_sch = _defer_recv_ops(input_sch, test_info["stage_to_rank"])
         for rank in expected_sch:
             for i, (expected, actual) in enumerate(
                 zip(expected_sch[rank], result_sch[rank])
@@ -1056,16 +1213,59 @@ class TestScheduleLowering(TestCase):
         # RECVs are flushed before SENDs to the same peer, but still
         # deferred to right before their consumers.
         recv_f0_pos_no_overlap = find_action(rank0_no_overlap, 2, RECV_F, 0)
-        # On rank 0 (lower rank), 2RECV_F0 may still appear before 0F1
-        # due to the flush-before-SEND constraint. That's expected.
-        self.assertGreaterEqual(recv_f0_pos_no_overlap, 0)
+        # On rank 0 (lower rank), 2RECV_F0 may still be flushed before a SEND
+        # to the same peer (rank 1), so it isn't required to land immediately
+        # before its consumer. But it must have moved later than in the
+        # overlap=True schedule, demonstrating deferral.
+        self.assertGreater(recv_f0_pos_no_overlap, recv_f0_pos_overlap)
 
-        # On rank 1 (higher rank, no flush constraint), RECVs should be
-        # deferred past unrelated compute ops.
+        # On rank 1 (higher rank, no flush constraint), every standalone RECV
+        # must be placed immediately before the compute op that consumes it.
+        # This is the core invariant _defer_recv_ops is supposed to guarantee.
         rank1_no_overlap = schedule_ops_no_overlap[1]
         rank1_overlap = schedule_ops_overlap[1]
-        # Count standalone RECVs — with deferral there should be the same
-        # number (all RECVs are standalone, just repositioned)
+
+        def _assert_recv_immediately_precedes_consumer(actions):
+            non_none = [a for a in actions if a is not None]
+            for i, a in enumerate(non_none):
+                if a.computation_type not in (RECV_F, RECV_B):
+                    continue
+                self.assertLess(
+                    i,
+                    len(non_none) - 1,
+                    f"RECV {a} on rank 1 has no following consumer",
+                )
+                consumer = non_none[i + 1]
+                # Consumer may be a compute op or a compound action whose
+                # sub_actions contain the matching compute op.
+                consumer_subs = (
+                    consumer.sub_actions
+                    if consumer.sub_actions is not None
+                    else (consumer,)
+                )
+                if a.computation_type == RECV_F:
+                    expected = (a.stage_index, F, a.microbatch_index)
+                    matched = any(
+                        (s.stage_index, s.computation_type, s.microbatch_index)
+                        == expected
+                        for s in consumer_subs
+                    )
+                else:
+                    matched = any(
+                        s.stage_index == a.stage_index
+                        and s.computation_type in (B, I)
+                        and s.microbatch_index == a.microbatch_index
+                        for s in consumer_subs
+                    )
+                self.assertTrue(
+                    matched,
+                    f"RECV {a} on rank 1 is not immediately followed by its "
+                    f"consumer (next action: {consumer})",
+                )
+
+        _assert_recv_immediately_precedes_consumer(rank1_no_overlap)
+
+        # Sanity: total RECV count should be unchanged by deferral.
         recv_count_overlap = sum(
             1
             for a in rank1_overlap
