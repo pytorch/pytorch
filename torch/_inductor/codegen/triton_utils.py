@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any
 
 import sympy
@@ -21,7 +20,7 @@ from .common import (
 )
 
 
-def should_unwrap_unspec_arg(name: str):
+def should_unwrap_unspec_arg(name: str) -> Any:
     if V.graph.is_unspec_arg(name):
         # Unwrap on all devices except CPU
         if V.graph.get_current_device_or_throw().type != "cpu":
@@ -102,7 +101,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
-def non_constexpr_signature(signature):
+def non_constexpr_signature(signature: Any) -> Any:
     new_signature = []
     for arg in signature:
         if not isinstance(arg, ConstexprArg):
@@ -122,7 +121,7 @@ def signature_to_meta(
     if indices is None:
         indices = list(range(len(signature)))
 
-    def _decide_tl_dtype(arg):
+    def _decide_tl_dtype(arg: Any) -> Any:
         # Even if the ks0 symbol itself is within tl.int32 range, it's
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
@@ -164,7 +163,7 @@ def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
     return layout
 
 
-def is_unaligned_buffer(arg: TensorArg):
+def is_unaligned_buffer(arg: TensorArg) -> Any:
     buf_name = arg.buffer
     if buf_name in V.graph.unaligned_buffers:
         return True

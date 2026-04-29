@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 import hashlib
 import logging
 from collections.abc import Sequence
-from typing import cast
+from typing import Any, cast
 
 from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
@@ -33,7 +32,7 @@ class CuteDSLScheduling(BaseScheduling):
     """
 
     @classmethod
-    def get_backend_features(cls, device) -> OrderedSet[BackendFeature]:
+    def get_backend_features(cls, device: Any) -> OrderedSet[BackendFeature]:
         return OrderedSet()
 
     @staticmethod
@@ -56,7 +55,7 @@ class CuteDSLScheduling(BaseScheduling):
         """
         return False
 
-    def define_kernel(self, src_code_str: str, node_schedule) -> str:
+    def define_kernel(self, src_code_str: str, node_schedule: Any) -> str:
         """Produce the kernel string
         Args:
             src_code_str: The finalized kernel code string
@@ -108,7 +107,7 @@ class CuteDSLScheduling(BaseScheduling):
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
         prologue_nodes: Sequence[BaseSchedulerNode],
-    ):
+    ) -> None:
         """
         Codegen a CuteDSL template. Currently doesn't support fusion.
         """

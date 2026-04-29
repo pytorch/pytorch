@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
@@ -62,7 +61,7 @@ class ROCmTemplateKernel(ROCmKernel):
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
 
-    def get_signature(self):
+    def get_signature(self) -> Any:
         return self.signature
 
     def def_kernel(
@@ -245,7 +244,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args: Any, out: Any) -> float:
         assert self.bmreq is not None
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)

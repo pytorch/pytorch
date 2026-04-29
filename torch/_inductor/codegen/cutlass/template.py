@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import hashlib
 import itertools
@@ -108,7 +107,7 @@ class CUTLASSTemplate(KernelTemplate):
         ).hexdigest()
 
     def generate_code_and_args(
-        self, name: str, input_key: str, layout_repr: str, **kwargs
+        self, name: str, input_key: str, layout_repr: str, **kwargs: Any
     ) -> tuple[str, tuple[int, ...]]:
         """
         Generate code and args with caching. We cache the code even if runtime
@@ -182,7 +181,7 @@ class CUTLASSTemplate(KernelTemplate):
         layout_repr: str,
         input_tensor_meta: TensorMeta | list[TensorMeta],
         output_tensor_meta: TensorMeta | list[TensorMeta],
-        **kwargs,
+        **kwargs: Any,
     ) -> CUTLASSTemplateCaller:
         """
         Generates the CUDA template caller object for the given GEMM template and operation.
@@ -372,13 +371,13 @@ class CUTLASSTemplate(KernelTemplate):
                 f"({self._DTYPE_TO_CUTLASS_SPARSE_META.get(node.get_dtype())}*)({ptr})"
             )
 
-    def render(self, **kwargs) -> str:
+    def render(self, **kwargs: Any) -> str:
         raise NotImplementedError
 
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return [ArgInfo("swizzle", "const uint8_t")]
 
-    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
         """
         Helper method to retrieve runtime args from generate kwargs
         """

@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 import functools
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -13,7 +13,7 @@ aten = torch.ops.aten
 
 
 @functools.cache
-def _misc_patterns_init(input_device: torch.device | None = None):
+def _misc_patterns_init(input_device: torch.device | None = None) -> Any:
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
@@ -33,11 +33,11 @@ def _misc_patterns_init(input_device: torch.device | None = None):
     # stores instead of atomic adds, which is quite a bit faster.
     # 2. Also, since we are guaranteed that they are completely within bounds,
     # we can use unsafe indexing and skip debug asserts
-    def randperm_index_add_pattern(x, y):
+    def randperm_index_add_pattern(x: Any, y: Any) -> Any:
         index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
         return torch.index_add(x, dim=0, source=y, index=index), index
 
-    def randperm_index_add_replacement(x, y):
+    def randperm_index_add_replacement(x: Any, y: Any) -> Any:
         index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
         return (
             torch.ops.aten._unsafe_index_put(
@@ -59,11 +59,11 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         skip_duplicates=True,
     )
 
-    def randperm_index_pattern(x, slice_shape):
+    def randperm_index_pattern(x: Any, slice_shape: Any) -> Any:
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
         return torch.ops.aten.index(x, (index,)), index
 
-    def randperm_index_replacement(x, slice_shape):
+    def randperm_index_replacement(x: Any, slice_shape: Any) -> Any:
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
@@ -87,7 +87,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         from .. import inductor_prims
 
         # Pattern 1: Bit manipulation approach
-        def e8m0_rceil_pattern(inp):
+        def e8m0_rceil_pattern(inp: Any) -> Any:
             inp_bits = inp.view(torch.int32)
             biased_exp = (inp_bits >> 23) & 0xFF
             mantissa = inp_bits & 0x7FFFFF
@@ -96,10 +96,10 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             e8m0_biased = torch.clamp(e8m0_biased, 0, 255)
             return e8m0_biased.to(torch.uint8)
 
-        def e8m0_rceil_replacement(inp):
+        def e8m0_rceil_replacement(inp: Any) -> Any:
             return inductor_prims.cvt_e8m0_rceil(inp)
 
-        def e8m0_extra_check(match):
+        def e8m0_extra_check(match: Any) -> Any:
             inp = match.kwargs.get("inp")
             if inp is None:
                 return False
@@ -127,14 +127,14 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
         E8M0_BIAS = 127
 
-        def e8m0_rceil_log2_pattern(inp):
+        def e8m0_rceil_log2_pattern(inp: Any) -> Any:
             log2_val = torch.log2(inp)
             ceil_val = torch.ceil(log2_val)
             clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
             biased = clamped + E8M0_BIAS
             return biased.to(torch.uint8)
 
-        def e8m0_rceil_log2_replacement(inp):
+        def e8m0_rceil_log2_replacement(inp: Any) -> Any:
             # The PTX instruction expects the raw float value, not log2
             # So we need to convert: if inp is log2(x), then 2^inp is x
             # But actually our pattern matches on the value before log2
@@ -175,7 +175,7 @@ class NumpyCompatNormalization:
                 assert numpy_kwarg not in self.inverse_mapping
                 self.inverse_mapping[numpy_kwarg] = actual_kwarg
 
-    def __call__(self, graph: torch.fx.Graph):
+    def __call__(self, graph: torch.fx.Graph) -> None:
         for node in graph.nodes:
             if node.op != "call_function":
                 continue

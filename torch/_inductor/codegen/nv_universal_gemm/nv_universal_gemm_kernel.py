@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 NVIDIA Universal GEMM kernel code generation.
 
@@ -41,11 +40,11 @@ log = logging.getLogger(__name__)
 class NVUniversalGemmKernelWrapper:
     """Wrapper to provide .run() interface for NVIDIA Universal GEMM kernels."""
 
-    def __init__(self, kernel_fn, kernel_path: str | None = None):
+    def __init__(self, kernel_fn: Any, kernel_path: str | None = None) -> None:
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
 
-    def run(self, *args, stream=None, **kwargs):
+    def run(self, *args: Any, stream: Any = None, **kwargs: Any) -> Any:
         """Execute the NVIDIA Universal GEMM kernel."""
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
@@ -225,7 +224,7 @@ class NVUniversalGemmKernel(Kernel):
 
         return code.getvalue()
 
-    def _get_reinterpret_view(self, node) -> ReinterpretView | None:
+    def _get_reinterpret_view(self, node: Any) -> ReinterpretView | None:
         """Extract or convert to ReinterpretView from a node, handling all views."""
         while isinstance(node, MutableBox):
             node = node.data
@@ -233,7 +232,7 @@ class NVUniversalGemmKernel(Kernel):
             return ExternKernel.convert_to_reinterpret_view(node)
         return None
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node: Any = None) -> None:
         """
         Generate the kernel call in the wrapper code.
 

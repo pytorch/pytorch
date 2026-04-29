@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import itertools
 from collections.abc import Callable
@@ -81,17 +80,17 @@ extern "C"
 class CppBmmTemplate(CppGemmTemplate):
     def __init__(
         self,
-        input_nodes,
+        input_nodes: Any,
         layout: ir.Layout,
         num_threads: int,
         register_blocking: GemmBlocking,
-        beta=1,
-        alpha=1,
-        has_bias=False,
+        beta: Any = 1,
+        alpha: Any = 1,
+        has_bias: Any = False,
         epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
         should_block_weights: bool = False,
-        name="bmm",
-    ):
+        name: Any = "bmm",
+    ) -> None:
         """
         In order to simplify the implementation and increase code reuse, the BMM template implements
         two versions of the GEMM kernel: a single-threaded version and a multi-threaded version.
@@ -117,7 +116,7 @@ class CppBmmTemplate(CppGemmTemplate):
         self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
 
     @staticmethod
-    def get_padded_size(n, block_n, k, should_block_weight):
+    def get_padded_size(n: Any, block_n: Any, k: Any, should_block_weight: Any) -> Any:
         if should_block_weight:
             # Tensor is constant or not contiguous, so we will pad and block
             new_size, padded_n = CppGemmTemplate.get_padded_size(
@@ -131,7 +130,7 @@ class CppBmmTemplate(CppGemmTemplate):
             return new_size, n
 
     @staticmethod
-    def check_if_block_weight(W, micro_gemm):
+    def check_if_block_weight(W: Any, micro_gemm: Any) -> Any:
         assert isinstance(W, ir.IRNode)
         _, n = W.get_size()[-2:]
         result = (
@@ -159,7 +158,7 @@ class CppBmmTemplate(CppGemmTemplate):
             b_index: The index for slicing the 3D batch tensors
         """
 
-        def hook():
+        def hook() -> Any:
             arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
@@ -171,8 +170,8 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel.render_hooks[placeholder] = hook
         return placeholder
 
-    def get_default_reindexers(self, epilogue_nodes):
-        def reindexer(args):
+    def get_default_reindexers(self, epilogue_nodes: Any) -> Any:
+        def reindexer(args: Any) -> Any:
             # if epilogue nodes exist, they have 3D ranges but args are 2D, so add 0 index
             return [self.b_index] + args
 
@@ -184,7 +183,7 @@ class CppBmmTemplate(CppGemmTemplate):
         template_buffer_node: ir.CppTemplateBuffer | None = None,
         flag_template_buffer_has_other_users: bool | None = None,
         epilogue_nodes: list[ir.IRNode] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         options = super().get_options(
             kernel=kernel,
@@ -218,7 +217,7 @@ class CppBmmTemplate(CppGemmTemplate):
         template_buffer_node: ir.CppTemplateBuffer | None = None,
         flag_template_buffer_has_other_users: bool | None = None,
         epilogue_nodes: list[ir.IRNode] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         options = self.get_options(
             kernel=kernel,
@@ -248,7 +247,7 @@ class CppBmmTemplate(CppGemmTemplate):
             del kernel.args.sizevars[options["b_index"]]
             return result
 
-    def codegen_single_thread_gemm(self):
+    def codegen_single_thread_gemm(self) -> Any:
         stub = self._template_from_string(GEMM_SINGLE_THREAD_MM_STUB).render(
             self.render_options
         )
@@ -256,7 +255,7 @@ class CppBmmTemplate(CppGemmTemplate):
             {**self.render_options, "num_threads": 1}
         )
 
-    def codegen_multi_thread_gemm(self):
+    def codegen_multi_thread_gemm(self) -> Any:
         stub = self._template_from_string(GEMM_THREADED_MM_STUB).render(
             self.render_options
         )
@@ -264,5 +263,5 @@ class CppBmmTemplate(CppGemmTemplate):
             self.render_options
         )
 
-    def codegen_gemm_stub_def(self):
+    def codegen_gemm_stub_def(self) -> Any:
         return ""

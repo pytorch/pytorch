@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Utility functions for NVIDIA Universal GEMM.
 """

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Global kernel cache for NVIDIA Universal GEMM.
 

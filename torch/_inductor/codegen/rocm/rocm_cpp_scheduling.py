@@ -1,7 +1,6 @@
-# mypy: allow-untyped-defs
 import logging
 from collections.abc import Sequence
-from typing import cast, TypeGuard
+from typing import Any, cast, TypeGuard
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -24,7 +23,7 @@ class ROCmCPPScheduling(BaseScheduling):
     It handles fusion decisions and ROCm C++ specific template code generation.
     """
 
-    def group_fn(self, sizes):
+    def group_fn(self, sizes: Any) -> Any:
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
@@ -38,7 +37,7 @@ class ROCmCPPScheduling(BaseScheduling):
     ) -> bool:
         return False
 
-    def define_kernel(self, src_code: str, node_schedule) -> str:
+    def define_kernel(self, src_code: str, node_schedule: Any) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
@@ -75,7 +74,7 @@ class ROCmCPPScheduling(BaseScheduling):
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
         prologue_nodes: Sequence[BaseSchedulerNode],
-    ):
+    ) -> None:
         """
         Codegen a ROCm template, possibly with fused epilogues
         """

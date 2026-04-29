@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """CPU-specific implementations for flex attention"""
 
 import copy
@@ -28,7 +27,7 @@ from .common import (
 )
 
 
-def check_cpu_supported():
+def check_cpu_supported() -> Any:
     requires_avx2_on_cpu = (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
@@ -41,16 +40,16 @@ def check_cpu_supported():
 
 
 def lower_cpu(
-    query,
-    key,
-    value,
-    subgraph,
-    block_mask,
-    scale,
-    kernel_options,
-    score_mod_other_buffers,
-    mask_mod_other_buffers,
-):
+    query: Any,
+    key: Any,
+    value: Any,
+    subgraph: Any,
+    block_mask: Any,
+    scale: Any,
+    kernel_options: Any,
+    score_mod_other_buffers: Any,
+    mask_mod_other_buffers: Any,
+) -> Any:
     """CPP based template for flex attention for x86 CPUs"""
     (
         _,  # q_length
@@ -147,7 +146,7 @@ def lower_cpu(
     #       mask = q_idx >= kv_idx
     #       qk_data = torch.where(mask, qk_data, torch.full_like(qk_data, -float("inf")))
     #       return qk_data
-    def convert_mask_graph_module(mask_graph):
+    def convert_mask_graph_module(mask_graph: Any) -> Any:
         gm = copy.deepcopy(mask_graph.graph_module)
         graph = gm.graph
         # Add qk_data as the first input

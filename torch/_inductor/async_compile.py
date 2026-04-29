@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import atexit
@@ -85,7 +84,7 @@ size_hints_regex = re.compile(
 )
 
 
-def pre_fork_setup():
+def pre_fork_setup() -> None:
     """
     Setup that must be done prior to forking with a process pool.
     """
@@ -101,7 +100,7 @@ def pre_fork_setup():
         triton_key()
 
 
-def caching_device_properties():
+def caching_device_properties() -> None:
     for _, device_interface in get_registered_device_interfaces():
         if device_interface.is_available():
             device_interface.Worker.get_device_properties()
@@ -136,7 +135,7 @@ def _compile_end() -> None:
         _triton_kernel_metrics = None
 
 
-def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
+def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]) -> None:
     global _triton_kernel_metrics
     # Must be called between _compile_start and _compile_end
     if _triton_kernel_metrics is not None:
@@ -159,7 +158,7 @@ def shutdown_compile_workers() -> None:
     after_fork()
 
 
-def after_fork():
+def after_fork() -> None:
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
     AsyncCompile.process_pool.cache_clear()
@@ -195,7 +194,7 @@ class CompiledTritonKernels:
     _cache: dict[str, CodeCacheFuture] = {}
 
     @staticmethod
-    def key(kernel_src: str):
+    def key(kernel_src: str) -> Any:
         """
         Generates a cache key given a triton kernel's full source code.
         This source includes the inductor meta, compilation metadata, the kernel itself, etc.
@@ -205,7 +204,7 @@ class CompiledTritonKernels:
         return code_hash(kernel_src, extra=torch_key())
 
     @staticmethod
-    def save(kernel_src: str, future: CodeCacheFuture):
+    def save(kernel_src: str, future: CodeCacheFuture) -> None:
         """
         Saves a compiled triton kernel to the cache.
         TODO: We store a LambdaFuture as that's the callable returned by async_compile.triton,
@@ -223,7 +222,7 @@ class CompiledTritonKernels:
         return CompiledTritonKernels._cache.get(key, None)
 
     @staticmethod
-    def cache_clear():
+    def cache_clear() -> None:
         CompiledTritonKernels._cache = {}
 
     @staticmethod
@@ -253,7 +252,7 @@ class AsyncCompile:
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
-    def _get_ready():
+    def _get_ready() -> Any:
         """No-op function to help mark when the subprocess pool is ready."""
         return "ready"
 
@@ -306,7 +305,7 @@ class AsyncCompile:
         _compile_end()
 
     @classmethod
-    def wait_pool_ready(cls, timeout=120) -> None:
+    def wait_pool_ready(cls, timeout: Any = 120) -> None:
         cls.use_process_pool()
         if cls._ready_future is not None:
             cls._ready_future.result(timeout=timeout)
@@ -318,7 +317,7 @@ class AsyncCompile:
         return cls.pool().submit(task)
 
     @classmethod
-    def use_process_pool(cls):
+    def use_process_pool(cls) -> Any:
         if get_compile_threads() <= 1:
             return False
 
@@ -347,7 +346,9 @@ class AsyncCompile:
         if isinstance(pool, SubprocPool):
             pool.wakeup()
 
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+    def triton(
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
+    ) -> Any:
         """
         Async_compile.triton is more complicated than the other backends because
         we're trying to optimize compile time as much as possible for this hot callsite.
@@ -373,7 +374,7 @@ class AsyncCompile:
             _load_triton_kernel_from_source, kernel_name, source_code
         )
 
-        def reload_kernel_in_parent():
+        def reload_kernel_in_parent() -> Any:
             # Benchmark how often this happens
             with dynamo_timed("reload_kernel_in_parent"):
                 return load_kernel()
@@ -512,18 +513,18 @@ class AsyncCompile:
                 finally:
                     log_triton_builds(fail=fail)
 
-    def multi_kernel(self, *args, **kwargs) -> Any:
+    def multi_kernel(self, *args: Any, **kwargs: Any) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
 
-    def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
+    def size_hint_multi_kernel(self, *args: Any, **kwargs: Any) -> Any:
         from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
 
         return SizeHintMultiKernelCall(*args, **kwargs)
 
-    def cpp(self, source_code: str):
+    def cpp(self, source_code: str) -> Any:
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppCodeCache.load(source_code).kernel
@@ -531,7 +532,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: list[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str) -> Any:
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -541,8 +542,14 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
-        def task():
+    def cutlass(
+        self,
+        cache_cls: Any,
+        source_code: Any,
+        dst_file_ext: Any,
+        aot_compile: Any = False,
+    ) -> Any:
+        def task() -> Any:
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
@@ -552,23 +559,25 @@ class AsyncCompile:
 
         return self.submit(task)
 
-    def cuda(self, source_code, dst_file_ext, aot_compile=False):
+    def cuda(
+        self, source_code: Any, dst_file_ext: Any, aot_compile: Any = False
+    ) -> Any:
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
         return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
 
-    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+    def xpu(self, source_code: Any, dst_file_ext: Any, aot_compile: Any = False) -> Any:
         kernel_code_log.info("XPU Kernel:\n%s", source_code)
         return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
 
     def rocm(
         self,
-        source_code,
-        dst_file_ext,
-        aot_compile=False,
-    ):
+        source_code: Any,
+        dst_file_ext: Any,
+        aot_compile: Any = False,
+    ) -> Any:
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
-        def task():
+        def task() -> Any:
             if aot_compile:
                 output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
                 ROCmCodeCache.aot_kernels_o.append(output_path)
@@ -578,7 +587,7 @@ class AsyncCompile:
 
         return self.submit(task)
 
-    def halide(self, meta: HalideMeta, source_code: str):
+    def halide(self, meta: HalideMeta, source_code: str) -> Any:
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if get_compile_threads() <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
@@ -588,7 +597,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cutedsl(self, kernel_name: str, source_code: str):
+    def cutedsl(self, kernel_name: str, source_code: str) -> Any:
         """
         Compile CuteDSL (CUTLASS Python DSL) kernels.
 
@@ -607,7 +616,7 @@ class AsyncCompile:
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
 
-        def task():
+        def task() -> Any:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
@@ -627,7 +636,7 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
-    def pallas(self, kernel_name: str, source_code: str):
+    def pallas(self, kernel_name: str, source_code: str) -> Any:
         """
         Compile Pallas (JAX experimental) kernels.
 
@@ -643,7 +652,7 @@ class AsyncCompile:
 
         kernel_code_log.info("Pallas Kernel:\n%s", source_code)
 
-        def task():
+        def task() -> Any:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
@@ -663,7 +672,7 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
-    def nv_universal_gemm(self, kernel_name: str, source_code: str):
+    def nv_universal_gemm(self, kernel_name: str, source_code: str) -> Any:
         """
         Compile NVIDIA Universal GEMM kernels.
 
@@ -684,7 +693,7 @@ class AsyncCompile:
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
 
-        def task():
+        def task() -> Any:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 

@@ -1,7 +1,7 @@
-# mypy: allow-untyped-defs
 import contextlib
 import logging
 import re
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -686,20 +686,20 @@ extern "C"
 class CppFlexAttentionTemplate(CppTemplate):
     def __init__(
         self,
-        input_nodes,
+        input_nodes: Any,
         layout: ir.Layout,
-        scale,
-        score_mod,
-        mask_mod,
-        kv_block_size,
-        q_block_size,
-        has_other_buffer,
-        no_full_kv_block,
-        fake_buffers,
-        len_score_other,
-        len_mask_other,
-        kernel_input_name_to_buffer,
-        block_vars,
+        scale: Any,
+        score_mod: Any,
+        mask_mod: Any,
+        kv_block_size: Any,
+        q_block_size: Any,
+        has_other_buffer: Any,
+        no_full_kv_block: Any,
+        fake_buffers: Any,
+        len_score_other: Any,
+        len_mask_other: Any,
+        kernel_input_name_to_buffer: Any,
+        block_vars: Any,
     ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16, torch.float16]
         super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
@@ -713,7 +713,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             V.graph.register_buffer(self.mask_mod) if self.mask_mod else None
         )
 
-        def get_idx(buf_name):
+        def get_idx(buf_name: Any) -> Any:
             match = re.search(r"\d+", buf_name)
             assert match, f"incorrect score buf name: {buf_name}"
             return match.group()
@@ -763,7 +763,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
         self.other_ptr_data = {}  # type: ignore[var-annotated]
 
-    def update_kernel_args(self, kernel_args):
+    def update_kernel_args(self, kernel_args: Any) -> Any:
         kernel_args.update(
             {
                 key: value
@@ -773,16 +773,18 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
         return kernel_args
 
-    def generate_other_buffer(self, buf_list, start_offset, len_attr, kernel_args):
+    def generate_other_buffer(
+        self, buf_list: Any, start_offset: Any, len_attr: Any, kernel_args: Any
+    ) -> Any:
         kernel_input_name_to_buffer_name = {
             key: value if isinstance(value, sympy.Symbol) else value.get_name()
             for key, value in self.kernel_input_name_to_buffer.items()
         }
 
-        def get_arg(name):
+        def get_arg(name: Any) -> Any:
             return kernel_input_name_to_buffer_name.get(name)
 
-        def get_arg_name(name):
+        def get_arg_name(name: Any) -> Any:
             if isinstance(get_arg(name), sympy.Symbol):
                 return kernel_args.sizevars.get(get_arg(name))
             return kernel_args.input_buffers.get(get_arg(name))
@@ -807,7 +809,9 @@ class CppFlexAttentionTemplate(CppTemplate):
             f"auto {ptr} = {name};" for ptr, (name, _) in self.other_ptr_data.items()
         )
 
-    def modification(self, subgraph_buffer, output_name, output_idx):
+    def modification(
+        self, subgraph_buffer: Any, output_name: Any, output_idx: Any
+    ) -> Any:
         assert isinstance(subgraph_buffer, ir.ComputedBuffer)
         subgraph_buffer_data = subgraph_buffer.data
         from ..loop_body import LoopBody
@@ -854,7 +858,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         dst_layout = subgraph_buffer.get_layout()
         output_index = dst_layout.make_indexer()([*var_ranges.keys()])
 
-        def fn(*args):
+        def fn(*args: Any) -> None:
             V.ops.store(
                 output_name,
                 output_index,
@@ -883,7 +887,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
 
-        def max_parallel_depth():
+        def max_parallel_depth() -> Any:
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
         # This loop is not parallelized since it is not the outermost loop.
@@ -912,26 +916,26 @@ class CppFlexAttentionTemplate(CppTemplate):
 
     @staticmethod
     def add_choices(
-        choices,
-        input_nodes,
-        layout,
-        scale,
-        score_mod,
-        mask_mod,
-        kv_block_size,
-        q_block_size,
-        has_other_buffer,
-        no_full_kv_block,
-        fake_buffers,
-        len_score_other,
-        len_mask_other,
-        kernel_input_name_to_buffer,
-        block_vars,
-    ):
-        def preprocessor(input_nodes, layout):
+        choices: Any,
+        input_nodes: Any,
+        layout: Any,
+        scale: Any,
+        score_mod: Any,
+        mask_mod: Any,
+        kv_block_size: Any,
+        q_block_size: Any,
+        has_other_buffer: Any,
+        no_full_kv_block: Any,
+        fake_buffers: Any,
+        len_score_other: Any,
+        len_mask_other: Any,
+        kernel_input_name_to_buffer: Any,
+        block_vars: Any,
+    ) -> Any:
+        def preprocessor(input_nodes: Any, layout: Any) -> Any:
             return input_nodes, layout
 
-        def postprocessor(output):
+        def postprocessor(output: Any) -> Any:
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -956,15 +960,17 @@ class CppFlexAttentionTemplate(CppTemplate):
         template.maybe_append_choice(choices)
         return template
 
-    def apply_score_mod(self, score, b, h, q_idx, kv_idx):
+    def apply_score_mod(
+        self, score: Any, b: Any, h: Any, q_idx: Any, kv_idx: Any
+    ) -> Any:
         return self.score_mod.graph_module(score, b, h, q_idx, kv_idx).item()
 
     def render(  # type: ignore[override,return]
         self,
-        kernel,
+        kernel: Any,
         template_buffer_node: ir.CppTemplateBuffer | None = None,
         epilogue_nodes: list[ir.IRNode] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
             raise NotImplementedError(
@@ -1024,19 +1030,21 @@ class CppFlexAttentionTemplate(CppTemplate):
                 )
             return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
 
-    def codegen_softmax_fusion(self, kernel_name: str):
+    def codegen_softmax_fusion(self, kernel_name: str) -> Any:
         # TODO: use inductor IR to rewrite those fusions
         return self._template_from_string(SOFTMAX_FUSIONS).render(
             dict(kernel_name=kernel_name)
         )
 
-    def codegen_brgemm_pack_function(self, kernel_name: str):
+    def codegen_brgemm_pack_function(self, kernel_name: str) -> Any:
         # TODO: make them general for common bmm templates
         return self._template_from_string(BRGEMM_PACK_FUNCTIONS).render(
             dict(kernel_name=kernel_name)
         )
 
-    def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
+    def codegen_allocate_buffer(
+        self, buffer_name: str, buffer_dtype: Any, buffer_size: Any
+    ) -> Any:
         return self._template_from_string(ALLOCATE_BUFFER).render(
             dict(
                 buffer_name=buffer_name,
@@ -1045,7 +1053,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             )
         )
 
-    def micro_gemm_define(self, kernel_name: str):
+    def micro_gemm_define(self, kernel_name: str) -> Any:
         from torch._inductor.codegen.cpp_gemm_template import (
             CppTemplateKernel,
             parallel_num_threads,
@@ -1083,7 +1091,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             code = micro_gemm.codegen_define(kernel)
         return code + code_trans
 
-    def codegen_micro_gemm(self, kernel_name: str):
+    def codegen_micro_gemm(self, kernel_name: str) -> Any:
         micro_gemm = self.micro_gemm_define(kernel_name)
         GEMM_SOURCE_CODE = MICRO_GEMM_TEMPLATE.replace("GEMM_DEFINE", micro_gemm)
         return self._template_from_string(GEMM_SOURCE_CODE).render()

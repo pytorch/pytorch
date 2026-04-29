@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -35,7 +34,7 @@ def compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
     options: dict[str, Any] | None = None,
-):
+) -> Any:
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
     FX graphs captured without using TorchDynamo.
@@ -55,8 +54,8 @@ def compile(
 
 def aoti_compile_and_package(
     exported_program: ExportedProgram,
-    _deprecated_unused_args=None,
-    _deprecated_unused_kwargs=None,
+    _deprecated_unused_args: Any = None,
+    _deprecated_unused_kwargs: Any = None,
     *,
     package_path: FileLike | None = None,
     inductor_configs: dict[str, Any] | None = None,
@@ -167,7 +166,7 @@ def _aoti_compile_and_package_inner(
     check_accuracy: str | None = None,
     package_path: str | io.BytesIO | None = None,
     inductor_configs: dict[str, Any] | None = None,
-):
+) -> Any:
     """
     See docstring for aoti_compile_and_package.
 
@@ -396,7 +395,7 @@ def list_options() -> list[str]:
     return list(current_config.keys())
 
 
-def cudagraph_mark_step_begin():
+def cudagraph_mark_step_begin() -> None:
     "Indicates that a new iteration of inference or training is about to begin."
     from .cudagraph_trees import mark_step_begin
 

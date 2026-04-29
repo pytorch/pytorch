@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools
 from collections.abc import Iterable
@@ -99,7 +98,9 @@ class CuteDSLTemplate(KernelTemplate):
                 source_code=code,
             )
 
-            def make_kernel_render(out_node, hint_override: int | None = None):
+            def make_kernel_render(
+                out_node: Any, hint_override: int | None = None
+            ) -> Any:
                 """
                 Factory function that creates a kernel renderer for the final output.
 
@@ -114,7 +115,7 @@ class CuteDSLTemplate(KernelTemplate):
                     subgraphs=subgraphs,
                 )
 
-                def render():
+                def render() -> Any:
                     return render_kernel.render(self.template, **kwargs)
 
                 return render_kernel, render
@@ -144,7 +145,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         template: "CuteDSLTemplate",
         mutated_inputs: Iterable[IRNode] | None = None,
         template_kwargs: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         description = self._build_description(name, template_kwargs)
         super().__init__(
             name=name,
@@ -168,7 +169,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
     def __str__(self) -> str:
         return f"CuteDSLTemplateCaller({self.name})"
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args: Any, out: Any) -> float:
         """Benchmark the kernel execution."""
         return self.bmreq.benchmark(*args, out=out)
 

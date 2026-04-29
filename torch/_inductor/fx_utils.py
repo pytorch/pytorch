@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import operator
 from collections import defaultdict
@@ -85,20 +84,20 @@ class FakeTensorUpdater:
         for node in self.graph.nodes:
             self.processed_hashes.add(self.hash_node(node))
 
-    def hash_node(self, node: torch.fx.Node):
+    def hash_node(self, node: torch.fx.Node) -> Any:
         # todo(chilli): Not a great hash function
         return (node, node.target, id(node.args), id(node.kwargs))
 
-    def incremental_update(self):
+    def incremental_update(self) -> Any:
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
         existing_storages: defaultdict[int | None, int] = defaultdict(int)
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
-        def is_intlist_same(new, old):
+        def is_intlist_same(new: Any, old: Any) -> Any:
             return statically_known_true(sym_eq(new, old))
 
-        def is_fake_tensor_same(new, old, *, node):
+        def is_fake_tensor_same(new: Any, old: Any, *, node: Any) -> Any:
             if type(new) is not type(old):
                 return False
             if isinstance(new, (list, tuple)):
@@ -136,7 +135,7 @@ class FakeTensorUpdater:
             if get_storage(new) == get_storage(old):
                 return True
 
-            def any_user_may_alias(node):
+            def any_user_may_alias(node: Any) -> Any:
                 if not isinstance(node.meta["val"], torch.Tensor):
                     # analysis too complicated on lists, can support in the future
                     return True
@@ -193,7 +192,7 @@ class FakeTensorUpdater:
 
             return False
 
-        def should_process_node(node):
+        def should_process_node(node: Any) -> Any:
             # node.target for nodes returning true from this function
             # are called under fake mode and does not work for inductor
             # lowerings. We check if the node.target is an aten operator
@@ -263,7 +262,7 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
-def get_fake(x):
+def get_fake(x: Any) -> Any:
     if isinstance(x, torch.fx.Node):
         if "val" not in x.meta:
             return x

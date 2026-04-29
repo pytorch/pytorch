@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -45,7 +44,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.source_file: str = ""
         self.hash_key, self.source_file = ROCmCodeCache.write(self.source_code, "so")
 
-    def precompile(self):
+    def precompile(self) -> None:
         # Prepopulate code cache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
@@ -128,7 +127,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         )
         self._workspace_size_updated = True
 
-    def ensure_dll_loaded(self):
+    def ensure_dll_loaded(self) -> None:
         if self.DLL is None:
             self.DLL, self.hash_key, self.source_file = ROCmCodeCache.load(
                 self.source_code, "so"

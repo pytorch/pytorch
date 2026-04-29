@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 import functools
 import inspect
 import logging
 import warnings
+from typing import Any
 
 import torch
 
@@ -21,7 +21,7 @@ aten = torch.ops.aten
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
-def _sfdp_pattern_1(query, key, value, inv_scale):
+def _sfdp_pattern_1(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     return (
         torch.matmul(query, key.transpose(-2, -1))
         .div(inv_scale)
@@ -30,7 +30,7 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
     )
 
 
-def _sfdp_replacement_1(query, key, value, inv_scale):
+def _sfdp_replacement_1(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -43,7 +43,7 @@ def _sfdp_replacement_1(query, key, value, inv_scale):
     )
 
 
-def _sfdp_pattern_2(query, key, value, scale_factor):
+def _sfdp_pattern_2(query: Any, key: Any, value: Any, scale_factor: Any) -> Any:
     return (
         torch.matmul(query, key.transpose(-2, -1))
         .mul(scale_factor)
@@ -52,7 +52,7 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
     )
 
 
-def _sfdp_replacement_2(query, key, value, scale_factor):
+def _sfdp_replacement_2(query: Any, key: Any, value: Any, scale_factor: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -65,7 +65,9 @@ def _sfdp_replacement_2(query, key, value, scale_factor):
     )
 
 
-def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_pattern_3(
+    query: Any, key: Any, value: Any, inv_scale_factor: Any, dropout_p: Any
+) -> Any:
     return torch.nn.functional.dropout(
         torch.matmul(query, key.transpose(-2, -1))
         .div(inv_scale_factor)
@@ -74,7 +76,9 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
     ).matmul(value)
 
 
-def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_replacement_3(
+    query: Any, key: Any, value: Any, inv_scale_factor: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -87,14 +91,18 @@ def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
+def _sfdp_pattern_4(
+    query: Any, key: Any, value: Any, scale_factor: Any, dropout_p: Any
+) -> Any:
     return torch.nn.functional.dropout(
         torch.matmul(query, key.transpose(-2, -1)).mul(scale_factor).softmax(dim=-1),
         p=dropout_p,
     ).matmul(value)
 
 
-def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
+def _sfdp_replacement_4(
+    query: Any, key: Any, value: Any, scale_factor: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -107,7 +115,9 @@ def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_5(query, key, value, attn_mask, inv_scale):
+def _sfdp_pattern_5(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     attn_weight = torch.softmax(
         (query @ key.transpose(-2, -1) / (inv_scale)) + attn_mask, dim=-1
     )
@@ -115,7 +125,9 @@ def _sfdp_pattern_5(query, key, value, attn_mask, inv_scale):
     return attn_weight @ value
 
 
-def _sfdp_replacement_5(query, key, value, attn_mask, inv_scale):
+def _sfdp_replacement_5(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -128,7 +140,9 @@ def _sfdp_replacement_5(query, key, value, attn_mask, inv_scale):
     )
 
 
-def _sfdp_pattern_6(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_pattern_6(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     attn_weight = torch.softmax(
         (query @ key.transpose(-2, -1) / inv_scale) + attn_mask, dim=-1
     )
@@ -136,7 +150,9 @@ def _sfdp_pattern_6(query, key, value, attn_mask, inv_scale, dropout_p):
     return attn_weight @ value
 
 
-def _sfdp_replacement_6(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_replacement_6(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -149,7 +165,9 @@ def _sfdp_replacement_6(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_7(query, key, value, inv_scale, dropout_p):
+def _sfdp_pattern_7(
+    query: Any, key: Any, value: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # in real workloads inputs to matmul are permuted
     # causing matmul to expand to a series of expand and clone calls
     # we want the same to happen during pattern tracing
@@ -165,7 +183,9 @@ def _sfdp_pattern_7(query, key, value, inv_scale, dropout_p):
     return attn_weight @ v
 
 
-def _sfdp_replacement_7(query, key, value, inv_scale, dropout_p):
+def _sfdp_replacement_7(
+    query: Any, key: Any, value: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # sdpa prefers inputs in permuted format
     # it makes a copy to put them in this format
     # if they aren't already
@@ -186,7 +206,7 @@ def _sfdp_replacement_7(query, key, value, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_8(query, key, value, inv_scale):
+def _sfdp_pattern_8(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     # no dropout version of pattern 7
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -199,7 +219,7 @@ def _sfdp_pattern_8(query, key, value, inv_scale):
     return attn_weight @ v
 
 
-def _sfdp_replacement_8(query, key, value, inv_scale):
+def _sfdp_replacement_8(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -215,7 +235,9 @@ def _sfdp_replacement_8(query, key, value, inv_scale):
     )
 
 
-def _sfdp_pattern_9(query, key, value, inv_scale, dropout_p):
+def _sfdp_pattern_9(
+    query: Any, key: Any, value: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
@@ -229,7 +251,9 @@ def _sfdp_pattern_9(query, key, value, inv_scale, dropout_p):
     return attn_weight @ v
 
 
-def _sfdp_replacement_9(query, key, value, inv_scale, dropout_p):
+def _sfdp_replacement_9(
+    query: Any, key: Any, value: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -245,7 +269,7 @@ def _sfdp_replacement_9(query, key, value, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_10(query, key, value, inv_scale):
+def _sfdp_pattern_10(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     # no dropout version of 9
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -259,7 +283,7 @@ def _sfdp_pattern_10(query, key, value, inv_scale):
     return attn_weight @ v
 
 
-def _sfdp_replacement_10(query, key, value, inv_scale):
+def _sfdp_replacement_10(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -275,7 +299,7 @@ def _sfdp_replacement_10(query, key, value, inv_scale):
     )
 
 
-def _sfdp_pattern_11(query, key, value, inv_scale):
+def _sfdp_pattern_11(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     # Mainly for huggingface models
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -283,7 +307,7 @@ def _sfdp_pattern_11(query, key, value, inv_scale):
     return torch.matmul(q, k.transpose(-2, -1)).div(inv_scale).softmax(dim=-1).matmul(v)
 
 
-def _sfdp_replacement_11(query, key, value, inv_scale):
+def _sfdp_replacement_11(query: Any, key: Any, value: Any, inv_scale: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.transpose(1, 2),
@@ -296,7 +320,9 @@ def _sfdp_replacement_11(query, key, value, inv_scale):
     )
 
 
-def _sfdp_pattern_12(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_pattern_12(
+    query: Any, key: Any, value: Any, inv_scale_factor: Any, dropout_p: Any
+) -> Any:
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
@@ -306,7 +332,9 @@ def _sfdp_pattern_12(query, key, value, inv_scale_factor, dropout_p):
     ).matmul(v)
 
 
-def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_replacement_12(
+    query: Any, key: Any, value: Any, inv_scale_factor: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.transpose(1, 2),
@@ -319,13 +347,13 @@ def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_13(query, key, value, dropout_p):
+def _sfdp_pattern_13(query: Any, key: Any, value: Any, dropout_p: Any) -> Any:
     attn_weight = torch.bmm(query, key.transpose(1, 2)).softmax(dim=-1)
     attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
     return torch.bmm(attn_weight, value)
 
 
-def _sfdp_replacement_13(query, key, value, dropout_p):
+def _sfdp_replacement_13(query: Any, key: Any, value: Any, dropout_p: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.unsqueeze(0),
@@ -336,7 +364,9 @@ def _sfdp_replacement_13(query, key, value, dropout_p):
     ).squeeze(0)
 
 
-def _sfdp_pattern_14(query, key, value, attn_mask, inv_scale):
+def _sfdp_pattern_14(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     # for BertLarge
     # Permutations are needed to create clones in graph.
     q = query.permute([0, 2, 1, 3])
@@ -349,7 +379,9 @@ def _sfdp_pattern_14(query, key, value, attn_mask, inv_scale):
     )
 
 
-def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
+def _sfdp_replacement_14(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.transpose(1, 2),
@@ -362,7 +394,9 @@ def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
     )
 
 
-def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale):
+def _sfdp_pattern_15(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     # for DistilBert
     # Permutations are needed to create clones in graph.
     # Ref: https://github.com/pytorch/pytorch/issues/119911
@@ -378,7 +412,9 @@ def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale):
     return torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1) @ v
 
 
-def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale):
+def _sfdp_replacement_15(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     bs = query.size(0)
     n_head = query.size(2)
@@ -399,7 +435,9 @@ def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale):
     )
 
 
-def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_pattern_16(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # for BertLarge with dropout
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
@@ -416,7 +454,9 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_replacement_16(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.transpose(1, 2),
@@ -429,7 +469,9 @@ def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_17(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_pattern_17(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # for DistilBert with dropout
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
@@ -448,7 +490,9 @@ def _sfdp_pattern_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_replacement_17(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     bs = query.size(0)
     n_head = query.size(2)
@@ -469,7 +513,9 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_18(query, key, value, causal_mask, inv_scale, dropout_p):
+def _sfdp_pattern_18(
+    query: Any, key: Any, value: Any, causal_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # for hf_GPT2 with dropout (introduces clone node) for inference
     # it also returns permuted key & value
     query = query.permute([0, 2, 1, 3])
@@ -498,7 +544,9 @@ def _sfdp_pattern_18(query, key, value, causal_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_replacement_18(query, key, value, causal_mask, inv_scale, dropout_p):
+def _sfdp_replacement_18(
+    query: Any, key: Any, value: Any, causal_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     permuted_key = key.transpose(1, 2)
     permuted_value = value.transpose(1, 2)
@@ -517,7 +565,15 @@ def _sfdp_replacement_18(query, key, value, causal_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, inv_scale, dropout_p):
+def _sfdp_pattern_19(
+    query: Any,
+    key: Any,
+    value: Any,
+    causal_mask: Any,
+    attn_mask: Any,
+    inv_scale: Any,
+    dropout_p: Any,
+) -> Any:
     # for token-classification+gpt2 / text-generation+gpt2
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
     inv_scale = torch.full(
@@ -537,8 +593,14 @@ def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, inv_scale, dropo
 
 
 def _sfdp_replacement_19(
-    query, key, value, causal_mask, attn_mask, inv_scale, dropout_p
-):
+    query: Any,
+    key: Any,
+    value: Any,
+    causal_mask: Any,
+    attn_mask: Any,
+    inv_scale: Any,
+    dropout_p: Any,
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = torch.where(causal_mask, attn_mask, fill_value)
@@ -553,7 +615,9 @@ def _sfdp_replacement_19(
     )
 
 
-def _sfdp_pattern_20(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_pattern_20(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     # for DistilBert with dropout transformers==4.44.2
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
@@ -572,7 +636,9 @@ def _sfdp_pattern_20(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_replacement_20(query, key, value, attn_mask, inv_scale, dropout_p):
+def _sfdp_replacement_20(
+    query: Any, key: Any, value: Any, attn_mask: Any, inv_scale: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     bs = query.size(0)
     n_head = query.size(2)
@@ -593,7 +659,7 @@ def _sfdp_replacement_20(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_21(query, key, value, attn_mask):
+def _sfdp_pattern_21(query: Any, key: Any, value: Any, attn_mask: Any) -> Any:
     # for T5 with inplace add
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
@@ -604,7 +670,7 @@ def _sfdp_pattern_21(query, key, value, attn_mask):
     return score.float().softmax(dim=-1).type_as(query).matmul(value)
 
 
-def _sfdp_replacement_21(query, key, value, attn_mask):
+def _sfdp_replacement_21(query: Any, key: Any, value: Any, attn_mask: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -619,7 +685,7 @@ def _sfdp_replacement_21(query, key, value, attn_mask):
     )
 
 
-def _sfdp_pattern_22(query, key, value, attn_mask):
+def _sfdp_pattern_22(query: Any, key: Any, value: Any, attn_mask: Any) -> Any:
     # for T5 with inplace add and return key and value
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
@@ -630,7 +696,7 @@ def _sfdp_pattern_22(query, key, value, attn_mask):
     return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
 
 
-def _sfdp_replacement_22(query, key, value, attn_mask):
+def _sfdp_replacement_22(query: Any, key: Any, value: Any, attn_mask: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -649,7 +715,7 @@ def _sfdp_replacement_22(query, key, value, attn_mask):
     )
 
 
-def _sfdp_pattern_23(query, key, value):
+def _sfdp_pattern_23(query: Any, key: Any, value: Any) -> Any:
     # for T5 with inplace add and
     # return key and value and
     # attn_mask is generated by atem.full(..., 0)
@@ -662,7 +728,7 @@ def _sfdp_pattern_23(query, key, value):
     return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
 
 
-def _sfdp_replacement_23(query, key, value):
+def _sfdp_replacement_23(query: Any, key: Any, value: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -681,7 +747,7 @@ def _sfdp_replacement_23(query, key, value):
     )
 
 
-def _sfdp_pattern_24(query, key, value, attention_mask):
+def _sfdp_pattern_24(query: Any, key: Any, value: Any, attention_mask: Any) -> Any:
     """
     this pattern is for MBartForCausalLM/PLBartForCausalLM.
     attn_mask has a different dtype with QKV.
@@ -705,7 +771,7 @@ def _sfdp_pattern_24(query, key, value, attention_mask):
     return attn_output
 
 
-def _sfdp_replacement_24(query, key, value, attention_mask):
+def _sfdp_replacement_24(query: Any, key: Any, value: Any, attention_mask: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -717,7 +783,9 @@ def _sfdp_replacement_24(query, key, value, attention_mask):
     )
 
 
-def _sfdp_pattern_25(query, key, value, attn_mask, dropout_p):
+def _sfdp_pattern_25(
+    query: Any, key: Any, value: Any, attn_mask: Any, dropout_p: Any
+) -> Any:
     # for T5 with inplace add
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
@@ -729,7 +797,9 @@ def _sfdp_pattern_25(query, key, value, attn_mask, dropout_p):
     ).matmul(value)
 
 
-def _sfdp_replacement_25(query, key, value, attn_mask, dropout_p):
+def _sfdp_replacement_25(
+    query: Any, key: Any, value: Any, attn_mask: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -747,7 +817,9 @@ def _sfdp_replacement_25(query, key, value, attn_mask, dropout_p):
     )
 
 
-def _sfdp_pattern_26(query, key, value, attn_mask, dropout_p):
+def _sfdp_pattern_26(
+    query: Any, key: Any, value: Any, attn_mask: Any, dropout_p: Any
+) -> Any:
     # for T5 with inplace add and return key and value
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
@@ -763,7 +835,9 @@ def _sfdp_pattern_26(query, key, value, attn_mask, dropout_p):
     )
 
 
-def _sfdp_replacement_26(query, key, value, attn_mask, dropout_p):
+def _sfdp_replacement_26(
+    query: Any, key: Any, value: Any, attn_mask: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -785,7 +859,7 @@ def _sfdp_replacement_26(query, key, value, attn_mask, dropout_p):
     )
 
 
-def _sfdp_pattern_27(query, key, value, dropout_p):
+def _sfdp_pattern_27(query: Any, key: Any, value: Any, dropout_p: Any) -> Any:
     # for T5 with inplace add and
     # return key and value and
     # attn_mask is generated by atem.full(..., 0)
@@ -802,7 +876,7 @@ def _sfdp_pattern_27(query, key, value, dropout_p):
     )
 
 
-def _sfdp_replacement_27(query, key, value, dropout_p):
+def _sfdp_replacement_27(query: Any, key: Any, value: Any, dropout_p: Any) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
@@ -822,13 +896,17 @@ def _sfdp_replacement_27(query, key, value, dropout_p):
     )
 
 
-def _sfdp_pattern_28(query, key, value, scale_factor, dropout_p):
+def _sfdp_pattern_28(
+    query: Any, key: Any, value: Any, scale_factor: Any, dropout_p: Any
+) -> Any:
     # Visformer pattern
     # same as pattern 4 but non-contiguous q/k/v
     return _sfdp_pattern_4(query, key, value, scale_factor, dropout_p)
 
 
-def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
+def _sfdp_replacement_28(
+    query: Any, key: Any, value: Any, scale_factor: Any, dropout_p: Any
+) -> Any:
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query.contiguous(),
@@ -855,7 +933,7 @@ def _warn_tf32_disabled() -> None:
         )
 
 
-def _sfdp_params_check(match):
+def _sfdp_params_check(match: Any) -> Any:
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
@@ -903,8 +981,8 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
-    def fn(match):
+def _sfdp_extra_check(scale_factor_op: Any = None, disable_cuda: Any = False) -> Any:
+    def fn(match: Any) -> Any:
         if (
             disable_cuda
             and "query" in match.kwargs
@@ -923,7 +1001,7 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     return fn
 
 
-def partialize_and_update_signature(func, **kwargs):
+def partialize_and_update_signature(func: Any, **kwargs: Any) -> Any:
     """
     Equivalent to functools.partial but also updates the signature on returned function
     """
@@ -937,7 +1015,7 @@ def partialize_and_update_signature(func, **kwargs):
 
     partial_func = functools.partial(func, **kwargs)
 
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         return partial_func(*args, **kwargs)
 
     wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
@@ -946,7 +1024,7 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns(input_device: torch.device | None = None):
+def _get_sfdp_patterns(input_device: torch.device | None = None) -> Any:
     from .joint_graph import patterns
 
     if input_device:
@@ -1366,6 +1444,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
 
 
 @functools.cache
-def _sfdp_init(input_device: torch.device | None = None):
+def _sfdp_init(input_device: torch.device | None = None) -> None:
     for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
         gen_register_replacement(key, **register_replacement_kwargs)

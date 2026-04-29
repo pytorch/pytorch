@@ -1,7 +1,6 @@
-# mypy: allow-untyped-defs
 import contextlib
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -12,7 +11,7 @@ INTERMEDIATE_HOOKS: list[Callable[[str, "torch.Tensor"], None]] = []
 
 
 @contextlib.contextmanager
-def intermediate_hook(fn):
+def intermediate_hook(fn: Any) -> Any:
     INTERMEDIATE_HOOKS.append(fn)
     try:
         yield
@@ -20,7 +19,7 @@ def intermediate_hook(fn):
         INTERMEDIATE_HOOKS.pop()
 
 
-def run_intermediate_hooks(name, val):
+def run_intermediate_hooks(name: Any, val: Any) -> None:
     global INTERMEDIATE_HOOKS
     hooks = INTERMEDIATE_HOOKS
     INTERMEDIATE_HOOKS = []

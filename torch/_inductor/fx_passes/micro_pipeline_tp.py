@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 from collections import defaultdict
@@ -44,7 +43,9 @@ def _compute_mm_arithmetic_intensity(M: int, N: int, K: int) -> float:
     return M * N * K / (M * K + N * K + M * N)
 
 
-def _filter_nodes_by_target(nodes: list[torch.fx.Node], target) -> list[torch.fx.Node]:
+def _filter_nodes_by_target(
+    nodes: list[torch.fx.Node], target: Any
+) -> list[torch.fx.Node]:
     return [x for x in nodes if x.target == target]
 
 
@@ -87,10 +88,10 @@ class _AllGatherMatch:
                 node.graph.erase_node(node)
 
 
-def find_all_gather_patterns(graph: torch.fx.Graph):
+def find_all_gather_patterns(graph: torch.fx.Graph) -> Any:
     c10d = torch.ops._c10d_functional
 
-    def make_zero_dim_all_gather_pattern(shard):
+    def make_zero_dim_all_gather_pattern(shard: Any) -> Any:
         return CallFunction(
             c10d.wait_tensor.default,
             CallFunction(
@@ -104,7 +105,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
     # Matches funcol.all_gather_tensor with gather_dim == 0
     zero_dim_all_gather_pattern = make_zero_dim_all_gather_pattern(KeywordArg("shard"))
 
-    def make_all_gather_split_pattern(shard):
+    def make_all_gather_split_pattern(shard: Any) -> Any:
         return CallFunction(
             operator.getitem,
             CallFunction(
@@ -116,7 +117,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             Ignored(),
         )
 
-    def make_cat_pattern(splits):
+    def make_cat_pattern(splits: Any) -> Any:
         return CallFunction(
             aten.cat.default,
             ListOf(splits),
@@ -246,10 +247,10 @@ class _ReduceScatterMatch:
                 node.graph.erase_node(node)
 
 
-def find_reduce_scatter_patterns(graph: torch.fx.Graph):
+def find_reduce_scatter_patterns(graph: torch.fx.Graph) -> Any:
     c10d = torch.ops._c10d_functional
 
-    def reduce_scatter_template(inp: PatternExpr, users: int):
+    def reduce_scatter_template(inp: PatternExpr, users: int) -> Any:
         return CallFunction(
             c10d.wait_tensor.default,
             CallFunction(
@@ -381,7 +382,7 @@ class _Matmul:
     pre_mm_reshape: torch.fx.Node | None
     post_mm_reshape: torch.fx.Node | None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         assert len(self.nodes) in (1, 3)
         if len(self.nodes) == 1:
             assert self.nodes[0].target in (aten.mm.default, aten._scaled_mm.default)
@@ -461,7 +462,7 @@ class _ScaledMatmul(_Matmul):
     pre_mm_reshape: torch.fx.Node | None
     post_mm_reshape: torch.fx.Node | None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.arg_ancestor_nodes |= _find_ancestors(self.A_scale_node)
         self.arg_ancestor_nodes |= _find_ancestors(self.B_scale_node)
@@ -656,7 +657,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             return
 
         # scaled_mm is not supported yet for last dim
-        def _filter_out_scaled_matmul(matmul: _Matmul):
+        def _filter_out_scaled_matmul(matmul: _Matmul) -> Any:
             return not isinstance(matmul, _ScaledMatmul)
 
         filter_matmul = _filter_out_scaled_matmul
@@ -906,7 +907,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     filter_matmul = None
     if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
         # scaled_mm is not supported yet for last dim mm+rs
-        def _filter_out_scaled_matmul(matmul: _Matmul):
+        def _filter_out_scaled_matmul(matmul: _Matmul) -> Any:
             return not isinstance(matmul, _ScaledMatmul)
 
         filter_matmul = _filter_out_scaled_matmul
@@ -1024,7 +1025,7 @@ def _get_collective_to_overlappable_nodes(
     descendants of the collective.
     """
 
-    def is_collective(node) -> bool:
+    def is_collective(node: Any) -> bool:
         # Only consider all-gather and reduce-scatter in the context of
         # micro-pipeline TP.
         return node.target in [
@@ -1084,7 +1085,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     return unexposed_collectives
 
 
-def micro_pipeline_tp_pass(graph: torch.fx.Graph):
+def micro_pipeline_tp_pass(graph: torch.fx.Graph) -> None:
     all_gathers = find_all_gather_patterns(graph)
     reduce_scatters = find_reduce_scatter_patterns(graph)
 

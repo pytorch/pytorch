@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -58,7 +57,7 @@ class ROCmTemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
-        **kwargs,
+        **kwargs: Any,
     ) -> ROCmTemplateCaller:
         """
         Generates the ROCm template caller object for the given GEMM template and operation. This ROCmTemplateCaller
@@ -122,7 +121,7 @@ class ROCmTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ROCmTemplateBuffer,
             epilogue_nodes: Sequence[IRNode] | None = None,
-        ):
+        ) -> Any:
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",
                 runtime_arg_info=self.get_runtime_arg_info(),
@@ -181,11 +180,11 @@ class ROCmTemplate(KernelTemplate):
         )
         return res
 
-    def render(self, **kwargs) -> str:
+    def render(self, **kwargs: Any) -> str:
         raise NotImplementedError
 
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return []
 
-    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
         return []

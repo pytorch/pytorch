@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -69,7 +68,7 @@ class LayoutArg:
     attr: ValidLayoutAttrs
     dim: int
 
-    def matches(self, node, attr, dim) -> bool:
+    def matches(self, node: Any, attr: Any, dim: Any) -> bool:
         return self.node == node and self.attr == attr and self.dim == dim
 
 
@@ -80,7 +79,7 @@ class CUTLASSKernel(Kernel):
 
     overrides = OpOverrides  # type: ignore[assignment]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
         self.size_args: list[Expr | int] = []
@@ -135,7 +134,7 @@ class CUTLASSKernel(Kernel):
 
     def add_layout_arg(
         self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
-    ):
+    ) -> None:
         arg = LayoutArg(node, symbol, attr, dim)
         self.layout_args[symbol].append(arg)
 
@@ -178,7 +177,7 @@ class CUTLASSKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
 
-        def get_ld(node) -> Expr | int:
+        def get_ld(node: Any) -> Expr | int:
             dim = self.find_ld_idx(node)
             return node.get_stride()[dim]
 
@@ -446,7 +445,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
-    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> str | None:
+    def cutlass_dtype(self, node: IRNode, default_dtype: Any = "void") -> str | None:
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
@@ -454,7 +453,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
 
         return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
 
-    def max_valid_index(self, node: IRNode, default=-1):
+    def max_valid_index(self, node: IRNode, default: Any = -1) -> Any:
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default
@@ -629,7 +628,7 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args: Any, out: Any) -> float:
         assert self.bmreq is not None
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)

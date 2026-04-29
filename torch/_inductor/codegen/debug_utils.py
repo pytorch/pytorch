@@ -1,11 +1,10 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import dtype as torch_dtype
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def _print_debugging_tensor_value_info(msg, arg):
+def _print_debugging_tensor_value_info(msg: Any, arg: Any) -> None:
     # helper for printing debugging stats for intermediate tensor values
     # at jit inductor level codegen
     max_numel_to_print = 64
@@ -59,15 +58,15 @@ class IntermediateValueDebuggingLevel(Enum):
 class DebugPrinterManager:
     def __init__(
         self,
-        debug_printer_level,
+        debug_printer_level: Any,
         use_array_ref: bool,
         writeline: Callable[..., None] | None = None,
         args_to_print_or_save: list[str] | None = None,
         kernel_name: str = "",
-        kernel=None,
+        kernel: Any = None,
         arg_signatures: list[type] | None = None,
-        kernel_type=None,
-    ):
+        kernel_type: Any = None,
+    ) -> None:
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
         self.use_array_ref = use_array_ref
         if args_to_print_or_save is None:
@@ -79,7 +78,7 @@ class DebugPrinterManager:
         self.filtered_kernel_names_to_print = self._get_debug_filtered_kernel_names()
         self.kernel_type = None
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self._perform_debug_print_or_save_helper(
             self.args_to_print_or_save,
             self.kernel_name,
@@ -87,7 +86,9 @@ class DebugPrinterManager:
             arg_signatures=self.arg_signatures,
         )
 
-    def __exit__(self, args_to_print_or_save, kernel_name, arg_signatures):
+    def __exit__(
+        self, args_to_print_or_save: Any, kernel_name: Any, arg_signatures: Any
+    ) -> None:
         self._perform_debug_print_or_save_helper(
             args_to_print_or_save,
             kernel_name,
@@ -97,11 +98,11 @@ class DebugPrinterManager:
 
     def _perform_debug_print_or_save_helper(
         self,
-        args_to_print_or_save,
-        kernel_name,
-        before_launch,
+        args_to_print_or_save: Any,
+        kernel_name: Any,
+        before_launch: Any,
         arg_signatures: list[type] | None = None,
-    ):
+    ) -> None:
         if self.debug_printer_level == IntermediateValueDebuggingLevel.OFF:
             return
         if self.debug_printer_level == IntermediateValueDebuggingLevel.SAVE_ONLY:
@@ -145,9 +146,9 @@ class DebugPrinterManager:
         args_to_print_or_save: list[str],
         kernel_name: str,
         arg_signatures: list[type] | None,
-        kernel,
-        kernel_type=None,
-    ):
+        kernel: Any,
+        kernel_type: Any = None,
+    ) -> None:
         # Note: MultiKernel debug printing is not supported for now
         if isinstance(kernel, MultiKernel):
             log.info(
@@ -193,9 +194,9 @@ class DebugPrinterManager:
 
     def codegen_intermediate_tensor_value_save(
         self,
-        args_to_save,
-        kernel_name,
-        before_launch=True,
+        args_to_save: Any,
+        kernel_name: Any,
+        before_launch: Any = True,
         arg_signatures: list[type] | None = None,
     ) -> None:
         for i, arg in enumerate(args_to_save):
@@ -230,9 +231,9 @@ class DebugPrinterManager:
 
     def codegen_intermediate_tensor_value_print(
         self,
-        args_to_print,
-        kernel_name,
-        before_launch=True,
+        args_to_print: Any,
+        kernel_name: Any,
+        before_launch: Any = True,
         arg_signatures: list[type] | None = None,
     ) -> None:
         launch_prefix = "before_launch" if before_launch else "after_launch"

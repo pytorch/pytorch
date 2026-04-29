@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import functools
 import os
@@ -144,7 +143,7 @@ cdll.LoadLibrary("__lib_path__")
         return self.__bool__impl(config.cpp.vec_isa_ok)
 
     @functools.cache  # noqa: B019
-    def __bool__impl(self, vec_isa_ok) -> bool:
+    def __bool__impl(self, vec_isa_ok: Any) -> bool:
         if vec_isa_ok is not None:
             return vec_isa_ok
 
@@ -469,7 +468,7 @@ def get_isa_from_cpu_capability(
     capability: str | None,
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
-):
+) -> Any:
     # AMX setting is not supported in eager
     # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
     # TODO add sve256 support

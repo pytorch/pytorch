@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
+# mypy: disable-error-code="attr-defined, valid-type"
 import functools
 import logging
 import random
@@ -19,13 +19,13 @@ from ...utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
-def is_static_int(number):
+def is_static_int(number: Any) -> Any:
     import sympy
 
     return isinstance(number, (int, sympy.Integer))
 
 
-def torch_layout_to_ck_layout(torch_layout):
+def torch_layout_to_ck_layout(torch_layout: Any) -> Any:
     if torch_layout.stride[-1] == 1:
         return "Row"
     elif torch_layout.stride[-2] == 1:
@@ -64,13 +64,13 @@ class CKTileGemmOperation:
     scheduler: str
     epilogue: str
 
-    def layout_repr(self):
+    def layout_repr(self) -> Any:
         return f"{self.layout_a[0]}{self.layout_b[0]}{self.layout_c[0]}"
 
-    def dtype_repr(self):
+    def dtype_repr(self) -> Any:
         return f"{self.datatype_a}{self.datatype_b}{self.datatype_c}"
 
-    def tile_sizes(self):
+    def tile_sizes(self) -> Any:
         return "_".join(
             [
                 f"{self.tile_m}{self.tile_n}{self.tile_k}",
@@ -79,7 +79,7 @@ class CKTileGemmOperation:
             ]
         )
 
-    def name(self):
+    def name(self) -> Any:
         return "ck_tile_gemm_universal_" + "_".join(
             [
                 f"{self.layout_repr()}",
@@ -91,12 +91,12 @@ class CKTileGemmOperation:
             ]
         )
 
-    def dict_items(self):
+    def dict_items(self) -> Any:
         return asdict(self).items()
 
 
 @functools.cache
-def ops():
+def ops() -> Any:
     """
     Generate the supported instance dataclasses
     """
@@ -394,7 +394,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         return res
 
-    def check_dtypes(self, op: "CKTileGemmOperation"):
+    def check_dtypes(self, op: "CKTileGemmOperation") -> Any:
         X_dtype, W_dtype, out_dtype = [
             T.get_layout().dtype for T in [*self.input_nodes, self.output_node]
         ]
@@ -406,7 +406,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def check_layouts(self, op: "CKTileGemmOperation"):
+    def check_layouts(self, op: "CKTileGemmOperation") -> Any:
         X_layout, W_layout, out_layout = [
             torch_layout_to_ck_layout(T.get_layout())
             for T in [*self.input_nodes, self.output_node]
@@ -419,7 +419,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def get_gemm_problem_size(self):
+    def get_gemm_problem_size(self) -> Any:
         X_size, W_size = [T.get_layout().size for T in [*self.input_nodes]]
 
         M, K = X_size
@@ -427,14 +427,14 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return M, N, K
 
-    def check_block_tiles(self, op: "CKTileGemmOperation"):
+    def check_block_tiles(self, op: "CKTileGemmOperation") -> Any:
         """
         The contiguous dimension of a tensor must be divisible by the block tile size
         This helper function enforces it for the inputs and the output.
         """
         M, N, K = self.get_gemm_problem_size()
 
-        def check(dim_size, tile_size, is_padded):
+        def check(dim_size: Any, tile_size: Any, is_padded: Any) -> Any:
             if (
                 is_static_int(dim_size)
                 and dim_size % tile_size != 0
@@ -472,13 +472,15 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return True
 
-    def check_alignments(self, op: "CKTileGemmOperation"):
+    def check_alignments(self, op: "CKTileGemmOperation") -> Any:
         """
         The contiguous dimension of a tensor must be divisible by the vector load size.
         """
         M, N, K = self.get_gemm_problem_size()
 
-        def max_alignment(contiguous_elements_per_tile, elements_per_thread, ck_dtype):
+        def max_alignment(
+            contiguous_elements_per_tile: Any, elements_per_thread: Any, ck_dtype: Any
+        ) -> Any:
             for vector_load_bytes in (16, 8, 4, 2, 1):
                 alignment = vector_load_bytes // self.ck_dtype_to_size[ck_dtype]
                 if (
@@ -542,7 +544,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return True
 
-    def check_warp_tiles(self, op: "CKTileGemmOperation"):
+    def check_warp_tiles(self, op: "CKTileGemmOperation") -> Any:
         if op.tile_m % (op.warp_m * op.warp_tile_m) != 0:
             return False
         if op.tile_n % (op.warp_n * op.warp_tile_n) != 0:
@@ -551,7 +553,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def check_block_tile_size(self, op: "CKTileGemmOperation"):
+    def check_block_tile_size(self, op: "CKTileGemmOperation") -> Any:
         # assuming LDS size is 64KB
         if op.pipeline == "CompV4":
             max_block_tile_size = 2**15
@@ -566,7 +568,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def filter_op(self, op: "CKTileGemmOperation"):
+    def filter_op(self, op: "CKTileGemmOperation") -> Any:
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -586,7 +588,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return op
 
-    def emit_ck_instance(self, op: "CKTileGemmOperation"):
+    def emit_ck_instance(self, op: "CKTileGemmOperation") -> Any:
         """
         This method is used to generate code which defines the type alias for the generated kernel class
         """
@@ -674,7 +676,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
 """
 
-        def render_epilogue(epilogue_type):
+        def render_epilogue(epilogue_type: Any) -> Any:
             if epilogue_type == "Default":
                 return r"""
             using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
@@ -721,7 +723,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             else:
                 raise AssertionError("Epilogue must be set")
 
-        def render_pipeline(pipeline_type):
+        def render_pipeline(pipeline_type: Any) -> Any:
             return rf"""
             using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCr{pipeline_type}<GemmPipelineProblem>;
 
@@ -729,7 +731,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem<has_hot_loop_v, tail_number_v>>;
         """
 
-        def render_scheduler(scheduler_type):
+        def render_scheduler(scheduler_type: Any) -> Any:
             return rf"""
             constexpr auto scheduler = ck_tile::GemmPipelineScheduler::{scheduler_type};
         """
@@ -745,7 +747,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         return rendered_definition
 
     def render(  # type: ignore[override]
-        self, kernel: ROCmTemplateKernel, op: "CKTileGemmOperation", **kwargs
+        self, kernel: ROCmTemplateKernel, op: "CKTileGemmOperation", **kwargs: Any
     ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
@@ -772,7 +774,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
-        def render_dispatch(pipeline_type, op_name):
+        def render_dispatch(pipeline_type: Any, op_name: Any) -> Any:
             switch_tailnum_template = r"""
             switch (tail_num) {
                 {% for tail_num in valid_tailnums %}
@@ -863,7 +865,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
         )
 
-    def gen_ops(self):
+    def gen_ops(self) -> Any:
         """
         Creates a list of `CKTileGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
@@ -898,10 +900,10 @@ class CKTileGemmTemplate(CKTileTemplate):
 
     @staticmethod
     def add_choices(
-        choices,
-        layout,
-        input_nodes,
-    ):
+        choices: Any,
+        layout: Any,
+        input_nodes: Any,
+    ) -> None:
         """
         Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
         """
@@ -924,7 +926,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
         default_choices = (1, 2, 4, 8, 16, 32)
 
-        def check(dim_size, tile_size, is_padded):
+        def check(dim_size: Any, tile_size: Any, is_padded: Any) -> Any:
             if (
                 is_static_int(dim_size)
                 and dim_size % tile_size != 0
@@ -949,7 +951,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return choices
 
-    def size_args(self):
+    def size_args(self) -> Any:
         """
         Sizes and strides to be used for the kernel call
         """

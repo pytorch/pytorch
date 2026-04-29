@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
+# mypy: disable-error-code="attr-defined, valid-type"
 import copy
 import logging
 import math
 import random
 from collections import namedtuple
+from typing import Any
 
 import sympy
 
@@ -49,11 +50,11 @@ padding_lookup = {
 }
 
 
-def is_static_int(number):
+def is_static_int(number: Any) -> Any:
     return isinstance(number, (int, sympy.Integer))
 
 
-def torch_layout_to_ck_layout(torch_layout):
+def torch_layout_to_ck_layout(torch_layout: Any) -> Any:
     if torch_layout.stride[-1] == 1:
         return "Row"
     elif torch_layout.stride[-2] == 1:
@@ -379,7 +380,7 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def inline_utils(self):
+    def inline_utils(self) -> Any:
         res = IndentedBuffer()
         res.splice(
             """
@@ -389,14 +390,14 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def _has_padding(self, dimension, gemm_specialization):
+    def _has_padding(self, dimension: Any, gemm_specialization: Any) -> Any:
         # Get the relevant padding map for the given dimension
         dimension_padding = padding_lookup.get(dimension, {})
 
         # Check if the specialization is in the dimension's padding map
         return dimension_padding.get(gemm_specialization, False)
 
-    def filter_op(self, op_info: InductorROCmOp):
+    def filter_op(self, op_info: InductorROCmOp) -> Any:
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -493,7 +494,7 @@ class CKGemmTemplate(CKTemplate):
 
         return op
 
-    def _check_num_k_loops(self, op, kBatch):
+    def _check_num_k_loops(self, op: Any, kBatch: Any) -> Any:
         # Additional splitK scenario check
         metas = [T.get_layout() for T in [*self.input_nodes]]
         X_meta = metas[0]
@@ -533,7 +534,9 @@ class CKGemmTemplate(CKTemplate):
         return True
 
     # small helper to figure out the prefetch stages on AMD
-    def _prefetch_stages(self, op, a_dtype_size, b_dtype_size, warp_size: int = 64):
+    def _prefetch_stages(
+        self, op: Any, a_dtype_size: Any, b_dtype_size: Any, warp_size: int = 64
+    ) -> Any:
         version_str = op.block_gemm_pipeline_version.split("::")[-1]
         try:
             version = int(version_str[1:])  # Assuming the format is always 'vX'
@@ -563,7 +566,7 @@ class CKGemmTemplate(CKTemplate):
 
         return stages
 
-    def emit_ck_instance(self, op: "CKGemmOperation"):
+    def emit_ck_instance(self, op: "CKGemmOperation") -> Any:
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         struct_name = (
             "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3"
@@ -608,7 +611,7 @@ class CKGemmTemplate(CKTemplate):
         self,
         kernel: ROCmTemplateKernel,
         op: "CKGemmOperation",
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
@@ -858,7 +861,7 @@ class CKGemmTemplate(CKTemplate):
 
         return res
 
-    def _is_rcr_f16(self):
+    def _is_rcr_f16(self) -> Any:
         X_meta, W_meta, Y_meta = (
             T.get_layout() for T in [*self.input_nodes, self.output_node]
         )
@@ -879,7 +882,7 @@ class CKGemmTemplate(CKTemplate):
         )
 
     # helper to calculate a potentially optimal kBatch(es) for a problem
-    def _get_kBatch(self, op):
+    def _get_kBatch(self, op: Any) -> Any:
         # we only set a higher kBatch if K > 16 * the larger of M and N
         # this is a hand-tuned heuristic to start
         metas = [T.get_layout() for T in [*self.input_nodes]]
@@ -963,13 +966,13 @@ class CKGemmTemplate(CKTemplate):
 
     @staticmethod
     def add_ck_gemm_choices(
-        choices,
-        layout,
-        input_nodes,
-        alpha=1,
-        beta=0,
-        input_reorder=None,
-    ):
+        choices: Any,
+        layout: Any,
+        input_nodes: Any,
+        alpha: Any = 1,
+        beta: Any = 0,
+        input_reorder: Any = None,
+    ) -> None:
         """
         Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
         """
@@ -988,7 +991,7 @@ class CKGemmTemplate(CKTemplate):
                 kBatch=op.kBatch,
             )
 
-    def size_args(self):
+    def size_args(self) -> Any:
         X = self.input_nodes[0]
         W = self.input_nodes[1]
         Bias = (

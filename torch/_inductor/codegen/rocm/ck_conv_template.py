@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 import logging
 import random
@@ -24,7 +23,7 @@ if ck4inductor is not None:
     )
 else:
 
-    def gen_conv_ops_library():
+    def gen_conv_ops_library() -> Any:
         return []
 
 
@@ -37,7 +36,7 @@ from torch._inductor.utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
-def torch_layout_to_ck_layouts(torch_layout):
+def torch_layout_to_ck_layouts(torch_layout: Any) -> Any:
     # logically, torch tensors are always NCHW,
     # and channels-last memory layout is visible in the strides
     if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
@@ -51,7 +50,7 @@ def torch_layout_to_ck_layouts(torch_layout):
         return None
 
 
-def torch_layout_to_ck_input_layout(torch_layout):
+def torch_layout_to_ck_input_layout(torch_layout: Any) -> Any:
     if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "NGCHW"
     elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
@@ -60,7 +59,7 @@ def torch_layout_to_ck_input_layout(torch_layout):
         return None
 
 
-def torch_layout_to_ck_weight_layout(torch_layout):
+def torch_layout_to_ck_weight_layout(torch_layout: Any) -> Any:
     if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "GKCYX"
     elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
@@ -69,7 +68,7 @@ def torch_layout_to_ck_weight_layout(torch_layout):
         return None
 
 
-def torch_layout_to_ck_output_layout(torch_layout):
+def torch_layout_to_ck_output_layout(torch_layout: Any) -> Any:
     if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "NGKHW"
     elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
@@ -389,16 +388,16 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
     @staticmethod
     def add_ck_conv_choices(
-        choices,
-        layout,
-        input_nodes,
+        choices: Any,
+        layout: Any,
+        input_nodes: Any,
         *,
-        stride,
-        padding,
-        dilation,
-        groups,
-        n_spatial_dimensions,
-    ):
+        stride: Any,
+        padding: Any,
+        dilation: Any,
+        groups: Any,
+        n_spatial_dimensions: Any,
+    ) -> None:
         template = CKGroupedConvFwdTemplate(
             input_nodes,
             layout,
@@ -417,15 +416,15 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes,
-        layout,
+        input_nodes: Any,
+        layout: Any,
         *,
-        stride,
-        padding,
-        dilation,
-        groups,
-        n_spatial_dimensions,
-    ):
+        stride: Any,
+        padding: Any,
+        dilation: Any,
+        groups: Any,
+        n_spatial_dimensions: Any,
+    ) -> None:
         super().__init__(
             "ck_conv_template",
             input_nodes,
@@ -437,7 +436,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-    def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
+    def filter_op(self, op: "CKGroupedConvFwdOp") -> Any:  # type: ignore[name-defined]
         metas = [
             T.get_layout()
             for T in [*self.input_nodes, self.output_node]
@@ -468,7 +467,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             return None
         return op
 
-    def gen_ops(self):
+    def gen_ops(self) -> Any:
         unfiltered_instances = gen_conv_ops_library()
 
         filtered_instances = list(
@@ -528,7 +527,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self,
         kernel: ROCmTemplateKernel,
         op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
@@ -580,7 +579,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             output_layout=op.e_layout,
         )
 
-    def size_args(self):
+    def size_args(self) -> Any:
         x, w = self.input_nodes[0], self.input_nodes[1]
         y = self.output_node
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import argparse
 import base64
 import functools
@@ -47,7 +46,7 @@ def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     return ty()
 
 
-def main():
+def main() -> None:
     try:
         parser = argparse.ArgumentParser()
         parser.add_argument(

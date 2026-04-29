@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import logging
@@ -47,12 +46,14 @@ cutedsl_pexpr = PythonPrinter().doprint
 class CuteDSLKernelWrapper:
     """Wrapper to provide .run() interface for CuteDSL kernels"""
 
-    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
+    def __init__(
+        self, kernel_fn: Callable[..., Any], kernel_path: str | None = None
+    ) -> None:
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
 
-    def run(self, *args, stream=None, **kwargs):
+    def run(self, *args: Any, stream: Any = None, **kwargs: Any) -> Any:
         """
         Execute the CuteDSL kernel.
 
@@ -76,10 +77,10 @@ class CuteDSLSubgraphInfo:
     template_out: str | None = None
     cse: CSE[Any] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.only_copy_if_non_none_fields = ("cse",)
 
-    def to_dict(self):
+    def to_dict(self) -> Any:
         return {
             field.name: getattr(self, field.name) for field in dataclasses.fields(self)
         }
@@ -153,14 +154,14 @@ class CuteDSLTemplateKernel(Kernel):
         )
         return imports.getvalue()
 
-    def gen_defines(self, **kwargs) -> str:
+    def gen_defines(self, **kwargs: Any) -> str:
         """Generate CuteDSL parameter definitions from kwargs, similar to Triton's gen_defines."""
         params = IndentedBuffer()
         for name, val in kwargs.items():
             params.writeline(f"{name}: cutlass.Constexpr = {val}")
         return params.getvalue()
 
-    def render(self, template, **kwargs):
+    def render(self, template: Any, **kwargs: Any) -> Any:
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
@@ -191,7 +192,7 @@ class CuteDSLTemplateKernel(Kernel):
         return PartialRender(full_code, self.render_hooks)
 
     @contextlib.contextmanager
-    def set_subgraph_body(self, body_name: str):
+    def set_subgraph_body(self, body_name: str) -> Any:
         """Set the active subgraph body for template processing."""
         assert all(
             hasattr(self, field.name)
@@ -233,7 +234,7 @@ class CuteDSLTemplateKernel(Kernel):
                 setattr(self, key, value)
 
     @contextlib.contextmanager
-    def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
+    def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False) -> Any:
         """Create a new subgraph body for template processing."""
         assert body_name not in self.subgraph_bodies, (
             f"Subgraph body '{body_name}' already exists"
@@ -248,7 +249,7 @@ class CuteDSLTemplateKernel(Kernel):
         with self.set_subgraph_body(body_name):
             yield
 
-    def _get_reinterpret_view(self, node) -> ReinterpretView | None:
+    def _get_reinterpret_view(self, node: Any) -> ReinterpretView | None:
         """Extract or convert to ReinterpretView from a node, handling all views."""
         while isinstance(node, MutableBox):
             node = node.data
@@ -256,7 +257,7 @@ class CuteDSLTemplateKernel(Kernel):
             return ExternKernel.convert_to_reinterpret_view(node)
         return None
 
-    def def_kernel(self, *argnames):
+    def def_kernel(self, *argnames: Any) -> Any:
         """Define kernel function signature for CuteDSL templates.
 
         When inputs are ReinterpretViews of the same underlying buffer (e.g., Q/K/V
@@ -285,7 +286,7 @@ class CuteDSLTemplateKernel(Kernel):
         if self.output_node:
             self.args.output(self.output_node.get_name())
 
-        def hook():
+        def hook() -> Any:
             # Generate signature with template input args plus additional args (output, sizevars)
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
@@ -312,7 +313,7 @@ class CuteDSLTemplateKernel(Kernel):
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
-    def get_output(self):
+    def get_output(self) -> Any:
         """Get the actual argument name for the output buffer."""
         assert self.output_node, "Output node must exist to get output buffer name"
         buf_name = self.output_node.get_name()
@@ -321,7 +322,7 @@ class CuteDSLTemplateKernel(Kernel):
             raise ValueError(f"Output buffer '{buf_name}' not found in args")
         return output
 
-    def set_cute_hash(self, func_name: str, suffix: str = ""):
+    def set_cute_hash(self, func_name: str, suffix: str = "") -> Any:
         """Generate code to set __cute_hash__ on a codegen function.
 
         This allows hash_callable in flash_attn to skip expensive runtime hashing
@@ -331,14 +332,14 @@ class CuteDSLTemplateKernel(Kernel):
         hash_value = f"{self.kernel_name}_{suffix}" if suffix else self.kernel_name
         return f'{func_name}.__cute_hash__ = "{hash_value}"'
 
-    def get_tensor_buffers(self):
+    def get_tensor_buffers(self) -> Any:
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
 
-    def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
+    def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4) -> Any:
         """Generate buffer unpacking code via render hook."""
 
-        def hook():
+        def hook() -> Any:
             tensor_buffers = self.get_tensor_buffers()
             if not tensor_buffers:
                 return ""
@@ -359,7 +360,7 @@ class CuteDSLTemplateKernel(Kernel):
         self.render_hooks[placeholder] = hook
         return placeholder
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node: Any = None) -> None:
         """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel.
 
         For inputs that are ReinterpretViews (e.g., Q/K/V slices from fused QKV),
@@ -392,7 +393,7 @@ class CuteDSLTemplateKernel(Kernel):
         # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
 
-    def _get_subgraph(self, subgraph_number: int):
+    def _get_subgraph(self, subgraph_number: int) -> Any:
         """Get subgraph by number for modification processing."""
         assert isinstance(subgraph_number, int)
         assert isinstance(self.subgraphs, list)
@@ -409,7 +410,7 @@ class CuteDSLTemplateKernel(Kernel):
         subgraph_number: int,
         output_name: str | None,
         mask: str | None = None,
-        **fixed_inputs,
+        **fixed_inputs: Any,
     ) -> str:
         """Generate CuteDSL code for a subgraph modification."""
         # Find unique name to avoid collisions between multiple modifications of same subgraph
@@ -469,11 +470,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def __init__(
         self,
-        kernel,
+        kernel: Any,
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
         mask: str | None,
-    ):
+    ) -> None:
         cutedsl_ops = CuteDSLOpOverrides()
         super().__init__(cutedsl_ops)
         self.name = f"CuteDSLPlaceholderSubstitution_{subgraph_number}"
@@ -490,7 +491,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # TODO: Fallback for common dimension names - should be replaced with proper dtype tracking
         return torch.float32 if name not in ("b", "h", "m", "n") else torch.int32
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr) -> Any:
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
 
@@ -569,7 +570,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
         return str(result)
 
-    def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
+    def indirect_indexing(
+        self, index_var: str, size: Any, check: Any, wrap_neg: Any = True
+    ) -> Any:
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
@@ -581,7 +584,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             "Store operations not supported - CuteDSL limited to read-only operations"
         )
 
-    def _add_kernel_input(self, name: str):
+    def _add_kernel_input(self, name: str) -> Any:
         """Add name as input to kernel and return input ref."""
         # Get the remapped name that will be used in the kernel
         remapped_name = self.kernel.args.input(name)
@@ -590,7 +593,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             self.tensor_buffers.append(remapped_name)
         return remapped_name
 
-    def _process_indexing(self, index):
+    def _process_indexing(self, index: Any) -> Any:
         """Process and rename indexing, adding symbols as kernel inputs."""
         renamed = self.kernel.rename_indexing(index)
         return self.kernel.kexpr(renamed)

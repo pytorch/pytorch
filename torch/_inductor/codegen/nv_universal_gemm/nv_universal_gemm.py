@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 NVIDIA Universal GEMM (NVGEMM) backend for PyTorch Inductor.
 
@@ -67,7 +66,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         kernel_name: str,
         input_tensor_meta: TensorMeta | list[TensorMeta],
         output_tensor_meta: TensorMeta | list[TensorMeta],
-        kernel,  # cutlass_api.Kernel object
+        kernel: Any,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
@@ -111,7 +110,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         fn = self.make_run_fn(*input_tensors, out=out)
         return self.do_bench(fn, *input_tensors, out=out)
 
-    def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
+    def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor) -> Any:
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
 
@@ -136,7 +135,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         workspace = self._workspace
 
-        def run_kernel():
+        def run_kernel() -> None:
             stream = torch.cuda.current_stream()
             kernel.run(
                 args,
@@ -148,7 +147,9 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         return run_kernel
 
-    def _create_gemm_arguments(self, cutlass_api, input_tensors, out):
+    def _create_gemm_arguments(
+        self, cutlass_api: Any, input_tensors: Any, out: Any
+    ) -> Any:
         """Create the appropriate GemmArguments based on variant."""
         if self.variant == GemmVariant.GROUPED_GEMM:
             a, b, offsets = input_tensors
@@ -205,7 +206,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         name: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        kernel,  # cutlass_api.Kernel object
+        kernel: Any,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
@@ -248,7 +249,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def __str__(self) -> str:
         return f"NVUniversalGemmCaller({self.kernel.metadata.kernel_name})"
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args: Any, out: Any) -> float:
         return self.bmreq.benchmark(*args, out=out)
 
     def output_node(self) -> TensorBox:
@@ -274,7 +275,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def call_name(self) -> str:
         return self.name
 
-    def to_callable(self):
+    def to_callable(self) -> Any:
         return self.bmreq.make_run_fn
 
     def hash_key(self) -> str:
@@ -307,7 +308,7 @@ def _create_dummy_tensor_from_layout(
         return None
 
 
-def _exclude_efc_kernels(metadata) -> bool:
+def _exclude_efc_kernels(metadata: Any) -> bool:
     """
     Filter out EFC kernels.
 

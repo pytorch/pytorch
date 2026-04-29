@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
@@ -94,7 +93,7 @@ class XPUCombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
 
-    def codegen_mix_order_reduction(self, node):
+    def codegen_mix_order_reduction(self, node: Any) -> Any:
         return self._triton_scheduling.codegen_mix_order_reduction(node)
 
     def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
@@ -114,7 +113,7 @@ class XPUCombinedScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
-    def benchmark_codegened_module(self, module):
+    def benchmark_codegened_module(self, module: Any) -> Any:
         return self._triton_scheduling.benchmark_codegened_module(module)
 
     def generate_kernel_code_from_nodes(
@@ -128,7 +127,7 @@ class XPUCombinedScheduling(BaseScheduling):
         )
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
+        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results: Any
     ) -> tuple[float, float, list[str | None]]:
         return self._triton_scheduling.benchmark_combo_kernel(
             node_list, node_benchmark_results

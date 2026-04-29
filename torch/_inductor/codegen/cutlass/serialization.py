@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import json
 from enum import Enum
