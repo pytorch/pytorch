@@ -3782,14 +3782,17 @@ class TestPrivateUse1ProfilerState(TestCase):
                 )
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestProfilerEarlyAbort(TestCase):
-    """Tests for early abort of device profiling when Kineto signals that
-    collection has stopped (e.g. CUPTI buffer overflow). The exit condition
+class TestProfilerDeviceStopped(TestCase):
+    """Tests for the DEVICE_STOPPED transition: when Kineto signals that
+    device collection has stopped (e.g. CUPTI buffer overflow), the profiler
+    saves any collected trace, sits in DEVICE_STOPPED for the rest of the
+    cycle, and resumes normal scheduling on the next cycle. The Kineto signal
     is mocked so no actual overflow is needed.
 
     Note that we don't actually depend on any CUDA specific behavior. But the
-    early abort logic does behave different if the user has only requested
+    DEVICE_STOPPED logic does behave different if the user has only requested
     CPU-only profiling. Explicitly specifying a GPU device seems cleaner than
     patching the `use_device` attributes in the profiler."""
 
@@ -3801,7 +3804,7 @@ class TestProfilerEarlyAbort(TestCase):
             schedule=torch.profiler.schedule(**schedule_kwargs),
         )
 
-    def test_step_early_abort_from_warmup(self):
+    def test_enters_device_stopped_from_warmup(self):
         p = self._make_profiler(wait=0, warmup=2, active=2)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
@@ -3811,7 +3814,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_step_early_abort_from_record(self):
+    def test_enters_device_stopped_from_record(self):
         p = self._make_profiler(wait=0, warmup=1, active=3)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
@@ -3827,7 +3830,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_step_early_abort_from_record_and_save(self):
+    def test_enters_device_stopped_from_record_and_save(self):
         p = self._make_profiler(wait=0, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
@@ -3843,7 +3846,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_gpu_stopped_persists_through_cycle(self):
+    def test_device_stopped_persists_through_cycle(self):
         """Once in DEVICE_STOPPED, the profiler stays there until the schedule
         moves to WARMUP (new cycle) or NONE (end)."""
         p = self._make_profiler(wait=0, warmup=1, active=4, repeat=2)
@@ -3854,7 +3857,7 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD -> DEVICE_STOPPED (early abort)
+            # step 1 -> 2: RECORD -> DEVICE_STOPPED
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             # step 2 -> 3: schedule says RECORD, stays DEVICE_STOPPED
@@ -3870,17 +3873,17 @@ class TestProfilerEarlyAbort(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
 
-    def test_step_no_abort_when_none(self):
+    def test_skips_device_stopped_when_prev_is_none(self):
         p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
-            # step 0 -> 1: NONE -> NONE. prev_action is NONE so the early
-            # abort path does not fire.
+            # step 0 -> 1: NONE -> NONE. prev_action is NONE so the entry
+            # guard for DEVICE_STOPPED does not fire.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_step_no_abort_when_already_stopping(self):
+    def test_skips_device_stopped_when_already_stopping(self):
         p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
@@ -3890,15 +3893,35 @@ class TestProfilerEarlyAbort(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_kineto_stopped is True,
-            # but the schedule already transitions to NONE, so the early abort
-            # path does not fire (current_action != NONE guard).
+            # but the schedule already transitions to NONE, so the entry guard
+            # for DEVICE_STOPPED does not fire (current_action != NONE).
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
+    @parametrize(
+        "prev,current",
+        [
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED),
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD),
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE),
+        ],
+    )
+    def test_unreachable_transition_raises(self, prev, current):
+        """Transitions that step()'s override logic makes impossible should
+        raise if invoked directly via _transit_action — they signal a bug
+        in the state machine, not a recoverable condition."""
+        p = self._make_profiler(wait=0, warmup=1, active=1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"Profiler internal error: {prev.name} -> {current.name} should be unreachable",
+        ):
+            p._transit_action(prev, current)
+
     def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
-        """A CPU-only profiler should not abort even if _is_kineto_stopped returns
-        True (e.g. stale flag from a previous device profiler)."""
+        """A CPU-only profiler should not enter DEVICE_STOPPED even if
+        _is_kineto_stopped returns True (e.g. stale flag from a previous
+        device profiler)."""
         p = profile(
             activities=[ProfilerActivity.CPU],
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=2),
@@ -3910,6 +3933,65 @@ class TestProfilerEarlyAbort(TestCase):
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
+
+    def test_device_stopped_with_real_kineto(self):
+        """Integration test: when _is_kineto_stopped flips True mid-run
+        against a live Kineto session, the DEVICE_STOPPED transition must
+        actually fire stop_trace + _trace_ready (not just flip the action
+        enum) — and produce a non-empty partial trace. After the schedule
+        rolls over, the next cycle must run cleanly."""
+        event_counts: list[int] = []
+
+        def handler(prof):
+            event_counts.append(len(list(prof.events())))
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=4, repeat=2),
+            on_trace_ready=handler,
+        )
+
+        p.start()  # step_num=0, WARMUP
+        # Cycle 1: two RECORD steps with real workload (steps 1 and 2).
+        for _ in range(2):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+        self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Step 3: under the patch, RECORD -> DEVICE_STOPPED fires stop_trace +
+        # _trace_ready against the live Kineto session, so handler() runs with
+        # whatever Kineto collected during steps 1-2.
+        with patch(self.PATCH_TARGET, return_value=True):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        self.assertEqual(len(event_counts), 1)
+        self.assertGreater(
+            event_counts[0], 0, "Partial cycle 1 trace should contain events"
+        )
+
+        # Walk through DEVICE_STOPPED until the schedule rolls over to WARMUP.
+        # Patch is removed; persistence guard alone keeps us in DEVICE_STOPPED
+        # because it only checks prev_action, not _is_kineto_stopped.
+        p.step()  # step 4: schedule says RECORD_AND_SAVE, persists DEVICE_STOPPED
+        self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+        p.step()  # step 5: schedule says WARMUP, exits DEVICE_STOPPED via prepare_trace
+        self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
+        # Cycle 2: full active phase against a freshly prepared Kineto session.
+        for _ in range(4):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+        self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        # p.stop() transits RECORD_AND_SAVE -> None, firing _trace_ready #2.
+        p.stop()
+
+        self.assertEqual(len(event_counts), 2)
+        self.assertGreater(
+            event_counts[1], 0, "Cycle 2 trace should contain events"
+        )
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

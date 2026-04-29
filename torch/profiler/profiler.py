@@ -549,6 +549,12 @@ class ProfilerAction(Enum):
     DEVICE_STOPPED = 4
 
 
+def _unreachable_transition(prev: str, current: str) -> None:
+    raise RuntimeError(
+        f"Profiler internal error: {prev} -> {current} should be unreachable"
+    )
+
+
 def schedule(
     *,
     wait: int,
@@ -940,6 +946,22 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.NONE): [],
+            # Unreachable by construction: step()'s entry guard excludes
+            # prev=NONE, and the persistence guard coerces RECORD /
+            # RECORD_AND_SAVE back to DEVICE_STOPPED. Hitting these means
+            # the state machine in step() is broken — fail loudly rather
+            # than continue with diverged state.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD): [
+                partial(_unreachable_transition, "DEVICE_STOPPED", "RECORD"),
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE): [
+                partial(
+                    _unreachable_transition, "DEVICE_STOPPED", "RECORD_AND_SAVE"
+                ),
+            ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
