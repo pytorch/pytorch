@@ -469,7 +469,7 @@ class _DynamoCacheEntry:
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 
 
@@ -555,6 +555,7 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
+    # pyrefly: ignore [deprecated]
     @contextlib.contextmanager
     def _ctx() -> Iterator[None]:
         increment_frame()
@@ -1115,8 +1116,8 @@ class DiskDynamoStore(DynamoStore):
         """
         try:
             pickled_content: bytes = pickle.dumps(cache_entry)
-            CacheArtifactManager.record_artifact(
-                PrecompileCacheArtifact.type(), path, pickled_content
+            CacheArtifactRecorder(PrecompileCacheArtifact.type(), path).record(
+                pickled_content
             )
             self._write_to_local_cache(pickled_content, path)
         except Exception as e:

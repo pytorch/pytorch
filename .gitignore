@@ -9,8 +9,6 @@
 ## PyTorch
 
 agent_space/
-.coverage
-coverage.xml
 .dmypy.json
 .gradle
 .hypothesis
@@ -41,7 +39,6 @@ docs/build/
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
-docs/cpp/source/api
 docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/compile/generated/
@@ -53,7 +50,6 @@ usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
-test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
@@ -368,7 +364,13 @@ xla/
 pr.diff
 
 # coverage files
-*/**/.coverage.*
+.coverage.*
+.coverage
+coverage.xml
+*.profdata
+*.profraw
+coverage-html
+coverage.lcov
 
 # buck generated files
 .buckd/

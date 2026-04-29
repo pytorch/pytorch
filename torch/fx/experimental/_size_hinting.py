@@ -23,6 +23,11 @@ from torch.utils._sympy.numbers import int_oo
 
 log = logging.getLogger(__name__)
 
+# Maximum number of free symbols in an expression before we skip
+# sympy.factor() in optimization_hint process for unbacked.
+# Factoring polynomials with many variables is expensive.
+SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
+
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -186,7 +191,7 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
         expression becomes the canonical expression.
         """
 
-        def __init__(self, eq_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]]):
+        def __init__(self, eq_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]]) -> None:
             self.eq_graph = eq_graph
             self.expressions = list(eq_graph.keys())
             self.reverse_expressions = {
@@ -196,15 +201,15 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
             self.size = [1] * len(self.expressions)
             self._build_canonical_expr_mapping()
 
-        def _build_canonical_expr_mapping(self):
+        def _build_canonical_expr_mapping(self) -> None:
             for expr, edges in self.eq_graph.items():
                 for adj in edges:
                     self.union_expr(expr, adj)
 
-        def union_expr(self, a: sympy.Expr, b: sympy.Expr):
+        def union_expr(self, a: sympy.Expr, b: sympy.Expr) -> bool:
             return self.union(self.reverse_expressions[a], self.reverse_expressions[b])
 
-        def union(self, a: int, b: int):
+        def union(self, a: int, b: int) -> bool:
             rootA = self.find(a)
             rootB = self.find(b)
             if rootA == rootB:
@@ -214,16 +219,16 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
             self.size[leader] += self.size[other]
             return True
 
-        def find_expr(self, expr: sympy.Expr):
+        def find_expr(self, expr: sympy.Expr) -> sympy.Expr:
             parent = self.find(self.reverse_expressions[expr])
             return self.expressions[parent]
 
-        def find(self, x: int):
+        def find(self, x: int) -> int:
             if self.leader[x] != x:
                 self.leader[x] = self.find(self.leader[x])
             return self.leader[x]
 
-        def choose_leader(self, a: int, b: int):
+        def choose_leader(self, a: int, b: int) -> tuple[int, int]:
             """
             The leader will become the canonical expression.
             Returns a (leader, follower) tuple.
@@ -297,9 +302,7 @@ def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
         new_expr = expr.subs(replacements)
         if new_expr == expr:
             break
-        # Limit sympy.factor() to expressions with <= 200 free symbols,
-        # as factoring polynomials with many variables is expensive.
-        if len(new_expr.free_symbols) <= 200:
+        if len(new_expr.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS:
             expr = sympy.factor(new_expr)
         else:
             expr = new_expr
@@ -347,10 +350,14 @@ def _optimization_hint_base(
 
         fallback = unbacked_symint_fallback
 
+    # to have expanded (Identity free) expr stored in original
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+
     original = expr
     # sympy.expand() doesn't work with boolean expressions like Or/And
     if isinstance(expr, sympy.Expr):
-        expr = sympy.expand(expr).xreplace(shape_env.replacements)
+        expr = expr.xreplace(shape_env.replacements)
     else:
         expr = sympy.sympify(expr).xreplace(shape_env.replacements)
 
@@ -391,9 +398,10 @@ def _optimization_hint_base(
     if has_free_unbacked_symbols(expr):
         # Make sure to substitute with the factored version
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-        # Limit sympy.factor() to expressions with <= 200 free symbols,
-        # as factoring polynomials with many variables is expensive.
-        if isinstance(original, sympy.Expr) and len(original.free_symbols) <= 200:
+        if (
+            isinstance(original, sympy.Expr)
+            and len(original.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS
+        ):
             original = sympy.factor(original)
         expr = _sub_unbacked_exprs(shape_env, original)
 

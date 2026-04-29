@@ -185,7 +185,8 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
     The router parses a configuration string with rules in the format:
         "filter1:backend1;filter2:backend2;..."
 
-    Rules are evaluated in order, and the first matching rule wins.
+    If a graph ID matches multiple rules with different backends, a ValueError
+    is raised.
 
     Examples:
         "0-5:eager;>5:inductor"     - IDs 0-5 use eager, rest use inductor
@@ -197,6 +198,7 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
     """
 
     def __init__(self, config_str: str) -> None:
+        self._backend_names: dict[int, str] = {}
         super().__init__(config_str, "backend")
 
     def _parse_value_str(self, value_str: str) -> Any | None:
@@ -209,7 +211,20 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
         # Register the backend so its reset() is called during torch._dynamo.reset()
         assert backend is not None, "Invalid override backend: " + value_str
         cached_backends.setdefault(id(backend), backend)
+        self._backend_names[id(backend)] = value_str
         return backend
+
+    def _match_rules(self, graph_id: int) -> Any | None:
+        """Match rules with conflict detection for overlapping filters."""
+        matches = {id(backend): backend for f, backend in self._rules if graph_id in f}
+        if len(matches) > 1:
+            names = [self._backend_names[bid] for bid in matches]
+            raise ValueError(
+                f"Conflicting backend override for graph {graph_id}: matched {names}"
+            )
+        if matches:
+            return next(iter(matches.values()))
+        return None
 
     def __repr__(self) -> str:
         if not self._rules:

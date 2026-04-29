@@ -345,14 +345,12 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
                 mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
 
-            # not fused
-            count = 3 if hasattr(mod2, "t3") else 2
-
+            # fused: weights share same dim 0 (in_features), different dim 1 is OK
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=count, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 

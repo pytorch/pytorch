@@ -79,6 +79,7 @@ CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
 _BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
+_default_backend: str | CompilerFn = "inductor"
 
 
 def register_backend(
@@ -204,3 +205,22 @@ def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
         return compiler_fn.compiler_fn in _COMPILER_FNS.values()
 
     return False
+
+
+def set_default_backend(backend: str | CompilerFn | None) -> None:
+    """Set the default backend used by torch.compile when no backend is explicitly specified.
+
+    Pass None to reset to the default ("inductor").
+    """
+    global _default_backend
+    if backend is None:
+        _default_backend = "inductor"
+        return
+    if not isinstance(backend, str) and not callable(backend):
+        raise TypeError(f"backend must be a string or callable, got {type(backend)}")
+    _default_backend = backend
+
+
+def get_default_backend() -> str | CompilerFn:
+    """Return the current default backend for torch.compile."""
+    return _default_backend

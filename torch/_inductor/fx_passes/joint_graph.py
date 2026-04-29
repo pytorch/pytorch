@@ -55,6 +55,27 @@ pass_patterns = [
 ]
 
 
+def _is_lossless_fp_widening_cast(
+    src_dtype: torch.dtype, dst_dtype: torch.dtype
+) -> bool:
+    if src_dtype == dst_dtype:
+        return True
+
+    if not (src_dtype.is_floating_point and dst_dtype.is_floating_point):
+        return False
+
+    src_info = torch.finfo(src_dtype)
+    dst_info = torch.finfo(dst_dtype)
+
+    # A floating-point cast is only pointless if the first conversion cannot
+    # discard precision or range from the source values.
+    return (
+        dst_info.eps <= src_info.eps
+        and dst_info.max >= src_info.max
+        and dst_info.tiny <= src_info.tiny
+    )
+
+
 @init_once_fakemode
 def lazy_init(input_device: torch.device | None = None):
     from .fuse_attention import _sfdp_init
@@ -522,7 +543,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
                         "device": fake_tensor.device,
-                        "pin_memory": False,
+                        "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
 
@@ -617,7 +638,8 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
 
 
 def joint_graph_passes(
-    graph: torch.fx.GraphModule, input_device: torch.device | None = None
+    graph: torch.fx.GraphModule,
+    input_device: torch.device | None = None,
 ):
     """
     Run FX transformations on the joint forwards+backwards graph.
@@ -627,7 +649,7 @@ def joint_graph_passes(
         subsystem="joint_graph_passes",
     )
 
-    lazy_init(input_device)  # type: ignore[call-arg]
+    lazy_init(input_device)
     count = 0
 
     # must occur before other passes
@@ -761,7 +783,15 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     graph = match.graph
     node = match.output_node()
     allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
-    if dtype1 in allowed and dtype2 in allowed:
+    arg_val = arg.meta.get("val", None)
+    if not isinstance(arg_val, torch.Tensor):
+        return
+
+    if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
+            arg_val.dtype, dtype1
+        ):
+            return
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)
         )

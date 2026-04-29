@@ -766,6 +766,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CU_MEM_HANDLE_TYPE_WIN32", "hipMemHandleTypeWin32"),
     ("CU_MEM_HANDLE_TYPE_WIN32_KMT", "hipMemHandleTypeWin32Kmt"),
     ("CU_MEM_LOCATION_TYPE_DEVICE", "hipMemLocationTypeDevice"),
+    ("CU_MEM_LOCATION_TYPE_HOST", "hipMemLocationTypeHost"),
     ("CU_MEM_LOCATION_TYPE_INVALID", "hipMemLocationTypeInvalid"),
     ("CU_MEM_OPERATION_TYPE_MAP", "hipMemOperationTypeMap"),
     ("CU_MEM_OPERATION_TYPE_UNMAP", "hipMemOperationTypeUnmap"),
@@ -1360,6 +1361,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaEventBlockingSync", "hipEventBlockingSync"),
     ("cudaEventDisableTiming", "hipEventDisableTiming"),
     ("cudaEventInterprocess", "hipEventInterprocess"),
+    ("cudaEventRecordDefault", "hipEventRecordDefault"),
+    ("cudaEventRecordExternal", "hipEventRecordExternal"),
+    ("cudaEventWaitDefault", "hipEventWaitDefault"),
+    ("cudaEventWaitExternal", "hipEventWaitExternal"),
     ("cudaStreamCreate", "hipStreamCreate"),
     ("cudaStreamCreateWithFlags", "hipStreamCreateWithFlags"),
     ("cudaStreamCreateWithPriority", "hipStreamCreateWithPriority"),
@@ -2676,6 +2681,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cub::RowMajorTid", "hipcub::RowMajorTid"),
     ("cub::CachingDeviceAllocator", "hipcub::CachingDeviceAllocator"),
     ("cub::CountingInputIterator", "hipcub::CountingInputIterator"),
+    ("cub::DeviceHistogram", "hipcub::DeviceHistogram"),
     ("cub::DeviceRadixSort", "hipcub::DeviceRadixSort"),
     ("cub::DeviceReduce", "hipcub::DeviceReduce"),
     ("cub::DeviceRunLengthEncode", "hipcub::DeviceRunLengthEncode"),
@@ -3392,6 +3398,23 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudnnTensorDescriptor_t ", "miopenTensorDescriptor_t "),
     ("CUDNN_ENFORCE", "MIOPEN_ENFORCE"),
     ("CUDNN_CHECK", "MIOPEN_CHECK"),
+    # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files:
+    # NVSHMEMSymmetricMemory.cpp and nvshmem_team_manager.hpp).
+    ("NVSHMEM_TEAM_INVALID", "rocshmem::ROCSHMEM_TEAM_INVALID"),
+    ("NVSHMEM_TEAM_WORLD", "rocshmem::ROCSHMEM_TEAM_WORLD"),
+    ("NVSHMEMX_INIT_WITH_UNIQUEID", "rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID"),
+
+    ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
+    ("nvshmem_free", "rocshmem::rocshmem_free"),
+    ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
+    ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
+
+    ("nvshmemx_uniqueid_t", "rocshmem::rocshmem_uniqueid_t"),
+    ("nvshmemx_get_uniqueid", "rocshmem::rocshmem_get_uniqueid"),
+    ("nvshmemx_init_attr", "rocshmem::rocshmem_init_attr"),
+    ("nvshmemx_init_attr_t", "rocshmem::rocshmem_init_attr_t"),
+    ("nvshmemx_set_attr_uniqueid_args", "rocshmem::rocshmem_set_attr_uniqueid_args"),
 ])
 
 C10_MAPPINGS = collections.OrderedDict([

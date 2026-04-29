@@ -1,24 +1,34 @@
 import functools
 import logging
+import sys
+from typing import cast
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
+from ..backends import cuda as _cuda
 from .common_utils import (
     _available_version,
     _unavailable_reason,
     check_native_jit_disabled,
     check_native_version_skip,
 )
-from .registry import _OpFn, _register_op_override
+from .dsl_registry import dsl_registry, DSLModuleProtocol
+from .registry import (
+    _OpFn,
+    deregister_op_overrides as _deregister_op_overrides_impl,
+    register_op_override as _register_op_override_impl,
+)
 
 
 log = logging.getLogger(__name__)
 
 
+_CUTEDSL_DSL_NAME = "cutedsl"
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     # Current version - Note Version.from_part(release=(4.4.1)) is better
     #                   but > v26 of packaging.
     Version(f"{4}.{4}.{1}"),
+    Version(f"{4}.{4}.{2}"),
 }
 
 
@@ -29,6 +39,10 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
     NOTE: Doesn't import at this point
     """
+    # Skip all checks if running on CPU-only binary
+    if not _cuda.is_built():
+        return (False, None)
+
     deps = [
         ("nvidia_cutlass_dsl", "cutlass"),
         ("apache_tvm_ffi", "tvm_ffi"),
@@ -38,7 +52,7 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("nvidia_cutlass_dsl")
     else:
-        log.info(
+        log.warning(
             "CuTeDSL operators require optional Python packages "
             "`nvidia-cutlass-dsl` and `apache-tvm-ffi`; "
             "%s",
@@ -65,13 +79,20 @@ def _version_is_ok() -> bool:
     if check_native_version_skip() or (version in _CUTEDSL_REQUIRED_VERSIONS):
         return True
 
-    log.info(
+    log.warning(
         "cutedsl version %s is not known-good (ok: %s); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
         _CUTEDSL_REQUIRED_VERSIONS,
     )
     return False
+
+
+def deregister_op_overrides() -> None:
+    """
+    Deregister all ops through cuteDSL
+    """
+    _deregister_op_overrides_impl(disable_dsl_names=_CUTEDSL_DSL_NAME)
 
 
 def register_op_override(
@@ -86,7 +107,7 @@ def register_op_override(
     """
     See torch/_native/registry.py for the underlying implementation
     and arguments. This is a thin, DSL-checking wrapper over
-    _register_op_override
+    _register_op_override_impl
     """
     available, version = _check_runtime_available()
     if (not available) or check_native_jit_disabled():
@@ -95,7 +116,8 @@ def register_op_override(
     if not _version_is_ok():
         return
 
-    _register_op_override(
+    _register_op_override_impl(
+        _CUTEDSL_DSL_NAME,
         lib_symbol,
         op_symbol,
         dispatch_key,
@@ -103,3 +125,8 @@ def register_op_override(
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )
+
+
+# Register this DSL module with the registry
+# Note: Import-time registration ensures DSL is available when module is loaded
+dsl_registry.register_dsl("cutedsl", cast(DSLModuleProtocol, sys.modules[__name__]))

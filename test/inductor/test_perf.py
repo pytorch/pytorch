@@ -29,7 +29,7 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -515,6 +515,7 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
+    @skipIfXpu(msg="copy_(cat()) fusion not supported on XPU")
     @unittest.skipIf(TEST_WITH_ROCM, "copy_(cat()) fusion not supported on ROCm")
     # TODO(ivankobzarev): enable copy_(cat()) fusion for CUDA 13+
     @unittest.skipIf(
@@ -555,7 +556,10 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
-        if config.triton.cooperative_reductions:
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             expected_numel = 134225922
 
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
@@ -1299,6 +1303,59 @@ class InplacingTests(TestCase):
 
         inp = (T(10, 10), T(5, 10), T(10))
         self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
+
+
+class RealizeOnReuseTests(TestCase):
+    """
+    The cost model compares memory traffic for inlining vs materializing:
+      Inline:      total_read_bytes * users
+      Materialize: total_read_bytes + output_bytes * (1 + users)
+    """
+
+    @requires_gpu_and_triton
+    def test_broadcast_reads_not_materialized(self):
+        # y = x * w1 * w2 + b has 4 reads: x is [100, 100] (large), w1/w2/b
+        # are [100] (small broadcast). total_read_bytes ≈ output_bytes, so
+        # materializing y would add a costly write for negligible savings.
+        # The size-aware model correctly avoids materializing y.
+        def f(x, w1, w2, b):
+            y = x * w1 * w2 + b
+            return y.sum(dim=0), y.sum(dim=1)
+
+        inp = (T(100, 100), T(100), T(100), T(100))
+        # If y were materialized: reads x,w1,w2,b + writes y, then each
+        # reduction reads y. Much more traffic than inlining the cheap
+        # broadcast ops into each reduction kernel.
+        # Inline: 2*read(x,w1,w2,b) + 2*write(y.sum(...)) = 2 * (100 * 100 + 100 + 100 + 100) + 2 * 100 = 20800.
+        # Materialize: read(x,w1,w2,b) + write(y) + 2*read(y) + 2*write(y.sum()) =
+        #              = (100 * 100 + 100 + 100 + 100) + 100 * 100 + 2 * 100 * 100 + 2 * 100 = 40500.
+        # so we should inline.
+        self.assertExpectedInline(count_numel(f, *inp), """20800""")
+
+    @requires_gpu_and_triton
+    def test_full_size_reads_materialized(self):
+        # x = a + b has 2 full-size reads and 3 users. total_read_bytes =
+        # 2 * output_bytes, so the cost model favors materializing:
+        #   2S * (3-1) = 4S >= S * (1+3) = 4S
+        def f(a, b, c, d):
+            x = a + b
+            return x + c, x + d, x.sum(dim=-1)
+
+        inp = (T(100, 100), T(100, 100), T(100, 100), T(100, 100))
+        self.assertExpectedInline(count_numel(f, *inp), """60100""")
+
+    @requires_gpu_and_triton
+    def test_dtype_promotion_not_materialized(self):
+        # x_f32 = x_bf16.float() has 1 bf16 read but fp32 output.
+        # total_read_bytes = S*2 (bf16), output_bytes = S*4 (fp32).
+        # S*2 * (users-1) < S*4 * (1+users), so materializing a large
+        # fp32 intermediate is avoided.
+        def f(x_bf16, bias_bf16):
+            logits = (x_bf16 + bias_bf16).float()
+            return logits.sum(dim=-1), logits.amax(dim=-1)
+
+        inp = (T(100, 100, dtype=torch.bfloat16), T(100, dtype=torch.bfloat16))
+        self.assertExpectedInline(count_numel(f, *inp), """5250""")
 
 
 # Test cases where we don't do the right thing yet.

@@ -1533,6 +1533,96 @@ class LocalElasticAgentTest(unittest.TestCase):
         self.assertEqual(alive_time, expected_time)
         mock_watchdog.get_last_progress_time.assert_called_once()
 
+    def test_get_alive_time_during_exit_barrier(self):
+        """When _in_exit_barrier is True, _get_alive_time returns current time
+        even if the watchdog exists (since watchdog progress time is stale)."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Set up a mock watchdog with a stale time
+        mock_watchdog = Mock()
+        mock_watchdog.get_last_progress_time.return_value = 1000  # very old
+        agent._worker_watchdog = mock_watchdog
+
+        # Without exit barrier flag, should return watchdog time
+        agent._in_exit_barrier = False
+        self.assertEqual(agent._get_alive_time(), 1000)
+
+        # With exit barrier flag, should return current time (not stale watchdog time)
+        agent._in_exit_barrier = True
+        alive_time = agent._get_alive_time()
+        now = int(time.time())
+        self.assertAlmostEqual(alive_time, now, delta=2)
+
+    def test_healthcheck_reports_healthy_during_exit_barrier(self):
+        """Verify health check callback returns current time during exit barrier,
+        preventing TW from killing the task while agents coordinate shutdown."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Simulate post-training state: watchdog exists but progress time is stale
+        mock_watchdog = Mock()
+        stale_time = int(time.time()) - 600  # 10 minutes ago
+        mock_watchdog.get_last_progress_time.return_value = stale_time
+        agent._worker_watchdog = mock_watchdog
+
+        # Before exit barrier: alive_time is stale (would fail TW health check)
+        alive_time = agent._get_alive_time()
+        self.assertEqual(alive_time, stale_time)
+
+        # During exit barrier: alive_time is current (TW health check passes)
+        agent._in_exit_barrier = True
+        alive_time = agent._get_alive_time()
+        now = int(time.time())
+        self.assertAlmostEqual(alive_time, now, delta=2)
+
+        # After exit barrier: back to watchdog time
+        agent._in_exit_barrier = False
+        alive_time = agent._get_alive_time()
+        self.assertEqual(alive_time, stale_time)
+
+    def test_in_exit_barrier_initialized_false(self):
+        """Verify _in_exit_barrier is False on agent construction."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+        self.assertFalse(agent._in_exit_barrier)
+
     def test_setup_healthcheck_idempotent(self):
         """Test _setup_healthcheck is idempotent and does not recreate server when JK is enabled."""
         node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
@@ -1614,52 +1704,6 @@ class LocalElasticAgentTest(unittest.TestCase):
                     del os.environ[healthcheck_port_env_name]
             else:
                 os.environ[healthcheck_port_env_name] = original_value
-
-    def test_pre_invoke_run_calls_setup_healthcheck(self):
-        """Test _pre_invoke_run calls _setup_healthcheck when JK is enabled."""
-        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-        self._backend = "c10d"
-        self._endpoint = f"localhost:{acquire_available_port()}"
-        spec = self.get_worker_spec(node_conf)
-        agent = self.get_agent(spec, node_config=node_conf)
-
-        with (
-            patch(
-                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
-                return_value=True,
-            ),
-            patch.object(agent, "_setup_healthcheck") as mock_setup,
-        ):
-            agent._pre_invoke_run()
-        mock_setup.assert_called_once()
-
-    def test_pre_invoke_run_skips_healthcheck_without_jk(self):
-        """Test _pre_invoke_run does NOT call _setup_healthcheck when JK is disabled."""
-        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-
-        # Use a mocked rendezvous handler to avoid blocking on real connections
-        rdzv_handler = Mock()
-        rdzv_handler.get_backend.return_value = "c10d"
-        spec = WorkerSpec(
-            role=node_conf.role,
-            local_world_size=node_conf.local_world_size,
-            entrypoint=node_conf.entrypoint,
-            args=node_conf.args,
-            rdzv_handler=rdzv_handler,
-            max_restarts=0,
-            monitor_interval=0.01,
-        )
-        agent = self.get_agent(spec, node_config=node_conf)
-
-        with (
-            patch(
-                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
-                return_value=False,
-            ),
-            patch.object(agent, "_setup_healthcheck") as mock_setup,
-        ):
-            agent._pre_invoke_run()
-        mock_setup.assert_not_called()
 
     def test_healthcheck_with_watchdog_enabled(self):
         """Test healthcheck works with watchdog enabled during agent run."""

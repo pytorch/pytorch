@@ -416,6 +416,13 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
   return backend_->allreduce_coalesced(tensors, opts);
 }
 
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_sparse(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  runCollectiveChecks(OpType::_ALLREDUCE_SPARSE, tensors);
+  return backend_->allreduce_sparse(tensors, opts);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
@@ -454,6 +461,13 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
   // details.
   runCollectiveChecks(OpType::ALLGATHER_COALESCED, {});
   return backend_->allgather_coalesced(outputTensorLists, inputTensors, opts);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_into_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  return backend_->allgather_into_tensor_coalesced(outputs, inputs, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
@@ -590,6 +604,21 @@ bool ProcessGroupWrapper::supportsTimeEstimation() const {
   return backend_->supportsTimeEstimation();
 }
 
+bool ProcessGroupWrapper::supportsShrinking() const {
+  return backend_->supportsShrinking();
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::shrink(
+    const std::vector<int64_t>& ranks_to_exclude,
+    int shrink_flags,
+    const c10::intrusive_ptr<Options>& opts_override) {
+  return backend_->shrink(ranks_to_exclude, shrink_flags, opts_override);
+}
+
+void ProcessGroupWrapper::setTimeout(std::chrono::milliseconds timeout) {
+  backend_->setTimeout(timeout);
+}
+
 c10::intrusive_ptr<Backend::Options> ProcessGroupWrapper::getBackendOptions() {
   return backend_->getBackendOptions();
 }
@@ -608,12 +637,61 @@ bool ProcessGroupWrapper::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
   return backend_->supportsTensorAlloc(deviceIdx);
 }
 
+void ProcessGroupWrapper::abort() {
+  backend_->abort();
+}
+
+void ProcessGroupWrapper::shutdown() {
+  backend_->shutdown();
+}
+
+void ProcessGroupWrapper::suspend() {
+  backend_->suspend();
+}
+
+void ProcessGroupWrapper::resume() {
+  backend_->resume();
+}
+
+std::unordered_map<std::string, uint64_t> ProcessGroupWrapper::
+    getMemoryStats() {
+  return backend_->getMemoryStats();
+}
+
 ErrorType ProcessGroupWrapper::getError() {
   return backend_->getError();
 }
 
 void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {
   backend_->eagerConnectSingleDevice(device);
+}
+
+void ProcessGroupWrapper::registerOnCompletionHook(
+    std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+  backend_->registerOnCompletionHook(std::move(hook));
+}
+
+void ProcessGroupWrapper::waitForPendingWorks() {
+  backend_->waitForPendingWorks();
+}
+
+void ProcessGroupWrapper::enableCollectivesTiming() {
+  backend_->enableCollectivesTiming();
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::split(
+    const c10::intrusive_ptr<Store>& store,
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Options>& opts) {
+  return backend_->split(store, ranks, opts);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Options>& opts,
+    const int& rank,
+    const int& size) {
+  return backend_->merge(store, opts, rank, size);
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {

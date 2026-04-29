@@ -2140,10 +2140,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                self.assertEqual(cnts.frame_count, 1)
-            else:
-                self.assertEqual(cnts.frame_count, num_submodules)
+            self.assertEqual(cnts.frame_count, 1)
 
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
@@ -2225,10 +2222,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             ]:
                 x = torch.randn(size)
                 mod(x)
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(cnts.frame_count, 2)
-        else:
-            self.assertEqual(cnts.frame_count, 2 * num_submodules)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_recursion(self):
         mod = MockModule()
@@ -2800,16 +2794,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         foo(mod, torch.rand([4]))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(compiles_without_buffers, 1)
-        else:
-            self.assertEqual(compiles_without_buffers, 0)
+        self.assertEqual(compiles_without_buffers, 1)
 
         foo(mod, torch.rand([4], dtype=torch.half))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(compiles_without_buffers, 2)
-        else:
-            self.assertEqual(compiles_without_buffers, 1)
+        self.assertEqual(compiles_without_buffers, 2)
 
         class Mod2(Mod):
             def __setattr__(self, name, value):
@@ -3635,6 +3623,67 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(compiled_call_count, eager_call_count)
         self.assertTrue(torch.allclose(output_eager, output))
+
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_dict_insertion_guard_method_func(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def hook_function(module, args):
+            return (args[0] + 1.0,)
+
+        class HookHelper:
+            def hook_method(self, module, args):
+                return (args[0] + 2.0,)
+
+        model = SimpleModel()
+        helper = HookHelper()
+
+        model.register_forward_pre_hook(hook_function)
+        model.register_forward_pre_hook(helper.hook_method, prepend=True)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def runner_func(mod, x):
+            return mod(x)
+
+        input_tensor = torch.randn(1, 10)
+        # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
+        _ = runner_func(model, input_tensor)
+
+    def test_prepend_hook_ordering(self):
+        class HookedLinear(torch.nn.Linear):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.register_forward_pre_hook(self._hook_add)
+                self.register_forward_pre_hook(self._hook_mul, prepend=True)
+
+            @staticmethod
+            def _hook_add(module, args):
+                return (args[0] + 1,)
+
+            @staticmethod
+            def _hook_mul(module, args):
+                return (args[0] * 2,)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = HookedLinear(4, 4, bias=False)
+
+            def forward(self, x):
+                return self.layer(x)
+
+        model = Model()
+        x = torch.ones(1, 4)
+
+        eager = model(x)
+        compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
+        self.assertEqual(eager, compiled)
 
 
 devices = ["cuda", "hpu", "xpu"]
