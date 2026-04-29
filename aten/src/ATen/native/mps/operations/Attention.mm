@@ -51,6 +51,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                    const Tensor& orig_query,
                                                    bool unsqueezed) {
   using namespace mps;
+  // MPSGraph fallback path doesn't combine causal + attn_mask correctly
+  TORCH_CHECK(!(is_causal && attn_mask.has_value()),
+              "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* qTensor = nil;
@@ -666,9 +669,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(value_.scalar_type()),
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               value_.scalar_type());
-  // match generic attention.cpp ref, combination is ill-defined
-  TORCH_CHECK(!(is_causal && attn_mask.has_value()),
-              "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
   const auto all_contiguous =
       query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
