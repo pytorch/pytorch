@@ -618,7 +618,7 @@ max_autotune_gemm_backends = os.environ.get(
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to None (or env var "none"/"all") to tune all configs.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
     if env_val.lower() in ("none", "all"):
@@ -2441,10 +2441,6 @@ class cuda(cutlass):
 
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
-
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: int | None = 5
 
 
 @inherit_fields_from(cutlass)
