@@ -389,6 +389,15 @@ struct MPSGraphCache {
     return static_cast<T*>(LookUp(key));
   }
 
+  void clear() {
+    dispatch_sync(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedGraph_;
+      }
+      cache_.clear();
+    });
+  }
+
  private:
   MPSGraphCache() {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
