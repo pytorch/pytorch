@@ -399,6 +399,10 @@ void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
+void deactivateGPUTrace() {
+  c10::impl::GPUTrace::unset_trace();
+}
+
 static void check_tensor_subclass(PyObject* obj, PyTypeObject* type) {
   TORCH_CHECK(
       PyObject_TypeCheck(obj, type),

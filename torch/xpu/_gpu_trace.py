@@ -27,6 +27,27 @@ StreamSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 EventSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "XPU event synchronization"
 )
+_callbacks = (
+    EventCreationCallbacks,
+    EventDeletionCallbacks,
+    EventRecordCallbacks,
+    EventWaitCallbacks,
+    MemoryAllocationCallbacks,
+    MemoryDeallocationCallbacks,
+    StreamCreationCallbacks,
+    DeviceSynchronizationCallbacks,
+    StreamSynchronizationCallbacks,
+    EventSynchronizationCallbacks,
+)
+
+
+def clear_callbacks() -> None:
+    for callback in _callbacks:
+        callback.clear_callbacks()
+
+
+def deactivate_trace() -> None:
+    torch._C._deactivate_gpu_trace()
 
 
 def register_callback_for_event_creation(cb: Callable[[int], None]) -> None:

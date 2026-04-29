@@ -610,6 +610,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
+  _C_m.def("_deactivate_gpu_trace", []() { deactivateGPUTrace(); });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
       _C_m, "_InferenceMode");

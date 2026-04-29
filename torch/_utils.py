@@ -1056,6 +1056,9 @@ class CallbackRegistry(Generic[P]):
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)
 
+    def clear_callbacks(self) -> None:
+        self.callback_list.clear()
+
     def fire_callbacks(self, *args: P.args, **kwargs: P.kwargs) -> None:
         for cb in self.callback_list:
             try:

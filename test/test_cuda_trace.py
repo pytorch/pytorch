@@ -19,10 +19,19 @@ if not TEST_CUDA:
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        gpu_trace.clear_callbacks()
+        gpu_trace.deactivate_trace()
+
     def setUp(self):
         super().setUp()
+        gpu_trace.clear_callbacks()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
+
+    def tearDown(self):
+        gpu_trace.clear_callbacks()
 
     def test_event_creation_callback(self):
         gpu_trace.register_callback_for_event_creation(self.mock)
