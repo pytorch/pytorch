@@ -21,7 +21,6 @@
 #else // AT_ROCM_ENABLED && USE_HIPDNN
 
 #include <hipdnn_frontend.hpp>
-#include <ATen/hipdnn/Types.h>
 #include <ATen/hipdnn/Handle.h>
 #include <ATen/hipdnn/Exceptions.h>
 #include <ATen/hipdnn/Utils.h>
