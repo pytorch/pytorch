@@ -52,7 +52,6 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
-@xfailIfS390X
 class BaseExtensionBackendTests(TestCase):
     module = None
 
@@ -108,6 +107,7 @@ class BaseExtensionBackendTests(TestCase):
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(BaseExtensionBackendTests):
+    @xfailIfS390X
     @skipIfWindows
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
