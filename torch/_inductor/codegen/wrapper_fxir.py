@@ -40,7 +40,7 @@ from torch.utils._sympy.solve import try_solve
 
 from .. import config, ir
 from ..runtime.triton_compat import Config
-from ..utils import cache_property_on_self, LineContext, ValueWithLineMap
+from ..utils import cache_property_on_self, LineContext, sympy_product, ValueWithLineMap
 from .common import (
     CodegenSymbol,
     FileBackedGraphModule,
@@ -48,6 +48,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .wrapper import (
+    AlignmentAssertLine,
     AllocateLine,
     BufferLike,
     CommentLine,
@@ -66,11 +67,14 @@ from .wrapper import (
     KernelDefinitionLine,
     Line,
     MultiOutputLine,
+    NanAssertLine,
     NullLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    ScalarAssertLine,
     ScatterFallbackLine,
+    SizeAssertLine,
     SubgraphPythonWrapperCodegen,
     SymbolicCallArg,
     SymbolicCallArgLine,
@@ -231,6 +235,41 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Override this behavior to generate prologues for FX subgraphs.
         """
         PythonWrapperCodegen.write_header(self)
+
+    def codegen_input_size_asserts(self) -> None:
+        """FXIR emits size asserts as WrapperLine objects immediately.
+
+        The base class defers input size asserts via _pending_input_asserts to
+        avoid blocking GPU kernel launches. FXIR builds a graph, so deferral is
+        unnecessary — emit SizeAssertLine objects directly."""
+        for name, buf in self.get_graph_inputs().items():
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+                continue
+            if sympy_product(buf.get_size()) == 0:
+                continue
+            self.writeline(
+                SizeAssertLine(
+                    wrapper=self,
+                    name=name,
+                    size=list(buf.get_size()),
+                    stride=list(buf.get_stride()),
+                )
+            )
+
+    def codegen_input_nan_asserts(self) -> None:
+        """FXIR emits nan/inf asserts as WrapperLine objects.
+
+        The base class writes text to self.prefix, which is ignored by the FX
+        converter. Override to emit NanAssertLine objects into self.lines."""
+        for name, buf in self.get_graph_inputs().items():
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+                continue
+            self.writeline(
+                NanAssertLine(
+                    wrapper=self,
+                    name=name,
+                )
+            )
 
     def register_alignment_check_inputs(self) -> None:
         """FXIR does not emit deferred alignment copies.
@@ -586,6 +625,14 @@ class FxConverter:
         assert graph is not None
         return self.subgm_getattrs[graph.name]
 
+    # Assertion line types that involve data-dependent operations (e.g.,
+    # data_ptr(), item()) which are incompatible with the fake-tensor
+    # metadata hook.  These are processed outside the hook context.
+    _DEFERRED_ASSERT_LINE_TYPES: tuple[type[WrapperLine], ...] = (
+        AlignmentAssertLine,
+        NanAssertLine,
+    )
+
     def generate(self) -> torch.fx.GraphModule:
         """
         Main entrypoint for FX codegen.
@@ -593,6 +640,8 @@ class FxConverter:
         self._generate_graph_inputs()
         self._generate_graph_constants()
         self._generate_subgm_getattrs()
+
+        deferred_lines: list[tuple[WrapperLine, torch.fx.Node | None]] = []
 
         with _set_node_metadata_hook(
             self.gm,
@@ -602,7 +651,13 @@ class FxConverter:
 
             # Generate FX IR from Wrapper IR lines.
             for line in self.lines:
-                if isinstance(line, WrapperLine):
+                if isinstance(line, self._DEFERRED_ASSERT_LINE_TYPES):
+                    # Snapshot the buffer node now — it may be freed
+                    # (removed from buffer_to_node) before deferred
+                    # processing runs.
+                    buffer_node = self.buffer_to_node.get(line.name)
+                    deferred_lines.append((line, buffer_node))
+                elif isinstance(line, WrapperLine):
                     line.codegen_fx(self)(line)
                 elif isinstance(line, LineContext):
                     # Ignore line context in FX IR.
@@ -620,6 +675,14 @@ class FxConverter:
                     )
 
             output = self._generate_outputs()
+
+        # Process assertion lines that use data-dependent operations outside
+        # the metadata hook, since fake tensors cannot evaluate data_ptr()
+        # or item().
+        for line, buffer_node in deferred_lines:
+            if buffer_node is not None:
+                self.buffer_to_node[line.name] = buffer_node
+            line.codegen_fx(self)(line)
 
         self.gm.graph.output(output)
         self.gm.recompile()
@@ -727,6 +790,65 @@ class FxConverter:
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
+
+    def _generate_size_assert(self, line: WrapperLine) -> None:
+        assert isinstance(line, SizeAssertLine)
+        buffer_node = self.buffer_to_node.get(line.name)
+        if buffer_node is None:
+            return
+
+        graph = self.gm.graph
+        for dim, expected_size in enumerate(line.size):
+            actual = graph.call_function(aten.sym_size.int, (buffer_node, dim))
+            expected = self._generate_sym_node(expected_size)
+            eq = graph.call_function(operator.eq, (actual, expected))
+            graph.call_function(torch._check, (eq,))
+
+        for dim, expected_stride in enumerate(line.stride):
+            actual = graph.call_function(aten.sym_stride.int, (buffer_node, dim))
+            expected = self._generate_sym_node(expected_stride)
+            eq = graph.call_function(operator.eq, (actual, expected))
+            graph.call_function(torch._check, (eq,))
+
+    def _generate_alignment_assert(self, line: WrapperLine) -> None:
+        assert isinstance(line, AlignmentAssertLine)
+        buffer_node = self.buffer_to_node.get(line.name)
+        if buffer_node is None:
+            return
+
+        graph = self.gm.graph
+        # data_ptr() is a Tensor method (not an ATen op) but works as
+        # an FX call_method node for eager interpretation.
+        data_ptr = graph.call_method("data_ptr", (buffer_node,))
+        mod = graph.call_function(operator.mod, (data_ptr, line.align_bytes))
+        eq = graph.call_function(operator.eq, (mod, 0))
+        graph.call_function(torch._check, (eq,))
+
+    def _generate_nan_assert(self, line: WrapperLine) -> None:
+        assert isinstance(line, NanAssertLine)
+        buffer_node = self.buffer_to_node.get(line.name)
+        if buffer_node is None:
+            return
+
+        graph = self.gm.graph
+        # assert not tensor.isnan().any().item()
+        has_nan = graph.call_function(aten.isnan.default, (buffer_node,))
+        any_nan = graph.call_function(aten.any.default, (has_nan,))
+        any_nan_scalar = graph.call_function(aten.item.default, (any_nan,))
+        no_nan = graph.call_function(operator.not_, (any_nan_scalar,))
+        graph.call_function(torch._check, (no_nan,))
+
+        # assert not tensor.isinf().any().item()
+        has_inf = graph.call_function(aten.isinf.default, (buffer_node,))
+        any_inf = graph.call_function(aten.any.default, (has_inf,))
+        any_inf_scalar = graph.call_function(aten.item.default, (any_inf,))
+        no_inf = graph.call_function(operator.not_, (any_inf_scalar,))
+        graph.call_function(torch._check, (no_inf,))
+
+    def _generate_scalar_assert(self, line: WrapperLine) -> None:
+        assert isinstance(line, ScalarAssertLine)
+        condition_node = self._generate_sym_node(line.scalar)
+        self.gm.graph.call_function(torch._check, (condition_node,))
 
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         assert isinstance(line, DynamicScalarLine)

@@ -534,6 +534,84 @@ class CommentLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class SizeAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    size: list[sympy.Expr]
+    stride: list[sympy.Expr]
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        size_str = self.wrapper.codegen_python_shape_tuple(self.size)
+        stride_str = self.wrapper.codegen_python_shape_tuple(self.stride)
+        if self.op_name is not None:
+            code.writeline(
+                f"assert_size_stride({self.name}, {size_str}, {stride_str}, {self.op_name!r})"
+            )
+        else:
+            code.writeline(f"assert_size_stride({self.name}, {size_str}, {stride_str})")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_size_assert
+
+
+@dataclasses.dataclass
+class AlignmentAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    align_bytes: int
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(
+            f"assert_alignment({self.name}, {self.align_bytes}, {self.op_name!r})"
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_alignment_assert
+
+
+@dataclasses.dataclass
+class NanAssertLine(WrapperLine):
+    """
+    Checks for both NaN and Inf values.  This matches the existing behavior of
+    PythonWrapperCodegen.codegen_input_nan_asserts() which checks both despite
+    the config flag being named ``nan_asserts``.
+    """
+
+    wrapper: PythonWrapperCodegen
+    name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(f"assert not {self.name}.isnan().any().item()")
+        code.writeline(f"assert not {self.name}.isinf().any().item()")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_nan_assert
+
+
+@dataclasses.dataclass
+class ScalarAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    scalar: sympy.Basic
+    msg: str
+    output_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        sizevar = self.wrapper.codegen_python_sizevar(self.scalar, simplify=False)
+        code.writeline(f"if not ({sizevar}):")
+        code.writeline(f"    raise RuntimeError({repr(self.msg)})")
+        code.writeline(f"{self.output_name} = None")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scalar_assert
+
+
+@dataclasses.dataclass
 class DynamicScalarLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.DynamicScalar
@@ -1239,7 +1317,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
-        self._pending_input_asserts: dict[str, tuple[str, str]] = {}
+        self._pending_input_asserts: dict[
+            str, tuple[list[sympy.Expr], list[sympy.Expr]]
+        ] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
         self.args_to_buffers: dict[
@@ -1587,9 +1667,11 @@ class PythonWrapperCodegen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_python_shape_tuple(buf.get_size())
-            stride = self.codegen_python_shape_tuple(buf.get_stride())
-            self._pending_input_asserts[name] = (size, stride)
+
+            self._pending_input_asserts[name] = (
+                list(buf.get_size()),
+                list(buf.get_stride()),
+            )
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
@@ -1689,7 +1771,14 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(name, size, stride))
+                self.writeline(
+                    SizeAssertLine(
+                        wrapper=self,
+                        name=name,
+                        size=size,
+                        stride=stride,
+                    )
+                )
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -2093,7 +2182,17 @@ class PythonWrapperCodegen(CodeGen):
 
             # At this point, we shouldn't generate any new memory planning lines.
             # Override writeline to point at the wrapper call, in case it gets called.
-            with self.set_writeline(self.wrapper_call.writeline):
+            # Use a wrapper that handles WrapperLine objects emitted during codegen
+            # (e.g., SizeAssertLine from codegen_size_asserts called via
+            # ExternKernelMultiOutLine) by calling their codegen method directly.
+            def _writeline_for_codegen(line):  # type: ignore[no-untyped-def]
+                if isinstance(line, WrapperLine):
+                    # pyrefly: ignore [missing-attribute]
+                    line.codegen(self.wrapper_call)
+                else:
+                    self.wrapper_call.writeline(line)
+
+            with self.set_writeline(_writeline_for_codegen):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
                         # pyrefly: ignore [missing-attribute]

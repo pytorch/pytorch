@@ -7123,21 +7123,35 @@ class ExternKernel(InputsKernel):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
                 return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            op_name = self.get_op_name()
+            # Local import: wrapper.py imports ir.py, so module-level would be circular.
+            from .codegen.wrapper import SizeAssertLine
+
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
+                SizeAssertLine(
+                    wrapper=wrapper,
+                    name=self.get_name(),
+                    size=list(self.get_size()),
+                    stride=list(self.get_stride()),
+                    op_name=self.get_op_name(),
+                )
             )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
+            # Local import: wrapper.py imports ir.py, so module-level would be circular.
+            from .codegen.wrapper import AlignmentAssertLine
+
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
                 wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                    AlignmentAssertLine(
+                        wrapper=wrapper,
+                        name=name,
+                        align_bytes=GPU_ALIGN_BYTES,
+                        op_name=op_name,
+                    )
                 )
             else:
                 wrapper.writeline(
@@ -8389,8 +8403,17 @@ class AssertScalar(ExternKernel):
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.fx_wrapper:
-            # TODO fix
-            pass
+            # Local import: wrapper.py imports ir.py, so module-level would be circular.
+            from .codegen.wrapper import ScalarAssertLine
+
+            wrapper.writeline(
+                ScalarAssertLine(
+                    wrapper=wrapper,
+                    scalar=self.scalar,
+                    msg=self.msg,
+                    output_name=self.get_name(),
+                )
+            )
         elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(

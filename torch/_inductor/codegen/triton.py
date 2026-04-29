@@ -6079,6 +6079,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.deallocate_workspaces()
 
     def codegen_nan_check(self) -> None:
+        from .wrapper import NanAssertLine
+
         wrapper = V.graph.wrapper_code
         _, call_args, arg_signatures, _ = self.args.python_argdefs()
         for arg, arg_signature in zip(call_args, arg_signatures):
@@ -6088,10 +6090,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
                     )
                 else:
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
+                    wrapper.writeline(NanAssertLine(wrapper=wrapper, name=arg))
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
         return TritonCSEVariable(*args, **kwargs)

@@ -42,6 +42,9 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._sympy.functions import FloorDiv
 
 
+aten = torch.ops.aten
+
+
 try:
     from .test_control_flow import CondModels
 except ImportError:
@@ -57,10 +60,10 @@ if HAS_GPU:
 
 test_config = {
     "compile_threads": 1,
-    "alignment_asserts": False,
-    "size_asserts": False,
-    "scalar_asserts": False,
-    "nan_asserts": False,
+    "alignment_asserts": True,
+    "size_asserts": True,
+    "scalar_asserts": True,
+    "nan_asserts": True,
 }
 
 
@@ -72,6 +75,28 @@ class FxirTestCase(InductorTestCase):
 
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
+
+    @staticmethod
+    def _get_assert_nodes(gm: torch.fx.GraphModule) -> set[torch.fx.Node]:
+        """Collect torch._check nodes and all their transitive input dependencies
+        that are used exclusively by assertion subgraphs."""
+        assert_nodes: set[torch.fx.Node] = set(
+            gm.graph.find_nodes(op="call_function", target=torch._check)
+        )
+        changed = True
+        while changed:
+            changed = False
+            for node in list(assert_nodes):
+                for arg in node.args:
+                    if (
+                        hasattr(arg, "op")
+                        and arg.op == "call_function"
+                        and arg not in assert_nodes
+                        and all(u in assert_nodes for u in arg.users)
+                    ):
+                        assert_nodes.add(arg)
+                        changed = True
+        return assert_nodes
 
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
@@ -124,6 +149,17 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
+        # Verify all non-assertion, non-triton call_function nodes have metadata.
+        for gm in gms:
+            assert_nodes = self._get_assert_nodes(gm)
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target != triton_kernel_wrapper_mutation
+                    and node not in assert_nodes
+                ):
+                    self.assertTrue(node.meta.get("val", None) is not None)
+
         return gms
 
     @classmethod
@@ -147,6 +183,101 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_size_assert_check_nodes(self):
+        """
+        Test that size_asserts generates torch._check nodes in the FX graph
+        for validating input tensor sizes and strides.
+        """
+        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+
+        check_nodes = gm.graph.find_nodes(op="call_function", target=torch._check)
+        # Each 2D input gets 2 size checks + 2 stride checks = 4 per input.
+        # Two inputs → at least 8 torch._check nodes.
+        self.assertGreaterEqual(len(check_nodes), 8)
+
+        # Verify sym_size and sym_stride nodes are also present.
+        sym_size_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sym_size.int
+        )
+        sym_stride_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sym_stride.int
+        )
+        self.assertGreaterEqual(len(sym_size_nodes), 4)
+        self.assertGreaterEqual(len(sym_stride_nodes), 4)
+
+    def test_nan_assert_check_nodes(self):
+        """
+        Test that nan_asserts generates isnan/isinf → torch._check nodes
+        in the FX graph for runtime NaN/Inf validation.  The nan_asserts
+        config flag checks for both NaN and Inf, matching the existing
+        PythonWrapperCodegen.codegen_input_nan_asserts() behavior.
+        """
+        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+
+        # Each input gets isnan + isinf checks → 2 isnan + 2 isinf nodes.
+        isnan_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.isnan.default
+        )
+        isinf_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.isinf.default
+        )
+        self.assertGreaterEqual(len(isnan_nodes), 2)
+        self.assertGreaterEqual(len(isinf_nodes), 2)
+
+        # Each isnan/isinf feeds into any → item → not_ → torch._check.
+        any_nodes = gm.graph.find_nodes(op="call_function", target=aten.any.default)
+        self.assertGreaterEqual(len(any_nodes), 4)  # 2 isnan + 2 isinf
+
+    def test_alignment_assert_check_nodes(self):
+        """
+        Test that alignment_asserts generates data_ptr() % align == 0 →
+        torch._check nodes in the FX graph for runtime alignment validation.
+
+        Uses torch.mm because alignment asserts are emitted by ExternKernel.codegen(),
+        which runs for extern ops like mm but not for Triton-compiled elementwise ops.
+        """
+        args = [torch.randn(8, 8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.mm, args, expected_num_triton_kernels=0)
+
+        # Alignment checks use call_method("data_ptr") on output buffers.
+        data_ptr_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_method" and n.target == "data_ptr"
+        ]
+        # The output buffer of torch.mm gets an alignment check.
+        self.assertGreaterEqual(len(data_ptr_nodes), 1)
+
+    def test_size_assert_fails_on_wrong_shape(self):
+        """Compile with one shape, run with a different shape → assertion fires."""
+        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+
+        # Run with wrong shape — torch._check should raise
+        wrong_args = [torch.randn(4, 16, device=self.device) for _ in range(2)]
+        with self.assertRaises(RuntimeError):
+            gm(*wrong_args)
+
+    def test_nan_assert_fails_on_nan(self):
+        """NaN input triggers the nan_assert check."""
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+
+        nan_input = torch.full((8,), float("nan"), device=self.device)
+        with self.assertRaises(RuntimeError):
+            gm(nan_input, args[1])
+
+    def test_nan_assert_fails_on_inf(self):
+        """Inf input triggers the nan_assert check (checks both NaN and Inf)."""
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+
+        inf_input = torch.full((8,), float("inf"), device=self.device)
+        with self.assertRaises(RuntimeError):
+            gm(inf_input, args[1])
 
     def test_device_type(self):
         """
@@ -857,10 +988,13 @@ class AOTFxirTestCase(InductorTestCase):
             flat_args, _ = pytree.tree_flatten(inp)
             self.assertTrue(same(model(*inp), gm(*flat_args)))
 
+            # Verify all non-assertion call_function nodes have metadata.
+            assert_nodes = FxirTestCase._get_assert_nodes(gm)
             for node in gm.graph.nodes:
                 if (
                     node.op == "call_function"
                     and node.target != triton_kernel_wrapper_mutation
+                    and node not in assert_nodes
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
 
@@ -1003,8 +1137,8 @@ class AOTFxirTestCase(InductorTestCase):
         inp = (torch.randn((5, 4), device=self.device),)
         gm = self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
 
-        # Check for dynamic size ops.
-        self.assertEqual(
+        # Check for dynamic size ops (size_asserts may add extra sym_size nodes).
+        self.assertGreaterEqual(
             len(
                 gm.graph.find_nodes(
                     op="call_function", target=torch.ops.aten.sym_size.int
@@ -1033,18 +1167,20 @@ class AOTFxirTestCase(InductorTestCase):
         (x, y) = [torch.randn(8, device=self.device) for _ in range(2)]
         gm = self.check(M(), (pred, x, y))
 
-        # Check the graph.
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
-    buf1 = cond[0]
-    buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",
+        # Check the graph has the expected cond structure.
+        cond_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.cond
         )
+        self.assertEqual(len(cond_nodes), 1)
+
+        # Verify cond result unpacking.
+        cond_node = cond_nodes[0]
+        getitem_users = [u for u in cond_node.users if u.target == operator.getitem]
+        self.assertEqual(len(getitem_users), 2)
+
+        # Verify subgraphs are passed correctly.
+        self.assertEqual(cond_node.args[1], gm.true_graph_0)
+        self.assertEqual(cond_node.args[2], gm.false_graph_0)
 
     def test_dims_dynamic_outer_static_padded_inner(self):
         """
