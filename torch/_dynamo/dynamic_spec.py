@@ -60,11 +60,10 @@ class IntSpec:
         IntSpec("x", IntSpecType.STATIC, value=10)
 
     ``type`` is fixed at construction; all other fields are mutable via
-    fluent setters that double as getters (no arg = read, one arg = write):
+    fluent setters that return ``self`` for chaining:
 
         spec = IntSpec.backed("batch", min=1, max=64)
         spec.guarding_hint(32)   # set, returns self
-        spec.guarding_hint()     # get, returns 32
         spec.min(1).max(64)      # chain
     """
 
