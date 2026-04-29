@@ -2,9 +2,15 @@
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <ostream>
+#include <string_view>
 #include <utility>
 
 namespace c10 {
+
+std::ostream& operator<<(std::ostream& os, const DebugInfoKind& kind) {
+  return os << (kind.value_ == nullptr ? "<uninitialized>" : *kind.value_);
+}
 
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
 #define debug_info (tls_debug_info.get())
@@ -48,7 +54,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
       "Expected debug info of type ",
-      (size_t)kind);
+      kind);
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
   return res->info_;
@@ -59,7 +65,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
   TORCH_CHECK(
       debug_info && debug_info->kind_ == kind,
       "Expected debug info of type ",
-      (size_t)kind);
+      kind);
   return debug_info->info_;
 }
 
