@@ -90,15 +90,13 @@ op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
 
 
 @contextmanager
-def _temp_attrs(obj, **attrs):
-    backup = {k: getattr(obj, k) for k in attrs}
-    for k, v in attrs.items():
-        setattr(obj, k, v)
+def _temp_test_configs(obj, **configs):
+    backup = {k: getattr(obj, k, None) for k in configs}
+    obj.register_test_configs(**configs)
     try:
         yield
     finally:
-        for k, v in backup.items():
-            setattr(obj, k, v)
+        obj.register_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -152,18 +150,15 @@ class TestDeviceTypeOpenReg(TestCase):
 
 
 # Modify PrivateUse1TestBase which is automatically included for OpenReg
-PrivateUse1TestBase.register_op_overrides(
-    {
-        "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
-        "op_skip_f32": [
-            DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
-        ],
-        "op_xfail": [DecorateInfo(unittest.expectedFailure)],
-        # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
-        "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
-    }
-)
-
+PrivateUse1TestBase.op_overrides = {
+    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
+    "op_skip_f32": [
+        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
+    ],
+    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
+    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
+}
 
 class TestSkippedSpecificTestCases(TestCase):
     executed_count = 0
@@ -194,12 +189,10 @@ class TestSkippedWholeTestClass(TestCase):
 
 
 # PrivateUse1 can skip individual methods or an entire instantiated class.
-PrivateUse1TestBase.register_test_exclusions(
-    {
-        "TestSkippedSpecificTestCases": ["test_skipped"],
-        "TestSkippedWholeTestClass": "*",
-    }
-)
+PrivateUse1TestBase.test_exclusions = {
+    "TestSkippedSpecificTestCases": ["test_skipped"],
+    "TestSkippedWholeTestClass": "*",
+}
 
 
 class TestSupportedOpsWithOverrides(TestCase):
@@ -240,7 +233,7 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
-with _temp_attrs(
+with _temp_test_configs(
     PrivateUse1TestBase,
     op_overrides={
         "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
