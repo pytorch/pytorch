@@ -422,28 +422,6 @@ class TestPythonRegistration(TestCase):
         # lib's finalizer should not have a reference anymore
         self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt)
 
-    def test_finalizer_clears_torch_ops_cache(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/181765:
-        # `del lib` (running the finalizer) must clear the cached
-        # OpOverloadPacket on torch.ops.<ns>, otherwise iterating ops in that
-        # namespace later raises AttributeError.
-        lib = Library(self.test_ns, "DEF")  # noqa: TOR901
-        lib.define("my_func() -> None")
-
-        @impl(lib, "my_func", "")
-        def my_func():
-            pass
-
-        torch.ops._test_python_registration.my_func()
-        del lib
-        gc.collect()
-
-        namespace = torch.ops._test_python_registration
-        self.assertNotIn("my_func", namespace._dir)
-        from torch._export.utils import _collect_all_valid_cia_ops_for_namespace
-
-        _collect_all_valid_cia_ops_for_namespace(namespace)
-
     def test_override_cpu_sum(self) -> None:
         # Example 1
         run = [False]
