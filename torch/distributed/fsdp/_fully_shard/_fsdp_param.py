@@ -560,9 +560,8 @@ class FSDPParam:
         all_gather_input_dtypes: list[torch.dtype],
         world_size: int,
         device: torch.device,
-        force_recreate: bool = False,
     ):
-        if not force_recreate and len(self.all_gather_outputs) > 0:
+        if len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)

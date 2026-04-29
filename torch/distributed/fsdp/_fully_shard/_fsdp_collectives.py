@@ -466,8 +466,6 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        # NOTE: Under compile, make sure we always recreate all_gather_outputs
-        # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels,
             all_gather_input_dtypes,
