@@ -28,6 +28,7 @@
 #include <pybind11/pybind11.h>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 using at::DeviceGuard;
 using at::DimnameList;

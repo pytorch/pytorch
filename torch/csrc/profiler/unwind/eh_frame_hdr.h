@@ -4,6 +4,7 @@
 
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
+// @allow-raw-throw
 
 // Overview of the format described in
 // https://refspecs.linuxfoundation.org/LSB_1.3.0/gLSB/gLSB/ehframehdr.html

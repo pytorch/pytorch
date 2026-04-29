@@ -45,6 +45,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 using namespace torch;
 using namespace torch::autograd;

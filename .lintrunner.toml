@@ -533,13 +533,9 @@ exclude_patterns = [
     # Remaining burn-down
     'aten/src/**',
     'c10/util/**',
-    'torch/csrc/autograd/**',
     'torch/csrc/distributed/**',
-    'torch/csrc/fx/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/profiler/**',
-    'torch/csrc/utils/**',
 ]
 command = [
     'python3',

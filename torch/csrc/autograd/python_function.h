@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::jit {
 struct Graph;

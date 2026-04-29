@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+// @allow-raw-throw
 
 namespace torch::profiler::impl {
 using result_ptr_t = std::shared_ptr<Result>;

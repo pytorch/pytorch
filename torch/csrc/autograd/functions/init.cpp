@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <utility>
+// @allow-raw-throw
 
 using namespace torch::autograd;
 

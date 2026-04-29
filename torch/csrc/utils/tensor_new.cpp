@@ -33,6 +33,7 @@
 
 #include <stdexcept>
 #include <vector>
+// @allow-raw-throw
 
 using at::Device;
 using at::IntArrayRef;

@@ -81,6 +81,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+// @allow-raw-throw
 
 inline bool THPUtils_checkScalar(PyObject* obj) {
 #ifdef USE_NUMPY

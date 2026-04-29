@@ -6,6 +6,7 @@
 #include <torch/csrc/QScheme.h>
 
 #include <torch/csrc/utils/object_ptr.h>
+// @allow-raw-throw
 
 namespace torch::utils {
 
@@ -32,7 +33,7 @@ void initializeQSchemes() {
 PyObject* getTHPQScheme(at::QScheme qscheme) {
   auto qscheme_ = thp_qscheme_array[static_cast<int>(qscheme)];
   if (!qscheme_) {
-    throw std::invalid_argument("unsupported QScheme");
+    TORCH_CHECK(false, "unsupported QScheme");
   }
   return qscheme_;
 }

@@ -3,6 +3,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+// @allow-raw-throw
 
 namespace torch::utils {
 

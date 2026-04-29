@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <sstream>
+// @allow-raw-throw
 
 using torch::autograd::Variable;
 using torch::autograd::variable_list;

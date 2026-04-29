@@ -2,6 +2,7 @@
 #include <fmt/format.h>
 #include <optional>
 #include <stdexcept>
+// @allow-raw-throw
 
 namespace torch::unwind {
 

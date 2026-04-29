@@ -5,6 +5,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_symnode.h>
+// @allow-raw-throw
 
 namespace torch::autograd {
 

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+// @allow-raw-throw
 
 #ifndef NLOHMANN_JSON_NAMESPACE_BEGIN
 #define NLOHMANN_JSON_NAMESPACE_BEGIN namespace nlohmann {

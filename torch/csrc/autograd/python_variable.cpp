@@ -50,6 +50,7 @@
 #include <sstream>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 using namespace at;
 using namespace torch;

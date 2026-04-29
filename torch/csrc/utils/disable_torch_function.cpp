@@ -5,6 +5,7 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <fmt/format.h>
+// @allow-raw-throw
 
 namespace torch {
 static PyObject* disabled_torch_function = nullptr;

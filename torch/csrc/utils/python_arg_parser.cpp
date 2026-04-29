@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch {
 

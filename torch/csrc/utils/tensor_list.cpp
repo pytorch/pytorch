@@ -5,6 +5,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_scalars.h>
+// @allow-raw-throw
 
 using namespace at;
 

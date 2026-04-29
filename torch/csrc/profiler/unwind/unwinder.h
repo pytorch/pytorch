@@ -3,6 +3,7 @@
 #include <torch/csrc/profiler/unwind/unwind_error.h>
 #include <cstdint>
 #include <limits>
+// @allow-raw-throw
 
 namespace torch::unwind {
 

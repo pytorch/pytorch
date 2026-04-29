@@ -23,6 +23,7 @@
 
 #include <memory> // for unique_ptr
 #include <utility>
+// @allow-raw-throw
 
 using namespace torch::autograd;
 

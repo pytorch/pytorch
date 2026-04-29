@@ -7,6 +7,7 @@
 
 #ifndef WIN32
 #include <pthread.h>
+// @allow-raw-throw
 #endif
 
 namespace torch::utils {

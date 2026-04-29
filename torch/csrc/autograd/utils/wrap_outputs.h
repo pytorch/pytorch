@@ -17,6 +17,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+// @allow-raw-throw
 
 namespace torch::autograd::utils {
 

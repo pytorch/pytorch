@@ -25,6 +25,7 @@
 
 #include <iostream>
 #include <utility>
+// @allow-raw-throw
 
 namespace py = pybind11;
 

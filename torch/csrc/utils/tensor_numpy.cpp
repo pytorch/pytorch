@@ -4,6 +4,7 @@
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/numpy_stub.h>
+// @allow-raw-throw
 
 #ifndef USE_NUMPY
 

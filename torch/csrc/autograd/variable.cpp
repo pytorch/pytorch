@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 namespace torch::autograd {
 
@@ -289,10 +290,9 @@ std::shared_ptr<Node> grad_accumulator(const Variable& self) {
   if (!autograd_meta) {
     return nullptr;
   }
-  if (autograd_meta->grad_fn_) {
-    throw std::logic_error(
-        "grad_accumulator() should be only called on leaf Variables");
-  }
+  TORCH_CHECK(
+      !autograd_meta->grad_fn_,
+      "grad_accumulator() should be only called on leaf Variables");
   if (!autograd_meta->requires_grad_) {
     return nullptr;
   }
