@@ -943,10 +943,6 @@ class profile(_KinetoProfile):
                 self.stop_trace,
                 self._trace_ready,
             ],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
-                self.stop_trace,
-                self._trace_ready,
-            ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
                 self.prepare_trace,
@@ -963,9 +959,19 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
-            # Unreachable: step()'s entry guard excludes prev=NONE.
+            # Unreachable transitions:
+            # - prev=NONE: entry guard excludes it (a NONE -> X transition
+            #   means we weren't profiling, so there's no stopped state to
+            #   react to).
+            # - prev=RECORD_AND_SAVE: entry guard excludes it because the
+            #   natural (R&S, *) transitions already call prepare_trace,
+            #   which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
+            #   here would skip prepare_trace and waste the next cycle.
             (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
                 partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "RECORD_AND_SAVE", "DEVICE_STOPPED"),
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
@@ -1016,44 +1022,49 @@ class profile(_KinetoProfile):
         self.current_action = schedule_action
         self._prev_schedule_action = schedule_action
 
-        # DEVICE_STOPPED handling: when device collection stops early (e.g. CUPTI
-        # buffer overflow), we enter DEVICE_STOPPED and stay there until the
-        # current profiling cycle ends.
+        # DEVICE_STOPPED handling: when Kineto signals that device collection
+        # has stopped early (e.g. CUPTI buffer overflow), we enter
+        # DEVICE_STOPPED and stay there until the current profiling cycle ends.
         #
-        # Once in DEVICE_STOPPED, the schedule continues to advance step_num but
-        # we override current_action to DEVICE_STOPPED until we hit a cycle
-        # boundary, defined as either:
-        # - the schedule moving to WARMUP or NONE (which always begin a new
-        #   cycle or end profiling), or
-        # - the previous step's raw schedule output being RECORD_AND_SAVE (which
-        #   always marks the end of an active phase, so the current step starts
-        #   a new cycle even if warmup=0).
-        # The second case is what makes warmup=0 schedules recoverable.
+        # Once in DEVICE_STOPPED (prev_action == DEVICE_STOPPED):
+        # - We exit at the next cycle boundary, defined by either:
+        #   - prev_schedule_action == RECORD_AND_SAVE: since active > 0,
+        #     every cycle ends with RECORD_AND_SAVE, so the next step starts
+        #     a new cycle regardless of warmup/wait shape.
+        #   - current_action == NONE: safety hatch for user-defined schedules
+        #     that may emit NONE without a preceding RECORD_AND_SAVE. (The
+        #     standard schedule() builder always pairs them.)
+        # - Otherwise we stay in DEVICE_STOPPED, absorbing the rest of the
+        #   cycle.
+        # - WARMUP is not a boundary marker: with warmup >= 2, mid-warmup
+        #   steps also have current_action == WARMUP, which would cause
+        #   premature exit and immediate re-entry on the next step.
         #
-        # Entry into DEVICE_STOPPED:
-        # - use_device must be set: a CPU-only profiler must not react to a
-        #   stale stopped flag from a previous device profiler.
-        # - prev_action must not be NONE or DEVICE_STOPPED: if we already
-        #   transitioned out, the next cycle must be allowed to start.
-        # - current_action must not be NONE: if the schedule is already
-        #   stopping us (e.g. RECORD_AND_SAVE -> NONE), respect that rather
-        #   than entering DEVICE_STOPPED.
+        # Entering DEVICE_STOPPED (override current_action to DEVICE_STOPPED):
+        # - We enter when all of the following hold:
+        #   - _is_kineto_stopped() is True: Kineto reports the stop.
+        #   - use_device is set: a CPU-only profiler must not react to a
+        #     stale stopped flag from a previous device profiler.
+        #   - prev_action is WARMUP or RECORD: these have no built-in cleanup
+        #     in their natural transitions.
+        #   - current_action is not NONE: if the schedule is already stopping
+        #     us (e.g. RECORD_AND_SAVE -> NONE), respect that rather than
+        #     overriding.
+        # - Otherwise we leave current_action as the schedule's output.
+        # - prev_action == RECORD_AND_SAVE is excluded: the natural (R&S, *)
+        #   transitions already call prepare_trace, so overriding here would
+        #   skip the reset and waste the next cycle.
         if prev_action == ProfilerAction.DEVICE_STOPPED:
             at_cycle_boundary = (
-                self.current_action in (ProfilerAction.WARMUP, ProfilerAction.NONE)
-                or prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
+                prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
+                or self.current_action == ProfilerAction.NONE
             )
             if not at_cycle_boundary:
                 self.current_action = ProfilerAction.DEVICE_STOPPED
         elif (
             torch.autograd._is_kineto_stopped()
             and self.use_device is not None
-            and prev_action
-            in (
-                ProfilerAction.WARMUP,
-                ProfilerAction.RECORD,
-                ProfilerAction.RECORD_AND_SAVE,
-            )
+            and prev_action in (ProfilerAction.WARMUP, ProfilerAction.RECORD)
             and self.current_action != ProfilerAction.NONE
         ):
             warn(

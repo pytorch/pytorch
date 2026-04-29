@@ -3830,20 +3830,35 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
 
-    def test_enters_device_stopped_from_record_and_save(self):
-        p = self._make_profiler(wait=0, warmup=1, active=1)
+    def test_does_not_enter_device_stopped_from_record_and_save(self):
+        """When prev_action is RECORD_AND_SAVE, the natural action_map
+        transition (e.g. R&S -> WARMUP) already fires prepare_trace, which
+        resets Kineto. We do NOT override to DEVICE_STOPPED — doing so
+        would skip the reset and waste the next cycle in DEVICE_STOPPED.
+        If Kineto recovers, profiling continues normally; if not, the
+        entry guard fires on the next step (prev=WARMUP or RECORD)."""
+        p = self._make_profiler(wait=0, warmup=1, active=2, repeat=2)
+
         with patch(self.PATCH_TARGET, return_value=False):
-            p.start()
-            # step 0 -> 1: WARMUP -> RECORD_AND_SAVE (normal)
-            p.step()
+            p.start()  # step 0: WARMUP
+            p.step()  # step 1: RECORD
+            p.step()  # step 2: RECORD_AND_SAVE
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD_AND_SAVE -> WARMUP (repeat), but
-            # _is_kineto_stopped -> True overrides to DEVICE_STOPPED. Transition
-            # fires stop_trace + _trace_ready to save the collected data.
+            # step 2 -> 3: prev=R&S, schedule=WARMUP. Despite kineto_stopped,
+            # we do NOT override; the natural (R&S, WARMUP) transition fires
+            # stop_trace + _trace_ready + prepare_trace.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
+        # Simulate Kineto recovering after prepare_trace: cycle 2 records
+        # normally rather than being wasted in DEVICE_STOPPED.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 3 -> 4: WARMUP -> RECORD
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()  # step 4 -> 5: RECORD -> RECORD_AND_SAVE
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
     def test_device_stopped_persists_through_cycle(self):
@@ -3941,11 +3956,44 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
             p.stop()
 
-    def test_device_stopped_recovers_with_active_one_warmup_zero(self):
-        """active=1, warmup=0 is the degenerate case where every step is
-        RECORD_AND_SAVE. prev_schedule_action is always RECORD_AND_SAVE,
-        so the cycle-boundary exit fires on every step out of
-        DEVICE_STOPPED — and the recovery target is RECORD_AND_SAVE itself."""
+    def test_device_stopped_persists_through_multistep_warmup(self):
+        """With warmup >= 2, consecutive WARMUP steps are mid-cycle, not
+        cycle boundaries. DEVICE_STOPPED must persist through the entire
+        warmup phase rather than oscillating WARMUP -> DEVICE_STOPPED ->
+        WARMUP -> DEVICE_STOPPED on every step."""
+        # wait=0, warmup=3, active=2, repeat=1 (cycle length 5):
+        # step 0..2: WARMUP; step 3: RECORD; step 4: R&S; step 5+: NONE.
+        p = self._make_profiler(wait=0, warmup=3, active=2, repeat=1)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()  # step 0: WARMUP
+            # step 0 -> 1: WARMUP -> DEVICE_STOPPED (entry)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 1 -> 2: schedule still WARMUP (same warmup phase, NOT a
+            # cycle boundary). Must stay in DEVICE_STOPPED.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 2 -> 3: schedule moves to RECORD. Still mid-cycle
+            # (prev_schedule_action is WARMUP, not RECORD_AND_SAVE). Stay.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 3 -> 4: schedule moves to R&S. Still mid-cycle. Stay.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 4 -> 5: prev_schedule_action == R&S marks the cycle
+            # boundary (here also end-of-profiling since repeat=1). Exit
+            # DEVICE_STOPPED into NONE.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_active_one_warmup_zero_never_enters_device_stopped(self):
+        """active=1, warmup=0, wait=0: every step is RECORD_AND_SAVE, so
+        prev_action is always RECORD_AND_SAVE — which the entry guard
+        excludes. The natural (R&S, R&S) transition fires every step
+        regardless of kineto_stopped, giving Kineto a chance to recover
+        on each step boundary."""
         p = self._make_profiler(wait=0, warmup=0, active=1, repeat=3)
 
         with patch(self.PATCH_TARGET, return_value=False):
@@ -3953,14 +4001,10 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 0 -> 1: RECORD_AND_SAVE -> DEVICE_STOPPED (entry)
+            # prev=R&S is excluded from the entry guard, so kineto_stopped
+            # is ignored. Natural (R&S, R&S) transition runs every step.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
-
-        with patch(self.PATCH_TARGET, return_value=False):
-            # step 1 -> 2: prev_schedule_action is RECORD_AND_SAVE, so we
-            # exit DS into the new cycle's first (and only) active step.
-            # (DS, RECORD_AND_SAVE) fires prepare_trace + start_trace.
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
@@ -3991,17 +4035,23 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_unreachable_transition_raises(self):
-        """The (NONE, DEVICE_STOPPED) transition is unreachable by
-        construction (the entry guard excludes prev=NONE) and should raise
-        if invoked directly via _transit_action — it signals a bug in the
-        state machine, not a recoverable condition."""
+    @parametrize(
+        "prev",
+        [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
+    )
+    def test_unreachable_transition_raises(self, prev):
+        """Transitions into DEVICE_STOPPED that step()'s entry guard
+        excludes should raise if invoked directly via _transit_action.
+        - prev=NONE: we weren't profiling, so there's nothing to stop.
+        - prev=RECORD_AND_SAVE: the natural transition already calls
+          prepare_trace, so DEVICE_STOPPED would skip the reset.
+        """
         p = self._make_profiler(wait=0, warmup=1, active=1)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Profiler internal error: NONE -> DEVICE_STOPPED should be unreachable",
+            f"Profiler internal error: {prev.name} -> DEVICE_STOPPED should be unreachable",
         ):
-            p._transit_action(ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED)
+            p._transit_action(prev, ProfilerAction.DEVICE_STOPPED)
 
     def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
         """A CPU-only profiler should not enter DEVICE_STOPPED even if
