@@ -1539,6 +1539,55 @@ static PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+// Returns the set of dtypes that are fully realized Python singletons: all
+// floating/complex/integer/bool/float8/float4/bits types. Excludes quantized
+// dtypes and the placeholder sub-byte int/uint types, matching the dtypes
+// tracked in torch.utils._dtype_abbrs.
+static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
+  auto all_scalar_types = {
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
+#undef DEFINE_SCALAR_TYPE
+
+  auto is_subbyte_dummy = [](at::ScalarType t) {
+    switch (t) {
+      case at::ScalarType::UInt1:
+      case at::ScalarType::UInt2:
+      case at::ScalarType::UInt3:
+      case at::ScalarType::UInt4:
+      case at::ScalarType::UInt5:
+      case at::ScalarType::UInt6:
+      case at::ScalarType::UInt7:
+      case at::ScalarType::Int1:
+      case at::ScalarType::Int2:
+      case at::ScalarType::Int3:
+      case at::ScalarType::Int4:
+      case at::ScalarType::Int5:
+      case at::ScalarType::Int6:
+      case at::ScalarType::Int7:
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  THPObjectPtr result(PyList_New(0));
+  if (!result)
+    throw python_error();
+  for (auto scalar_type : all_scalar_types) {
+    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
+      continue;
+    }
+    auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
+    if (PyList_Append(result.get(), dtype) < 0) {
+      throw python_error();
+    }
+  }
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::DeviceTypeName(
@@ -2139,6 +2188,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
+    {"_get_all_dtypes", THPModule_getAllDtypes, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
     {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
