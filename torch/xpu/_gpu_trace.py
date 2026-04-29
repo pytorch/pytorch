@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+import torch
 from torch._utils import CallbackRegistry
 
 
