@@ -33,6 +33,19 @@ class TestCudaTrace(TestCase):
     def tearDown(self):
         gpu_trace.clear_callbacks()
 
+    def test_deactivate_and_reactivate_gpu_trace(self):
+        gpu_trace.register_callback_for_event_creation(self.mock)
+
+        torch._C._deactivate_gpu_trace()
+        inactive_event = torch.cuda.Event()
+        inactive_event.record()
+        self.mock.assert_not_called()
+
+        torch._C._activate_gpu_trace()
+        active_event = torch.cuda.Event()
+        active_event.record()
+        self.mock.assert_called_once_with(active_event._as_parameter_.value)
+
     def test_event_creation_callback(self):
         gpu_trace.register_callback_for_event_creation(self.mock)
 
