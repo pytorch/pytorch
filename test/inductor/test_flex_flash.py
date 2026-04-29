@@ -1326,6 +1326,48 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_backend_return_lse_matches_triton_and_reference(self, device, dtype):
+        torch.manual_seed(0)
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=128,
+            dim=32,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_flex = torch.compile(
+            functools.partial(
+                flex_attention,
+                scale=1.0,
+                return_lse=True,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+        )
+        triton_flex = torch.compile(
+            functools.partial(
+                flex_attention,
+                scale=1.0,
+                return_lse=True,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+        )
+
+        _, lse_flash = flash_flex(q, k, v)
+        _, lse_triton = triton_flex(q, k, v)
+        ref_lse = torch.logsumexp(
+            torch.matmul(q.float(), k.float().transpose(-2, -1)), dim=-1
+        )
+
+        torch.testing.assert_close(lse_triton.float(), ref_lse, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(lse_flash.float(), ref_lse, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(
+            lse_flash.float(), lse_triton.float(), atol=1e-4, rtol=1e-4
+        )
+
+    @xfailIfSM120OrLater
+    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
         from torch._dynamo.exc import BackendCompilerFailed
 
