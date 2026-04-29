@@ -15,7 +15,6 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._inductor import comms
 from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
@@ -25,7 +24,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
-from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -122,9 +120,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="post_grad_passes",
     )
-
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
 
     if config.dce:
         # has some issues with mutation in inference mode
@@ -385,10 +380,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-            comms.reinplace_fsdp_all_gather
-        )
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
