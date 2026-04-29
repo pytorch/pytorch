@@ -10,7 +10,9 @@ When writing native ops, they are required to interact meaningfully with torch's
 
 As a further clarification, ops cannot be labelled as `CompositeImplicitAutograd` in `native_functions.yaml`, as-in the op must have an explicit autograd function registered, or at minimum an explicit implementation registered for the same backend as being overridden/added.
 
-Further, we expect the overriding function to take as the first argument `dispatch_keys` (of type `torch.DispatchKeySet`), which is necessary for fallback implementations.
+Each override is described by **two callables**: a predicate (`cond`) and an implementation (`impl`). At call time the registry's router evaluates the cond against the op's arguments and, if it returns `True`, routes the call to `impl`. If no registered cond matches, the router transparently falls through to the original aten kernel — there's no need to thread a fallback kernel or a `DispatchKeySet` through your code.
+
+For overrides that always apply (no predicate), pass `unconditional_override=True` and omit `cond` (or pass `None`).
 
 ## A Note on Imports
 
@@ -25,22 +27,28 @@ First, we're going to write the registration function, and a top-level call, bei
 
 from ... import triton_utils as tu
 
-def calling_fn(dispatch_key, ...):
+def my_cond(*args, **kwargs) -> bool:
+    # Cheap predicate: e.g. dtype / ndim checks. Avoid expensive work here
+    # if possible; this runs on every call.
+    return True
+
+def my_impl(*args, **kwargs):
     # Lazily import the kernels (and triton) on first call
     from .triton_kernels import outer_fn
-    torch.library.wrap_triton(outer_fn)(...)
+    return torch.library.wrap_triton(outer_fn)(*args, **kwargs)
 
 def register_to_dispatch():
     tu.register_op_override(
         "aten",
         "_scaled_mm_v2",
         "CUDA",
-        calling_fn,
+        cond=my_cond,
+        impl=my_impl,
     )
 
 ```
 
-Note the lazy import of kernels inside `calling_fn` - this function isn't called during registration (it just needs to be defined), and on first call it'll import the `triton_kernels` module, with all its dependencies. This kernels module can import anything it wants internally, our restriction on no DSL imports during registration has been met. Quick example of `triton_kernels.py` below:
+Note the lazy import of kernels inside `my_impl` - this function isn't called during registration (it just needs to be defined), and on first call it'll import the `triton_kernels` module, with all its dependencies. This kernels module can import anything it wants internally, our restriction on no DSL imports during registration has been met. Quick example of `triton_kernels.py` below:
 
 ```
 # torch/_native/ops/test_op/triton_kernels.py
@@ -70,78 +78,74 @@ Both cases are very similar, with 2) only requiring an extra step to obtain the 
 
 This follows a simple and standard path, with a good example being the implementation of [FlashAttention v4 (FAv4)](https://github.com/pytorch/pytorch/blob/1f66f34cda5b5ad02d231b90fa0c0de2cb4e02d1/torch/nn/attention/_fa4.py#L67) in torch.
 
-The following example replaces the implementation of `aten._scaled_grouped_mm_v2` on `CUDA` devices:
+The following example replaces the implementation of `aten._scaled_grouped_mm_v2` on `CUDA` devices for **every** call:
 
 ```
 from ... import cutedsl_utils as cu
 
-def my_impl(dispatch_key, ...) -> ...:
+def my_impl(*args, **kwargs) -> ...:
     """
-    Replacement implementation
+    Replacement implementation — signature matches aten::_scaled_grouped_mm_v2.
     """
     pass
 
-# Override the symbol `aten._scaled_grouped_mm_v2` in this example with the implementation in `my_impl`,
-# noting the function signatures must match.
-# Replacing an operator completely (no fallback) requires passing the `unconditional_override=True` flag.
+# Pass `unconditional_override=True` and `cond=None` to apply the impl to
+# every call (a trivially-true predicate is substituted internally).
 def register_kernel_override():
-    tu.register_op_override(
+    cu.register_op_override(
         "aten",
         "_scaled_grouped_mm_v2",
         "CUDA",
-        my_impl,
-        unconditional_override=True
+        cond=None,
+        impl=my_impl,
+        unconditional_override=True,
     )
 ```
 
 ### Replacing a Subset of Calls
 
-This time we only want to override the behavior of a subset of `aten._scaled_grouped_mm_v2` calls, and choose whether to invoke our implementation or the original depending on some input arguments. Note that the core of the example -- creating a `torch.library.Library`, and registering our function using `lib.impl(...)` are the same as in [Replacing an Operator](#Replacing-an-Operator).
+This time we only want to override the behavior of a subset of `aten._scaled_grouped_mm_v2` calls, based on some input property. Write a `cond` that returns `True` when the override should fire and `False` otherwise — when it returns `False`, the registry's router transparently falls through to the original aten kernel. You never need to call the fallback yourself.
 
 ```
 from ... import cutedsl_utils as cu
 
-def my_impl(...) -> ...:
+def my_cond(arg1, arg2, *args, **kwargs) -> bool:
     """
-    Replacement implementation - laxy import actual implementation and run it
+    Decide whether to invoke my_impl. Keep this cheap — it runs on every call.
+    Avoid APIs that aren't defined on FakeTensors (e.g. `_is_cow_tensor`) if
+    you want the override to apply under torch.export / torch.compile too.
+    """
+    return arg1 == ... and arg2 == ...
+
+
+def my_impl(arg1, arg2, *args, **kwargs) -> ...:
+    """
+    Replacement implementation — lazy-import the actual kernel and run it.
     """
     from .my_impl_kernel import my_kernel
-    return my_kernel(...)
+    return my_kernel(arg1, arg2, *args, **kwargs)
 
 
-# Note the dispatch_keys argument here - this must be passed as the first argument
-# to the fallback kernel.
-# Also note that we need the `fallback_kernel` argument to be specified, as
-# we this function gets called every operator invocation - the "fallback" is
-# actually the currently registered function, which is... this one.
-def enable_my_impl(dispatch_keys, arg1, arg2, *args, fallback_kernel, **kwargs):
-    # determine if we want to call our implementation
-    if arg1 == ... and arg2 == ...:
-        return my_impl(arg1, arg2, *args, **kwargs)
-    else:
-        # Call the fallback
-        return fallback_kernel(dispatch_keys,
-                               arg1, arg2, *args, **kwargs)
-
-# Override the symbol `aten._scaled_grouped_mm_v2` in this example with the implementation in `my_impl`,
-# only when the check-method `enable_my_impl` returns `True`
+# Override `aten::_scaled_grouped_mm_v2` on CUDA only when `my_cond` returns
+# True. For other inputs the native aten kernel runs — the registry captures
+# it automatically before installing the override and wires the fallback.
 def register_kernel_override():
-
-    # Get the original implementation for fallback purposes
-    fallback_kernel = torch.library.get_kernel("aten::_scaled_grouped_mm_v2", "CUDA")
-
-    # partially-specialize our function so that we're not grabbing the
-    # fallback every invocation.
-    fn = functools.partial(enable_my_impl, fallback_kernel=fallback_kernel)
-
-    # Same as before
     cu.register_op_override(
         "aten",
         "_scaled_grouped_mm_v2",
         "CUDA",
-        fn,
+        cond=my_cond,
+        impl=my_impl,
     )
 ```
+
+Notes:
+* `cond` and `impl` have the **same signature as the aten op** — no extra
+  `dispatch_keys` or `fallback_kernel` parameters.
+* Multiple overrides can be registered for the same op at the same
+  dispatch key; the router tries them in registration order and stops at
+  the first `cond` that returns `True`. See § "Registration Orders and You"
+  below for how to control ordering.
 
 ## Registering a New Operator
 
@@ -170,12 +174,23 @@ register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    implementation_fn: _OpOverrideFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
-    unconditional_override: bool = False,) -> None
+    unconditional_override: bool = False,
+) -> None
 ```
-Register a given implementation to a library - `lib_symbol = "aten"` for most cases, `op_symbol` refers to the library method you wish to override (ex. `"_scaled_grouped_mm_v2"` from above), and dispatch key will generally be one of `("CPU", "CUDA")` depending on what backend you're overriding. For all arguments, please see the comments for `register_op_override` in [registry.py](registry.py).
+Register a given implementation to a library.
+
+* `lib_symbol`: namespace you're overriding — `"aten"` for most cases.
+* `op_symbol`: the op to override, either a bare name (`"bmm"`, resolving to `aten.bmm.default`) or overload-qualified (`"add_.Tensor"` → `aten.add_.Tensor`).
+* `dispatch_key`: typically `"CPU"` or `"CUDA"` (or any other backend key).
+* `cond`: predicate choosing when `impl` applies. May be `None` if `unconditional_override=True`, in which case a trivially-true predicate is substituted.
+* `impl`: implementation callable; its signature matches the aten op.
+* `unconditional_override`: apply `impl` to every call, bypassing the cond check.
+
+For full argument details see the docstring for `register_op_override` in [registry.py](registry.py).
 
 `deregister_op_overrides() -> None` : De-register all operators that are currently registered by this DSL. Note that `torch._native.registry` has a `deregister_op_overrides` method to enable this in a centralized fashion.
 
