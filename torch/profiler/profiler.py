@@ -539,7 +539,12 @@ class _KinetoProfile:
 
 class ProfilerAction(Enum):
     """
-    Profiler actions that can be taken at the specified intervals
+    Profiler actions that can be taken at the specified intervals.
+
+    NONE, WARMUP, RECORD, and RECORD_AND_SAVE are user-facing values that may
+    be returned from a user-provided schedule. DEVICE_STOPPED is set
+    internally by the profiler when device collection stops early due to
+    errors; it must not be returned from a user-provided schedule.
     """
 
     NONE = 0
@@ -932,12 +937,20 @@ class profile(_KinetoProfile):
             ],
             # DEVICE_STOPPED: entered when device collection stops early (e.g.
             # CUPTI buffer overflow). Absorbs the remainder of the current
-            # profiling cycle, then exits when the schedule moves to WARMUP
-            # (new cycle) or NONE (end). Note that we do not produce a trace
-            # because that is the semantics of WARMUP.
+            # profiling cycle, then exits at the next cycle boundary.
+            #
+            # All three entry transitions fire _trace_ready so the user's
+            # callback is invoked even when entry happens from WARMUP. This
+            # matters for active=1 schedules: the only active step (R&S) gets
+            # converted to DEVICE_STOPPED via WARMUP -> R&S override, and
+            # without _trace_ready firing here the user would never see a
+            # callback for that cycle. The trace will be empty (no recording
+            # ran), but the callback firing is the signal that the cycle
+            # completed.
             (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
                 self.start_trace,
                 self.stop_trace,
+                self._trace_ready,
             ],
             (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
                 self.stop_trace,
@@ -959,17 +972,17 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
-            # Unreachable transitions:
-            # - prev=NONE: entry guard excludes it (a NONE -> X transition
-            #   means we weren't profiling, so there's no stopped state to
-            #   react to).
-            # - prev=RECORD_AND_SAVE: entry guard excludes it because the
-            #   natural (R&S, *) transitions already call prepare_trace,
-            #   which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
-            #   here would skip prepare_trace and waste the next cycle.
-            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
-                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
-            ],
+            # (NONE, DEVICE_STOPPED) is not reachable through step() — the
+            # entry guard excludes prev=NONE — but it IS reachable via
+            # start() after a stop() that left current_action in
+            # DEVICE_STOPPED. Treating it as a no-op allows restart-after-DS
+            # without raising, matching the silent behavior the action_map
+            # had for unknown (NONE, *) keys before DEVICE_STOPPED existed.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [],
+            # Unreachable: entry guard excludes prev=RECORD_AND_SAVE because
+            # the natural (R&S, *) transitions already call prepare_trace,
+            # which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
+            # here would skip prepare_trace and waste the next cycle.
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
                 partial(_unreachable_transition, "RECORD_AND_SAVE", "DEVICE_STOPPED"),
             ],
@@ -1036,9 +1049,6 @@ class profile(_KinetoProfile):
         #     standard schedule() builder always pairs them.)
         # - Otherwise we stay in DEVICE_STOPPED, absorbing the rest of the
         #   cycle.
-        # - WARMUP is not a boundary marker: with warmup >= 2, mid-warmup
-        #   steps also have current_action == WARMUP, which would cause
-        #   premature exit and immediate re-entry on the next step.
         #
         # Entering DEVICE_STOPPED (override current_action to DEVICE_STOPPED):
         # - We enter when all of the following hold:
@@ -1054,6 +1064,12 @@ class profile(_KinetoProfile):
         # - prev_action == RECORD_AND_SAVE is excluded: the natural (R&S, *)
         #   transitions already call prepare_trace, so overriding here would
         #   skip the reset and waste the next cycle.
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+
         if prev_action == ProfilerAction.DEVICE_STOPPED:
             at_cycle_boundary = (
                 prev_schedule_action == ProfilerAction.RECORD_AND_SAVE

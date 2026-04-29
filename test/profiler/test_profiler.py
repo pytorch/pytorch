@@ -3988,6 +3988,107 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
+    def test_warmup_to_device_stopped_fires_trace_ready(self):
+        """When DEVICE_STOPPED is entered from WARMUP (e.g. active=1
+        schedule where every R&S step gets converted to DS), the
+        (WARMUP, DEVICE_STOPPED) transition must fire on_trace_ready so
+        the user's callback is invoked. Without this, active=1 schedules
+        with persistent kineto_stopped would silently drop all callbacks."""
+        callbacks: list[ProfilerAction] = []
+
+        def handler(prof):
+            callbacks.append(prof.current_action)
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=2),
+            on_trace_ready=handler,
+        )
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()  # step 0: WARMUP
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 0 -> 1: prev=W, schedule=R&S, kineto_stopped=T -> override
+            # to DS. (W, DS) fires start_trace + stop_trace + _trace_ready.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+
+        self.assertEqual(
+            len(callbacks), 1, "(WARMUP, DEVICE_STOPPED) must fire on_trace_ready"
+        )
+
+    def test_start_after_stop_in_device_stopped(self):
+        """A user may call start() after a stop() that left current_action
+        in DEVICE_STOPPED. The (NONE, DEVICE_STOPPED) transition is a no-op
+        rather than a hard error — pre-existing code allowed
+        restart-after-stop because missing action_map keys silently no-op."""
+        p = self._make_profiler(wait=0, warmup=1, active=1)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+
+        # current_action stayed as DEVICE_STOPPED through stop(). start()
+        # must not raise on the (NONE, DEVICE_STOPPED) transition.
+        self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+        p.start()
+        p.stop()
+
+    def test_user_schedule_returning_device_stopped_raises(self):
+        """ProfilerAction.DEVICE_STOPPED is internal; user-provided
+        schedules must not return it. step() raises ValueError if a
+        schedule does."""
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=lambda step: ProfilerAction.DEVICE_STOPPED,
+        )
+        p.start()
+        with self.assertRaisesRegex(ValueError, "DEVICE_STOPPED is set internally"):
+            p.step()
+
+    def test_device_stopped_recovers_across_infinite_cycles(self):
+        """With repeat=0 (infinite cycles), DEVICE_STOPPED entry and
+        recovery must work across multiple cycles, not just one."""
+        # wait=0, warmup=1, active=2, repeat=0 (cycle length 3, infinite):
+        # step 0: W; step 1: R; step 2: R&S; step 3: W; step 4: R;
+        # step 5: R&S; step 6: W; ...
+        p = self._make_profiler(wait=0, warmup=1, active=2, repeat=0)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()  # step 0: WARMUP
+            p.step()  # step 1: RECORD
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Cycle 1: enter DS at the R&S step.
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()  # step 2: prev=R, schedule=R&S -> DS
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        # Cycle 1 -> Cycle 2: exit DS at the R&S boundary.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 3: prev=DS, prev_schedule=R&S -> WARMUP
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()  # step 4: WARMUP -> RECORD
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Cycle 2: enter DS again.
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()  # step 5: prev=R, schedule=R&S -> DS
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        # Cycle 2 -> Cycle 3: exit again. Confirms recovery is not a
+        # one-shot — it works across arbitrary cycles.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 6: prev=DS, prev_schedule=R&S -> WARMUP
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.stop()
+
     def test_active_one_warmup_zero_never_enters_device_stopped(self):
         """active=1, warmup=0, wait=0: every step is RECORD_AND_SAVE, so
         prev_action is always RECORD_AND_SAVE — which the entry guard
@@ -4035,23 +4136,18 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    @parametrize(
-        "prev",
-        [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
-    )
-    def test_unreachable_transition_raises(self, prev):
-        """Transitions into DEVICE_STOPPED that step()'s entry guard
-        excludes should raise if invoked directly via _transit_action.
-        - prev=NONE: we weren't profiling, so there's nothing to stop.
-        - prev=RECORD_AND_SAVE: the natural transition already calls
-          prepare_trace, so DEVICE_STOPPED would skip the reset.
-        """
+    def test_unreachable_transition_raises(self):
+        """The (RECORD_AND_SAVE, DEVICE_STOPPED) transition is unreachable
+        via step() because the entry guard excludes prev=R&S, and should
+        raise if invoked directly via _transit_action."""
         p = self._make_profiler(wait=0, warmup=1, active=1)
         with self.assertRaisesRegex(
             RuntimeError,
-            f"Profiler internal error: {prev.name} -> DEVICE_STOPPED should be unreachable",
+            "Profiler internal error: RECORD_AND_SAVE -> DEVICE_STOPPED should be unreachable",
         ):
-            p._transit_action(prev, ProfilerAction.DEVICE_STOPPED)
+            p._transit_action(
+                ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED
+            )
 
     def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
         """A CPU-only profiler should not enter DEVICE_STOPPED even if
