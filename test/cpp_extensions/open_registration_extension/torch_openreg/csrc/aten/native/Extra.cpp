@@ -1,5 +1,8 @@
 #include "Extra.h"
 
+#include <c10/util/ApproximateClock.h>
+#include "profiler/OpenRegTracer.h"
+
 namespace at::native::openreg {
 
 at::Tensor quantize_per_tensor(
@@ -165,6 +168,9 @@ void abs_kernel(at::TensorIteratorBase& iter) {
       input_tensor.sizes() == output_tensor.sizes(),
       "Input and output tensor sizes must match.");
 
+  auto& tracer = ::openreg::profiler::OpenRegTracer::instance();
+  const int64_t start = tracer.isEnabled() ? c10::getTime() : 0;
+
   auto abs_loop = [](float* out_ptr, const float* in_ptr, int64_t n) {
     for (int64_t i = 0; i < n; ++i) {
       out_ptr[i] = std::abs(in_ptr[i]);
@@ -195,6 +201,17 @@ void abs_kernel(at::TensorIteratorBase& iter) {
         iter.numel());
 
     output_tensor.copy_(output);
+  }
+
+  if (start) {
+    tracer.record({
+        ::openreg::profiler::ActivityKind::KERNEL,
+        "abs_kernel",
+        start,
+        c10::getTime(),
+        output_tensor.device().index(),
+        0,
+        tracer.currentCorrelation()});
   }
 }
 // LITERALINCLUDE END: STUB ABS

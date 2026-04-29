@@ -3,8 +3,6 @@ set(LIBRARY_NAME torch_openreg)
 file(GLOB_RECURSE SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
-list(FILTER SOURCE_FILES EXCLUDE REGEX ".*/tests/.*")
-
 add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
 
 target_link_libraries(${LIBRARY_NAME} PRIVATE torch_cpu_library openreg)
@@ -17,9 +15,10 @@ install(TARGETS ${LIBRARY_NAME}
 )
 
 # OpenReg tracer unit tests
+set(OPENREG_TESTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../tests/cpp)
 if(USE_TEST AND TARGET gtest_main)
   add_executable(test_openreg_tracer
-    ${CMAKE_CURRENT_SOURCE_DIR}/profiler/tests/test_openreg_tracer.cpp
+    ${OPENREG_TESTS_DIR}/test_openreg_tracer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegTracer.cpp
   )
   target_link_libraries(test_openreg_tracer PRIVATE gtest_main)

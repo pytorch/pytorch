@@ -2,6 +2,9 @@
 
 #include <unordered_set>
 
+#include <c10/util/ApproximateClock.h>
+#include "profiler/OpenRegTracer.h"
+
 namespace at::native::openreg {
 
 // LITERALINCLUDE START: EMPTY.MEMORY_FORMAT IMPL
@@ -85,6 +88,9 @@ at::Tensor _copy_from(
   TORCH_CHECK(self.defined(), "Source tensor (self) is not defined.");
   TORCH_CHECK(dst.defined(), "Destination tensor (dst) is not defined.");
 
+  auto& tracer = ::openreg::profiler::OpenRegTracer::instance();
+  const int64_t start = tracer.isEnabled() ? c10::getTime() : 0;
+
   MemoryGuard guard(self, dst);
 
   if (self.device() == dst.device()) {
@@ -123,6 +129,17 @@ at::Tensor _copy_from(
       at::native::copy_(
           const_cast<at::Tensor&>(dst), self_as_cpu, non_blocking);
     }
+  }
+
+  if (start) {
+    tracer.record({
+        ::openreg::profiler::ActivityKind::KERNEL,
+        "_copy_from",
+        start,
+        c10::getTime(),
+        dst.device().index(),
+        0,
+        tracer.currentCorrelation()});
   }
 
   return dst;
@@ -177,7 +194,21 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         op_name,
         "' is not implemented for device openreg.");
   } else {
+    auto& tracer = ::openreg::profiler::OpenRegTracer::instance();
+    const int64_t start = tracer.isEnabled() ? c10::getTime() : 0;
+
     at::native::cpu_fallback(op, stack);
+
+    if (start) {
+      tracer.record({
+          ::openreg::profiler::ActivityKind::KERNEL,
+          op_name.name,
+          start,
+          c10::getTime(),
+          -1,
+          0,
+          tracer.currentCorrelation()});
+    }
   }
 }
 // LITERALINCLUDE END: FALLBACK IMPL
