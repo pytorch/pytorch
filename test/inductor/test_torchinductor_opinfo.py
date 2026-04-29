@@ -231,12 +231,14 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {}
-
-# torch-xpu-ops: #2956
-inductor_skips["xpu"]["lu"] = {f32}
-inductor_skips["xpu"]["nn.functional.linear"] = {f16}
-inductor_skips["xpu"]["masked.cumprod"] = {f16}
+inductor_skips["xpu"] = {
+    # torch-xpu-ops: #2956
+    "lu": {f32},
+    "nn.functional.linear": {f16},
+    "masked.cumprod": {f16},
+    # flaky
+    "nn.functional.cosine_embedding_loss": {b8},
+}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
