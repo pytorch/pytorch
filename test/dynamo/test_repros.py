@@ -7271,6 +7271,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch("use_recursive_dict_tags_for_guards", True)
     def test_guard_tag_safe_tensor_metadata_segfault(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180741
         # When a submodule becomes a tag-safe root, the recording pass stashes
