@@ -1533,23 +1533,6 @@ void index_reduce_func_cuda_impl(
 
 TORCH_IMPL_FUNC(index_add_cuda_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-#if defined(__HIP_PLATFORM_AMD__)
-  // On AMD MI350X, scatter_add_ outperforms the indexFuncLargeIndex
-  // atomicAdd path across all measured source sizes (>=1.0x at 1K rising
-  // to ~2x for uniform / ~5x for Zipf-distributed indices). Always
-  // redirect for the matching shape; see bench_index_add_powerlaw.py.
-  if (alpha.equal(1) && dim == 0 && self.dim() == 2) {
-    // Mirror index_add_cuda_impl's structured-kernel pre-copy: for
-    // out-of-place / index_add(out=...) the result is uninitialized
-    // and must be seeded with self before accumulating.
-    if (!result.is_same(self)) {
-      result.copy_(self);
-    }
-    auto expanded_index = index.to(at::kLong).unsqueeze(1).expand_as(source);
-    result.scatter_add_(dim, expanded_index, source);
-    return;
-  }
-#endif
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 
