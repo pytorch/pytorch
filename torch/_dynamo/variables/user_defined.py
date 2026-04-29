@@ -220,6 +220,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
+    def get_id_guard_type(self) -> Callable[..., Any] | None:
+        if self.source:
+            return GuardBuilder.CLASS_MATCH
+        return None
+
     def as_python_constant(self) -> type[object]:
         return self.value
 
@@ -1387,6 +1392,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(self.value):
             return self.value
+
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton.language as tl
+
+            if isinstance(self.value, tl.constexpr):
+                return self.value.value
 
         if self.is_pytree_constant_class and self.source:
             # NOTE pytree constants created in the torch.compile region will

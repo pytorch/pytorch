@@ -520,6 +520,7 @@ print(t.is_pinned())
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_set_per_process_memory_fraction(self):
+        torch.cuda.empty_cache()
         orig = torch.cuda.get_per_process_memory_fraction(0)
         torch.cuda.reset_peak_memory_stats(0)
         try:

@@ -7271,6 +7271,39 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    def test_guard_tag_safe_tensor_metadata_segfault(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180741
+        # When a submodule becomes a tag-safe root, the recording pass stashes
+        # tensor pointers found during traversal.  PythonLambdaGuardAccessor
+        # (from ___from_numpy on the np.float64 attribute) creates a temporary
+        # tensor with refcount 1, which is freed after Py_DECREF.  The stashed
+        # raw pointer then dangles and check_tensor_metadata_fast segfaults.
+        import numpy as np
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.scale = np.float64(8.0)
+
+            def forward(self, x):
+                return self.linear(x) / self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer()])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        model = Model()
+        compiled = torch.compile(model, backend="eager")
+        out = compiled(torch.randn(2, 10))
+        self.assertEqual(out.shape, torch.Size([2, 10]))
+
     def test_deleted_compile_wrapper_segfault(self):
         def fn(x):
             return x + 1

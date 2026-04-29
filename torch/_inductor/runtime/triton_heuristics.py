@@ -725,7 +725,7 @@ class CachingAutotuner(KernelInterface):
                 )
         self.launchers = launchers
 
-    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any, Any]:
+    def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
         Returns a tuple of old values
@@ -737,6 +737,7 @@ class CachingAutotuner(KernelInterface):
             self.fn.repr,
             self.launchers,
             getattr(self.fn, "_hash_lock", None),
+            self.benchmark_failure_reasons,
         )
         self.fn.fn = None
         self.fn.__globals__ = None
@@ -744,12 +745,11 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         self._cached_launcher = None
+        self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
 
-    def restore_after_unpickle(
-        self, old_values: tuple[Any, Any, Any, Any, Any, Any] | None
-    ) -> None:
+    def restore_after_unpickle(self, old_values: tuple[Any, ...] | None) -> None:
         self._cached_launcher = None
         if old_values:
             (
@@ -759,6 +759,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn.repr,
                 self.launchers,
                 self.fn._hash_lock,
+                self.benchmark_failure_reasons,
             ) = old_values
         else:
             # even if we don't need/have specific values, we do need the
@@ -1026,13 +1027,11 @@ class CachingAutotuner(KernelInterface):
             return float("inf")
 
         device_interface = self.get_device_interface()
+        stream = device_interface.get_raw_stream(device_interface.current_device())
 
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
 
         def kernel_call():
-            # Resolve the raw stream at call time rather than at closure-creation
-            # time so that CUDA graph capture on a different stream works correctly.
-            stream = device_interface.get_raw_stream(device_interface.current_device())
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )

@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
