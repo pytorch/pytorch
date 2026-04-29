@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineEventBase.h>
 #include <c10/util/Exception.h>
 
@@ -42,7 +43,7 @@ struct InlineEvent final : public InlineEventBase {
 
   ~InlineEvent() noexcept {
     if (event())
-      backend_.destroyEvent(*this);
+      base().destroyEvent(*this);
   }
 
   bool was_marked_for_recording() const noexcept {
@@ -63,7 +64,7 @@ struct InlineEvent final : public InlineEventBase {
         DeviceTypeName(stream.device_type()),
         ".");
 
-    backend_.record(*this, stream);
+    base().record(*this, stream);
     was_marked_for_recording_ = true;
     setDeviceIndex(stream.device_index());
   }
@@ -80,13 +81,13 @@ struct InlineEvent final : public InlineEventBase {
         DeviceTypeName(stream.device_type()),
         ".");
 
-    backend_.block(*this, stream);
+    base().block(*this, stream);
   }
 
   bool query() const {
     if (!was_marked_for_recording_)
       return true;
-    return backend_.queryEvent(*this);
+    return base().queryEvent(*this);
   }
 
   void* eventId() const {
@@ -114,16 +115,23 @@ struct InlineEvent final : public InlineEventBase {
         (query() && other.query()) || device_type() == DeviceType::MPS,
         "Both events must be completed before calculating elapsed time.");
 
-    return backend_.elapsedTime(*this, other);
+    return base().elapsedTime(*this, other);
   }
 
   void synchronize() const {
     if (!was_marked_for_recording_)
       return;
-    backend_.synchronizeEvent(*this);
+    base().synchronizeEvent(*this);
   }
 
  private:
+  DeviceGuardImplInterface& base() {
+    return static_cast<DeviceGuardImplInterface&>(backend_);
+  }
+  const DeviceGuardImplInterface& base() const {
+    return static_cast<const DeviceGuardImplInterface&>(backend_);
+  }
+
   T backend_;
   bool was_marked_for_recording_ = false;
 };

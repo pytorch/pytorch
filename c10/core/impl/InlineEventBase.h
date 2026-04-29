@@ -32,7 +32,13 @@ struct InlineEventBase {
   InlineEventBase(const DeviceType device_type, const EventFlag flag)
       : device_type_{device_type}, flag_{flag} {}
 
-  InlineEventBase(InlineEventBase&& other) noexcept = default;
+  InlineEventBase(InlineEventBase&& other) noexcept
+      : event_(other.event_),
+        device_type_(other.device_type_),
+        device_index_(other.device_index_),
+        flag_(other.flag_) {
+    other.event_ = nullptr;
+  }
   InlineEventBase& operator=(InlineEventBase&& other) noexcept = default;
 
   friend void swap(InlineEventBase& a, InlineEventBase& b) noexcept {
