@@ -451,7 +451,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
 
-  size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes);
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
@@ -675,8 +675,6 @@ static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
       std::move(data_ptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-
-  base->set_resizable(false);
   return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
 #else
   TORCH_CHECK(false, "XPU is not available");

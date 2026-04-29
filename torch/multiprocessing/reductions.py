@@ -14,7 +14,7 @@ try:
     # from being inherited in a forked child process. The reduce_storage method
     # requires this module indirectly through DupFd(). The built-in mp.Queue
     # class pickles arguments in a background thread which may overlap with the
-    # fork.
+    # forking process.
     import multiprocessing.resource_sharer
 except ImportError:
     pass
@@ -234,11 +234,15 @@ def rebuild_xpu_tensor(
 ):
     if isinstance(storage_handle, tuple):
         storage_handle_list = list(storage_handle)
-        if storage_handle_list and hasattr(storage_handle_list[0], "detach"):
-            storage_handle_list[0] = storage_handle_list[0].detach()
+        if storage_handle_list:
+            detach = getattr(storage_handle_list[0], "detach", None)
+            if callable(detach):
+                storage_handle_list[0] = detach()
         storage_handle = tuple(storage_handle_list)
-    elif hasattr(storage_handle, "detach"):
-        storage_handle = storage_handle.detach()
+    else:
+        detach = getattr(storage_handle, "detach", None)
+        if callable(detach):
+            storage_handle = detach()
 
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
@@ -453,22 +457,19 @@ def reduce_tensor(tensor):
             storage_offset_bytes,
         ) = storage._share_xpu_()
         tensor_offset = tensor.storage_offset()
-        cache_handle = handle
 
         if (
             isinstance(handle, tuple)
             and len(handle) == 2
             and isinstance(handle[0], int)
         ):
-            fd = os.dup(handle[0])
+            orig_fd = handle[0]
+            fd = os.dup(orig_fd)
             handle = (multiprocessing.reduction.DupFd(fd), handle[1])
         elif handle is not None:
             raise RuntimeError(
                 f"Unsupported XPU IPC handle type: {type(handle)!r}. Expected DMA-BUF tuple."
             )
-
-        if cache_handle is not None:
-            shared_cache[(cache_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         return (
             rebuild_xpu_tensor,
             (

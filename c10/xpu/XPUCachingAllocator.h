@@ -25,7 +25,7 @@ class XPUAllocator : public DeviceAllocator {
   virtual void raw_delete(void* ptr) = 0;
   virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(
-      std::string handle,
+      const std::string& handle,
       c10::DeviceIndex device) = 0;
 };
 
@@ -84,9 +84,9 @@ inline ShareableHandle shareIpcHandle(void* ptr) {
 }
 
 inline std::shared_ptr<void> getIpcDevPtr(
-    std::string handle,
+    const std::string& handle,
     c10::DeviceIndex device) {
-  return get()->getIpcDevPtr(std::move(handle), device);
+  return get()->getIpcDevPtr(handle, device);
 }
 
 C10_XPU_API void enablePeerAccess(

@@ -62,8 +62,10 @@ c10::xpu::XPUCachingAllocator::ShareableHandle XPUPluggableAllocator::
 }
 
 std::shared_ptr<void> XPUPluggableAllocator::getIpcDevPtr(
-    std::string handle,
+    const std::string& handle,
     c10::DeviceIndex device) {
+  (void)handle;
+  (void)device;
   TORCH_CHECK(
       false,
       "XPUPluggableAllocator does not yet support getIpcDevPtr. "

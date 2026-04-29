@@ -113,6 +113,7 @@ struct Block {
   void* ptr{nullptr}; // memory address
   bool allocated{false}; // in-use flag
   bool mapped{true}; // True if this Block is backed by physical pages
+  bool dma_buf_allocated{false}; // True if allocated with DMA-BUF export flag
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
@@ -417,6 +418,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block{nullptr};
+  bool dma_buf_used{false};
   StatTypes stat_types = {};
 };
 
@@ -491,6 +493,7 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
       const auto alloc_result = ze_ipc_api.alloc_device(
           ze_context, &alloc_desc, size, kDeviceAlignment, ze_device, ptr);
       if (alloc_result == ZE_RESULT_SUCCESS) {
+        p.dma_buf_used = true;
         return;
       }
     }
@@ -503,24 +506,17 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
-void deletePrimitive(void* ptr, BlockPool* pool) {
+void deletePrimitive(void* ptr, BlockPool* pool, bool dma_buf_allocated) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
     auto& ze_ipc_api = get_ze_ipc_api();
-    if (ze_ipc_api.free_device && ze_ipc_api.get_alloc_properties) {
+    if (dma_buf_allocated && ze_ipc_api.free_device) {
       auto ze_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
           xpu::get_device_context());
-      ze_memory_allocation_properties_t alloc_props = {};
-      alloc_props.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
-      alloc_props.pNext = nullptr;
-      const auto props_result = ze_ipc_api.get_alloc_properties(
-          ze_context, ptr, &alloc_props, nullptr);
-      if (props_result == ZE_RESULT_SUCCESS) {
-        const auto free_result = ze_ipc_api.free_device(ze_context, ptr);
-        if (free_result == ZE_RESULT_SUCCESS) {
-          return;
-        }
+      const auto free_result = ze_ipc_api.free_device(ze_context, ptr);
+      if (free_result == ZE_RESULT_SUCCESS) {
+        return;
       }
     }
 
@@ -1029,6 +1025,7 @@ class DeviceCachingAllocator {
       p.pool->owner_PrivatePool->allocation_count++;
     }
     p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
+    p.block->dma_buf_allocated = p.dma_buf_used;
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
@@ -1113,7 +1110,7 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_segment_allocated);
 
     auto* pool = block->pool;
-    deletePrimitive(block->ptr, pool);
+    deletePrimitive(block->ptr, pool, block->dma_buf_allocated);
 
     if (pool->owner_PrivatePool) {
       TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
@@ -1880,7 +1877,7 @@ static void local_raw_delete(void* ptr);
 class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
-  std::mutex IpcMutex;
+  std::mutex ipc_mutex_;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   struct MemHandleCacheEntry {
     MemHandleCacheEntry(c10::DeviceIndex device, const std::string& handle)
@@ -1943,6 +1940,10 @@ class NativeCachingAllocator : public XPUAllocator {
           kDeviceAlignment,
           ze_device,
           &xpu_ipc_ptr_);
+      if (fd_ >= 0) {
+        ::close(static_cast<int>(fd_));
+        fd_ = -1;
+      }
       TORCH_CHECK(
           alloc_result == ZE_RESULT_SUCCESS,
           "zeMemAllocDevice (DMA-BUF import) failed with code ",
@@ -2122,8 +2123,6 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   ShareableHandle shareIpcHandle(void* ptr) override {
-    std::lock_guard<std::mutex> ipc_lock(IpcMutex);
-
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "invalid device pointer for XPU IPC: ", ptr);
     TORCH_CHECK(
@@ -2176,14 +2175,16 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   std::shared_ptr<void> getIpcDevPtr(
-      std::string handle,
+      const std::string& handle,
       c10::DeviceIndex device) override {
-    std::lock_guard<std::mutex> lock(IpcMutex);
+    std::lock_guard<std::mutex> lock(ipc_mutex_);
     auto iter = ipcMemHandle_to_devptr.find(handle);
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
-      TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
-      return devptr;
+      if (devptr) {
+        return devptr;
+      }
+      ipcMemHandle_to_devptr.erase(iter);
     }
 
     MemHandleCacheEntry entry(device, handle);
@@ -2197,7 +2198,7 @@ class NativeCachingAllocator : public XPUAllocator {
     auto sp = std::shared_ptr<void>(
         inserted_entry.ptr(), [shared_handle, this](void* p) {
           (void)p;
-          std::unique_lock<std::mutex> deleter_lock(IpcMutex);
+          std::unique_lock<std::mutex> deleter_lock(ipc_mutex_);
 
           auto it = ipcMemHandle_to_devptr.find(shared_handle);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
