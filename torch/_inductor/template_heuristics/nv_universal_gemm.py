@@ -175,6 +175,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         result = [k for k, _ in selected]
 
         # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
+        # NOTE: once nvMatmulHeuristics' search space is extended to cover
+        # these tile/cluster shapes, this block (and the
+        # `nvgemm_supplement_configs` flag) can be removed.
+        # Tracking: https://github.com/pytorch/pytorch/issues/181908
         if config.nvgemm_supplement_configs:
             _SUPPLEMENT_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
                 [
