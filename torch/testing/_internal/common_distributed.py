@@ -75,11 +75,8 @@ if _TORCHCOMM_AVAILABLE:
         ("rcclx", "TORCHCOMM_HAS_RCCLX"),
         ("ncclx", "TORCHCOMM_HAS_NCCLX"),
     ]:
-        try:
-            torchcomms._load_backend(_backend)
+        if torchcomms.is_backend_built(_backend):
             globals()[_flag] = True
-        except ImportError:
-            pass
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
