@@ -195,8 +195,8 @@ struct ParamsLRUCache {
 using HipdnnConvCache = ParamsLRUCache<HipdnnConvParams, HipdnnConvCachedGraph>;
 
 static HipdnnConvCache* getHipdnnConvCache() {
-  static thread_local auto* cache = new HipdnnConvCache(getHipdnnConvCacheLimit());
-  return cache;
+  static thread_local HipdnnConvCache cache(getHipdnnConvCacheLimit());
+  return &cache;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,10 +387,6 @@ static void runHipdnnConvFprop(
     bool benchmark,
     bool deterministic) {
 
-  TORCH_CHECK(
-      !deterministic,
-      "hipdnn_convolution does not support deterministic mode yet. "
-      "hipDNN does not currently provide engine-level determinism guarantees.");
   if (benchmark) {
     TORCH_WARN_ONCE(
         "hipdnn_convolution: benchmark mode is not supported yet and will be ignored. "
@@ -440,10 +436,6 @@ static void runHipdnnConvDgrad(
     bool benchmark,
     bool deterministic) {
 
-  TORCH_CHECK(
-      !deterministic,
-      "hipdnn_convolution does not support deterministic mode yet. "
-      "hipDNN does not currently provide engine-level determinism guarantees.");
   if (benchmark) {
     TORCH_WARN_ONCE(
         "hipdnn_convolution: benchmark mode is not supported yet and will be ignored. "
@@ -495,10 +487,6 @@ static void runHipdnnConvWgrad(
     bool benchmark,
     bool deterministic) {
 
-  TORCH_CHECK(
-      !deterministic,
-      "hipdnn_convolution does not support deterministic mode yet. "
-      "hipDNN does not currently provide engine-level determinism guarantees.");
   if (benchmark) {
     TORCH_WARN_ONCE(
         "hipdnn_convolution: benchmark mode is not supported yet and will be ignored. "

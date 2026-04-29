@@ -502,6 +502,7 @@ struct ConvParams {
     if (!at::globalContext().userEnabledHipdnn()) return false;
     if (!detail::getCUDAHooks().compiledWithHipDNN()) return false;
     if (!input.is_cuda()) return false;
+    if (deterministic) return false;
     auto dtype = input.scalar_type();
     if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) return false;
     if (input.dim() < 4 || input.dim() > 5) return false;
