@@ -870,6 +870,11 @@ class profile(_KinetoProfile):
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
+        # Raw schedule output of the previous step, separate from
+        # current_action which step() may override to DEVICE_STOPPED. Used to
+        # detect cycle boundaries (RECORD_AND_SAVE -> next) when warmup=0,
+        # so DEVICE_STOPPED can exit and resume profiling on the new cycle.
+        self._prev_schedule_action = self.current_action
         self.step_rec_fn: prof.record_function | None = None
 
         self.action_map: dict[
@@ -928,7 +933,8 @@ class profile(_KinetoProfile):
             # DEVICE_STOPPED: entered when device collection stops early (e.g.
             # CUPTI buffer overflow). Absorbs the remainder of the current
             # profiling cycle, then exits when the schedule moves to WARMUP
-            # (new cycle) or NONE (end).
+            # (new cycle) or NONE (end). Note that we do not produce a trace
+            # because that is the semantics of WARMUP.
             (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
                 self.start_trace,
                 self.stop_trace,
@@ -946,19 +952,20 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.NONE): [],
-            # Unreachable by construction: step()'s entry guard excludes
-            # prev=NONE, and the persistence guard coerces RECORD /
-            # RECORD_AND_SAVE back to DEVICE_STOPPED. Hitting these means
-            # the state machine in step() is broken — fail loudly rather
-            # than continue with diverged state.
-            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
-                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
-            ],
+            # Cycle boundary recovery: when the schedule has no WARMUP phase
+            # (warmup=0), DEVICE_STOPPED exits directly into the next cycle's
+            # active phase. Mirrors (NONE, RECORD) / (NONE, RECORD_AND_SAVE).
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD): [
-                partial(_unreachable_transition, "DEVICE_STOPPED", "RECORD"),
+                self.prepare_trace,
+                self.start_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE): [
-                partial(_unreachable_transition, "DEVICE_STOPPED", "RECORD_AND_SAVE"),
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            # Unreachable: step()'s entry guard excludes prev=NONE.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
@@ -1003,17 +1010,25 @@ class profile(_KinetoProfile):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
+        prev_schedule_action = self._prev_schedule_action
         self.step_num += 1
-        self.current_action = self.schedule(self.step_num)
+        schedule_action = self.schedule(self.step_num)
+        self.current_action = schedule_action
+        self._prev_schedule_action = schedule_action
 
         # DEVICE_STOPPED handling: when device collection stops early (e.g. CUPTI
-        # buffer overflow), we enter DEVICE_STOPPED and stay there for the
-        # remainder of the current profiling cycle.
+        # buffer overflow), we enter DEVICE_STOPPED and stay there until the
+        # current profiling cycle ends.
         #
         # Once in DEVICE_STOPPED, the schedule continues to advance step_num but
-        # we override current_action to DEVICE_STOPPED until the schedule moves
-        # to WARMUP (new cycle — prepare_trace resets the stopped flag) or
-        # NONE (end of profiling).
+        # we override current_action to DEVICE_STOPPED until we hit a cycle
+        # boundary, defined as either:
+        # - the schedule moving to WARMUP or NONE (which always begin a new
+        #   cycle or end profiling), or
+        # - the previous step's raw schedule output being RECORD_AND_SAVE (which
+        #   always marks the end of an active phase, so the current step starts
+        #   a new cycle even if warmup=0).
+        # The second case is what makes warmup=0 schedules recoverable.
         #
         # Entry into DEVICE_STOPPED:
         # - use_device must be set: a CPU-only profiler must not react to a
@@ -1024,10 +1039,11 @@ class profile(_KinetoProfile):
         #   stopping us (e.g. RECORD_AND_SAVE -> NONE), respect that rather
         #   than entering DEVICE_STOPPED.
         if prev_action == ProfilerAction.DEVICE_STOPPED:
-            if self.current_action not in (
-                ProfilerAction.WARMUP,
-                ProfilerAction.NONE,
-            ):
+            at_cycle_boundary = (
+                self.current_action in (ProfilerAction.WARMUP, ProfilerAction.NONE)
+                or prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
+            )
+            if not at_cycle_boundary:
                 self.current_action = ProfilerAction.DEVICE_STOPPED
         elif (
             torch.autograd._is_kineto_stopped()
