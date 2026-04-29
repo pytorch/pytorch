@@ -51,6 +51,29 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
   return !any_inputs_require_grad || !gradmode_enabled;
 }
 
+// XPU-specific: accept stride(-1) == 0 for broadcast masks, since
+// undo_broadcast in the oneDNN path handles this correctly.
+// When the last dim is broadcast (stride 0), require stride(-2) == 1
+// to ensure the underlying data is still contiguous.
+bool check_last_dim_stride_xpu(sdp::sdp_params const& params, bool debug) {
+  bool qkv_ok = params.query.sym_stride(-1) == 1 &&
+      params.key.sym_stride(-1) == 1 &&
+      params.value.sym_stride(-1) == 1;
+  bool mask_ok = true;
+  if (params.attn_mask.has_value()) {
+    const auto& mask = *params.attn_mask;
+    auto last_stride = mask.sym_stride(-1);
+    mask_ok = last_stride == 1 ||
+        (last_stride == 0 && mask.dim() >= 2 && mask.sym_stride(-2) == 1);
+  }
+  if (!(qkv_ok && mask_ok) && debug) {
+    TORCH_WARN(
+        "XPU fused attention requires the last dimension stride to be 1, "
+        "or 0 (broadcast) with the second-to-last dimension stride equal to 1 for attention mask.");
+  }
+  return qkv_ok && mask_ok;
+}
+
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
       at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
@@ -64,7 +87,7 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
       sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
       sdp::check_attn_mask_shape,
       sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
+      check_last_dim_stride_xpu,
       check_head_dim_size_xpu,
       check_no_grad);
   for (auto& constraint : constraints) {
@@ -149,7 +172,7 @@ bool can_use_mem_efficient_attention(
     constexpr auto dense_constraints =
         c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
             sdp::check_nonzero_sequence_lengths_dense,
-            sdp::check_last_dim_stride_equals_1_dense<false>,
+            check_last_dim_stride_xpu,
             sdp::check_batch_size_and_num_heads_dense<false>);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
