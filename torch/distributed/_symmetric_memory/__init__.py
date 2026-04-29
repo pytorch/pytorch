@@ -2272,6 +2272,88 @@ def reduce_scatter_offset(
         )
 
 
+def all_to_all_vdev(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group: str,
+) -> None:
+    r"""
+    all_to_all_vdev(input, out, in_splits, out_splits_offsets, group) -> None
+
+    Variable-length AllToAll where the per-peer split sizes live on device.
+    Functionally equivalent to :func:`torch.distributed.all_to_all_single` with
+    explicit ``input_split_sizes`` / ``output_split_sizes``, but the splits
+    never have to leave the device, which avoids the host/device sync that the
+    standard collective imposes when the splits are device tensors.
+
+    All four tensor arguments must be allocated via
+    :func:`torch.distributed._symmetric_memory.empty` and rendezvous'd on
+    ``group`` (i.e. they must be symmetric-memory tensors on the *same*
+    backend).
+
+    Args:
+        input (Tensor): Send buffer (contiguous).  Sized to fit
+            ``sum(in_splits)`` rows along dim 0.  All ranks must agree on the
+            tensor shape and dtype.
+        out (Tensor): Recv buffer (contiguous).  Must be large enough to hold
+            the rows pulled from every peer (i.e. the sum of the output splits
+            this rank receives).  Same dtype as ``input``.
+        in_splits (Tensor): 1-D ``int64`` tensor of length
+            ``group.size()``.  ``in_splits[p]`` = number of rows this rank
+            sends to peer ``p``.
+        out_splits_offsets (Tensor): 2-D ``int64`` tensor of shape
+            ``(2, group.size())``.  On return:
+
+            - ``out_splits_offsets[0, p]`` = number of rows received from peer ``p``.
+            - ``out_splits_offsets[1, p]`` = exclusive prefix-sum of row 0
+              (the position of peer ``p``'s chunk inside ``out``).
+
+            The contents on entry are ignored / used as scratch.
+        group (str): Name of the :class:`~torch.distributed.ProcessGroup` to
+            perform the operation on.
+
+    Backend dispatch:
+
+    - ``"NCCL"``    -> :func:`torch.ops.symm_mem.nccl_all_to_all_vdev`
+      (NCCL device-API based, requires NCCL >= 2.28).
+    - ``"NVSHMEM"`` -> :func:`torch.ops.symm_mem.all_to_all_vdev`
+      (NVSHMEM-based, requires PyTorch built with NVSHMEM support).
+
+    Other backends raise :class:`NotImplementedError`.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # MoE token shuffle: every rank decides per-peer how many tokens to send
+        >>> max_in = group.size() * max_tokens_per_peer
+        >>> input  = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
+        >>> out    = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
+        >>> in_sp  = symm_mem.empty(group.size(), dtype=torch.int64, device="cuda")
+        >>> out_sp = symm_mem.empty(2, group.size(), dtype=torch.int64, device="cuda")
+        >>> for t in (input, out, in_sp, out_sp):
+        ...     symm_mem.rendezvous(t, group=group_name)
+        >>> # ... fill `input` and `in_sp` from your router on device ...
+        >>> symm_mem.all_to_all_vdev(input, out, in_sp, out_sp, group_name)
+        >>> # `out_sp[0]` = received splits, `out_sp[1]` = exclusive offsets in `out`
+    """
+    backend = get_backend(input.device)
+    match backend:
+        case "NCCL":
+            torch.ops.symm_mem.nccl_all_to_all_vdev(
+                input, out, in_splits, out_splits_offsets, group
+            )
+        case "NVSHMEM":
+            torch.ops.symm_mem.all_to_all_vdev(
+                input, out, in_splits, out_splits_offsets, group
+            )
+        case _:
+            raise NotImplementedError(
+                f"all_to_all_vdev: unsupported backend: {backend}"
+            )
+
+
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     r"""
     is_symm_mem_tensor(tensor) -> bool
@@ -2299,4 +2381,5 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "all_to_all_vdev",
 ]
