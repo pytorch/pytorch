@@ -3,7 +3,9 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/EventFlag.h>
 #include <c10/core/Stream.h>
+#include <c10/core/impl/InlineEventBase.h>
 #include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
@@ -17,26 +19,6 @@ namespace c10 {
 
 // Forward declaration
 class DataPtr;
-
-/**
- * Note [Flags defining the behavior of events]
- *
- * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
- * BACKEND_DEFAULT is what a particular backend would select if no
- * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same.
- *
- * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation.
- */
-enum class EventFlag {
-  // Disable timing
-  PYTORCH_DEFAULT,
-  // Enable timing
-  BACKEND_DEFAULT,
-  // FOR TESTING ONLY
-  INVALID
-};
 
 namespace impl {
 
@@ -269,6 +251,39 @@ struct C10_API DeviceGuardImplInterface {
       void* /*event2*/,
       const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
+  }
+
+  // -- New event APIs taking InlineEventBase --
+  // Backends may override these directly. The default implementations
+  // delegate to the legacy void* overloads above for backwards
+  // compatibility with existing backends.
+
+  virtual void destroyEvent(InlineEventBase& event) const noexcept {
+    destroyEvent(event.event(), event.device_index());
+  }
+
+  virtual void record(InlineEventBase& event, const Stream& stream) const {
+    void* raw = event.event();
+    record(&raw, stream, event.device_index(), event.flag());
+    event.setEvent(raw);
+  }
+
+  virtual void block(const InlineEventBase& event, const Stream& stream) const {
+    block(event.event(), stream);
+  }
+
+  virtual bool queryEvent(const InlineEventBase& event) const {
+    return queryEvent(event.event());
+  }
+
+  virtual void synchronizeEvent(const InlineEventBase& event) const {
+    synchronizeEvent(event.event());
+  }
+
+  virtual double elapsedTime(
+      const InlineEventBase& event1,
+      const InlineEventBase& event2) const {
+    return elapsedTime(event1.event(), event2.event(), event1.device_index());
   }
 
   /**

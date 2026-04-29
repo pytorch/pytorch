@@ -107,6 +107,29 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     impl_->synchronizeEvent(event);
   }
 
+  // New event functions taking InlineEventBase
+  void destroyEvent(InlineEventBase& event) const noexcept override {
+    impl_->destroyEvent(event);
+  }
+  void record(InlineEventBase& event, const Stream& stream) const override {
+    impl_->record(event, stream);
+  }
+  void block(const InlineEventBase& event, const Stream& stream)
+      const override {
+    impl_->block(event, stream);
+  }
+  bool queryEvent(const InlineEventBase& event) const override {
+    return impl_->queryEvent(event);
+  }
+  void synchronizeEvent(const InlineEventBase& event) const override {
+    impl_->synchronizeEvent(event);
+  }
+  double elapsedTime(
+      const InlineEventBase& event1,
+      const InlineEventBase& event2) const override {
+    return impl_->elapsedTime(event1, event2);
+  }
+
   void synchronizeDevice(const DeviceIndex device_index) const override {
     impl_->synchronizeDevice(device_index);
   }

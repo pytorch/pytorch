@@ -2,18 +2,18 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/InlineEventBase.h>
 #include <c10/util/Exception.h>
 
 namespace c10::impl {
 
 template <typename T>
-struct InlineEvent final {
+struct InlineEvent final : public InlineEventBase {
   InlineEvent() = delete;
   InlineEvent(
       const DeviceType _device_type,
       const EventFlag _flag = EventFlag::PYTORCH_DEFAULT)
-      : backend_{_device_type}, device_type_{_device_type}, flag_{_flag} {}
+      : InlineEventBase(_device_type, _flag), backend_{_device_type} {}
 
   // Copy constructor and copy assignment operator (deleted)
   InlineEvent(const InlineEvent&) = delete;
@@ -21,13 +21,10 @@ struct InlineEvent final {
 
   // Move constructor and move assignment operator
   InlineEvent(InlineEvent&& other) noexcept
-      : event_(other.event_),
+      : InlineEventBase(std::move(other)),
         backend_(std::move(other.backend_)),
-        device_type_(other.device_type_),
-        device_index_(other.device_index_),
-        flag_(other.flag_),
         was_marked_for_recording_(other.was_marked_for_recording_) {
-    other.event_ = nullptr;
+    other.was_marked_for_recording_ = false;
   }
   InlineEvent& operator=(InlineEvent&& other) noexcept {
     swap(other);
@@ -35,28 +32,19 @@ struct InlineEvent final {
   }
 
   void swap(InlineEvent& other) noexcept {
-    std::swap(event_, other.event_);
-    std::swap(backend_, other.backend_);
-    std::swap(device_type_, other.device_type_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(flag_, other.flag_);
-    std::swap(was_marked_for_recording_, other.was_marked_for_recording_);
+    using std::swap;
+    swap(
+        static_cast<InlineEventBase&>(*this),
+        static_cast<InlineEventBase&>(other));
+    swap(backend_, other.backend_);
+    swap(was_marked_for_recording_, other.was_marked_for_recording_);
   }
 
   ~InlineEvent() noexcept {
-    if (event_)
-      backend_.destroyEvent(event_, device_index_);
+    if (event())
+      backend_.destroyEvent(*this);
   }
 
-  DeviceType device_type() const noexcept {
-    return device_type_;
-  }
-  DeviceIndex device_index() const noexcept {
-    return device_index_;
-  }
-  EventFlag flag() const noexcept {
-    return flag_;
-  }
   bool was_marked_for_recording() const noexcept {
     return was_marked_for_recording_;
   }
@@ -68,16 +56,16 @@ struct InlineEvent final {
 
   void record(const Stream& stream) {
     TORCH_CHECK(
-        stream.device_type() == device_type_,
+        stream.device_type() == device_type(),
         "Event device type ",
-        DeviceTypeName(device_type_),
+        DeviceTypeName(device_type()),
         " does not match recording stream's device type ",
         DeviceTypeName(stream.device_type()),
         ".");
 
-    backend_.record(&event_, stream, device_index_, flag_);
+    backend_.record(*this, stream);
     was_marked_for_recording_ = true;
-    device_index_ = stream.device_index();
+    setDeviceIndex(stream.device_index());
   }
 
   void block(const Stream& stream) const {
@@ -85,37 +73,37 @@ struct InlineEvent final {
       return;
 
     TORCH_CHECK(
-        stream.device_type() == device_type_,
+        stream.device_type() == device_type(),
         "Event device type ",
-        DeviceTypeName(device_type_),
+        DeviceTypeName(device_type()),
         " does not match blocking stream's device type ",
         DeviceTypeName(stream.device_type()),
         ".");
 
-    backend_.block(event_, stream);
+    backend_.block(*this, stream);
   }
 
   bool query() const {
     if (!was_marked_for_recording_)
       return true;
-    return backend_.queryEvent(event_);
+    return backend_.queryEvent(*this);
   }
 
   void* eventId() const {
-    return event_;
+    return event();
   }
 
   double elapsedTime(const InlineEvent& other) const {
     TORCH_CHECK(
-        other.device_type() == device_type_,
+        other.device_type() == device_type(),
         "Event device type ",
-        DeviceTypeName(device_type_),
+        DeviceTypeName(device_type()),
         " does not match other's device type ",
         DeviceTypeName(other.device_type()),
         ".");
     TORCH_CHECK_VALUE(
-        (flag_ == EventFlag::BACKEND_DEFAULT) &&
-            (other.flag_ == EventFlag::BACKEND_DEFAULT),
+        (flag() == EventFlag::BACKEND_DEFAULT) &&
+            (other.flag() == EventFlag::BACKEND_DEFAULT),
         "Both events must be created with argument 'enable_timing=True'.");
     TORCH_CHECK_VALUE(
         was_marked_for_recording() && other.was_marked_for_recording(),
@@ -123,24 +111,20 @@ struct InlineEvent final {
     // elapsedTime in MPS can wait event to be completed if event is not ready,
     // which is a little different from CUDA
     TORCH_CHECK(
-        (query() && other.query()) || device_type_ == DeviceType::MPS,
+        (query() && other.query()) || device_type() == DeviceType::MPS,
         "Both events must be completed before calculating elapsed time.");
 
-    return backend_.elapsedTime(event_, other.event_, device_index_);
+    return backend_.elapsedTime(*this, other);
   }
 
   void synchronize() const {
     if (!was_marked_for_recording_)
       return;
-    backend_.synchronizeEvent(event_);
+    backend_.synchronizeEvent(*this);
   }
 
  private:
-  void* event_ = nullptr;
   T backend_;
-  DeviceType device_type_;
-  DeviceIndex device_index_ = -1;
-  EventFlag flag_ = EventFlag::PYTORCH_DEFAULT;
   bool was_marked_for_recording_ = false;
 };
 
