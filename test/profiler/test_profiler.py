@@ -3989,9 +3989,7 @@ class TestProfilerDeviceStopped(TestCase):
         p.stop()
 
         self.assertEqual(len(event_counts), 2)
-        self.assertGreater(
-            event_counts[1], 0, "Cycle 2 trace should contain events"
-        )
+        self.assertGreater(event_counts[1], 0, "Cycle 2 trace should contain events")
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

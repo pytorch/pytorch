@@ -958,9 +958,7 @@ class profile(_KinetoProfile):
                 partial(_unreachable_transition, "DEVICE_STOPPED", "RECORD"),
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE): [
-                partial(
-                    _unreachable_transition, "DEVICE_STOPPED", "RECORD_AND_SAVE"
-                ),
+                partial(_unreachable_transition, "DEVICE_STOPPED", "RECORD_AND_SAVE"),
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
@@ -1043,8 +1041,9 @@ class profile(_KinetoProfile):
             and self.current_action != ProfilerAction.NONE
         ):
             warn(
-                "GPU activity collection was stopped early. "
-                f"Aborting profiling at step {self.step_num}."
+                "Device profiling activity collection was stopped early "
+                f"at step {self.step_num}. Profiler schedule is proceeding "
+                "until next cycle without actual profiler activity collection."
             )
             self.current_action = ProfilerAction.DEVICE_STOPPED
 
