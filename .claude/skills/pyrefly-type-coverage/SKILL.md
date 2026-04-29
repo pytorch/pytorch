@@ -14,16 +14,19 @@ This skill guides you through improving type coverage in Python files using Pyre
 
 ### Step 1: Remove Ignore Errors Directive
 
-First, locate and remove any `pyre-ignore-all-errors` comments at the top of the file:
+First, locate and remove any file-level type-check suppressions at the top of the file:
 
 ```python
 # REMOVE lines like these:
 # pyre-ignore-all-errors
 # pyre-ignore-all-errors[16,21,53,56]
 # @lint-ignore-every PYRELINT
+# mypy: ignore-errors
 ```
 
-These directives suppress type checking for the entire file and must be removed to enable proper type coverage.
+These directives suppress type checking for the entire file and must be removed
+to enable proper type coverage. Pyrefly honors `# mypy: ignore-errors` for mypy
+compatibility, so it must be removed too.
 
 ### Step 2: Add Entry to pyrefly.toml
 

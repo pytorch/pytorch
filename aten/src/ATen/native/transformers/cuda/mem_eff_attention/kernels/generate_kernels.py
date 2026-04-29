@@ -13,7 +13,7 @@ import collections
 import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 
 DTYPES = {
@@ -57,7 +57,7 @@ class FwdKernel:
     max_k: int
     supports_dropout: bool = True
     supports_bias: bool = True
-    dispatch_cond: Optional[str] = None
+    dispatch_cond: str | None = None
 
     def __post_init__(self) -> None:
         # Set kernel selection priority
@@ -154,7 +154,7 @@ class BwdKernel:
     block_i: int
     block_j: int
     max_k: int
-    dispatch_cond: Optional[str] = None
+    dispatch_cond: str | None = None
     keys_queries_aligned_to_blocksizes: bool = False
 
     def __post_init__(self) -> None:
@@ -309,7 +309,7 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: Optional[str] = None,
+    disable_def: str | None = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -379,7 +379,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
         (autogen_dir / f"{family_name}_{f}.cu").write_text(impl_cu)
 
 
-def main(output_dir: Optional[str]) -> None:
+def main(output_dir: str | None) -> None:
     if output_dir is None:
         output_dir = Path(__file__).parent
     else:

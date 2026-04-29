@@ -23,6 +23,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -421,7 +422,7 @@ def _do_bench_using_profiling(
 @functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
-        from torchvision.ops import roi_align  # noqa: F401
+        from torchvision.ops import roi_align
 
         torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
@@ -486,6 +487,8 @@ def _type_of(key: torch.dtype | None) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        "float8_e4m3fnuz": "fp8e4b8",
+        "float8_e5m2fnuz": "fp8e5b16",
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
@@ -1016,9 +1019,17 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(
-                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
-            )
+            formatted_node = node.format_node(include_tensor_metadata=True)
+            if formatted_node is not None and torch.version.hip:
+                # AMDGCN asm strings can contain newlines, which propagate
+                # into format_node() output.  Split so every line gets the
+                # comment prefix; otherwise bare newlines break the wrapper.
+                detailed_metadata.extend(
+                    f"{wrapper.comment}   {line}"
+                    for line in formatted_node.splitlines()
+                )
+            else:
+                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -1757,6 +1768,14 @@ def get_tma_workspace_arg(
     )
 
 
+def get_default_kpack(block_k: int = 16) -> int:
+    if not torch.version.hip:
+        return 0
+    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+        return 1
+    return 2
+
+
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
@@ -1947,15 +1966,53 @@ def can_use_tma(
     )
 
 
+def _descriptor_shape_fits_in_int32(
+    sizes: Sequence[sympy.Expr], add_guards: bool = False
+) -> bool:
+    int32_max = torch.iinfo(torch.int32).max
+    conditions = []
+    for size in sizes:
+        if isinstance(size, (int, sympy.Integer)):
+            if size > int32_max:
+                return False
+        else:
+            conditions.append(sympy.Le(size, int32_max))
+
+    if not conditions:
+        return True
+
+    from .virtualized import V
+
+    condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
+    if not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not all(len(m.get_size()) == 2 for m in matrices):
+        return False
+    if not all(
+        _descriptor_shape_fits_in_int32(m.get_size(), add_guards=add_guards)
+        for m in matrices
+    ):
+        return False
+    if config.triton.enable_template_tma_store and not _descriptor_shape_fits_in_int32(
+        output_layout.size, add_guards=add_guards
+    ):
+        return False
+    # On AMD (HIP), TMA is not available but we still use non-TMA persistent
+    # kernels, so skip the TMA compatibility checks.
+    if torch.version.hip is not None:
+        return True
     layout = output_layout if config.triton.enable_template_tma_store else None
-    return (
-        all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
-        and config.triton.enable_persistent_tma_matmul
-    )
+    return can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
 
 
 def use_triton_blackwell_tma_template(
@@ -2003,9 +2060,36 @@ def ensure_nv_universal_gemm_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass_api") is not None
+        available = importlib.util.find_spec("cutlass_api") is not None
     except ImportError:
         return False
+    if available:
+        _ensure_fp4_dtype_registered()
+    return available
+
+
+def _ensure_fp4_dtype_registered():
+    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+
+    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
+    in-place so all callers (including TensorWrapper) pick up the change.
+    Remove once cutlass_api adds native FP4 support.
+    """
+    import cutlass_api.utils
+
+    try:
+        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+    except (KeyError, AttributeError):
+        import cutlass
+
+        _orig = cutlass_api.utils.cutlass_type_from_torch_type
+
+        def _patched(dtype):
+            if dtype == torch.float4_e2m1fn_x2:
+                return cutlass.Float4E2M1FN
+            return _orig(dtype)
+
+        cutlass_api.utils.cutlass_type_from_torch_type = _patched
 
 
 @functools.lru_cache(maxsize=1)
@@ -2101,9 +2185,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # for the compiled CUTLASS .so, similar to how the triton branch uses
     # static CUfunction + loadKernel for non-AOT mode.
     if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        log.warning(
+        warnings.warn(
             "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend."
+            "Skipping CUTLASS backend.",
         )
         return False
 
@@ -2562,7 +2646,12 @@ def run_and_get_kernels(
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
-        kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
+            # With lazy Triton kernel compilation, kernel sources are embedded
+            # inside C++ R"TRITON(...)TRITON" raw strings.
+            kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
+        else:
+            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
         if remove_quote:
             kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
@@ -3152,6 +3241,22 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
 
     assert static_arg_idxs == list(range(len(static_arg_idxs)))
     return len(static_arg_idxs)
+
+
+def get_static_bw_input_idxs(fx_g: torch.fx.GraphModule) -> list[int]:
+    """
+    Returns indices of backward graph inputs that are always at fixed
+    addresses: primals (parameters/buffers/user inputs saved for backward).
+    Excludes saved activations which may not be at fixed addresses when
+    the forward is partitioned for CUDA graphs.
+    """
+    static_idxs = []
+    for idx, n in enumerate(fx_g.graph.nodes):
+        if n.op != "placeholder":
+            break
+        if n.name.startswith("primals_"):
+            static_idxs.append(idx)
+    return static_idxs
 
 
 @dataclasses.dataclass
@@ -4271,7 +4376,8 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
         return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
-            x, torch._inductor.ir.GeneratorState
+            x,
+            (torch._inductor.ir.GeneratorState, torch._inductor.ir.OpaqueObjectState),
         )
 
     flat_args = [
@@ -4364,6 +4470,9 @@ COLLECTIVE_OPS = OrderedSet(
         "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
         "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
         "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+        "torch.ops._c10d_functional.isend.default",
+        "torch.ops._c10d_functional.irecv.default",
+        "torch.ops._c10d_functional.batch_p2p_ops.default",
     ]
 )
 

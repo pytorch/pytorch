@@ -41,7 +41,6 @@
 - name: OSS CI
   patterns:
   - .github/**
-  - .circleci/**
   - .ci/**
   - scripts/**
   - tools/**
@@ -198,11 +197,13 @@
 - name: MPS
   patterns:
   - test/test_mps.py
+  - test/inductor/test_mps_basic.py
+  - torch/testing/_internal/common_mps.py
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
+  - c10/metal/**
   approved_by:
-  - alband
   - malfet
   - DenisVieriu97
   - kurtamohler
@@ -534,6 +535,7 @@
   - aten/src/ATen/detail/PrivateUse1HooksInterface.*
   - docs/source/accelerator/**
   - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  - test/test_accelerator.py
   approved_by:
   - albanD
   - fffrog

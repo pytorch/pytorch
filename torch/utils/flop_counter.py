@@ -282,18 +282,27 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     """
     Count flops for self-attention.
 
-    NB: We can assume that value_shape == key_shape
+    Supports GQA (grouped-query attention) where key/value have fewer heads
+    than the query. The kernel broadcasts KV heads to match query heads.
     """
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
+    b, h_q, s_q, d_q = query_shape
+    _b2, h_kv, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
-    if not b == _b2 == _b3 or not h == _h2 == _h3 or not d_q == _d2 or not s_k == _s3 or not d_q == _d2:
-        raise AssertionError("sdpa_flop_count: query/key/value shapes are incompatible")
+    if not (b == _b2 == _b3 and h_kv == _h3 and d_q == _d2 and s_k == _s3):
+        raise AssertionError(
+            f"sdpa_flop_count: query/key/value shapes are incompatible: "
+            f"q={query_shape}, k={key_shape}, v={value_shape}"
+        )
+    if h_q < h_kv or h_q % h_kv != 0:
+        raise AssertionError(
+            f"sdpa_flop_count: query heads ({h_q}) must be a multiple of "
+            f"key/value heads ({h_kv})"
+        )
     total_flops = 0
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
-    # scores: [b, h, s_q, s_k] @ v: [b, h, s_k, d_v] -> out: [b, h, s_q, d_v]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_v))
+    # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_q), (b * h_q, d_q, s_k))
+    # scores: [b, h_q, s_q, s_k] @ v: [b, h_q, s_k, d_v] -> out: [b, h_q, s_q, d_v]
+    total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_v))
     return total_flops
 
 
@@ -490,31 +499,39 @@ def _efficient_attention_forward_flop(
 
 
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
-    total_flops = 0
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
+    b, h_q, s_q, d_q = query_shape
+    _b2, h_kv, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
     _b4, _h4, _s4, _d4 = grad_out_shape
-    if not b == _b2 == _b3 == _b4 or not h == _h2 == _h3 == _h4 or not d_q == _d2:
-        raise AssertionError("sdpa_backward_flop_count: batch/heads/dimension mismatch among tensors")
-    if not d_v == _d4 or not s_k == _s3 or not s_q == _s4:
-        raise AssertionError("sdpa_backward_flop_count: grad_out/value/key/query shapes are incompatible")
+    if not (b == _b2 == _b3 == _b4 and h_kv == _h3 and h_q == _h4):
+        raise AssertionError(
+            "sdpa_backward_flop_count: batch/heads mismatch among tensors"
+        )
+    if h_q < h_kv or h_q % h_kv != 0:
+        raise AssertionError(
+            f"sdpa_backward_flop_count: query heads ({h_q}) must be a multiple of "
+            f"key/value heads ({h_kv})"
+        )
+    if not (d_q == _d2 and d_v == _d4 and s_k == _s3 and s_q == _s4):
+        raise AssertionError(
+            "sdpa_backward_flop_count: grad_out/value/key/query shapes are incompatible"
+        )
     total_flops = 0
     # Step 1: We recompute the scores matrix.
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
+    # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_q), (b * h_q, d_q, s_k))
 
     # Step 2: We propagate the gradients through the score @ v operation.
-    # gradOut: [b, h, s_q, d_v] @ v: [b, h, d_v, s_k] -> gradScores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_v), (b * h, d_v, s_k))
-    # scores: [b, h, s_k, s_q] @ gradOut: [b, h, s_q, d_v] -> gradV: [b, h, s_k, d_v]
-    total_flops += bmm_flop((b * h, s_k, s_q), (b * h, s_q, d_v))
+    # gradOut: [b, h_q, s_q, d_v] @ v: [b, h_q, d_v, s_k] -> gradScores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_v), (b * h_q, d_v, s_k))
+    # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
+    total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
     # Step 3: We propagate th gradients through the k @ v operation
-    # gradScores: [b, h, s_q, s_k] @ k: [b, h, s_k, d_q] -> gradQ: [b, h, s_q, d_q]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_q))
-    # q: [b, h, d_q, s_q] @ gradScores: [b, h, s_q, s_k] -> gradK: [b, h, d_q, s_k]
-    total_flops += bmm_flop((b * h, d_q, s_q), (b * h, s_q, s_k))
+    # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
+    total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
+    # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]
+    total_flops += bmm_flop((b * h_q, d_q, s_q), (b * h_q, s_q, s_k))
     return total_flops
 
 
@@ -588,6 +605,85 @@ def _efficient_attention_backward_flop(
     return sum(
         sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
         for query_shape, key_shape, value_shape, grad_out_shape in shapes
+    )
+
+
+def _varlen_attn_forward_flop(
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn forward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k if cu_seq_k is not None else cu_seq_q,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
+
+
+def _varlen_attn_out_flop(
+    out,
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn_out forward."""
+    return _varlen_attn_forward_flop(
+        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k,
+    )
+
+
+def _varlen_attn_backward_flop(
+    grad_out,
+    query,
+    key,
+    value,
+    out,
+    lse,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn backward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in sizes
     )
 
 

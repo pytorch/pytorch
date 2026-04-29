@@ -21,8 +21,10 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
+    skipMPS,
     skipXLA,
     skipXPUIf,
 )
@@ -31,6 +33,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
     all_types_complex_float8_and,
+    highest_precision_float,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -1216,7 +1219,7 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
-        dtype = torch.float if device.startswith("mps") else torch.double
+        dtype = highest_precision_float(device)
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
@@ -2020,6 +2023,258 @@ class TestIndexing(TestCase):
                     x0[:, :, index_list[i]] = src[:, :, i]
 
             self.assertEqual(x0, y0, atol=0, rtol=0)
+
+    @onlyNativeDeviceTypes
+    @skipMPS  # https://github.com/pytorch/pytorch/issues/161029
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_index_add_large_index_vectorized_path(self, device, dtype):
+        # Tests that exercise both the VecSize=4 (vectorized) and VecSize=1
+        # (scalar) paths in the indexFuncLargeIndex CUDA kernel.
+        # VecSize=4 activates when: IndexIsMajor=true, sliceSize % 4 == 0,
+        # and both dst/src have stride-1 on their innermost dimension.
+        # numIndex must be > 16 to hit the LargeIndex kernel at all.
+        #
+        # Strategy: for each shape that hits the vectorized path, also run
+        # the same operation with sliceSize+1 (which forces the scalar path)
+        # and compare both against a CPU float reference.  We use UNIQUE
+        # indices to avoid non-deterministic atomic accumulation ordering.
+        num_idx = 64
+        num_dest = 100
+
+        def _run_and_check(dst_shape, dim, num_idx, num_dest_dim, tag):
+            dst = torch.zeros(dst_shape, dtype=dtype, device=device)
+            src_shape = list(dst_shape)
+            src_shape[dim] = num_idx
+            src = torch.randn(src_shape, dtype=dtype, device=device)
+            index = torch.randperm(num_dest_dim, device=device)[:num_idx]
+
+            # Reference: run the same op on CPU in float
+            dst_ref = dst.detach().cpu().float()
+            src_ref = src.detach().cpu().float()
+            idx_cpu = index.cpu()
+            dst_ref.index_add_(dim, idx_cpu, src_ref)
+
+            dst.index_add_(dim, index, src)
+
+            atol, rtol = (
+                (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+            )
+            self.assertEqual(
+                dst.cpu().float(),
+                dst_ref,
+                atol=atol,
+                rtol=rtol,
+                msg=f"Failed for {tag}, shape={dst_shape}, dim={dim}",
+            )
+
+        # --- VecSize=4 path: contiguous, dim=0, sliceSize divisible by 4 ---
+        for slice_size in [32, 128, 256]:
+            _run_and_check(
+                (num_dest, slice_size),
+                0,
+                num_idx,
+                num_dest,
+                f"vec4 sliceSize={slice_size}",
+            )
+
+        # --- VecSize=1 path: sliceSize NOT divisible by 4 ---
+        for slice_size in [3, 17, 33]:
+            _run_and_check(
+                (num_dest, slice_size),
+                0,
+                num_idx,
+                num_dest,
+                f"scalar sliceSize={slice_size}",
+            )
+
+        # --- VecSize=1 path: non-contiguous (stride != 1 on inner dim) ---
+        dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
+        src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
+        dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
+        src = src_base[:, ::2]
+        index = torch.randperm(num_dest, device=device)[:num_idx]
+
+        dst_ref = dst.detach().cpu().float().contiguous()
+        src_ref = src.detach().cpu().float().contiguous()
+        dst_ref.index_add_(0, index.cpu(), src_ref)
+        dst.index_add_(0, index, src)
+        atol, rtol = (
+            (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+        )
+        self.assertEqual(
+            dst.cpu().float(),
+            dst_ref,
+            atol=atol,
+            rtol=rtol,
+            msg="Failed for non-contiguous (stride-2)",
+        )
+
+        # --- VecSize=1 path: IndexIsMajor=false (dim=1 on row-major tensor) ---
+        _run_and_check(
+            (32, num_dest),
+            1,
+            num_idx,
+            num_dest,
+            "IndexIsMajor=false dim=1",
+        )
+
+        # --- VecSize=4 path: 3-D contiguous, dim=0, sliceSize divisible by 4 ---
+        _run_and_check(
+            (100, 8, 16),
+            0,
+            num_idx,
+            100,
+            "3D vec4 sliceSize=128",
+        )
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_index_add_correctness_2d_large(self, device, dtype):
+        # Correctness for the path used on HIP when index_add_ is redirected
+        # to scatter_add_ (alpha=1, dim=0, 2D). Uses duplicate indices
+        # (200K src into 1K dest) to stress-test atomic accumulation.
+        # On NVIDIA CUDA this exercises the original index_add_ kernel and
+        # is still useful coverage. Selection is verified separately by
+        # test_index_add_redirect_kernel_selection_hip.
+        num_dest, dim = 1000, 64
+        num_src = 200_000
+
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=dtype, device=device)
+        dst = torch.zeros(num_dest, dim, dtype=dtype, device=device)
+
+        # Reference on CPU in float32
+        dst_ref = torch.zeros(num_dest, dim, dtype=torch.float32)
+        dst_ref.index_add_(0, idx.cpu(), src.cpu().float())
+
+        dst.index_add_(0, idx, src)
+
+        # bf16/fp16 with ~200 atomicAdds per row accumulates rounding error
+        # up to several tenths in worst-case elements; use L2 relative error
+        # rather than per-element max to avoid flakes from outliers.
+        if dtype in (torch.bfloat16, torch.half):
+            err = (dst.cpu().float() - dst_ref).norm().item()
+            ref_norm = max(dst_ref.norm().item(), 1e-8)
+            self.assertLess(
+                err / ref_norm,
+                1e-2,
+                f"index_add_ {dtype} L2 rel err too high: {err / ref_norm}",
+            )
+        else:
+            self.assertEqual(
+                dst.cpu(),
+                dst_ref,
+                atol=1e-5,
+                rtol=1e-5,
+                msg=f"index_add_ correctness failed for {dtype}",
+            )
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_index_add_correctness_2d_out_of_place(self, device, dtype):
+        # Regression test: torch.index_add (out-of-place) and
+        # torch.index_add(..., out=) hit the same TORCH_IMPL_FUNC as the
+        # in-place variant via structured_delegate. The HIP redirect must
+        # seed `result` with self before scattering, otherwise out-of-place
+        # accumulates into uninitialized memory.
+        num_dest, dim, num_src = 200, 32, 5000
+
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=dtype, device=device)
+        self_ = torch.randn(num_dest, dim, dtype=dtype, device=device)
+
+        # Reference: CPU fp32 in-place starting from self
+        ref = self_.cpu().float().clone()
+        ref.index_add_(0, idx.cpu(), src.cpu().float())
+
+        # Functional out-of-place: returns a fresh tensor.
+        out_func = torch.index_add(self_, 0, idx, src)
+        # Out-explicit: caller-provided destination tensor.
+        out_explicit = torch.empty_like(self_)
+        torch.index_add(self_, 0, idx, src, out=out_explicit)
+
+        atol = 5e-2 if dtype == torch.bfloat16 else 1e-5
+        rtol = 1e-2 if dtype == torch.bfloat16 else 1e-5
+        self.assertEqual(out_func.cpu().float(), ref, atol=atol, rtol=rtol)
+        self.assertEqual(out_explicit.cpu().float(), ref, atol=atol, rtol=rtol)
+        # self must be untouched by out-of-place form.
+        self.assertFalse(out_func.data_ptr() == self_.data_ptr())
+
+    @onlyCUDA
+    def test_index_add_correctness_2d_alpha(self, device):
+        # Correctness with alpha != 1, which bypasses the HIP redirect and
+        # always hits index_add_'s native alpha-scaling path on both HIP
+        # and CUDA.
+        num_dest, dim = 100, 32
+        num_src = 200_000
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=torch.float32, device=device)
+        dst = torch.zeros(num_dest, dim, dtype=torch.float32, device=device)
+
+        dst_ref = torch.zeros(num_dest, dim, dtype=torch.float32)
+        dst_ref.index_add_(0, idx.cpu(), src.cpu(), alpha=2.0)
+
+        dst.index_add_(0, idx, src, alpha=2.0)
+        self.assertEqual(dst.cpu(), dst_ref, atol=1e-5, rtol=1e-5)
+
+    @onlyCUDA
+    def test_index_add_redirect_kernel_selection_hip(self, device):
+        # Verify the HIP-only redirect actually fires for matching cases
+        # and does NOT fire for any unmet condition. The redirect calls
+        # scatter_add_ from inside the index_add_ implementation, which
+        # surfaces in the profiler as an aten::scatter_add_ event nested
+        # under aten::index_add_. CUDA (NVIDIA) has no redirect.
+        if not torch.version.hip:
+            raise unittest.SkipTest("redirect is HIP-only")
+
+        n_dest, dim, n_src = 100, 32, 1024
+        idx = torch.randint(0, n_dest, (n_src,), device=device, dtype=torch.int64)
+
+        def saw_scatter_add(fn):
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU]
+            ) as prof:
+                fn()
+                torch.cuda.synchronize()
+            return any(e.name == "aten::scatter_add_" for e in prof.events())
+
+        # 1. Conditions met (alpha=1, dim=0, 2D): redirect MUST fire.
+        dst = torch.zeros(n_dest, dim, dtype=torch.float32, device=device)
+        src = torch.randn(n_src, dim, dtype=torch.float32, device=device)
+        self.assertTrue(
+            saw_scatter_add(lambda: dst.index_add_(0, idx, src)),
+            "redirect should fire when alpha=1, dim=0, 2D",
+        )
+
+        # 2. alpha != 1 -> bypass.
+        self.assertFalse(
+            saw_scatter_add(lambda: dst.index_add_(0, idx, src, alpha=2.0)),
+            "alpha != 1 must bypass redirect",
+        )
+
+        # 3. dim != 0 -> bypass.
+        dst_t = torch.zeros(dim, n_dest, dtype=torch.float32, device=device)
+        src_t = torch.randn(dim, n_src, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_t.index_add_(1, idx, src_t)),
+            "dim != 0 must bypass redirect",
+        )
+
+        # 4. 1D tensor -> bypass (self.dim() != 2).
+        dst_1d = torch.zeros(n_dest, dtype=torch.float32, device=device)
+        src_1d = torch.randn(n_src, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_1d.index_add_(0, idx, src_1d)),
+            "1D tensor must bypass redirect",
+        )
+
+        # 5. 3D tensor -> bypass (self.dim() != 2).
+        dst_3d = torch.zeros(n_dest, dim, 4, dtype=torch.float32, device=device)
+        src_3d = torch.randn(n_src, dim, 4, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_3d.index_add_(0, idx, src_3d)),
+            "3D tensor must bypass redirect",
+        )
 
     @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029

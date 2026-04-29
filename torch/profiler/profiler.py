@@ -105,6 +105,33 @@ class _ITraceObserver(ABC):
         pass
 
 
+def _parse_activities(
+    activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]],
+) -> tuple[set[ProfilerActivity], dict[ProfilerActivity, set[str]]]:
+    """Parse a mixed activities list into a set of activities and a filter dict.
+
+    Each item is either a bare ``ProfilerActivity`` (collect all defaults) or a
+    ``dict[ProfilerActivity, list[str]]`` (collect only the named subset).
+    An empty list value (e.g. ``{CUDA: []}``) means collect nothing for that group.
+    """
+    parsed_activities: set[ProfilerActivity] = set()
+    activity_filters: dict[ProfilerActivity, set[str]] = {}
+    for item in activities:
+        if isinstance(item, ProfilerActivity):
+            if item in parsed_activities:
+                raise ValueError(f"Activity {item} specified more than once")
+            parsed_activities.add(item)
+        elif isinstance(item, dict):
+            for key, val in item.items():
+                if key in parsed_activities:
+                    raise ValueError(f"Activity {key} specified more than once")
+                parsed_activities.add(key)
+                activity_filters[key] = set(val)
+        else:
+            raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
+    return parsed_activities, activity_filters
+
+
 class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
@@ -114,6 +141,14 @@ class _KinetoProfile:
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -152,7 +187,8 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
@@ -164,7 +200,11 @@ class _KinetoProfile:
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        self.activities = set(activities) if activities else supported_activities()
+        if activities is not None:
+            self.activities, self.activity_filters = _parse_activities(activities)
+        else:
+            self.activities = supported_activities()
+            self.activity_filters: dict[ProfilerActivity, set[str]] = {}
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -210,6 +250,12 @@ class _KinetoProfile:
             import torch._inductor.config as inductor_config
 
             self.has_cudagraphs = inductor_config.triton.cudagraphs
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle. "
+                "Only events from the current cycle will be reported. "
+                "To keep events across cycles, set acc_events=True."
+            )
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -224,12 +270,9 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
-            )
-        if (self.profiler is not None) and (not self.acc_events):
-            _warn_once(
-                "Warning: Profiler clears events at the end of each cycle."
-                "Only events from the current cycle will be reported."
-                "To keep events across cycles, set acc_events=True."
+                activity_filters=self.activity_filters
+                if self.activity_filters
+                else None,
             )
         self.profiler._prepare_trace()
 
@@ -358,6 +401,8 @@ class _KinetoProfile:
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
 
+        Returns an :class:`~torch.autograd.profiler_util.EventList` of the aggregated events.
+
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
@@ -372,8 +417,8 @@ class _KinetoProfile:
 
     def events(self):
         """
-        Returns the list of unaggregated profiler events,
-        to be used in the trace callback or after the profiling is finished
+        Return the list of unaggregated :class:`~torch.autograd.profiler_util.FunctionEvent`
+        objects, for use in the trace callback or after profiling has finished.
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
@@ -612,10 +657,20 @@ class profile(_KinetoProfile):
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (Callable): callable that is called at each step when ``schedule``
-            returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
+        on_trace_ready (Callable): callable invoked at the end of each profiling cycle
+            (when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``). Receives the
+            :class:`profile` instance as its only argument, typically used to export the
+            trace (e.g. via :meth:`export_chrome_trace`) or print a summary.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
@@ -638,6 +693,9 @@ class profile(_KinetoProfile):
         post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
             results. If specified, event parsing will stop after this duration and return partial
             results. Useful for handling large traces that may take too long to process.
+        custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
+            invoked once per profiling cycle. Defaults to a random UUID; retrieve via
+            :meth:`get_trace_id`.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -740,7 +798,8 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,
         record_shapes: bool = False,
@@ -756,7 +815,16 @@ class profile(_KinetoProfile):
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        activities_set = set(activities) if activities else supported_activities()
+        # Extract activities for the use_cuda deprecation check.
+        if activities is not None:
+            activities_set: set[ProfilerActivity] = set()
+            for item in activities:
+                if isinstance(item, ProfilerActivity):
+                    activities_set.add(item)
+                elif isinstance(item, dict):
+                    activities_set.update(item.keys())
+        else:
+            activities_set = supported_activities()
         if use_cuda is not None:
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",
@@ -909,7 +977,8 @@ class profile(_KinetoProfile):
 
     def set_custom_trace_id_callback(self, callback) -> None:
         """
-        Sets a callback to be called when a new trace ID is generated.
+        Set the trace ID generator. Called at the start of each cycle, so updating
+        it between cycles yields distinct IDs per cycle.
         """
         self.custom_trace_id_callback = callback
 

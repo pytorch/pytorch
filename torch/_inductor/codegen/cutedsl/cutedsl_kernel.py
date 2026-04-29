@@ -15,6 +15,7 @@ from torch._inductor.codegen.common import (
     CSEVariable,
     IndentedBuffer,
     Kernel,
+    PythonPrinter,
     ValueRanges,
 )
 from torch._inductor.ir import (
@@ -31,7 +32,7 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
-from .cutedsl_op_overrides import CuteDSLOpOverrides
+from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -40,6 +41,7 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+cutedsl_pexpr = PythonPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
@@ -129,7 +131,10 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        return str(expr)
+        return cutedsl_pexpr(expr)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CuteDSLCSEVariable(*args, **kwargs)
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
@@ -530,6 +535,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 final_expr,
                 dtype=var_dtype,
                 bounds=ValueRanges.unknown(),
+                shape=(1,),
             )
             return out
 
@@ -544,11 +550,19 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
     ) -> str:
         """
-        Convert SSA expression to indexable scalar for tensor loads.
+        Convert expression to indexable scalar for tensor loads.
 
         Workaround for lack of gather support: SSA values cannot be used directly
-        as indices. This generates code to convert SSA → indexable scalar.
+        as indices in tensor loads. This generates code to convert SSA → indexable
+        scalar. Compile-time integer constants are already indexable and are
+        returned directly without the SSA round-trip.
         """
+        # Constant integer expressions (e.g. sympy-folded offsets like "0")
+        # are already valid indices — skip the ssa_to_indexable round-trip
+        # which only accepts TensorSSA, not bare Python ints.
+        if expr_str.lstrip("-").isdigit():
+            return expr_str
+
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"

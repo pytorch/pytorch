@@ -90,6 +90,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .comprehension_graph_break import maybe_setup_comprehension_speculation
 from .exc import (
     augment_exc_message_with_hop_name,
     BackendCompilerFailed,
@@ -128,7 +129,6 @@ from .source import (
     SkipGuardSource,
     Source,
 )
-from .synthetic_function_graph_break import maybe_setup_comprehension_speculation
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
@@ -141,17 +141,17 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import typestr, ValueMutationNew, VariableTracker
+from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
-from .variables.builtin import BuiltinVariable
-from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .variables.builtin import BuiltinVariable, DictBuiltinVariable
+from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
@@ -161,11 +161,10 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .variables.iter import MAX_ITERATOR_LIMIT
+from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
-    IteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -181,8 +180,9 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -284,6 +284,12 @@ class SpeculationLog:
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
     graph_break_on_autograd_grad: bool = False
+    # Names of output tensors whose grad_fns were consumed by autograd.grad.
+    autograd_grad_leaked_tensors: list[str] = dataclasses.field(default_factory=list)
+    # If True, graph break at requires_grad_() on source-less intermediates
+    # instead of tracing it. Set when we detect that such an intermediate
+    # leaks as a graph output with requires_grad=True.
+    graph_break_on_requires_grad_: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -582,19 +588,154 @@ explain = False
 #   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
+def get_node_source_info(n: torch.fx.Node) -> str:
+    """Extract the innermost user source location from an FX node's stack trace."""
+    st = n.meta.get("stack_trace", "") or getattr(n, "stack_trace", "")
+    if not st:
+        return ""
+    trace_lines = st.strip().split("\n")
+    last_file_idx = -1
+    for i, line in enumerate(trace_lines):
+        if line.strip().startswith("File "):
+            last_file_idx = i
+    if last_file_idx < 0:
+        return ""
+    file_line = trace_lines[last_file_idx].strip()
+    code = ""
+    if last_file_idx + 1 < len(trace_lines):
+        code = trace_lines[last_file_idx + 1].strip()
+    return f"{file_line}" + (f", code: {code}" if code else "")
+
+
+def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
+    """Walk the FX graph backwards from a TensorVariable to show how it was
+    computed, with user source locations. Graph inputs (placeholders) are always
+    shown first, followed by operations in dataflow order ending at the branch
+    condition."""
+    if not isinstance(value, TensorVariable):
+        return ""
+    try:
+        node = value.proxy.node
+
+        # Collect operations and placeholders separately so placeholders (root
+        # cause) always appear first regardless of traversal order.
+        op_blocks: list[list[str]] = []
+        placeholder_blocks: list[list[str]] = []
+        visited: set[str] = set()
+
+        def fmt_arg(a: object) -> str:
+            return a.name if isinstance(a, torch.fx.Node) else repr(a)
+
+        def walk(n: torch.fx.Node) -> None:
+            if n.name in visited:
+                return
+            visited.add(n.name)
+            source = get_node_source_info(n)
+
+            if n.op == "placeholder":
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name}: graph input ({n.target})")
+                placeholder_blocks.append(block)
+                return
+
+            if n.op == "call_function" and len(op_blocks) < max_lines:
+                target_name = getattr(n.target, "__name__", str(n.target))
+                args_str = ", ".join(fmt_arg(a) for a in n.args)
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name} = {target_name}({args_str})")
+                op_blocks.append(block)
+
+                for a in n.args:
+                    if isinstance(a, torch.fx.Node):
+                        walk(a)
+
+        walk(node)
+
+        if not op_blocks and not placeholder_blocks:
+            return ""
+
+        # Placeholders first (root cause), then ops in dataflow order (reversed
+        # from the DFS collection order) ending at the branch condition.
+        all_lines: list[str] = []
+        for block in placeholder_blocks + list(reversed(op_blocks)):
+            all_lines.extend(block)
+            all_lines.append("")
+
+        return (
+            "\n\n  The branch condition involves a tensor computed as follows:\n"
+            + "\n".join(f"    {line}" for line in all_lines)
+        )
+    except Exception:
+        log.debug("format_tensor_computation_trace failed", exc_info=True)
+        return ""
+
+
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
+        trace_info = format_tensor_computation_trace(value)
+        hints: list[str] = []
+        if isinstance(value, TensorVariable):
+            try:
+                node = value.proxy.node
+                example = node.meta.get("example_value")
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype
+                    in (
+                        torch.int32,
+                        torch.int64,
+                    )
+                ):
+                    hints.append(
+                        "The branch condition uses a scalar integer tensor. "
+                        "Consider rewriting the computation to use plain Python "
+                        "ints (e.g. use int attributes instead of tensor buffers) "
+                        "so the condition becomes a shape guard instead of "
+                        "data-dependent branching."
+                    )
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype == torch.bool
+                ):
+                    hints.append(
+                        "For the common pattern `if tensor_cond: x = transform(x)` "
+                        "(e.g. clamping inf/nan values), consider making the code "
+                        "branchless by always applying the transform. Operations like "
+                        "torch.clamp, torch.nan_to_num, and torch.where are typically "
+                        "no-ops on well-behaved inputs and compile without graph breaks."
+                    )
+                # Detect boolean reductions (any/all) which are a telltale sign
+                # of `tensor.any() or other_tensor.any()` patterns.
+                # node.target is a str for call_method nodes (e.g. tensor.any())
+                # and a callable for call_function nodes (e.g. torch.any()).
+                target_name = getattr(node.target, "__name__", None) or (
+                    node.target if isinstance(node.target, str) else None
+                )
+                if target_name in ("any", "all", "bitwise_and", "bitwise_or"):
+                    hints.append(
+                        "Note: Python `or`/`and` between tensor expressions (e.g. "
+                        "`tensor.any() or other_tensor.any()`) triggers implicit bool "
+                        "conversion. Use `torch.logical_or`/`torch.logical_and` or the "
+                        "`|`/`&` operators instead."
+                    )
+            except Exception:
+                pass
+        hints.extend(graph_break_hints.FUNDAMENTAL)
+        hints.append("Use `torch.cond` to express dynamic control flow.")
         unimplemented(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow.",
-            hints=[
-                *graph_break_hints.FUNDAMENTAL,
-                "Use `torch.cond` to express dynamic control flow.",
-            ],
+            "Dynamo does not support tracing dynamic control flow." + trace_info,
+            hints=hints,
         )
 
     def jump_graph_break(
@@ -668,6 +809,7 @@ def generic_jump(
                     return self.jump(inst)
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                    return
                 else:
                     unimplemented(
                         gb_type="Data-dependent assertion failed (cannot compile partial graph)",
@@ -767,17 +909,19 @@ def generic_jump(
                     x = None
 
             # __bool__ or __len__ is function
-            if isinstance(x, UserMethodVariable):
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 method_name = getattr(getattr(x, "fn", None), "__name__", None)
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = VariableTracker.build(
+                        exc.raise_observed_exception(
+                            TypeError,
                             self,
-                            f"__bool__ should return bool, returned {type(result_value).__name__}",
+                            args=[
+                                f"__bool__ should return bool, returned {type(result_value).__name__}"
+                            ],
                         )
-                        exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
@@ -1079,7 +1223,8 @@ class ExceptionStack:
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
-            val.set_context(prev)  # type: ignore[union-attr, arg-type]
+            if prev is not val:
+                val.set_context(prev)  # type: ignore[union-attr, arg-type]
         return val
 
     def _break_context_reference_cycle(self, val: ExceptionVals) -> None:
@@ -1095,7 +1240,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
+                o.set_context(ConstantVariable.create(None))  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -1604,9 +1749,8 @@ class InstructionTranslatorBase(
                         *create_copy(2),
                         cg.create_load_const(0),
                         cg.create_binary_subscr(),
-                        create_dup_top(),
                         *create_binary_slice(num_stack, None),
-                        *create_swap(2),
+                        *create_copy(3),
                         cg.create_load_const(0),
                         create_instruction("STORE_SUBSCR"),
                     ]
@@ -1728,6 +1872,9 @@ class InstructionTranslatorBase(
                         exc=e,
                     )
 
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
+
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     readable_graph = torch.fx.GraphModule(
                         self.output.nn_modules, self.output.graph
@@ -1741,6 +1888,8 @@ class InstructionTranslatorBase(
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
 
                 raise
             finally:
@@ -1758,11 +1907,30 @@ class InstructionTranslatorBase(
                     # twice is not an issue (second stop is a no op).
                     self.output.mark_bytecode_tracing_stop()
 
-    def push(self, val: VariableTracker | None) -> None:
-        assert val is None or isinstance(val, VariableTracker), (
+    def push(self, val: VariableTracker) -> None:
+        assert isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
-        self.stack.append(val)  # type: ignore[arg-type]
+        if val.source_location is None:
+            inst = self.current_instruction
+            if inst.positions is not None and inst.positions.lineno is not None:
+                val.set_source_location(
+                    SourceLocation(
+                        filename=self.f_code.co_filename,
+                        lineno=inst.positions.lineno,
+                        end_lineno=inst.positions.end_lineno,
+                        col_offset=inst.positions.col_offset,
+                        end_col_offset=inst.positions.end_col_offset,
+                    )
+                )
+            elif inst.starts_line is not None:
+                val.set_source_location(
+                    SourceLocation(
+                        filename=self.f_code.co_filename,
+                        lineno=inst.starts_line,
+                    )
+                )
+        self.stack.append(val)
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -1829,7 +1997,53 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
+        var = self.symbolic_locals.get(inst.argval)
+        if isinstance(var, TensorVariable):
+            self._maybe_emit_sync_dealloc(var)
         del self.symbolic_locals[inst.argval]
+
+    def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
+        from .variables.streams import get_current_stream, new_event
+
+        device = var.device
+        if device is None or device.type not in ("cuda", "xpu"):
+            return
+
+        node = var.proxy.node
+        alloc_stream = node.meta.get("custom", {}).get("stream", None)
+
+        users = set(node.users.keys())
+        if not users:
+            return
+        last_user = None
+        for n in self.output.graph.nodes:
+            if n in users:
+                last_user = n
+        if last_user is None or last_user.op == "output":
+            return
+
+        last_use_stream = last_user.meta.get("custom", {}).get("stream", None)
+        if alloc_stream == last_use_stream:
+            return
+
+        if alloc_stream is None:
+            alloc_stream = get_current_stream(device)
+        if last_use_stream is None:
+            last_use_stream = get_current_stream(device)
+
+        event_idx = new_event()
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (event_idx, last_use_stream),
+            {},
+        )
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.sync_dealloc,
+            (event_idx, alloc_stream, var.as_proxy()),
+            {},
+        )
 
     def STORE_DEREF(self, inst: Instruction) -> None:  # type: ignore[override]
         assert inst.argval in self.cell_and_freevars()
@@ -2026,7 +2240,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_mod(recorded_name, value)
 
         # pyrefly: ignore [unbound-name]
-        if istype(value, (types.ModuleType, DummyModule)):
+        if isinstance(value, (types.ModuleType, DummyModule)):
             # pyrefly: ignore [unbound-name, bad-argument-type]
             self.push(PythonModuleVariable(value, source=source))
         else:
@@ -2111,20 +2325,6 @@ class InstructionTranslatorBase(
         assert inst.target is not None
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
-    def BEGIN_FINALLY(self, inst: Instruction) -> None:
-        self.push(None)
-
-    def WITH_CLEANUP_START(self, inst: Instruction) -> None:
-        exit, exc = self.popn(2)
-        assert exc is None
-        self.push(exc)
-
-        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
-
-    def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
-        self.popn(2)
-        self.push(None)
-
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         self.push(it)
@@ -2140,7 +2340,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(CONSTANT_VARIABLE_NONE)
+                self.push(ConstantVariable.create(None))
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -2212,21 +2412,23 @@ class InstructionTranslatorBase(
             # Pass the stored python_stack to preserve the original exception location
             python_stack = getattr(val, "python_stack", None)
             raise observed_exception_type(
-                f"raised exception {val}", real_stack=python_stack
+                f"raised exception {val.debug_repr()}", real_stack=python_stack
             )
 
-        unimplemented(
-            gb_type="Failed to raise exception",
-            context=str(exc),
-            explanation="Attempted to raise a non-Exception type/value.",
-            hints=[*graph_break_hints.USER_ERROR],
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                f"exceptions must derive from BaseException, not {val.python_type_name()}",
+            ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = VariableTracker.build(self, "No active exception to reraise")
-                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
 
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
@@ -2352,7 +2554,7 @@ class InstructionTranslatorBase(
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
             unimplemented(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
+                context=f"raised exception {curr_exc.debug_repr()}",
                 explanation=observed_exn_gb_explanation,
                 hints=[
                     *graph_break_hints.USER_ERROR,
@@ -2449,9 +2651,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2492,7 +2694,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = CONSTANT_VARIABLE_NONE
+            prev_exc: VariableTracker = ConstantVariable.create(None)
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -2670,7 +2872,7 @@ class InstructionTranslatorBase(
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
-            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+            kwargsvars = DictBuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
@@ -2736,15 +2938,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
-            self.push(obj)
-            self.push(None)
+            raise AssertionError(
+                "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
+            )
 
     def CALL_METHOD(self, inst: Instruction) -> None:
-        args = self.popn(inst.argval)
-        dummy = self.pop()
-        assert dummy is None
-        fn = self.pop()
-        self.call_function(fn, args, {})
+        raise AssertionError(
+            "CALL_METHOD should have been rewritten to CALL_FUNCTION. This function should never be called."
+        )
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
@@ -2777,11 +2978,21 @@ class InstructionTranslatorBase(
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
+        self._maybe_sync_dealloc_attr(obj, inst.argval)
         VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
+        # Only check side_effects — a pure dict lookup with no observable
+        # side effects. We intentionally avoid var_getattr here because it
+        # can trigger __getattr__, add graph nodes, or cause graph breaks.
+        if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            attr_var = self.output.side_effects.load_attr(obj, name)
+            if isinstance(attr_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(attr_var)
 
     @staticmethod
     def codegen_return_with_pops(
@@ -2989,21 +3200,12 @@ class InstructionTranslatorBase(
             )
 
         # add resume function to the global scope
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(resume_name, new_code)
-            package_name = None
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                resume_name,
-                types.FunctionType(new_code, self.f_globals, resume_name),
-            )
-            package_name = resume_name
-
+        self.output.install_resume_function_global(
+            resume_name, new_code, self.f_globals
+        )
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
+                new_code, self.f_globals["__name__"], resume_name
             )
 
         counters["resumes"][new_code.co_name] += 1
@@ -3218,7 +3420,15 @@ class InstructionTranslatorBase(
                         cg.create_binary_subscr(),
                     ]
                 )
-                cg.make_function_with_closure(name, code)
+                # Call the factory function (stored under resume_name) to
+                # create the resume function with correct globals and closure.
+                cg.extend_output(
+                    [
+                        cg.create_load_global(name, add=True),
+                        *create_swap(2),
+                        *create_call_function(1, push_null=True),
+                    ]
+                )
             else:
                 cg.extend_output(cg.load_function_name(name, False, 0))
             cg.extend_output(create_swap(2))
@@ -3239,7 +3449,15 @@ class InstructionTranslatorBase(
                     cg.create_binary_subscr(),
                 ]
             )
-            cg.make_function_with_closure(resume_names[-1], resume_codes[-1])
+            # Call the factory function to create the resume function with
+            # correct globals and closure.
+            cg.extend_output(
+                [
+                    cg.create_load_global(resume_names[-1], add=True),
+                    *create_swap(2),
+                    *create_call_function(1, push_null=True),
+                ]
+            )
             cg.extend_output(
                 [
                     *create_rot_n(3),
@@ -3324,7 +3542,31 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        # Check for tensor items using side-effect-free internal lookups
+        # only. We avoid call_method("__getitem__") because it can execute
+        # user code and add unwanted graph nodes.
+        self._maybe_sync_dealloc_subscr(obj, key)
         obj.call_method(self, "__delitem__", [key], {})
+
+    def _maybe_sync_dealloc_subscr(
+        self, obj: VariableTracker, key: VariableTracker
+    ) -> None:
+        from .variables.dicts import ConstDictVariable
+        from .variables.lists import BaseListVariable
+
+        item_var = None
+        try:
+            if isinstance(obj, BaseListVariable):
+                item_var = obj.getitem_const(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    key,
+                )
+            elif isinstance(obj, ConstDictVariable):
+                item_var = obj.maybe_getitem_const(key)
+        except Exception:
+            pass
+        if isinstance(item_var, TensorVariable):
+            self._maybe_emit_sync_dealloc(item_var)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3864,6 +4106,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
+
     BINARY_SUBSCR = break_graph_if_unsupported(
         push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
@@ -4237,7 +4480,8 @@ class InstructionTranslatorBase(
         self.push(fn)
 
     def CONVERT_VALUE(self, inst: Instruction) -> None:
-        self.push(self._convert_value(self.pop(), inst.argval))
+        assert inst.arg is not None
+        self.push(self._convert_value(self.pop(), inst.arg))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
@@ -4402,6 +4646,25 @@ class InstructionTranslatorBase(
         frame_loc_chain_list.append(frame_loc)
         return tuple(frame_loc_chain_list)
 
+    def _format_stack_source_attribution(self) -> str:
+        """Format bytecode source locations for stack values involved in a graph break."""
+        seen: set[SourceLocation] = set()
+        parts: list[str] = []
+        for vt in self.stack:
+            source_location = vt.source_location
+            if source_location is None:
+                continue
+            if source_location in seen:
+                continue
+            seen.add(source_location)
+            parts.append(
+                f"  {vt!r} originated from:\n{source_location.format().rstrip()}"
+            )
+
+        if not parts:
+            return ""
+        return "Stack variable source attribution:\n" + "\n".join(parts)
+
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4451,11 +4714,15 @@ class InstructionTranslatorBase(
         if exc is not None:
             reason = augment_exc_message_with_hop_name(exc, reason)
 
-        user_stack_trace = (
-            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
-            f"Graph Break Reason: {reason}\n"
-            "\nUser code traceback:\n"
-        )
+        stack_source_attribution = self._format_stack_source_attribution()
+        user_stack_trace_parts = [
+            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}",
+            f"Graph Break Reason: {reason}",
+        ]
+        if stack_source_attribution:
+            user_stack_trace_parts.extend(["", stack_source_attribution])
+        user_stack_trace_parts.extend(["", "User code traceback:"])
+        user_stack_trace = "\n".join(user_stack_trace_parts) + "\n"
 
         if config.verbose:
             user_stack_trace += (
@@ -4911,7 +5178,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            # TODO graph break if one_graph is set - this might break things
             raise exc.SkipFrame(
                 "No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.\n"
                 f"Frame info: {format_frame_info(self.f_code)}"
@@ -5199,23 +5465,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
-        if args and isinstance(args[0], NNModuleVariable):
-            module = parent.output.get_submodule(args[0].module_key)
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
-        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
-        if args and isinstance(args[0], UnspecializedNNModuleVariable):
-            module = args[0].value
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
+        # For unrealized lazy VTs, use peek_type to skip non-Module args
+        # without realizing them (which would install unnecessary guards).
+        if args:
+            arg0 = args[0]
+            should_check = True
+            if isinstance(arg0, LazyVariableTracker) and not arg0.is_realized():
+                if issubclass(arg0.peek_type(), torch.nn.Module):
+                    arg0 = arg0.realize()
+                else:
+                    should_check = False
+
+            if should_check:
+                if isinstance(arg0, NNModuleVariable):
+                    module = parent.output.get_submodule(arg0.module_key)
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
+                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                    module = arg0.value
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
 
         assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
@@ -5276,7 +5549,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return CONSTANT_VARIABLE_NONE  # return dummy variable
+            return ConstantVariable.create(None)  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -5535,7 +5808,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(CONSTANT_VARIABLE_NONE)
+        self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager

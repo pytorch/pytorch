@@ -786,7 +786,7 @@ def analyze_memory_coalescing(
                 continue
 
             # TODO - if a var is in the middle, such as [n0, n1, n2]
-            # n1 can can be split beyond range
+            # n1 can be split beyond range
 
             MIN_TILING_BLOCK = 8
             if not all(

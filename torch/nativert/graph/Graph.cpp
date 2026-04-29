@@ -553,6 +553,24 @@ bool Graph::cleanupDeadNodes() {
 
   const bool mutated = !toRemove.empty();
 
+  if (mutated && VLOG_IS_ON(1)) {
+    c10::FastMap<std::string_view, int> removedByTarget;
+    for (const auto* n : toRemove) {
+      removedByTarget[n->target()]++;
+    }
+    VLOG(1) << "cleanupDeadNodes: removing " << toRemove.size()
+            << " dead nodes. Breakdown by op:";
+    // Sort by count descending for readability
+    std::vector<std::pair<std::string_view, int>> sorted(
+        removedByTarget.begin(), removedByTarget.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    for (const auto& [target, count] : sorted) {
+      VLOG(1) << "  " << target << ": " << count;
+    }
+  }
+
   // Remove nodes in reverse order to handle input/output dependencies
   for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
     removeNode(*it);
@@ -946,10 +964,7 @@ void Value::addUser(Node* node) {
 }
 
 void Value::eraseUser(Node* node) {
-  users_.erase(
-      std::remove_if(
-          users_.begin(), users_.end(), [&](Node* el) { return el == node; }),
-      users_.end());
+  std::erase(users_, node);
 }
 
 std::vector<const Value*> Value::getListElements() const {
@@ -1057,6 +1072,15 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
         } else if constexpr (is_same_v<T, vector<string>>) {
           out << fmt::format("[{}]", fmt::join(arg, ","));
         } else if constexpr (is_same_v<T, vector<vector<int64_t>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
+        } else if constexpr (is_same_v<T, vector<vector<double>>>) {
           out << '[';
           for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
             if (idx > 0) {

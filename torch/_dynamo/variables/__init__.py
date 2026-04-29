@@ -17,14 +17,15 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 """
 
 from .base import VariableTracker
-from .builtin import BuiltinVariable
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    CONSTANT_VARIABLE_TRUE,
-    ConstantVariable,
-    EnumVariable,
+from .builtin import (
+    BaseBuiltinVariable,
+    BuiltinVariable,
+    DictBuiltinVariable,
+    GetAttrBuiltinVariable,
+    IterBuiltinVariable,
+    ListBuiltinVariable,
 )
+from .constant import ConstantVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
@@ -51,19 +52,14 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    DefaultDictVariable,
     DictItemsVariable,
-    DictKeySetVariable,
     DunderDictVariable,
-    FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
-    OrderedSetClassVariable,
-    OrderedSetVariable,
-    SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
+    BaseUserFunctionVariable,
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
@@ -81,7 +77,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
-    TritonSetAllocatorSkipVariable,
+    TritonSetAllocatorVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -99,7 +95,6 @@ from .iter import (
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
-    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -108,7 +103,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    NamedTupleVariable,
     RangeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -145,7 +139,19 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamContextVariable, StreamVariable
+from .sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
+    SetVariable,
+)
+from .streams import (
+    CudaStreamVariable,
+    EventVariable,
+    StreamContextVariable,
+    StreamVariable,
+)
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -157,11 +163,16 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
+    NamedTupleVariable,
+    OrderedDictVariable,
     RemovableHandleVariable,
+    StructSequenceVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -169,6 +180,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
+    UserDefinedVariable,
 )
 
 
@@ -176,14 +188,13 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
+    "BaseBuiltinVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
-    "CONSTANT_VARIABLE_FALSE",
-    "CONSTANT_VARIABLE_NONE",
-    "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
+    "DictBuiltinVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
@@ -195,25 +206,27 @@ __all__ = [
     "DeletedVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
-    "EnumVariable",
     "FakeItemVariable",
+    "GetAttrBuiltinVariable",
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
     "InspectVariable",
+    "IterBuiltinVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
+    "ListBuiltinVariable",
     "ListIteratorVariable",
     "ListVariable",
-    "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "CellVariable",
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
+    "OrderedDictVariable",
     "NumpyVariable",
     "OptimizerVariable",
     "PolyfilledFunctionVariable",
@@ -241,6 +254,8 @@ __all__ = [
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedTupleVariable",
+    "NamedTupleVariable",
+    "StructSequenceVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",

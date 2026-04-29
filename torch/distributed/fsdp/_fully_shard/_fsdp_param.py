@@ -31,6 +31,16 @@ from ._fsdp_common import (
 )
 
 
+_orig_param_uid_counter = itertools.count()
+
+
+def _get_orig_param_uid(param: nn.Parameter) -> int:
+    if not hasattr(param, "_fsdp_orig_uid"):
+        uid = next(_orig_param_uid_counter)
+        param._fsdp_orig_uid = uid  # pyrefly: ignore[missing-attribute]
+    return param._fsdp_orig_uid  # pyrefly: ignore[missing-attribute]
+
+
 """
 [Note: FSDP tensors]
 FSDP considers the following tensors:
@@ -166,12 +176,14 @@ class FSDPParam:
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: torch.Tensor | None  # ND
     _sharding_spec: DTensorSpec
-    # DTensor attributes (only defined for DTensor `param`):
-    _tp_spec: DTensorSpec
+    _unsharded_dtensor_spec: (
+        DTensorSpec | None
+    )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
+    _orig_param_uid: int
 
     def __init__(
         self,
@@ -226,6 +238,7 @@ class FSDPParam:
         else:
             self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
             fsdp_placement = None
+        self._shard_mesh = self._init_shard_mesh()
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -249,69 +262,8 @@ class FSDPParam:
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_dtensor = isinstance(param, DTensor)
-        if self.is_dtensor:
-            self._tp_spec = cast(DTensor, param)._spec
-            dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            if dp_mesh is None or tp_mesh is None:
-                raise AssertionError(
-                    "FSDP requires the DP and model parallel TP/EP mesh to be not None but got: \n"
-                    f"DP's mesh: {dp_mesh}\nTP/EP's mesh: {tp_mesh}"
-                )
-            self._spmd_mesh = DeviceMesh._concatenate([dp_mesh, tp_mesh])
-            if len(self._tp_spec.placements) > 2:
-                raise NotImplementedError(
-                    f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
-                )
-            split_factor = self._tp_spec.num_shards_map[shard_dim]
-            if not (2 <= self._spmd_mesh.ndim <= 4):
-                raise AssertionError(
-                    "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
-                    f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
-                )
-            self._spmd_placements: tuple[Placement, ...]
-            if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
-                dp_shard_tp_placement = (
-                    (
-                        _StridedShard(shard_dim, split_factor=split_factor)
-                        if split_factor > 1
-                        else fsdp_placement
-                    ),
-                    *self._tp_spec.placements,
-                )
-            else:  # DDP
-                dp_shard_tp_placement = (
-                    (Replicate()),
-                    *self._tp_spec.placements,
-                )
-            if isinstance(self.mesh_info, HSDPMeshInfo):  # HSDP
-                if self.mesh_info.replicate_mesh_dim != 0:
-                    raise AssertionError(
-                        f"Expected replicate_mesh_dim to be 0, got {self.mesh_info.replicate_mesh_dim}"
-                    )
-                self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
-            else:  # FSDP or DDP
-                self._spmd_placements = dp_shard_tp_placement
-
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=self._tp_spec.tensor_meta,
-            )
-            param_data = cast(DTensor, param)._local_tensor
-        else:
-            self._spmd_mesh = self.mesh_info.mesh
-            if isinstance(self.mesh_info, HSDPMeshInfo):  # HSDP
-                self._spmd_placements = (Replicate(), fsdp_placement)
-            elif isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP
-                self._spmd_placements = (fsdp_placement,)
-            elif isinstance(self.mesh_info, DDPMeshInfo):  # DDP
-                self._spmd_placements = (Replicate(),)
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=TensorMeta(param.size(), param.stride(), param.dtype),
-            )
-            param_data = param
+        self._orig_param_uid = _get_orig_param_uid(param)
+        param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
         if not param_data.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}"
@@ -366,12 +318,188 @@ class FSDPParam:
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
             )
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
-        self.sharded_param.requires_grad_(param.requires_grad)
+        self.sharded_param = nn.Parameter(
+            self.to_sharded_dtensor(sharded_param),
+            requires_grad=param.requires_grad,
+        )
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+
+    def _init_sharding_spec(
+        self,
+        param: nn.Parameter,
+        fsdp_placement: Shard,
+        shard_dim: int,
+    ) -> torch.Tensor:
+        """
+        Build ``_sharding_spec``, ``_spmd_mesh``, and ``_spmd_placements`` and
+        return the local tensor data to be sharded.
+        """
+        self._unsharded_dtensor_spec = None
+        if self.mesh_info.is_spmd_mesh and not self.is_dtensor:
+            raise ValueError(
+                "When dp_mesh_dims is provided, all parameters must be "
+                "DTensors on the full SPMD mesh (e.g. via distribute_module). "
+                f"Got plain tensor for parameter '{self._module_info.param_name}'."
+            )
+        if self.is_dtensor and self.mesh_info.is_spmd_mesh:
+            return self._init_sharding_spec_spmd(param, fsdp_placement, shard_dim)
+        if self.is_dtensor:
+            return self._init_sharding_spec_tp(param, fsdp_placement, shard_dim)
+        return self._init_sharding_spec_plain(param, fsdp_placement)
+
+    def _init_sharding_spec_spmd(
+        self,
+        param: nn.Parameter,
+        fsdp_placement: Shard,
+        shard_dim: int,
+    ) -> torch.Tensor:
+        """SPMD path: param is a DTensor on the full SPMD mesh."""
+        self._unsharded_dtensor_spec = cast(DTensor, param)._spec
+        spmd_mesh = self._unsharded_dtensor_spec.mesh
+        dp_dim_names = self.mesh_info.dp_mesh_dims
+        if dp_dim_names is None:
+            raise AssertionError("dp_dim_names must not be None for SPMD mesh")
+        if spmd_mesh.mesh_dim_names is None:
+            raise AssertionError("spmd_mesh.mesh_dim_names must not be None")
+        if (
+            self.mesh_info.spmd_mesh is not None
+            and spmd_mesh is not self.mesh_info.spmd_mesh
+        ):
+            raise ValueError(
+                "Expected param's DTensor mesh to be the same mesh passed "
+                "to fully_shard, but got different mesh objects"
+            )
+
+        dp_shard_indices = [
+            spmd_mesh.mesh_dim_names.index(n) for n in dp_dim_names.shard_names
+        ]
+
+        orig_placements = self._unsharded_dtensor_spec.placements
+        for idx in dp_shard_indices:
+            if not isinstance(orig_placements[idx], Replicate):
+                raise ValueError(
+                    f"Expected Replicate() on DP shard dim "
+                    f"'{spmd_mesh.mesh_dim_names[idx]}' (index {idx}) "
+                    f"but got {orig_placements[idx]}"
+                )
+        dp_replicate_indices = []
+        for rep_name in dp_dim_names.replicate_names:
+            rep_idx = spmd_mesh.mesh_dim_names.index(rep_name)
+            dp_replicate_indices.append(rep_idx)
+            if not isinstance(orig_placements[rep_idx], Replicate):
+                raise ValueError(
+                    f"Expected Replicate() on DP replicate dim "
+                    f"'{spmd_mesh.mesh_dim_names[rep_idx]}' (index {rep_idx}) "
+                    f"but got {orig_placements[rep_idx]}"
+                )
+
+        # Cache DP dim indices so _get_grad_inner_tensor can skip
+        # redistribution on DP dims and let FSDP's reduce-scatter handle them.
+        self._dp_dim_indices: frozenset[int] = frozenset(
+            dp_shard_indices + dp_replicate_indices
+        )
+
+        new_placements = list(orig_placements)
+        for dp_idx in dp_shard_indices:
+            # split_factor = number of non-DP shards on shard_dim from
+            # mesh dims with higher index (the "right-side" dims that
+            # _StridedShard needs to interleave with)
+            sf = 1
+            for j in range(dp_idx + 1, spmd_mesh.ndim):
+                p = orig_placements[j]
+                if isinstance(p, (Shard, _StridedShard)) and p.dim == shard_dim:
+                    sf *= spmd_mesh.size(j)
+            new_placements[dp_idx] = (
+                _StridedShard(shard_dim, split_factor=sf) if sf > 1 else fsdp_placement
+            )
+
+        self._spmd_mesh = spmd_mesh
+        self._spmd_placements: tuple[Placement, ...] = tuple(new_placements)
+        self._sharding_spec = DTensorSpec(
+            self._spmd_mesh,
+            self._spmd_placements,
+            tensor_meta=self._unsharded_dtensor_spec.tensor_meta,
+        )
+        return cast(DTensor, param)._local_tensor
+
+    def _init_sharding_spec_tp(
+        self,
+        param: nn.Parameter,
+        fsdp_placement: Shard,
+        shard_dim: int,
+    ) -> torch.Tensor:
+        """TP/EP path: param is a DTensor, DP mesh is separate from TP mesh."""
+        self._unsharded_dtensor_spec = cast(DTensor, param)._spec
+        dp_mesh, tp_mesh = (self.mesh_info.mesh, self._unsharded_dtensor_spec.mesh)
+        if dp_mesh is None or tp_mesh is None:
+            raise AssertionError(
+                "FSDP requires the DP and model parallel TP/EP mesh to be not None but got: \n"
+                f"DP's mesh: {dp_mesh}\nTP/EP's mesh: {tp_mesh}"
+            )
+        self._spmd_mesh = DeviceMesh._concatenate([dp_mesh, tp_mesh])
+        if len(self._unsharded_dtensor_spec.placements) > 2:
+            raise NotImplementedError(
+                f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._unsharded_dtensor_spec.placements}"
+            )
+        split_factor = self._unsharded_dtensor_spec.num_shards_map[shard_dim]
+        if not (2 <= self._spmd_mesh.ndim <= 4):
+            raise AssertionError(
+                "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
+                f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
+            )
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            dp_shard_tp_placement = (
+                (
+                    _StridedShard(shard_dim, split_factor=split_factor)
+                    if split_factor > 1
+                    else fsdp_placement
+                ),
+                *self._unsharded_dtensor_spec.placements,
+            )
+        else:  # DDP
+            dp_shard_tp_placement = (
+                Replicate(),
+                *self._unsharded_dtensor_spec.placements,
+            )
+        self._spmd_placements: tuple[Placement, ...]
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            if self.mesh_info.replicate_mesh_dim != 0:
+                raise AssertionError(
+                    f"Expected replicate_mesh_dim to be 0, got {self.mesh_info.replicate_mesh_dim}"
+                )
+            self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
+        else:
+            self._spmd_placements = dp_shard_tp_placement
+
+        self._sharding_spec = DTensorSpec(
+            self._spmd_mesh,
+            self._spmd_placements,
+            tensor_meta=self._unsharded_dtensor_spec.tensor_meta,
+        )
+        return cast(DTensor, param)._local_tensor
+
+    def _init_sharding_spec_plain(
+        self,
+        param: nn.Parameter,
+        fsdp_placement: Shard,
+    ) -> torch.Tensor:
+        """Plain tensor path: param is not a DTensor."""
+        self._spmd_mesh = self.mesh_info.mesh
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            self._spmd_placements = (Replicate(), fsdp_placement)
+        elif isinstance(self.mesh_info, FSDPMeshInfo):
+            self._spmd_placements = (fsdp_placement,)
+        elif isinstance(self.mesh_info, DDPMeshInfo):
+            self._spmd_placements = (Replicate(),)
+        self._sharding_spec = DTensorSpec(
+            self._spmd_mesh,
+            self._spmd_placements,
+            tensor_meta=TensorMeta(param.size(), param.stride(), param.dtype),
+        )
+        return param
 
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info
@@ -404,8 +532,10 @@ class FSDPParam:
         # then we do not need extra casting
         if reduce_dtype == param_dtype:
             reduce_dtype = None
-        # Clamp `param_dtype` to `None` if no casting is required
-        if param_dtype == self.orig_dtype:
+        # Clamp `param_dtype` to `None` if no casting is required or if the
+        # parameter is non-floating-point (mixed precision is only meaningful
+        # for floating-point parameters)
+        if param_dtype == self.orig_dtype or not self.orig_dtype.is_floating_point:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
@@ -481,8 +611,10 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        if self.is_dtensor:
-            unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
+        if self._unsharded_dtensor_spec is not None:
+            unsharded_param = _from_local_no_grad(
+                unsharded_param, self._unsharded_dtensor_spec
+            )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
@@ -503,7 +635,7 @@ class FSDPParam:
     def to_sharded_post_forward(self) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
-                "Resharding to smaller mesh with TP is not supported yet"
+                "Resharding to smaller mesh is not supported for DTensor parameters yet"
             )
         self._assert_in_states(ShardedState.UNSHARDED)
         if self.post_forward_mesh_info is None:
@@ -532,7 +664,8 @@ class FSDPParam:
             storage_offset=0,
         )
         self._sharded_post_forward_param = nn.Parameter(
-            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
+            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
+            requires_grad=self.sharded_param.requires_grad,
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
@@ -726,13 +859,32 @@ class FSDPParam:
                 grad = grad.wait()
             if not isinstance(grad, DTensor):
                 raise AssertionError(f"Expected DTensor, got {type(grad)}")
-            placements = self._tp_spec.placements
-            if placements != grad.placements:
-                if len(self._tp_spec.placements) != len(grad.placements):
-                    raise AssertionError(
-                        f"Expected same placement length: {self._tp_spec=} {grad.placements=}"
-                    )
-                grad = grad.redistribute(placements=placements)
+            if self._unsharded_dtensor_spec is None:
+                raise AssertionError(
+                    "Expected _unsharded_dtensor_spec for DTensor param"
+                )
+            placements = self._unsharded_dtensor_spec.placements
+            if self.mesh_info.is_spmd_mesh:
+                # Only redistribute non-DP dims; keep Partial on DP dims
+                # so FSDP's reduce-scatter handles them directly, avoiding
+                # a redundant all-reduce on the DP dimensions.
+                target_placements = tuple(
+                    grad.placements[i] if i in self._dp_dim_indices else placements[i]
+                    for i in range(len(placements))
+                )
+                if target_placements != grad.placements:
+                    if len(placements) != len(grad.placements):
+                        raise AssertionError(
+                            f"Expected same placement length: {placements=} {grad.placements=}"
+                        )
+                    grad = grad.redistribute(placements=target_placements)
+            else:
+                if placements != grad.placements:
+                    if len(placements) != len(grad.placements):
+                        raise AssertionError(
+                            f"Expected same placement length: {placements=} {grad.placements=}"
+                        )
+                    grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
 
@@ -740,14 +892,17 @@ class FSDPParam:
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
 
-    @property
-    def shard_mesh(self):
+    def _init_shard_mesh(self) -> DeviceMesh:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
         if mesh.mesh_dim_names is None:
             raise AssertionError("Expected mesh_dim_names to not be None")
         return mesh[mesh.mesh_dim_names[-1]]
+
+    @property
+    def shard_mesh(self):
+        return self._shard_mesh
 
     @property
     def shard_mesh_from_root(self):

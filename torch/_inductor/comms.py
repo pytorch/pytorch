@@ -52,39 +52,37 @@ if TYPE_CHECKING:
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
-    from torch._inductor.scheduler import _get_mm_like_fn
-
-    runtime_estimations = {}
-    runtime_estimations_for_mms = {}
-
-    for snode in snodes:
-        runtime_estimations[snode] = snode.get_estimated_runtime()
-        if _get_mm_like_fn(snode) is not None:
-            runtime_estimations_for_mms[snode] = runtime_estimations[snode]
+    runtime_estimations = [snode.get_estimated_runtime() for snode in snodes]
 
     import torch.distributed as dist
     from torch.distributed.distributed_c10d import _get_default_group
 
     world_size = dist.get_world_size()
     pg = _get_default_group()
-    gathered_runtime_estimations_for_mms: list[list[float]] = [
-        [] for _ in range(world_size)
-    ]
+    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
     dist.all_gather_object(
-        gathered_runtime_estimations_for_mms,
-        list(runtime_estimations_for_mms.values()),
+        gathered_runtime_estimations,
+        runtime_estimations,
         pg,
     )
-    median_runtime_estimations_for_mms = torch.median(
-        torch.tensor(gathered_runtime_estimations_for_mms), dim=0
-    ).values.tolist()
-    for idx, snode in enumerate(runtime_estimations_for_mms.keys()):
-        runtime_estimations_for_mms[snode] = median_runtime_estimations_for_mms[idx]
 
-    for snode in snodes:
-        if snode in runtime_estimations_for_mms:
-            runtime_estimations[snode] = runtime_estimations_for_mms[snode]
-        snode.override_estimated_runtime = runtime_estimations[snode]
+    lengths = OrderedSet([len(e) for e in gathered_runtime_estimations])
+    if len(lengths) != 1:
+        log.warning(
+            "Different ranks have different numbers of scheduler nodes (%s), "
+            "skipping runtime estimation alignment",
+            [len(e) for e in gathered_runtime_estimations],
+        )
+        for idx, snode in enumerate(snodes):
+            snode.override_estimated_runtime = runtime_estimations[idx]
+        return
+
+    median_runtime_estimations = torch.median(
+        torch.tensor(gathered_runtime_estimations), dim=0
+    ).values.tolist()
+
+    for idx, snode in enumerate(snodes):
+        snode.override_estimated_runtime = median_runtime_estimations[idx]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
@@ -1751,7 +1749,7 @@ def _find_buffers_with_changed_last_use_sink_waits(
 
     for buf in candidate_bufs:
         snode_last_use = buf_to_snode_last_use[buf]
-        if snode_last_use != candidate:  # noqa: E711
+        if snode_last_use != candidate:
             continue
 
         # candidate is last use of buf
@@ -2186,7 +2184,7 @@ def visualize_overlap(order):
     cur_comm_node = None
 
     def step_log(step, msg):
-        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
+        overlap_log.debug(f"{step:>6}: {msg}")
 
     for step, snode in enumerate(order):
         if cur_comm_node is None:
@@ -2205,15 +2203,13 @@ def visualize_overlap(order):
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-                step_log(step, f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")
             elif is_wait(snode.node):  # end of this comm op
                 step_log(step, f"{node_summary(snode)}")
                 cur_comm_node = None
             else:  # overlapped compute op
                 step_log(step, f"| {node_summary(snode)}")
-    overlap_log.debug(
-        f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
-    )
+    overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
 def reorder_compute_and_comm_for_overlap(

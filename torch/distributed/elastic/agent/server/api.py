@@ -459,12 +459,19 @@ class SimpleElasticAgent(ElasticAgent):
     such as one particular type of worker role.
     """
 
-    def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
+    def __init__(
+        self,
+        spec: WorkerSpec,
+        exit_barrier_timeout: float = 300,
+        shutdown_timeout: int = 30,
+    ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
         self._exit_barrier_timeout = exit_barrier_timeout
+        self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
+        self._in_exit_barrier: bool = False
 
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
         return self._worker_group
@@ -497,11 +504,14 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+    ) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
+            timeout: Time to wait for graceful shutdown before sending SIGKILL
         """
         raise NotImplementedError
 
@@ -738,15 +748,15 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
+            logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
-            self._shutdown(e.sigval)
+            self._shutdown(e.sigval, timeout=self._shutdown_timeout)
             shutdown_called = True
             raise
         finally:
             if not shutdown_called:
-                self._shutdown()
+                self._shutdown(timeout=self._shutdown_timeout)
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
 
@@ -979,6 +989,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._exit_barrier_timeout,
         )
         start = time.time()
+        self._in_exit_barrier = True
         try:
             store_util.barrier(
                 store=self._store,
@@ -998,3 +1009,5 @@ class SimpleElasticAgent(ElasticAgent):
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start,
             )
+        finally:
+            self._in_exit_barrier = False

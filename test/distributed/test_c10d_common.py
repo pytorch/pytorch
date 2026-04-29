@@ -3,6 +3,7 @@
 import copy
 import os
 import pickle
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,8 +14,8 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
+from pathlib import Path
 from sys import platform
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -1019,7 +1020,7 @@ class CommonDistributedDataParallelTest:
 
     @dataclass
     class CustomOutput:
-        o1: Optional[torch.Tensor]
+        o1: torch.Tensor | None
         o2: dict[str, torch.Tensor]
 
     class DataclassOutputModule(nn.Module):
@@ -1546,6 +1547,42 @@ class AbstractLargeCommTest:
                 torch.tensor([pg_idx, ranks_in[1]], device=self.device),
             ]
             self.assertEqual(output_tensor_list, expected)
+
+    def _test_new_group_ordered(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # Reverse-order ranks: group rank 0 = highest global rank
+        reversed_ranks = list(range(self.world_size - 1, -1, -1))
+        new_pg = dist.new_group(ranks=reversed_ranks, sort_ranks=False)
+
+        # Verify that the group rank assignment follows the user-provided order
+        expected_group_rank = reversed_ranks.index(rank)
+        self.assertEqual(dist.get_group_rank(new_pg, rank), expected_group_rank)
+        self.assertEqual(
+            dist.get_process_group_ranks(new_pg),
+            reversed_ranks,
+        )
+
+        # Verify that all_gather results follow the custom rank order
+        input_tensor = torch.tensor([rank], device=self.device)
+        output_tensor_list = [
+            torch.tensor([-1], device=self.device) for _ in range(self.world_size)
+        ]
+        dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+        # Group rank i holds global rank reversed_ranks[i]
+        expected = [
+            torch.tensor([reversed_ranks[i]], device=self.device)
+            for i in range(self.world_size)
+        ]
+        self.assertEqual(output_tensor_list, expected)
 
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
@@ -2191,6 +2228,7 @@ class ReduceOpTest(TestCase):
             self.assertTrue(
                 isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
             )
+            self.assertTrue(isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp))
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
@@ -2291,6 +2329,171 @@ class LocalRankTest(MultiProcessTestCase):
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
         self.assertEqual(dist.get_node_local_rank(), self.rank)
+
+
+class RecordCommTest(TestCase):
+    def test_set_get(self):
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+        with dist.record_comm("test_name"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "test_name"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+    def test_nesting(self):
+        with dist.record_comm("outer"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+            with dist.record_comm("inner"):
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_comm_profiling_name(), "inner"
+                )
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+
+# Trivially-destructible types safe for thread_local.
+# Non-trivial destructors (std::string, std::vector, std::map, etc.)
+# register via __cxa_thread_atexit_impl which holds a mutex — if fork()
+# happens while that mutex is held, the child deadlocks.
+_SAFE_TLS_TYPE_RE = re.compile(
+    r"""
+    (?:
+        .*\*\s*$              # any pointer type (T*, const T*, etc.)
+        | bool
+        | u?int(?:8|16|32|64)_t
+        | int
+        | size_t
+        | ssize_t
+        | ptrdiff_t
+        | float
+        | double
+        | char
+        | (?:unsigned|signed)\s+(?:int|long(?:\s+long)?|short|char)
+        | unsigned
+        | signed
+        | long(?:\s+long)?
+        | short
+    )
+    """,
+    re.VERBOSE,
+)
+
+# Regex to extract a thread_local declaration.
+# Captures the type portion (group 1) and the variable name (group 2).
+_TLS_DECL_RE = re.compile(
+    r"""
+    (?:^|(?<=\s))               # start of line or preceded by whitespace
+    (?:static\s+)?              # optional leading static
+    thread_local                # the keyword
+    \s+(?:static\s+)?           # optional trailing static
+    (.+?)                       # type (group 1) — non-greedy
+    \s+((?:\w+(?:<[^>]*>)?::)*\w+)  # variable name, possibly qualified (group 2)
+    \s*[=;(]                    # followed by = or ; or (
+    """,
+    re.VERBOSE,
+)
+
+
+class ThreadLocalSafetyLintTest(TestCase):
+    """Lint: every thread_local in c10d must use a trivially-destructible type.
+
+    Non-trivially-destructible thread_local variables (std::string,
+    std::vector, std::map, c10::intrusive_ptr, ...) register destructors
+    via __cxa_thread_atexit_impl, which holds an internal glibc mutex.
+    If fork() happens while that mutex is held the child process inherits
+    a locked mutex and deadlocks on the next TLS access.
+
+    Use raw pointers (T*) with lazy heap-allocation instead.
+    """
+
+    # Pre-existing violations outside this diff's scope.  Each entry is
+    # (relative_path, variable_name).  Remove entries as they get fixed.
+    _KNOWN_VIOLATIONS = {
+        ("ProcessGroup.cpp", "pg"),
+        ("cuda/CUDAEventCache.cpp", "cacheDeviceMap"),
+    }
+
+    @staticmethod
+    def _c10d_src_dir() -> Path:
+        # test file:  caffe2/test/distributed/test_c10d_common.py
+        # source dir: caffe2/torch/csrc/distributed/c10d/
+        return (
+            Path(__file__).resolve().parents[2]
+            / "torch"
+            / "csrc"
+            / "distributed"
+            / "c10d"
+        )
+
+    @staticmethod
+    def _is_safe_type(type_str: str) -> bool:
+        """Return True if *type_str* is trivially destructible."""
+        cleaned = type_str.strip()
+        # Remove const / volatile / mutable qualifiers for matching
+        cleaned = re.sub(r"\b(const|volatile|mutable|inline)\b", "", cleaned).strip()
+        # Pointer types are always safe
+        if cleaned.endswith("*"):
+            return True
+        # Check against known safe scalar types
+        return bool(_SAFE_TLS_TYPE_RE.fullmatch(cleaned))
+
+    def test_no_non_trivial_thread_locals(self):
+        """Scan c10d sources for thread_local with non-trivial destructors."""
+        c10d_dir = self._c10d_src_dir()
+        self.assertTrue(
+            c10d_dir.is_dir(),
+            f"c10d source directory not found: {c10d_dir}",
+        )
+
+        violations = []
+        for ext in ("*.cpp", "*.hpp", "*.h", "*.cc"):
+            for filepath in c10d_dir.rglob(ext):
+                lines = filepath.read_text().splitlines()
+                idx = 0
+                while idx < len(lines):
+                    stripped = lines[idx].strip()
+                    idx += 1
+                    # Skip pure comments and static_assert guards
+                    if (
+                        stripped.startswith(("//", "/*"))
+                        or "static_assert" in stripped
+                        or "thread_local" not in stripped
+                    ):
+                        continue
+                    # Try single-line match first
+                    m = _TLS_DECL_RE.search(stripped)
+                    if not m and idx < len(lines):
+                        # Multi-line declaration (type on one line,
+                        # variable name on the next)
+                        combined = stripped + " " + lines[idx].strip()
+                        m = _TLS_DECL_RE.search(combined)
+                    if not m:
+                        continue
+                    tls_type, var_name = m.group(1), m.group(2)
+                    if self._is_safe_type(tls_type):
+                        continue
+                    rel = str(filepath.relative_to(c10d_dir))
+                    # Strip class qualifiers from var_name for allowlist
+                    # e.g. "Foo<T>::bar" -> "bar"
+                    bare_name = var_name.rsplit("::", 1)[-1]
+                    if (rel, bare_name) in self._KNOWN_VIOLATIONS:
+                        continue
+                    violations.append(
+                        f"  {rel}:{idx}: thread_local {tls_type} {var_name}"
+                    )
+
+        self.assertEqual(
+            violations,
+            [],
+            "Non-trivially-destructible thread_local variable(s) found in c10d.\n"
+            "These cause fork-deadlocks via __cxa_thread_atexit.\n"
+            "Use a raw pointer (T*) with lazy heap-allocation instead.\n\n"
+            "Violations:\n" + "\n".join(violations),
+        )
 
 
 if __name__ == "__main__":
