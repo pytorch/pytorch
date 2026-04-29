@@ -90,9 +90,7 @@ Value* symbolicToValue(
             // We convert them into a constant Value in graph. These value
             // doesn't have producer node
             int64_t value = listEl.get_as_int();
-            TORCH_CHECK(
-                value >= std::numeric_limits<int>::min() &&
-                value <= std::numeric_limits<int>::max());
+            TORCH_CHECK(std::in_range<int>(value));
             Value* symintValue =
                 graph.createConstantSymIntValue(static_cast<int>(value));
             listValue.push_back(symintValue);

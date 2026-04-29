@@ -83,8 +83,7 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
-      id >= std::numeric_limits<worker_id_t>::min() &&
-          id <= std::numeric_limits<worker_id_t>::max(),
+      std::in_range<worker_id_t>(id),
       "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<ScriptRRefFetchCall>(
       static_cast<worker_id_t>(id), RRefId::fromIValue(values[0]));
@@ -105,8 +104,7 @@ std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
       values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
-      id >= std::numeric_limits<worker_id_t>::min() &&
-          id <= std::numeric_limits<worker_id_t>::max(),
+      std::in_range<worker_id_t>(id),
       "PythonRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<PythonRRefFetchCall>(
       static_cast<worker_id_t>(id), RRefId::fromIValue(values[0]));

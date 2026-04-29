@@ -9,6 +9,7 @@
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
+#include <utility>
 
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -299,8 +300,7 @@ class Tensor {
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
     STD_TORCH_CHECK(
-        device_index >= std::numeric_limits<int8_t>::min() &&
-            device_index <= std::numeric_limits<int8_t>::max(),
+        std::in_range<int8_t>(device_index),
         "Device index is out of range of return type int8_t, please use get_device_index() instead.");
     return static_cast<int8_t>(device_index);
   }
