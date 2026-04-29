@@ -126,5 +126,15 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                 for if_out, else_out in zip(
                     pytree.tree_iter(outs[0]), pytree.tree_iter(outs[1])
                 ):
+                    if (
+                        not (
+                            isinstance(if_out, torch.Tensor)
+                            and isinstance(else_out, torch.Tensor)
+                        )
+                        and if_out != else_out
+                    ):
+                        raise ValueError(
+                            f"For cudagraph captured torch.cond(), the returned constants of both branches must be equal. Got true_fn tried to return {if_out} and while false_fn tried to return {else_out}"
+                        )
                     if_out.copy_(else_out)
     return outs[0]

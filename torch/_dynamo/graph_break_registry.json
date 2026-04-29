@@ -5154,6 +5154,14 @@
     {
       "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
       "Context": "str(ret_val)",
+      "Explanation": "Constants returned from branches must be ints or None.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
+      "Context": "str(ret_val)",
       "Explanation": "Constants returned from branches must be ints.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "

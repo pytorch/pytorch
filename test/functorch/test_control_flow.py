@@ -5670,6 +5670,70 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_cond_traced_no_outputs_cudagraphs(self):
+        state = torch.zeros(4, device="cuda")
+
+        def true_fn():
+            state.add_(1.0)
+
+        def false_fn():
+            state.add_(-1.0)
+
+        predicate = torch.tensor(True, device="cuda")
+
+        with torch.no_grad():
+            # Warmup runs both branches and then executes the cond, so
+            # state is incremented once (by the true branch).
+            with ControlFlowOpWarmupDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+            torch.cuda.synchronize()
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            # Capture records the conditional node but does not execute
+            # GPU code, so state is unchanged.
+            g = torch.cuda.CUDAGraph()
+            with (
+                torch.cuda.graph(g),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.cond(predicate, true_fn, false_fn, [])
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+            g.replay()
+            torch.cuda.synchronize()
+            # Replay with pred=True runs the true branch: state += 1.
+            self.assertEqual(state, 2 * torch.ones(4, device="cuda"))
+
+            predicate.fill_(False)
+            g.replay()
+            torch.cuda.synchronize()
+            # Replay with pred=False runs the false branch: state -= 1.
+            self.assertEqual(state, torch.ones(4, device="cuda"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_unequal_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return 1
+
+        def false_fn():
+            return 2
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "returned constants of both branches must be equal",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
