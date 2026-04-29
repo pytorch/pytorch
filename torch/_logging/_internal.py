@@ -1181,6 +1181,10 @@ def _init_logs(log_file_name=None) -> None:
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
+    # Override isEnabledFor so that logging.disable() cannot suppress trace
+    # events.  When TORCH_TRACE is set we always want output regardless of
+    # the global disable threshold.
+    trace_log.isEnabledFor = lambda level: level >= trace_log.level
     trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
