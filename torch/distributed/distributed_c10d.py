@@ -5597,7 +5597,6 @@ def split_group(
             f"Global rank {global_rank} is not part of the parent group {parent_pg}"
         )
 
-    device_type = torch._C._get_accelerator().type
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
     if torch.accelerator.is_available():

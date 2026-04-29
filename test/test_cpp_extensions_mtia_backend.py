@@ -140,6 +140,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
         with torch.mtia.device(device_1):
             self.assertTrue(torch.mtia.current_device() == device_1.index)
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/181842")
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_default_generators(self):
         # Trigger lazy initialization first by calling current_stream()
