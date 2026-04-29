@@ -530,8 +530,16 @@ include_patterns = [
 exclude_patterns = [
     # Vendored code
     'third_party/concurrentqueue/**',
-    # Remaining burn-down
-    'torch/csrc/jit/**',
+    # Dead TorchScript code (not on torch.ops codepath)
+    'torch/csrc/jit/api/**',
+    'torch/csrc/jit/backends/**',
+    'torch/csrc/jit/frontend/**',
+    'torch/csrc/jit/ir/**',
+    'torch/csrc/jit/mobile/**',
+    'torch/csrc/jit/passes/**',
+    'torch/csrc/jit/serialization/**',
+    'torch/csrc/jit/tensorexpr/**',
+    'torch/csrc/jit/testing/**',
 ]
 command = [
     'python3',

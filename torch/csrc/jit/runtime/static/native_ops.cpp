@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+// @allow-raw-throw
 
 namespace {
 constexpr auto createBorrowedIValue =

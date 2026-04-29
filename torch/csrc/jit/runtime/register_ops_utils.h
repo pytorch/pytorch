@@ -32,6 +32,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 namespace torch::jit {
 constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {

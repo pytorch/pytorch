@@ -9,6 +9,7 @@
 
 #include <fmt/format.h>
 #include <stdexcept>
+// @allow-raw-throw
 
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;

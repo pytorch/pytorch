@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+// @allow-raw-throw
 
 namespace py = pybind11;
 

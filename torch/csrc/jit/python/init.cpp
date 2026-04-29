@@ -121,6 +121,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+// @allow-raw-throw
 
 namespace torch::jit {
 

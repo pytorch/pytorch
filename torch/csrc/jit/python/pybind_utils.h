@@ -39,6 +39,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+// @allow-raw-throw
 
 // The visibility attribute is to avoid a warning about storing a field in the
 // struct that has a different visibility (from pybind) than the struct.

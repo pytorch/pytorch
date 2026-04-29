@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
+// @allow-raw-throw
 
 namespace torch::jit {
 

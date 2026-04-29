@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
+// @allow-raw-throw
 
 namespace torch::jit {
 namespace {

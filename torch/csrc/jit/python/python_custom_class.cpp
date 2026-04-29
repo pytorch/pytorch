@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
 
 #include <fmt/format.h>
+// @allow-raw-throw
 
 namespace torch::jit {
 

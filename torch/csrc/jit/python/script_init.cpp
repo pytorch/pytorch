@@ -74,6 +74,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+// @allow-raw-throw
 
 namespace torch::jit {
 

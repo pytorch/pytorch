@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/structseq.h>
 
 #include <torch/csrc/autograd/grad_mode.h>
+// @allow-raw-throw
 
 namespace torch::jit::python {
 

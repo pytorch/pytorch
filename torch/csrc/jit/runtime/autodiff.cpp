@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <algorithm>
 #include <memory>
+// @allow-raw-throw
 
 namespace torch::jit {
 

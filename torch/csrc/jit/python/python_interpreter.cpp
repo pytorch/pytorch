@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+// @allow-raw-throw
 
 namespace py = pybind11;
 

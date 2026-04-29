@@ -17,6 +17,7 @@
 #include <limits>
 #include <optional>
 #include <utility>
+// @allow-raw-throw
 
 namespace torch::jit {
 

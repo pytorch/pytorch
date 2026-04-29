@@ -12,6 +12,7 @@
 #include <c10/util/irange.h>
 
 #include <sstream>
+// @allow-raw-throw
 
 using namespace torch::autograd;
 using namespace torch::jit;

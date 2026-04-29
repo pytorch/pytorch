@@ -13,6 +13,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+// @allow-raw-throw
 
 namespace torch::jit {
 

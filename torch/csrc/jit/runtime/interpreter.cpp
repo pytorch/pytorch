@@ -25,6 +25,7 @@
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
+// @allow-raw-throw
 using torch::distributed::autograd::DistAutogradContainer;
 #endif
 

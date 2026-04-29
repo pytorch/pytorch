@@ -14,6 +14,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <sstream>
+// @allow-raw-throw
 
 namespace torch::jit {
 
