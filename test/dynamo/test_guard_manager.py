@@ -336,22 +336,101 @@ user_stack=None)
 
     def test_dynamic_indices_guard(self):
         root = RootGuardManager()
-        guard1 = guards.DYNAMIC_INDICES(root, set(), ["x.size(0) == y.size(0)"], None)
-        guard2 = guards.DYNAMIC_INDICES(
-            root, set({0, 1}), ["x.size(0) == y.size(0)"], None
+
+        # Test with expected attr: _dynamo_dynamic_indices = {0, 1}
+        # and absent attr: _dynamo_static_indices
+        expected_attrs = {"_dynamo_dynamic_indices": {0, 1}}
+        absent_attrs = ["_dynamo_static_indices"]
+        dependent_attrs = {}  # type: ignore[var-annotated]
+        guard = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs,
+            ["dimension marking guard"],
+            None,
         )
 
+        # No attr at all -> pass (unspecified = don't care)
         x = torch.randn(4)
-        self.assertTrue(guard1(x))
-        self.assertTrue(guard2(x))
+        self.assertTrue(guard(x))
 
-        x._dynamo_dynamic_indices = set({0})
-        self.assertFalse(guard1(x))
-        self.assertTrue(guard2(x))
+        # Exact match -> pass
+        x._dynamo_dynamic_indices = {0, 1}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
 
-        x._dynamo_dynamic_indices = set({2})
-        self.assertFalse(guard1(x))
-        self.assertFalse(guard2(x))
+        # Subset -> pass (runtime markings are a subset of compiled)
+        x._dynamo_dynamic_indices = {0}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
+
+        # Different set -> fail
+        x._dynamo_dynamic_indices = {2}
+        x._has_dynamo_dim_marking = True
+        self.assertFalse(guard(x))
+
+        # Absent attr present -> fail
+        x._dynamo_dynamic_indices = {0, 1}
+        x._dynamo_static_indices = {0}
+        x._has_dynamo_dim_marking = True
+        self.assertFalse(guard(x))
+
+    def test_dimension_marking_guard_dependent_attrs(self):
+        root = RootGuardManager()
+
+        # Test dependent_attrs: _dynamo_shape_ids is checked only when
+        # _dynamo_unbacked_indices (gate) is present.
+        expected_attrs = {"_dynamo_unbacked_indices": {0}}
+        absent_attrs = []  # type: ignore[var-annotated]
+        dependent_attrs = {
+            "_dynamo_shape_ids": ({0: "batch"}, "_dynamo_unbacked_indices"),
+        }
+        guard = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs,
+            ["dimension marking guard dependent"],
+            None,
+        )
+
+        # No gate attr -> pass (don't care)
+        x = torch.randn(4)
+        self.assertTrue(guard(x))
+
+        # Gate present + dependent attr matches -> pass
+        x._dynamo_unbacked_indices = {0}
+        x._dynamo_shape_ids = {0: "batch"}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
+
+        # Gate present + dependent attr mismatch -> fail
+        x._dynamo_shape_ids = {0: "other"}
+        self.assertFalse(guard(x))
+
+        # Gate present + dependent attr absent + expected non-None -> fail
+        del x._dynamo_shape_ids
+        self.assertFalse(guard(x))
+
+        # Test with expected=None for dependent attr (compile-time also absent)
+        dependent_attrs_none = {
+            "_dynamo_shape_ids": (None, "_dynamo_unbacked_indices"),
+        }
+        guard2 = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs_none,
+            ["dimension marking guard dependent none"],
+            None,
+        )
+
+        # Gate present + dependent attr absent + expected None -> pass
+        y = torch.randn(4)
+        y._dynamo_unbacked_indices = {0}
+        y._has_dynamo_dim_marking = True
+        self.assertTrue(guard2(y))
 
     def test_tensor_match_guard(self):
         guard_manager = RootGuardManager()
@@ -1067,8 +1146,7 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
         def hook(guard_wrapper, f_locals, builder):
             guard_str = str(guard_wrapper)
-            # One for tensor and one for y
-            self.assertEqual(guard_str.count("NO_HASATTR"), 2)
+            self.assertEqual(guard_str.count("NO_HASATTR"), 1)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):

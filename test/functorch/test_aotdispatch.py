@@ -4577,9 +4577,9 @@ def forward(self, tangents_1):
         x = torch.randn(10, 10, requires_grad=use_autograd)
         y = torch.randn(10, 10, requires_grad=use_autograd)
         out = fn(x, y)
-        self.assertFalse(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(out, "_dynamo_propagated_dynamic_indices"))
         out2 = fn2(out)
-        self.assertFalse(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(out2, "_dynamo_propagated_dynamic_indices"))
         self.assertEqual(counters["aot_autograd"]["total"], 2)
         counters.clear()
 
@@ -4587,9 +4587,9 @@ def forward(self, tangents_1):
         x = torch.randn(20, 20)
         y = torch.randn(20, 20)
         out = fn(x, y)
-        self.assertTrue(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        self.assertTrue(hasattr(out, "_dynamo_propagated_dynamic_indices"))
         out2 = fn2(out)
-        self.assertTrue(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertTrue(hasattr(out2, "_dynamo_propagated_dynamic_indices"))
         self.assertEqual(counters["aot_autograd"]["total"], 2)
         counters.clear()
         torch._dynamo.reset()
@@ -4607,9 +4607,9 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4617,9 +4617,9 @@ def forward(self, tangents_1):
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4699,9 +4699,9 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4709,9 +4709,9 @@ def forward(self, tangents_1):
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
