@@ -30,10 +30,11 @@ https://dev-discuss.pytorch.org/t/backed-to-unbacked-from-guardable-to-guardless
 """
 
 import enum
+from collections.abc import Iterator
 from typing import Any, ClassVar
 
 
-__all__ = ["IntSpecType", "IntSpec"]
+__all__ = ["IntSpecType", "IntSpec", "TensorSpec"]
 
 
 class IntSpecType(enum.Enum):
@@ -291,3 +292,75 @@ class IntSpec:
             elif val is not None:
                 parts.append(f"{slot[1:]}={val}")
         return f"IntSpec({', '.join(parts)})"
+
+
+class TensorSpec:
+    """Per-dimension shape specification for a tensor.
+
+    A list-like container of ``IntSpec | None`` with length equal to the
+    tensor's dim. ``None`` entries inherit the default dynamism policy from
+    the compile context.
+
+    Construct from any of:
+
+    - ``int`` — number of dims; all entries start as ``None``.
+    - ``list`` / ``tuple`` of ``IntSpec | None`` — dim is inferred from
+      length, entries used as-is.
+    - ``dict[int, IntSpec | None]`` — sparse per-dim spec; dim is inferred
+      from ``max(keys) + 1``. Empty dict rejected.
+
+    Example::
+        TensorSpec(3)  # rank 3, all None
+        TensorSpec([IntSpec.backed("batch"), None])  # rank 2, dim 0 backed
+        TensorSpec({0: IntSpec.backed("batch")})  # rank 1, dim 0 backed
+    """
+
+    def __init__(
+        self,
+        arg: int
+        | list[IntSpec | None]
+        | tuple[IntSpec | None, ...]
+        | dict[int, IntSpec | None],
+    ) -> None:
+        if isinstance(arg, int):
+            self._dim = arg
+            self._specs: list[IntSpec | None] = [None] * arg
+        elif isinstance(arg, (list, tuple)):
+            self._dim = len(arg)
+            self._specs = list(arg)
+        elif isinstance(arg, dict):
+            self._dim = max(arg.keys()) + 1
+            self._specs = [None] * self._dim
+            for k, v in arg.items():
+                self._specs[k] = v
+        else:
+            raise TypeError(
+                f"TensorSpec expects int / list / tuple / dict, "
+                f"got {type(arg).__name__}"
+            )
+
+    def dim(self, index: int, spec: IntSpec) -> "TensorSpec":
+        """Set the spec at ``index`` and return ``self`` for chaining."""
+        self._specs[index] = spec
+        return self
+
+    def __getitem__(self, index: int) -> IntSpec | None:
+        return self._specs[index]
+
+    def __setitem__(self, index: int, spec: IntSpec | None) -> None:
+        self._specs[index] = spec
+
+    def __len__(self) -> int:
+        return self._dim
+
+    def __iter__(self) -> Iterator[IntSpec | None]:
+        return iter(self._specs)
+
+    def __repr__(self) -> str:
+        entries = ", ".join(repr(spec) for spec in self._specs)
+        return f"TensorSpec([{entries}])"
+
+    # No ``__eq__`` / ``__hash__``: matches :class:`IntSpec`'s design — specs
+    # are immutable compile-time inputs compared via ``repr()`` when needed.
+    # Value-based equality would force cache keys to drift with object
+    # identity and conflict with the AOT-snapshot invariant.
