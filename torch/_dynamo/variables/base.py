@@ -725,8 +725,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
-        elif name == "__neg__" and not args and not kwargs:
-            return self.nb_negative_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (

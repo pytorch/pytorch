@@ -5,8 +5,8 @@ import operator
 
 import torch
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import make_dynamo_test
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbNegativeTests(TestCase):
@@ -435,34 +435,6 @@ class NbNegativeTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -5)
-
-    def test_user_defined_staticmethod_neg(self):
-        class StaticNeg:
-            @staticmethod
-            def __neg__():
-                return 99
-
-        obj = StaticNeg()
-
-        def fn(x):
-            return -obj
-
-        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, 99)
-
-    def test_user_defined_classmethod_neg(self):
-        class ClassNeg:
-            @classmethod
-            def __neg__(cls):
-                return cls.__name__
-
-        obj = ClassNeg()
-
-        def fn(x):
-            return -obj
-
-        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, "ClassNeg")
 
     # --- nn.Module with __neg__ ---
 
