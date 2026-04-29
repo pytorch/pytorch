@@ -945,7 +945,7 @@ class CacheabilityValidator:
         from torch._inductor.compiler_bisector import CompilerBisector
 
         if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
+            log.debug("don't cache graph when bisect enabled")
             self.bypass("compiler bisector enabled")
 
     def _check_shape_env(self) -> None:

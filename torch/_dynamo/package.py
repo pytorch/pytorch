@@ -201,7 +201,7 @@ class _DynamoCodeCacheEntry:
          multiple function objects pointing to the same code such as recursive functions.
       4. A list of guarded code that eval frame dispatches to.
       5. A list of imported module objects unioned from all compiled branches.
-      6. A list of "backends" (compiled fx graph) unioned from all compield branches.
+      6. A list of "backends" (compiled fx graph) unioned from all compiled branches.
       7. A string path used to access the original code object users defined.
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.

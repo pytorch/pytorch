@@ -327,7 +327,7 @@ class NodeSplitGetter:
                 continue
 
             # if we can't split the pw ranges into a (pw, red) split,
-            # dont add as a split option, but do make sure we check that this size
+            # don't add as a split option, but do make sure we check that this size
             # is splittable
             maybe_splits = get_pw_red_splits(
                 n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
