@@ -10428,6 +10428,205 @@ class TestSDPA(TestCaseMPS):
 
             self.assertEqual(y_cpu, y_mps)
 
+    def _prefill_qkv(self, B, NH_q, NH_kv, qL, kL, HD, layout, dtype, device="mps"):
+        if layout == "contiguous":
+            q = torch.randn(B, NH_q, qL, HD, dtype=dtype, device=device)
+            k = torch.randn(B, NH_kv, kL, HD, dtype=dtype, device=device)
+            v = torch.randn(B, NH_kv, kL, HD, dtype=dtype, device=device)
+        elif layout == "transpose_seq_head":
+            q = torch.randn(B, qL, NH_q, HD, dtype=dtype, device=device).transpose(1, 2)
+            k = torch.randn(B, kL, NH_kv, HD, dtype=dtype, device=device).transpose(1, 2)
+            v = torch.randn(B, kL, NH_kv, HD, dtype=dtype, device=device).transpose(1, 2)
+        elif layout == "mT":
+            q = torch.randn(B, NH_q, HD, qL, dtype=dtype, device=device).mT
+            k = torch.randn(B, NH_kv, HD, kL, dtype=dtype, device=device).mT
+            v = torch.randn(B, NH_kv, HD, kL, dtype=dtype, device=device).mT
+        elif layout == "sliced_seq":
+            q_full = torch.randn(B, NH_q, qL * 2 + 3, HD, dtype=dtype, device=device)
+            k_full = torch.randn(B, NH_kv, kL * 2 + 3, HD, dtype=dtype, device=device)
+            v_full = torch.randn(B, NH_kv, kL * 2 + 3, HD, dtype=dtype, device=device)
+            q = q_full[:, :, 1:qL + 1, :]
+            k = k_full[:, :, 2:kL + 2, :]
+            v = v_full[:, :, 3:kL + 3, :]
+        elif layout == "sliced_head":
+            q_full = torch.randn(B, NH_q, qL, HD * 2, dtype=dtype, device=device)
+            k_full = torch.randn(B, NH_kv, kL, HD * 2, dtype=dtype, device=device)
+            v_full = torch.randn(B, NH_kv, kL, HD * 2, dtype=dtype, device=device)
+            q = q_full[..., :HD]
+            k = k_full[..., :HD]
+            v = v_full[..., :HD]
+        elif layout == "permute_batch_head":
+            q = torch.randn(NH_q, B, qL, HD, dtype=dtype, device=device).permute(1, 0, 2, 3)
+            k = torch.randn(NH_kv, B, kL, HD, dtype=dtype, device=device).permute(1, 0, 2, 3)
+            v = torch.randn(NH_kv, B, kL, HD, dtype=dtype, device=device).permute(1, 0, 2, 3)
+        else:
+            raise ValueError(f"Unknown layout: {layout}")
+        return q, k, v
+
+    def _run_prefill_test(self, q, k, v, attn_mask=None, is_causal=False, tol=None):
+        if tol is None:
+            if q.dtype == torch.float32:
+                tol = 0.01
+            elif q.dtype == torch.float16:
+                tol = 0.02
+            else:
+                tol = 0.05
+        enable_gqa = q.shape[-3] != k.shape[-3]
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_mask, dropout_p=0.0,
+                is_causal=is_causal, enable_gqa=enable_gqa,
+            )
+        cpu_mask = attn_mask.cpu() if attn_mask is not None else None
+        y_ref = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(),
+            attn_mask=cpu_mask, dropout_p=0.0,
+            is_causal=is_causal, enable_gqa=enable_gqa,
+        )
+        self._compare_tensors(y.cpu(), y_ref, tol=tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [32, 64, 72, 80, 96, 128, 256])
+    @parametrize("variant", ["plain", "causal", "bool_mask", "float_mask"])
+    def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant):
+        torch.manual_seed(1729)
+        B, NH, qL, kL = 2, 4, 16, 32
+        q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
+        is_causal = False
+        attn_mask = None
+        if variant == "causal":
+            is_causal = True
+        elif variant == "bool_mask":
+            attn_mask = torch.ones(B, NH, qL, kL, dtype=torch.bool, device="mps")
+            attn_mask[..., kL // 2:] = False
+        elif variant == "float_mask":
+            attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            attn_mask[..., kL // 2:] = -1e4
+        self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [64, 128])
+    @parametrize(
+        "layout",
+        ["contiguous", "transpose_seq_head", "mT", "sliced_seq", "sliced_head", "permute_batch_head"],
+    )
+    @parametrize("is_causal", [False, True])
+    def test_prefill_attention_layouts(self, dtype, head_dim, layout, is_causal):
+        torch.manual_seed(1729)
+        q, k, v = self._prefill_qkv(
+            B=2, NH_q=4, NH_kv=4, qL=16, kL=32, HD=head_dim, layout=layout, dtype=dtype,
+        )
+        self._run_prefill_test(q, k, v, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    def test_prefill_attention_mixed_layouts(self, dtype):
+        torch.manual_seed(1729)
+        B, NH, qL, kL, HD = 2, 4, 16, 32, 64
+        q = torch.randn(B, qL, NH, HD, dtype=dtype, device="mps").transpose(1, 2)
+        k = torch.randn(NH, B, kL, HD, dtype=dtype, device="mps").permute(1, 0, 2, 3)
+        v_full = torch.randn(B, NH, kL * 2 + 3, HD, dtype=dtype, device="mps")
+        v = v_full[:, :, 1:kL + 1, :]
+        self._run_prefill_test(q, k, v)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("head_dim", [64, 128])
+    @parametrize("mask_layout", ["broadcast_head", "broadcast_batch", "sliced"])
+    def test_prefill_attention_mask_layouts(self, dtype, head_dim, mask_layout):
+        torch.manual_seed(1729)
+        B, NH, qL, kL = 2, 4, 16, 32
+        q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
+        if mask_layout == "broadcast_head":
+            mask = torch.ones(B, 1, qL, kL, dtype=torch.bool, device="mps")
+            mask[..., kL // 2:] = False
+        elif mask_layout == "broadcast_batch":
+            mask = torch.ones(1, NH, qL, kL, dtype=torch.bool, device="mps")
+            mask[..., kL // 2:] = False
+        elif mask_layout == "sliced":
+            mask_full = torch.zeros(B, NH, qL, kL * 2 + 1, dtype=dtype, device="mps")
+            mask_full[..., 1 + kL // 2:1 + kL] = -1e4
+            mask = mask_full[..., 1:kL + 1]
+        else:
+            raise ValueError(f"Unknown mask_layout: {mask_layout}")
+        self._run_prefill_test(q, k, v, attn_mask=mask)
+
+    @parametrize("dtype", [torch.float32])
+    @parametrize("head_dim", [64, 128, 256])
+    @parametrize(
+        "qL,kL",
+        [(9, 1), (9, 7), (15, 17), (33, 31), (17, 100), (64, 64), (33, 65)],
+    )
+    @parametrize("is_causal", [False, True])
+    def test_prefill_attention_partial_blocks(self, dtype, head_dim, qL, kL, is_causal):
+        torch.manual_seed(1729)
+        q, k, v = self._prefill_qkv(
+            B=1, NH_q=2, NH_kv=2, qL=qL, kL=kL, HD=head_dim,
+            layout="contiguous", dtype=dtype,
+        )
+        self._run_prefill_test(q, k, v, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("gqa_factor", [2, 4, 8])
+    @parametrize("is_causal", [False, True])
+    def test_prefill_attention_gqa(self, dtype, gqa_factor, is_causal):
+        torch.manual_seed(1729)
+        NH_kv = 2
+        NH_q = NH_kv * gqa_factor
+        q, k, v = self._prefill_qkv(
+            B=2, NH_q=NH_q, NH_kv=NH_kv, qL=16, kL=32, HD=64,
+            layout="contiguous", dtype=dtype,
+        )
+        self._run_prefill_test(q, k, v, is_causal=is_causal)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("head_dim", [64, 128])
+    @parametrize("is_causal", [False, True])
+    def test_prefill_attention_long_kl(self, dtype, head_dim, is_causal):
+        torch.manual_seed(1729)
+        q, k, v = self._prefill_qkv(
+            B=1, NH_q=4, NH_kv=4, qL=32, kL=1024, HD=head_dim,
+            layout="contiguous", dtype=dtype,
+        )
+        tol = 0.02 if dtype == torch.float32 else 0.05
+        self._run_prefill_test(q, k, v, is_causal=is_causal, tol=tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("head_dim", [64, 128])
+    def test_prefill_attention_multi_q_blocks(self, dtype, head_dim):
+        torch.manual_seed(1729)
+        q, k, v = self._prefill_qkv(
+            B=1, NH_q=2, NH_kv=2, qL=128, kL=128, HD=head_dim,
+            layout="contiguous", dtype=dtype,
+        )
+        self._run_prefill_test(q, k, v)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [64, 128])
+    @parametrize(
+        "variant",
+        ["bool_row_false", "float_row_neg_inf", "kv_padding", "causal_with_inf"],
+    )
+    def test_prefill_attention_fully_masked_rows(self, dtype, head_dim, variant):
+        # CPU returns 0 for query rows where every key is masked
+        torch.manual_seed(1729)
+        B, NH, qL, kL = 2, 2, 16, 32
+        q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
+        attn_mask = None
+        is_causal = False
+        if variant == "bool_row_false":
+            attn_mask = torch.ones(B, NH, qL, kL, dtype=torch.bool, device="mps")
+            attn_mask[..., 0, :] = False
+        elif variant == "float_row_neg_inf":
+            attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            attn_mask[..., 0, :] = float("-inf")
+        elif variant == "kv_padding":
+            attn_mask = torch.ones(B, NH, qL, kL, dtype=torch.bool, device="mps")
+            attn_mask[1, :, qL // 2:, :] = False
+        elif variant == "causal_with_inf":
+            attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            attn_mask[..., 0, 0] = float("-inf")
+            is_causal = True
+        self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
 
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
