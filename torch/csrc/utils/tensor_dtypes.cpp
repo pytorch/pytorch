@@ -19,7 +19,9 @@ void initializeDtypes() {
 #undef DEFINE_SCALAR_TYPE
 
   for (at::ScalarType scalarType : all_scalar_types) {
-    auto [primary_name, legacy_name] = c10::getDtypeNames(scalarType);
+    auto [primary_view, legacy_view] = c10::getDtypeNames(scalarType);
+    std::string primary_name(primary_view);
+    std::string legacy_name(legacy_view);
     THPObjectPtr dtype(THPDtype_New(scalarType, primary_name));
     torch::registerDtypeObject((THPDtype*)dtype.get(), scalarType);
     if (PyModule_AddObjectRef(
