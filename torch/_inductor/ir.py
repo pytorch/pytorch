@@ -5663,6 +5663,21 @@ class TritonTemplateCallerBase(ChoiceCaller):
         raise NotImplementedError
 
 
+_NVUniversalGemmCallerClass: type | None = None
+
+
+def _is_output_plannable_nvgemm_choice(choice: ChoiceCaller) -> bool:
+    global _NVUniversalGemmCallerClass
+    if _NVUniversalGemmCallerClass is None:
+        try:
+            from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+            _NVUniversalGemmCallerClass = NVUniversalGemmCaller
+        except ImportError:
+            return False
+    return isinstance(choice, _NVUniversalGemmCallerClass)
+
+
 class MultiTemplateBuffer(TritonTemplateBuffer):
     """
     Represents a Buffer with multiple backing implementation choices.
@@ -5692,6 +5707,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
+            or _is_output_plannable_nvgemm_choice(choice)
             or (
                 isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller)
                 and choice.has_out_variant
@@ -5699,12 +5715,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             for choice in unfiltered_choices
         )
         self._make_kernel_renders: dict[int | None, Any] = {}
+        self._render_kind: str | None = None
+        # Tracks the bound caller so the fusion-benchmark loop's per-iteration
+        # swap is not silently overridden by re-selection from choice_timings().
+        self._render_caller: ChoiceCaller | None = None
 
     @property
     def output_plannable(self) -> bool:
-        """
-        Are all possible choices TritonTemplates or Extern Kernels with out variants
-        """
+        """True when all choices are TritonTemplates, NVUniversalGemmCallers, or Extern Kernels with out variants."""
         return self._output_plannable
 
     @property
@@ -5726,11 +5744,17 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.layout == caller.layout
 
         render = self.make_kernel_render
+        prev_kind = self._render_kind
+        prev_caller = self._render_caller
         self.make_kernel_render = caller.get_make_kernel_render()
+        self._render_kind = "triton"
+        self._render_caller = caller
         try:
             yield
         finally:
             self.make_kernel_render = render
+            self._render_kind = prev_kind
+            self._render_caller = prev_caller
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         assert isinstance(
@@ -5739,6 +5763,38 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_size() == caller.layout.size
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
+        self._render_kind = "triton"
+        self._render_caller = caller
+
+    @contextlib.contextmanager
+    def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        assert isinstance(caller, NVUniversalGemmCaller), type(caller)
+        assert self.layout == caller.layout
+
+        render = self.make_kernel_render
+        prev_kind = self._render_kind
+        prev_caller = self._render_caller
+        self.make_kernel_render = caller.get_make_kernel_render()
+        self._render_kind = "nvgemm"
+        self._render_caller = caller
+        try:
+            yield
+        finally:
+            self.make_kernel_render = render
+            self._render_kind = prev_kind
+            self._render_caller = prev_caller
+
+    def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        assert isinstance(caller, NVUniversalGemmCaller), type(caller)
+        assert self.get_size() == caller.layout.size
+        assert self.get_stride() == caller.layout.stride
+        self.make_kernel_render = caller.get_make_kernel_render()
+        self._render_kind = "nvgemm"
+        self._render_caller = caller
 
     def get_min_choice(
         self, hint_override: int | None = None
@@ -5756,6 +5812,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
         # Set the default to be the one without hint override
         self.make_kernel_render = self._make_kernel_renders[None]
+        self._render_kind = "triton"
+        self._render_caller = callers[None]
 
 
 class CUTLASSTemplateBuffer(TemplateBuffer):
@@ -5860,6 +5918,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         scale_type_b: Any | None = None,
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
+        supports_epilogue_fusion: bool = False,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -5872,6 +5931,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.scale_type_b = scale_type_b
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5889,7 +5949,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         return self.outputs
 
     def _make_kernel_render(
-        self, out_node: Any, hint_override: int | None = None
+        self,
+        out_node: Any,
+        hint_override: int | None = None,
+        epilogue_fn_code: str | None = None,
+        epilogue_reads: list[str] | None = None,
+        epilogue_writes: list[str] | None = None,
+        epilogue_var_renames: dict[str, Any] | None = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -5898,6 +5964,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
+        if epilogue_fn_code is not None:
+            assert epilogue_var_renames is not None, (
+                "epilogue_fn_code requires epilogue_var_renames"
+            )
+
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -5925,6 +5996,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
+            epilogue_fn_code=epilogue_fn_code,
+            epilogue_reads=epilogue_reads,
+            epilogue_writes=epilogue_writes,
+            epilogue_var_renames=epilogue_var_renames,
         )
 
         def render():
