@@ -81,6 +81,9 @@ std::string precision2str(Float32Precision prec) {
       return "tf32";
     case Float32Precision::BF16:
       return "bf16";
+    case Float32Precision::DEFAULT:
+      // DEFAULT is an internal sentinel and should be resolved before reaching here
+      TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
@@ -391,6 +394,25 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
+
+  // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
+  // default". It is only used as the initial state for CUDA conv/rnn.
+  if (precision == Float32Precision::DEFAULT) {
+    key.second = Float32Op::ALL;
+    Float32Precision parent = fp32_precision.find(key)->second;
+    if (parent == Float32Precision::NONE || parent == Float32Precision::DEFAULT) {
+      key.first = Float32Backend::GENERIC;
+      parent = fp32_precision.find(key)->second;
+    }
+    if (parent != Float32Precision::NONE && parent != Float32Precision::DEFAULT) {
+      // A parent explicitly overrides; apply it (cuda does not support bf16).
+      return (backend == Float32Backend::CUDA && parent == Float32Precision::BF16)
+          ? Float32Precision::NONE
+          : parent;
+    }
+    return Float32Precision::TF32;
+  }
+
   if (precision == Float32Precision::NONE) {
     key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
@@ -445,6 +467,9 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
+  TORCH_CHECK(
+      p != Float32Precision::DEFAULT,
+      "DEFAULT precision is internal and cannot be set explicitly");
 
   it->second = p;
 }
