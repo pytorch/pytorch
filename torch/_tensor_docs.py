@@ -6944,7 +6944,7 @@ add_docstr_all(
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor.
 
 Example::
 
