@@ -340,6 +340,13 @@ class DeviceTypeTestBase(TestCase):
     # in the future.
     op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
+    # An optional mechanism to limit which ops generate test variants.
+    # When set, only ops whose full_name is in this collection will generate tests.
+    # This is useful for less mature backends that only implement a few operators.
+    # Keys are OpInfo.full_name (e.g. "add", "mul", "linalg.norm").
+    # If None (default), all ops in the @ops decorator's op_list generate variants.
+    op_allowlist = None  # type: Optional[Collection[str]]
+
     # An optional skip mechanism built upon instantiate_device_type_tests(),
     # designed to facilitate skipping either an entire class or specific test cases
     # within a class.
@@ -408,6 +415,23 @@ class DeviceTypeTestBase(TestCase):
         if test_exclusions is not None and test_class_name in test_exclusions:
             return test_exclusions[test_class_name]
         return []
+
+    @classmethod
+    def _apply_op_allowlist(cls, ops):
+        """Filters ops.op_list to only include ops declared in op_allowlist.
+
+        If op_allowlist is None (default), no filtering is applied.
+        If op_allowlist is set, only ops whose full_name is in the collection
+        will generate test variants.
+
+        Args:
+            ops: The ops decorator instance whose op_list will be filtered.
+        """
+        if cls.op_allowlist is None:
+            return
+
+        supported_set = set(cls.op_allowlist)
+        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -1154,6 +1178,9 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        # Order matters: op_allowlist filters first, then op_overrides adds decorators
+        # This ensures op_overrides only applies to ops that passed the op_allowlist filter
+        device_cls._apply_op_allowlist(self)
         device_cls._apply_op_overrides(self)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
