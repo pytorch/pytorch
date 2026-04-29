@@ -199,6 +199,7 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
         for dep in new_deps:
             dup = new_graph.node_copy(dep, remat_input)
             dup.name = dep.name + "_recomputed"
+            dup.meta["autograd_backward"] = True
             recomputed_nodes[dep] = dup
 
         env[node] = new_graph.node_copy(node, remat_input)
