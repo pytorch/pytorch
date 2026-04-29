@@ -60,6 +60,18 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         detached_mat = mat.detach()
         self.assertFalse(detached_mat is mat)
 
+    def test_detach_inplace_inference_mode(self):
+        # Under inference_mode, autograd does not intercept detach_, so the
+        # call falls through to DTensor's dispatcher. Ensure aten.detach_ has a
+        # registered sharding strategy and propagates the input spec.
+        device_mesh = self.build_device_mesh()
+        for spec in ([Shard(0)], [Replicate()]):
+            mat = distribute_tensor(torch.randn(12, 8), device_mesh, spec)
+            with torch.inference_mode():
+                out = torch.ops.aten.detach_(mat)
+            self.assertTrue(out is mat)
+            self.assertEqual(out.placements, tuple(spec))
+
     def test_clone(self):
         device_mesh = self.build_device_mesh()
         specs = [[Replicate()], [Shard(0)]]
