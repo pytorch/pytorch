@@ -379,6 +379,7 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
+        self.cpu_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -1575,6 +1576,43 @@ class CachingAutotuner(KernelInterface):
         CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
+    def save_cpu_kernel(self, launcher):
+        """AOTI counterpart of save_gpu_kernel for CPU Triton kernels.
+
+        Captures the kernel and launcher `.so` files into
+        `CpuTritonKernelCache` for `CppWrapperCpu` to dlopen at runtime.
+        Triton CPU backend needs to emit `run_from_nativert`.
+        """
+        from torch._inductor.codecache import CpuTritonKernelCache
+
+        key = self.inductor_meta.get("kernel_name")
+        assert key is not None, "kernel_name can not be None"
+
+        compiled = launcher.bin
+        kernel_bytes = compiled.asm.get("so")
+        launcher_bytes = compiled.asm.get("launcher.so")
+        if kernel_bytes is None or launcher_bytes is None:
+            raise RuntimeError(
+                f"CPU AOTI requires a Triton CPU backend that emits a launcher "
+                f"`.so` exporting `run_from_nativert`; kernel '{key}' has "
+                f"compiled.asm keys {list(compiled.asm.keys())}."
+            )
+        kernel_symbol = (
+            compiled.metadata.name
+            if hasattr(compiled.metadata, "name")
+            else compiled.metadata["name"]
+        )
+        signature = compiled.src.signature
+
+        CpuTritonKernelCache.set(
+            key,
+            kernel_bytes=kernel_bytes,
+            launcher_bytes=launcher_bytes,
+            kernel_symbol=kernel_symbol,
+            signature=signature,
+        )
+        self.cpu_kernel_saved = True
+
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
         Coordinate descent tuning can be run with or without max-autotune.
@@ -1839,7 +1877,11 @@ class CachingAutotuner(KernelInterface):
         # autotuning entirely, this is the only call site that records the winner.
         TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
-            self.save_gpu_kernel(stream, launcher)
+            if self.device_props.type == "cpu":
+                if not self.cpu_kernel_saved:
+                    self.save_cpu_kernel(launcher)
+            else:
+                self.save_gpu_kernel(stream, launcher)
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
@@ -2621,7 +2663,10 @@ class DebugAutotuner(CachingAutotuner):
             (launcher,) = self.launchers
 
             if launcher.store_cubin:
-                self.save_gpu_kernel(stream, launcher)
+                if self.device_props.type == "cpu":
+                    self.save_cpu_kernel(launcher)
+                else:
+                    self.save_gpu_kernel(stream, launcher)
 
             if self.cached is None:
                 ms = self.bench(launcher, *args, with_profiler=self.with_profiler)
