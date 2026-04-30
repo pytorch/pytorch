@@ -274,6 +274,7 @@ case "$tag" in
     PYTHON_VERSION=3.12
     OPENBLAS=yes
     OPENBLAS_VERSION="v0.3.33"
+    platform_flag="--platform linux/riscv64" # we may be building on an x86 host with QEMU
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
@@ -330,6 +331,7 @@ fi
 docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
+       ${platform_flag:-} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \

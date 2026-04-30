@@ -77,6 +77,7 @@ jobs:
           # TODO: Re-enable me when docker pin update happens
           # pytorch-linux-jammy-py3-clang18-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14,
           pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build,
         ]
         include:
@@ -95,6 +96,10 @@ jobs:
           echo "${GITHUB_WORKSPACE}"
           sudo rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Setup QEMU
+        if: matrix.docker-image-name == 'pytorch-linux-noble-riscv64-py3.12-gcc14'
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
