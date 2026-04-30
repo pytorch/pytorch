@@ -1785,9 +1785,10 @@ class LoweringTest(MultiProcContinuousTest):
 
         @torch.library.impl(lib, "my_collective", "CUDA")
         def cuda_impl(input, reduce_op, group_name):
-            assert symm_mem.is_symm_mem_tensor(input), (
-                f"Expected input to be a symmetric memory tensor, but got {type(input)}"
-            )
+            if not symm_mem.is_symm_mem_tensor(input):
+                raise ValueError(
+                    f"Expected input to be a symmetric memory tensor, but got {type(input)}"
+                )
             return input.clone()
 
         def func(x):
