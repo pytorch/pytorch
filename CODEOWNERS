@@ -72,7 +72,11 @@ nn/qat/ @jerryzh168
 /.ci  @pytorch/pytorch-dev-infra
 
 # Docker
-/.ci/docker/ @jeffdaily
+/.ci/docker/ubuntu-rocm/ @jeffdaily
+/.ci/docker/common/install_roc*.sh @jeffdaily
+/.ci/docker/common/install_miopen.sh @jeffdaily
+/.ci/docker/common/install_amdsmi.sh @jeffdaily
+/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
