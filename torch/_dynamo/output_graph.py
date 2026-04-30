@@ -4078,6 +4078,16 @@ class SubgraphTracer(fx.Tracer):
         if proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
 
+        # Wrapper subclasses (e.g. DTensor) from dynamo-disabled regions may not
+        # have had track_produced_symints called, causing _lift_basic_symbols to
+        # hit "Source of 'sN' is None" when lifting inner tensor symbols.
+        if (
+            isinstance(example_value, torch.Tensor)
+            and is_traceable_wrapper_subclass(example_value)
+            and proxy.tracer is self.parent
+        ):
+            self.parent.track_produced_symints(example_value, proxy)
+
         example_value = proxy.node.meta["example_value"]
         type_expr = (
             type(example_value.real_obj)
