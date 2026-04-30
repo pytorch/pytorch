@@ -125,6 +125,29 @@ _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
 
+_is_cache_hit_post_compile = threading.local()
+
+
+def _in_cache_hit_post_compile() -> bool:
+    return getattr(_is_cache_hit_post_compile, "value", False)
+
+
+def _raise_if_strict_autotune_cache(filename: str | None) -> None:
+    if not _in_cache_hit_post_compile():
+        return
+    import torch._functorch.config as functorch_config
+
+    if functorch_config.strict_autotune_cache:
+        raise RuntimeError(
+            f"Autotune cache miss for kernel {filename} during "
+            f"cache hit post-compile. This means we hit the "
+            f"AOTAutograd/FxGraph cache but missed the autotune "
+            f"cache, which will cause expensive re-autotuning. "
+            f"Set torch._functorch.config.strict_autotune_cache = "
+            f"False to disable this check."
+        )
+
+
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
 
@@ -301,6 +324,7 @@ def check_autotune_cache(
             else:
                 autotune_cache_info["autotune_cache_state"] = "miss"
                 autotune_cache_info["num_configs"] = len(configs)
+                _raise_if_strict_autotune_cache(filename)
                 if inductor_meta.get("coordinate_descent_tuning"):
                     autotune_cache_info["coordesc_tuning"] = True
                     if len(configs) == 1:

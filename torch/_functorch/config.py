@@ -370,6 +370,11 @@ _test_disable_functionalization = True
 # Used for tests
 strict_autograd_cache = False
 
+# When True, error if the autograd cache (AOTAutograd or FxGraph) hits
+# but the runtime autotune cache misses. This catches the failure mode
+# where we replay cached compiled code but have to re-autotune kernels.
+strict_autotune_cache = False
+
 # Note [Recomputing collectives in the partitioner]
 # The purpose of this config is as follows:
 # - We have many passes in the compiler (min-cut partitioning, DCE, etc)

@@ -1618,7 +1618,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                         CompileEventLogger.increment_toplevel, "num_triton_bundles"
                     )
 
+        from .runtime.triton_heuristics import _is_cache_hit_post_compile
+
         try:
+            _is_cache_hit_post_compile.value = True
             artifact_path = graph.after_deserialization(constants)
 
             from .graph import GraphLowering
@@ -1631,6 +1634,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             return None, cache_info
+        finally:
+            _is_cache_hit_post_compile.value = False
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         code = graph.source_code
