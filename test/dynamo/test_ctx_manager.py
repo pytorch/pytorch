@@ -17,7 +17,10 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -241,61 +244,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast(self):
-        if not torch.cuda.is_bf16_supported():
-            raise unittest.SkipTest("requires bf16")
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
-
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    e_float16 = torch.mm(a_float32, b_float32)
-                    f_float16 = torch.mm(d_float32, e_float16)
-                return f_float16
-
-        module = MyModule()
-        real = module(torch.tensor([0.5]))
-        real_device = real.device
-        real_dtype = real.dtype
-
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
-        exported = graph(torch.tensor([0.5]))
-        self.assertEqual(exported.device, real_device)
-        self.assertEqual(exported.dtype, real_dtype)
-
-        self.assertEqual(exported.device.type, "cuda")
-        self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_amp_autocast(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
-                    c_float64 = torch.mm(a_float32, b_float32)
-                return c_float64
-
-        module = MyModule()
-        real = module(torch.tensor([0.5]))
-        real_device = real.device
-        real_dtype = real.dtype
-
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
-        exported = graph(torch.tensor([0.5]))
-        self.assertEqual(exported.device, real_device)
-        self.assertEqual(exported.dtype, real_dtype)
-
-        self.assertEqual(exported.device.type, "cuda")
-        self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.float64)
 
     def test_is_autocast_cpu_enabled(self):
         def fn(a_float32, b_float32):
@@ -545,123 +493,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_16.dtype, torch.bfloat16)
         self.assertEqual(out_32.device.type, "cpu")
         self.assertEqual(out_32.dtype, torch.float32)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast_float64(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
-
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
-                    e_float64 = torch.mm(a_float32, b_float32)
-                    f_float64 = torch.mm(d_float32, e_float64)
-                return f_float64
-
-        module = MyModule()
-        real = module(torch.tensor([0.5]))
-        real_device = real.device
-        real_dtype = real.dtype
-
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
-        exported = graph(torch.tensor([0.5]))
-        self.assertEqual(exported.device, real_device)
-        self.assertEqual(exported.dtype, real_dtype)
-
-        self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.float64)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast_device(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
-
-                with torch.autocast("cuda"):
-                    e_float64 = torch.mm(a_float32, b_float32)
-                    f_float64 = torch.mm(d_float32, e_float64)
-                return f_float64
-
-        module = MyModule()
-        real = module(torch.tensor([0.5]))
-        real_device = real.device
-        real_dtype = real.dtype
-
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
-        exported = graph(torch.tensor([0.5]))
-        self.assertEqual(exported.device, real_device)
-        self.assertEqual(exported.dtype, real_dtype)
-
-        self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.float16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast_arguments_binding(self):
-        def f1(x):
-            with torch.autocast(device_type="cuda", enabled=False):
-                x = torch.sin(x + 1)
-            return x
-
-        def f2(x):
-            with torch.autocast(device_type="cpu", enabled=False):
-                x = torch.cos(x + 1)
-            return x
-
-        x = torch.rand([2, 3])
-        ref1 = f1(x)
-        ref2 = f2(x)
-        opt_f1 = torch.compile(backend="eager")(f1)
-        opt_f2 = torch.compile(backend="eager")(f2)
-        res1 = opt_f1(x)
-        res2 = opt_f2(x)
-        self.assertTrue(same(ref1, res1))
-        self.assertTrue(same(ref2, res2))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast_decorator(self):
-        def autocast_func(orig_func):
-            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
-            def new_fwd(*args, **kwargs):
-                return orig_func(*args, **kwargs)
-
-            return new_fwd
-
-        def autocast_func_cuda(orig_func):
-            @torch.autocast(device_type="cuda", dtype=torch.float16)
-            def new_fwd(*args, **kwargs):
-                return orig_func(*args, **kwargs)
-
-            return new_fwd
-
-        def autocast_func_cpu(orig_func):
-            @torch.autocast(device_type="cpu", dtype=torch.float16)
-            def new_fwd(*args, **kwargs):
-                return orig_func(*args, **kwargs)
-
-            return new_fwd
-
-        def mm(a, b):
-            return torch.mm(a, b)
-
-        mm_float16 = autocast_func(mm)
-        mm_float16_cuda = autocast_func_cuda(mm)
-        mm_float16_cpu = autocast_func_cpu(mm)
-
-        def fn(a, b):
-            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
-
-        a_float32 = torch.rand((8, 8), device="cuda")
-        b_float32 = torch.rand((8, 8), device="cuda")
-
-        ref = fn(a_float32, b_float32)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        res = opt_fn(a_float32, b_float32)
-        self.assertTrue(same(ref, res))
-        self.assertTrue(res[0].dtype == torch.float16)
-        self.assertTrue(res[1].dtype == torch.float16)
 
     def test__enter__exit_autocast(self):
         def f(x, y):
@@ -2311,6 +2142,178 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(torch._dynamo.exc.Unsupported, fn, args, kwargs)
             self.assertEqual(torch.cuda.current_device(), initial_dev)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast(self):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("requires bf16")
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    e_float16 = torch.mm(a_float32, b_float32)
+                    f_float16 = torch.mm(d_float32, e_float16)
+                return f_float16
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.bfloat16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_amp_autocast(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_float64(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_device(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast("cuda"):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_arguments_binding(self):
+        def f1(x):
+            with torch.autocast(device_type="cuda", enabled=False):
+                x = torch.sin(x + 1)
+            return x
+
+        def f2(x):
+            with torch.autocast(device_type="cpu", enabled=False):
+                x = torch.cos(x + 1)
+            return x
+
+        x = torch.rand([2, 3])
+        ref1 = f1(x)
+        ref2 = f2(x)
+        opt_f1 = torch.compile(backend="eager")(f1)
+        opt_f2 = torch.compile(backend="eager")(f2)
+        res1 = opt_f1(x)
+        res2 = opt_f2(x)
+        self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref2, res2))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_decorator(self):
+        def autocast_func(orig_func):
+            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cuda(orig_func):
+            @torch.autocast(device_type="cuda", dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cpu(orig_func):
+            @torch.autocast(device_type="cpu", dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        mm_float16 = autocast_func(mm)
+        mm_float16_cuda = autocast_func_cuda(mm)
+        mm_float16_cpu = autocast_func_cpu(mm)
+
+        def fn(a, b):
+            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
+
+        a_float32 = torch.rand((8, 8), device="cuda")
+        b_float32 = torch.rand((8, 8), device="cuda")
+
+        ref = fn(a_float32, b_float32)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(a_float32, b_float32)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(res[0].dtype == torch.float16)
+        self.assertTrue(res[1].dtype == torch.float16)
+
 
 class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
     def test_stream_context_manager1(self, device):
@@ -2671,6 +2674,184 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @onlyCUDA
+    def test_autocast_bf16(self, device):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("requires bf16")
+
+        device_type = torch.device(device).type
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device=device)
+                b_float32 = torch.rand((8, 8), device=device)
+                d_float32 = torch.rand((8, 8), device=device)
+
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    e_float16 = torch.mm(a_float32, b_float32)
+                    f_float16 = torch.mm(d_float32, e_float16)
+                return f_float16
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, device_type)
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.bfloat16)
+
+    def test_amp_autocast(self, device):
+        device_type = torch.device(device).type
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device=device)
+                b_float32 = torch.rand((8, 8), device=device)
+
+                with torch.autocast(device_type=device_type, dtype=torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, device_type)
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    def test_autocast_float64(self, device):
+        device_type = torch.device(device).type
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device=device)
+                b_float32 = torch.rand((8, 8), device=device)
+                d_float32 = torch.rand((8, 8), device=device)
+
+                with torch.autocast(device_type=device_type, dtype=torch.float64):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    def test_autocast_device_context(self, device):
+        device_type = torch.device(device).type
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device=device)
+                b_float32 = torch.rand((8, 8), device=device)
+                d_float32 = torch.rand((8, 8), device=device)
+
+                with torch.autocast(device_type):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+
+    def test_autocast_arguments_binding(self, device):
+        device_type = torch.device(device).type
+
+        def f1(x):
+            with torch.autocast(device_type=device_type, enabled=False):
+                x = torch.sin(x + 1)
+            return x
+
+        def f2(x):
+            with torch.autocast(device_type="cpu", enabled=False):
+                x = torch.cos(x + 1)
+            return x
+
+        x = torch.rand([2, 3])
+        ref1 = f1(x)
+        ref2 = f2(x)
+        opt_f1 = torch.compile(backend="eager")(f1)
+        opt_f2 = torch.compile(backend="eager")(f2)
+        res1 = opt_f1(x)
+        res2 = opt_f2(x)
+        self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref2, res2))
+
+    def test_autocast_decorator(self, device):
+        device_type = torch.device(device).type
+
+        def autocast_func(orig_func):
+            @torch.amp.autocast(device_type=device_type, dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_device(orig_func):
+            @torch.autocast(device_type=device_type, dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cpu(orig_func):
+            @torch.autocast(device_type="cpu", dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        mm_float16 = autocast_func(mm)
+        mm_float16_device = autocast_func_device(mm)
+        mm_float16_cpu = autocast_func_cpu(mm)
+
+        def fn(a, b):
+            return mm_float16(a, b), mm_float16_device(a, b), mm_float16_cpu(a, b)
+
+        a_float32 = torch.rand((8, 8), device=device)
+        b_float32 = torch.rand((8, 8), device=device)
+
+        ref = fn(a_float32, b_float32)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(a_float32, b_float32)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(res[0].dtype == torch.float16)
+        self.assertTrue(res[1].dtype == torch.float16)
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
