@@ -60,6 +60,45 @@ void* getCurrentCUDASolverDnHandleLazy();
 
 using namespace torch;
 
+namespace {
+
+struct ClearBlasWorkspaces : torch::autograd::Node {
+  explicit ClearBlasWorkspaces(c10::DeviceIndex device)
+      : Node(torch::autograd::edge_list(1)) {
+    add_input_metadata(
+        at::TensorOptions()
+            .device(c10::Device(c10::DeviceType::CUDA, device))
+            .dtype(at::kFloat),
+        c10::SymIntArrayRef(),
+        /* is_tensor_subclass */ false,
+        /* is_nested */ false,
+        /* grad_dtype */ at::kFloat);
+  }
+
+  torch::autograd::variable_list apply(
+      torch::autograd::variable_list&& /* inputs */) override {
+    at::cuda::clearCublasWorkspaces();
+    // Keep a non-empty output list to avoid leaf-stream post-processing for
+    // this synthetic node. The corresponding next edge is intentionally empty.
+    return torch::autograd::variable_list(1);
+  }
+};
+
+void clearBlasWorkspacesOnAutogradThreads(c10::DeviceIndex device_count) {
+  auto& engine = torch::autograd::Engine::get_default_engine();
+  if (!engine.device_threads_started() || device_count <= 0) {
+    return;
+  }
+
+  for (const auto i : c10::irange(static_cast<size_t>(device_count))) {
+    auto clear_node =
+        std::make_shared<ClearBlasWorkspaces>(static_cast<c10::DeviceIndex>(i));
+    engine.execute_node_with_graph_task(std::move(clear_node));
+  }
+}
+
+} // namespace
+
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
@@ -1644,11 +1683,9 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto& engine = torch::autograd::Engine::get_default_engine();
   pybind11::gil_scoped_release no_gil;
   at::cuda::clearCublasWorkspaces();
-  engine.execute_callback_on_device_threads(
-      c10::cuda::device_count(), [] { at::cuda::clearCublasWorkspaces(); });
+  clearBlasWorkspacesOnAutogradThreads(c10::cuda::device_count());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
