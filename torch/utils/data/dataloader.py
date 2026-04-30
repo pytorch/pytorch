@@ -183,7 +183,7 @@ class DataLoader(Generic[_T_co]):
             input, after seeding and before data loading. (default: ``None``)
         multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
             ``None``, the default
-            `multiprocessing context <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`_ # noqa: D401
+            `multiprocessing context <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`_
             of your operating system will
             be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
