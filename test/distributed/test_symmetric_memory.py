@@ -1799,11 +1799,8 @@ class LoweringTest(MultiProcContinuousTest):
         x = torch.rand(4, 4, device=self.device)
         code = run_and_get_triton_code(compiled, x)
 
-        FileCheck().check_count(
-            "empty_strided_p2p",
-            1,
-            exactly=True,
-        ).run(code)
+        # Verify that exactly one symm_mem allocation call is generated
+        FileCheck().check_count("empty_strided_p2p(", 1, exactly=True).run(code)
 
 
 class SymmMemSingleProcTest(TestCase):
