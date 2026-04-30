@@ -13,11 +13,6 @@
 #include <torch/csrc/shim_exception_state.h>
 #include <optional>
 
-namespace torch::aot_inductor {
-TORCH_API const char* get_last_error();
-TORCH_API void set_last_error(const char* msg);
-} // namespace torch::aot_inductor
-
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)                     \
   try {                                                                     \
     __VA_ARGS__                                                             \
@@ -25,7 +20,6 @@ TORCH_API void set_last_error(const char* msg);
     torch::csrc::shim::details::set_torch_exception_what(e.what());         \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         e.what_without_backtrace());                                        \
-    torch::aot_inductor::set_last_error(e.what());                          \
     if (torch::csrc::shim::details::                                        \
             torch_exception_state_get_exception_printing()) {               \
       LOG(ERROR) << "Exception in aoti_torch: "                             \
@@ -36,7 +30,6 @@ TORCH_API void set_last_error(const char* msg);
     torch::csrc::shim::details::set_torch_exception_what(e.what());         \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         torch::csrc::shim::details::get_torch_exception_what());            \
-    torch::aot_inductor::set_last_error(e.what());                          \
     if (torch::csrc::shim::details::                                        \
             torch_exception_state_get_exception_printing()) {               \
       LOG(ERROR) << "Exception in aoti_torch: "                             \
@@ -47,7 +40,6 @@ TORCH_API void set_last_error(const char* msg);
     torch::csrc::shim::details::set_torch_exception_what("UNKNOWN");        \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         torch::csrc::shim::details::get_torch_exception_what());            \
-    torch::aot_inductor::set_last_error("Unknown exception in aoti_torch"); \
     if (torch::csrc::shim::details::                                        \
             torch_exception_state_get_exception_printing()) {               \
       LOG(ERROR) << "Exception in aoti_torch: "                             \
