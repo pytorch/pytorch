@@ -2020,16 +2020,16 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+test_vec() {
+  # This is to test vec instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
+    echo "Testing vec instructions"
+    mkdir -p test/test-reports/vec
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
+    vec_tests=$(find . -maxdepth 1 -executable -name 'vec_test*')
+    for vec_exec in $vec_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+      $vec_exec --gtest_output=xml:test/test-reports/vec/"$vec_exec".xml
     done
     popd
     assert_git_not_dirty
@@ -2313,6 +2313,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
@@ -2361,7 +2362,7 @@ else
   install_monkeytype
   test_python
   test_aten
-  test_vec256
+  test_vec
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
