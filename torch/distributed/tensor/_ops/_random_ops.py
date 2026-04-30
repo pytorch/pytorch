@@ -42,7 +42,6 @@ _inplace_random_ops = [
     aten.native_dropout.default,
     aten.bernoulli_.float,
     aten.bernoulli.default,
-    aten.bernoulli.p,
     aten.log_normal_.default,
     aten.exponential_.default,
     aten.geometric_.default,
@@ -52,24 +51,6 @@ for _op in _inplace_random_ops:
     register_single_dim_strategy(_op, allow_uneven_sharding=True)(
         _random_inplace_single_dim_strategy
     )
-
-
-@register_single_dim_strategy(
-    [
-        aten.bernoulli_.Tensor,
-        aten.bernoulli.Tensor,
-    ]
-)
-def random_op_with_p_tensor_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    self_meta = args_schema[0]
-    if not isinstance(self_meta, TensorMeta):
-        raise AssertionError(f"Expect TensorMeta but got {type(self_meta)}")
-    return [
-        [_ShardingPlaceholder(d), _ShardingPlaceholder(d), _ShardingPlaceholder(d)]
-        for d in range(len(self_meta.shape))
-    ]
 
 
 @register_single_dim_strategy(aten.multinomial.default)
