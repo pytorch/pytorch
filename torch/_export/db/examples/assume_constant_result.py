@@ -5,7 +5,7 @@ import torch._dynamo as torchdynamo
 
 class AssumeConstantResult(torch.nn.Module):
     """
-    Applying `assume_constant_result` decorator to burn make non-tracable code as constant.
+    Applying `assume_constant_result` decorator to burn make non-traceable code as constant.
     """
 
     @torchdynamo.assume_constant_result

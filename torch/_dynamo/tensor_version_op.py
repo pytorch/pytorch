@@ -31,7 +31,7 @@ _tensor_version = _make_prim(
     return_type=RETURN_TYPE.NEW,
     meta=torch.ops.aten._version.default,
     impl_aten=torch.ops.aten._version.default,
-    doc="Tracable unbacked SymInt version of torch.Tensor._version",
+    doc="Traceable unbacked SymInt version of torch.Tensor._version",
 )
 
 
@@ -51,7 +51,7 @@ _unsafe_set_version_counter = _make_prim(
     return_type=RETURN_TYPE.NEW,
     meta=lambda self, version: None,
     impl_aten=torch._C._autograd._unsafe_set_version_counter,
-    doc="Tracable+SymInt version of torch._C._autograd._unsafe_set_version_counter",
+    doc="Traceable+SymInt version of torch._C._autograd._unsafe_set_version_counter",
 )
 torch.fx.node.has_side_effect(_unsafe_set_version_counter)
 
