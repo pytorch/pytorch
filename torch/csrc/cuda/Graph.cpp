@@ -124,6 +124,30 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
           py::arg("scalar_cuda_pred_tensor"))
       .def(
+          "begin_capture_to_while_node",
+          [](::at::cuda::CUDAGraph& self,
+             const at::Tensor& scalar_cuda_pred_tensor) {
+            // cudaGraphConditionalHandle is `unsigned long long`. Return
+            // it as a Python int so callers can pass it back to
+            // set_conditional_handle from inside the body.
+            cudaGraphConditionalHandle handle =
+                self.begin_capture_to_while_node(scalar_cuda_pred_tensor);
+            return static_cast<uint64_t>(handle);
+          },
+          py::arg("scalar_cuda_pred_tensor"),
+          py::call_guard<py::gil_scoped_release>())
+      .def_static(
+          "set_conditional_handle",
+          [](uint64_t handle,
+             const at::Tensor& scalar_cuda_pred_tensor) {
+            ::at::cuda::CUDAGraph::set_conditional_handle(
+                static_cast<cudaGraphConditionalHandle>(handle),
+                scalar_cuda_pred_tensor);
+          },
+          py::arg("handle"),
+          py::arg("scalar_cuda_pred_tensor"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "end_capture_to_conditional_node",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::end_capture_to_conditional_node));

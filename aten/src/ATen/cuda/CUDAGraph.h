@@ -82,6 +82,13 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
+  // While-conditional analog of begin_capture_to_if_node. Returns the
+  // cudaGraphConditionalHandle for the new node so the caller can re-set
+  // the predicate from inside the body via set_conditional_handle (the
+  // body subgraph's last operation must update the handle for the next
+  // iteration's check).
+  cudaGraphConditionalHandle begin_capture_to_while_node(
+      const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
   static void set_conditional_handle(
       cudaGraphConditionalHandle handle,
