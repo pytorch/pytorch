@@ -117,6 +117,12 @@ def _build_test(
                     keep_config = False
                     break
 
+            # same for 'xpu': skip configs that target XPU on machines without XPU support
+            if "xpu" in attr.values():
+                if not torch.xpu.is_available():
+                    keep_config = False
+                    break
+
             test_attrs.update(attr)
 
         if not keep_config:
@@ -386,16 +392,13 @@ class BenchmarkRunner:
                 functools.partial(func, iters, print_per_iter, gpu_sync), number=1
             )
             return forward_time
-        # Stable timing with Timer; stmt runs iters forwards + device sync.
-        # `cuda_sync` is still the parameter name on ``run_forward`` for
-        # backwards compat; semantically it means "sync the GPU".
         timer = Timer(
-            stmt="func(iters, print_per_iter, cuda_sync)",
+            stmt="func(iters, print_per_iter, gpu_sync)",
             globals={
                 "func": func,
                 "iters": iters,
                 "print_per_iter": print_per_iter,
-                "cuda_sync": gpu_sync,
+                "gpu_sync": gpu_sync,
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
