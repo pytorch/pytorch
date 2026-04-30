@@ -978,17 +978,18 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
-            # (NONE, DEVICE_STOPPED) is not reachable through step() — the
-            # entry guard excludes prev=NONE — but it IS reachable via
-            # start() after a stop() that left current_action in
-            # DEVICE_STOPPED. Treating it as a no-op allows restart-after-DS
-            # without raising, matching the silent behavior the action_map
-            # had for unknown (NONE, *) keys before DEVICE_STOPPED existed.
-            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [],
-            # Unreachable: entry guard excludes prev=RECORD_AND_SAVE because
-            # the natural (R&S, *) transitions already call prepare_trace,
-            # which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
-            # here would skip prepare_trace and waste the next cycle.
+            # Unreachable transitions:
+            # - prev=NONE: step()'s entry guard excludes it, and start() and
+            #   __init__ both reject DEVICE_STOPPED from a user schedule, so
+            #   self.current_action is never DEVICE_STOPPED when
+            #   _transit_action(NONE, ...) is called.
+            # - prev=RECORD_AND_SAVE: entry guard excludes it because the
+            #   natural (R&S, *) transitions already call prepare_trace,
+            #   which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
+            #   here would skip prepare_trace and waste the next cycle.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
+            ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
                 partial(_unreachable_transition, "RECORD_AND_SAVE", "DEVICE_STOPPED"),
             ],
@@ -1040,6 +1041,7 @@ class profile(_KinetoProfile):
     def stop(self) -> None:
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            self.step_rec_fn = None
         self._transit_action(self.current_action, None)
 
     def step(self) -> None:
@@ -1048,6 +1050,9 @@ class profile(_KinetoProfile):
         """
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            # Drop our reference so a subsequent stop() / step() — e.g. after
+            # this step() raises — doesn't double-exit the same instance.
+            self.step_rec_fn = None
         prev_action = self.current_action
         prev_schedule_action = self._prev_schedule_action
         next_step = self.step_num + 1

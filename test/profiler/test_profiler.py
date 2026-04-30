@@ -4119,6 +4119,10 @@ class TestProfilerDeviceStopped(TestCase):
         # Profiler state must be unchanged so stop() can finalize cleanly.
         self.assertEqual(p.step_num, step_num_before)
         self.assertEqual(p.current_action, current_action_before)
+        # step_rec_fn was exited at the top of step() before the raise; it
+        # must have been cleared so stop() doesn't double-exit it.
+        self.assertIsNone(p.step_rec_fn)
+        # stop() runs without re-exiting an already-exited record_function.
         p.stop()
 
     def test_device_stopped_recovers_across_infinite_cycles(self):
@@ -4205,18 +4209,26 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
 
-    def test_unreachable_transition_raises(self):
-        """The (RECORD_AND_SAVE, DEVICE_STOPPED) transition is unreachable
-        via step() because the entry guard excludes prev=R&S, and should
-        raise if invoked directly via _transit_action."""
+    @parametrize(
+        "prev",
+        [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
+    )
+    def test_unreachable_transition_raises(self, prev):
+        """Transitions into DEVICE_STOPPED that step() / start() / __init__
+        all exclude should raise if invoked directly via _transit_action.
+
+        - prev=NONE: step()'s entry guard excludes it, and start() /
+          __init__ reject DEVICE_STOPPED from user schedules, so
+          current_action is never DEVICE_STOPPED at _transit_action(NONE, ...).
+        - prev=RECORD_AND_SAVE: entry guard excludes it because the
+          natural (R&S, *) transitions handle cycle-boundary cleanup.
+        """
         p = self._make_profiler(wait=0, warmup=1, active=1)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Profiler internal error: RECORD_AND_SAVE -> DEVICE_STOPPED should be unreachable",
+            f"Profiler internal error: {prev.name} -> DEVICE_STOPPED should be unreachable",
         ):
-            p._transit_action(
-                ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED
-            )
+            p._transit_action(prev, ProfilerAction.DEVICE_STOPPED)
 
     def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
         """A CPU-only profiler should not enter DEVICE_STOPPED even if
