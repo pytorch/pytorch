@@ -747,6 +747,116 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(FailOnRecompileLimitHit, "fullgraph=True"):
             opt_f(torch.randn(4))
 
+    @parametrize("fullgraph", [True, False])
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_independent_regions(self, fullgraph):
+        """isolate_recompiles=True with fullgraph in {True, False}: two
+        regions each compile cleanly, recompile per-region for new shapes,
+        and produce correct outputs."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin() + 1
+
+        opt_a = torch.compile(
+            f,
+            backend=cnt,
+            fullgraph=fullgraph,
+            dynamic=False,
+            isolate_recompiles=True,
+        )
+        opt_b = torch.compile(
+            f,
+            backend=cnt,
+            fullgraph=fullgraph,
+            dynamic=False,
+            isolate_recompiles=True,
+        )
+
+        x3 = torch.randn(3)
+        x4 = torch.randn(4)
+        expected3 = x3.sin() + 1
+        expected4 = x4.sin() + 1
+
+        self.assertEqual(opt_a(x3), expected3)
+        self.assertEqual(opt_b(x3), expected3)
+        self.assertEqual(opt_a(x4), expected4)
+        self.assertEqual(opt_b(x4), expected4)
+
+        # 4 compiles total: 2 regions x 2 shapes
+        self.assertEqual(cnt.frame_count, 4)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_graph_break_independent_regions(self):
+        """fullgraph=False with isolate_recompiles=True and a graph break:
+        each region keeps independent buckets for both the main frame and
+        the resume frame."""
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def f(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            return a + 1
+
+        opt_a = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+        opt_b = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+
+        x3 = torch.randn(3)
+        x4 = torch.randn(4)
+        expected3 = x3.sin() + 1
+        expected4 = x4.sin() + 1
+
+        self.assertEqual(opt_a(x3), expected3)
+        self.assertEqual(opt_b(x3), expected3)
+        self.assertEqual(opt_a(x4), expected4)
+        self.assertEqual(opt_b(x4), expected4)
+
+        # 8 graphs: 2 regions x 2 shapes x 2 frames (main + resume).
+        # Main frames trace `x.sin()`, resume frames trace `a + 1`.
+        self.assertEqual(len(backend.graphs), 8)
+        sin_graphs = [g for g in backend.graphs if "sin" in g.code]
+        add_graphs = [g for g in backend.graphs if "add" in g.code]
+        self.assertEqual(len(sin_graphs), 4)
+        self.assertEqual(len(add_graphs), 4)
+
+    @torch._dynamo.config.patch(recompile_limit=2, automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_graph_break_per_region_limit(self):
+        """Graph-break function with two regions: each region's resume
+        function respects its own recompile_limit independently. Region a
+        exhausts its limit; region b continues compiling unaffected."""
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def f(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            return a + 1
+
+        opt_a = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+        opt_b = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+
+        # Fill region a up to its limit (2 distinct shapes -> 2 main + 2 resume)
+        opt_a(torch.randn(3))
+        opt_a(torch.randn(4))
+        graphs_after_a = len(backend.graphs)
+        self.assertEqual(graphs_after_a, 4)
+
+        # Third shape in region a hits the per-region limit -> falls back to
+        # eager via RUN_ONLY; no new compiles.
+        opt_a(torch.randn(5))
+        self.assertEqual(len(backend.graphs), graphs_after_a)
+
+        # Region b is independent and still compiles freely.
+        opt_b(torch.randn(3))
+        self.assertEqual(len(backend.graphs), graphs_after_a + 2)
+
     @torch._dynamo.config.patch(
         accumulated_recompile_limit=6,
         recompile_limit=4,
