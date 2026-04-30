@@ -6005,6 +6005,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         gemm_op: str,
         alpha: float,
         beta: float,
+        out_dtype: Any | None = None,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render=None)
         self.epilogue_name = epilogue_name
@@ -6012,6 +6013,7 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         self.gemm_op = gemm_op
         self.alpha = alpha
         self.beta = beta
+        self.out_dtype = out_dtype
 
     def should_allocate(self) -> bool:
         return False

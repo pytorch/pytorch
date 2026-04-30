@@ -28,6 +28,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         gemm_op = kwargs.pop("gemm_op")
         alpha = kwargs.pop("alpha")
         beta = kwargs.pop("beta")
+        out_dtype = kwargs.pop("out_dtype", None)
         return QuackGemmEpilogueTemplateCaller(
             name=f"quack_gemm_epilogue_{next(self.index_counter)}",
             input_nodes=input_nodes,
@@ -37,6 +38,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             gemm_op=gemm_op,
             alpha=alpha,
             beta=beta,
+            out_dtype=out_dtype,
         )
 
 
@@ -51,6 +53,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         gemm_op: str,
         alpha: float,
         beta: float,
+        out_dtype: Any | None = None,
     ) -> None:
         super().__init__(
             name=name,
@@ -63,6 +66,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.gemm_op = gemm_op
         self.alpha = alpha
         self.beta = beta
+        self.out_dtype = out_dtype
 
     def benchmark(self, *args: Any, out: Any) -> float:
         return 0.0
@@ -77,6 +81,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 gemm_op=self.gemm_op,
                 alpha=self.alpha,
                 beta=self.beta,
+                out_dtype=self.out_dtype,
             )
         )
 
@@ -88,7 +93,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
 
     def hash_key(self) -> str:
         return code_hash(
-            f"{self.gemm_op}\n{self.alpha}\n{self.beta}\n"
+            f"{self.gemm_op}\n{self.alpha}\n{self.beta}\n{self.out_dtype}\n"
             f"{self.epilogue_name}\n{self.epilogue_source}"
         )
 
