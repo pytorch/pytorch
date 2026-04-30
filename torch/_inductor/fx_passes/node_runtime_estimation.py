@@ -1,5 +1,5 @@
 """
-Collective runtime estimation using CUDA events and power-of-2 rounding.
+Node runtime estimation for overlap scheduling.
 """
 
 from __future__ import annotations

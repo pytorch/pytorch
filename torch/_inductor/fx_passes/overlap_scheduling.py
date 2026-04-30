@@ -162,15 +162,22 @@ def estimate_collective_time(
     )
 
 
+def _get_flop_registry_key(target: Any) -> Any | None:
+    """Return the flop_registry key for a node target, or None if not registered."""
+    key = getattr(target, "overloadpacket", None)
+    if key in torch.utils.flop_counter.flop_registry:
+        return key
+    if target in torch.utils.flop_counter.flop_registry:
+        return target
+    return None
+
+
 def is_compute_node(n: fx.Node) -> bool:
     """
     Should we consider this node computationally expensive ?
     Currently uses flop registration, but we could expand more generally.
     """
-    return (
-        getattr(n.target, "overloadpacket", None)
-        in torch.utils.flop_counter.flop_registry
-    )
+    return _get_flop_registry_key(n.target) is not None
 
 
 def estimate_roofline_runtime_ms(node: fx.Node) -> float:
@@ -183,7 +190,6 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
     from torch._inductor.fx_passes.fusion_regions import is_view_node
     from torch.utils._pytree import tree_flatten, tree_map
     from torch.utils._runtime_estimation import get_compute_time, get_transfer_time
-    from torch.utils.flop_counter import flop_registry
 
     if is_view_node(node):
         return 0.0
@@ -205,12 +211,20 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
     out_dtypes = OrderedSet([t.dtype for t in flat_outs if isinstance(t, torch.Tensor)])
 
     # Compute time (FLOPs-based, only if op is in flop_registry)
-    # May return SymFloat if shapes are symbolic (after flop division)
     compute_ns: float = 0.0
-    func_packet = getattr(node.target, "overloadpacket", None)
-    if func_packet in flop_registry and len(out_dtypes) == 1:
-        compute_ns = get_compute_time(func_packet, args, kwargs, out, out_dtypes.copy())
-        # Extract hint from symbolic value if needed
+    flop_key = _get_flop_registry_key(node.target)
+    if flop_key is not None and len(out_dtypes) >= 1:
+        # Use a single dtype for peak-flops lookup. For mixed-dtype outputs
+        # (e.g. flex_attention returns bf16 out + fp32 logsumexp), use the
+        # first output tensor's dtype as the compute dtype.
+        compute_dtypes = (
+            OrderedSet(out_dtypes)
+            if len(out_dtypes) == 1
+            else OrderedSet(
+                [next(t.dtype for t in flat_outs if isinstance(t, torch.Tensor))]
+            )
+        )
+        compute_ns = get_compute_time(flop_key, args, kwargs, out, compute_dtypes)
         if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
             compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
 
@@ -246,6 +260,12 @@ def benchmark_node_with_cache_key(
 ) -> tuple[float, str | None]:
     """Benchmark a compute node and return (runtime, cache_key)."""
     assert is_compute_node(n)
+
+    # HOPs can't be benchmarked standalone (args include subgraphs) — use analytical
+    from torch._ops import HigherOrderOperator
+
+    if isinstance(n.target, HigherOrderOperator):
+        return estimate_roofline_runtime_ms(n), None
 
     from torch._dynamo.testing import rand_strided
 
