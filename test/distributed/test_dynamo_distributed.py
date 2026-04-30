@@ -1726,6 +1726,42 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             w.wait()
             torch.accelerator.synchronize(device)
 
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_into_tensor_stack_vs_concat_dynamic(self):
+        """all_gather_into_tensor supports both stack and concat output shapes.
+
+        Tests that torch.compile with dynamic shapes handles both correctly
+        and produces numerically identical results to eager.
+        """
+
+        def stack_gather(x):
+            world_size = dist.get_world_size()
+            out = torch.empty((world_size,) + x.shape, dtype=x.dtype, device=x.device)
+            dist.all_gather_into_tensor(out, x)
+            return out
+
+        def concat_gather(x):
+            world_size = dist.get_world_size()
+            out = torch.empty(
+                (world_size * x.shape[0],) + x.shape[1:],
+                dtype=x.dtype,
+                device=x.device,
+            )
+            dist.all_gather_into_tensor(out, x)
+            return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            device = f"{self.device_type}:{self.rank}"
+            x = torch.randn(10, 20, dtype=torch.bfloat16, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+
+            for fn in (stack_gather, concat_gather):
+                eager_result = fn(x)
+                compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                compiled_result = compiled_fn(x)
+                self.assertEqual(eager_result, compiled_result)
+                torch._dynamo.reset()
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipUnless(torch.accelerator.is_available(), "Requires accelerator")

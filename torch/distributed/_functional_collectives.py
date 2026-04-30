@@ -1622,7 +1622,6 @@ def all_gather_tensor_inplace(
     group=None,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
-    gather_dim: int = 0,
 ):
     if async_op:
         raise AssertionError(
@@ -1633,7 +1632,8 @@ def all_gather_tensor_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
+    result = all_gather_tensor(input_tensor, 0, group, tag)
+    return output_tensor.copy_(result.reshape(output_tensor.shape))
 
 
 def reduce_scatter_tensor_inplace(

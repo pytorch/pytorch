@@ -121,6 +121,30 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_all_gather_into_tensor_stack_output(self):
+        """all_gather_into_tensor with stack-shaped output should work with dynamic shapes.
+
+        The original dist.all_gather_into_tensor API supports both concat-shaped
+        output [world_size * dim0, ...] and stack-shaped output [world_size, dim0, ...].
+        The Dynamo remapping must handle both.
+        """
+
+        def fn(x):
+            world_size = dist.get_world_size()
+            input_size = x.size()
+            output_tensor = torch.empty(
+                (world_size,) + input_size, dtype=x.dtype, device=x.device
+            )
+            dist.all_gather_into_tensor(output_tensor, x, group=dist.group.WORLD)
+            return output_tensor.reshape(world_size * input_size[0], input_size[1])
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(10, 20)
+        torch._dynamo.mark_dynamic(x, 0)
+        result = opt_fn(x)
+        self.assertEqual(result.shape, torch.Size([20, 20]))
+
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
             device_type="cpu",

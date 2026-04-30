@@ -1030,9 +1030,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 f"Expected frame_count == 1, got {counter.frame_count}"
             )
 
-        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        if counter.op_count != 3:
-            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        # should test more precisely, but the 4 is supposed to be (all_gather, wait, reshape, copy_)
+        if counter.op_count != 4:
+            raise AssertionError(f"Expected op_count == 4, got {counter.op_count}")
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
@@ -1091,9 +1091,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 f"Expected frame_count == 1, got {counter.frame_count}"
             )
 
-        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        if counter.op_count != 3:
-            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        # should test more precisely, but the 4 is supposed to be (all_gather, wait, reshape, copy_)
+        if counter.op_count != 4:
+            raise AssertionError(f"Expected op_count == 4, got {counter.op_count}")
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
