@@ -22,6 +22,7 @@ _SUPPORTED_GEMM_OPS = {
     torch.ops.aten.mm.default,
     torch.ops.aten.addmm.default,
     torch.ops.aten.bmm.default,
+    torch.ops.aten.baddbmm.default,
     torch.ops.aten._scaled_mm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CPP", "CUTEDSL", "QUACK"}
