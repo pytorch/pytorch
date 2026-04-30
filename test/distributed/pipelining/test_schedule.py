@@ -1210,60 +1210,64 @@ class TestScheduleLowering(TestCase):
         self.assertGreater(f1_pos_overlap, recv_f0_pos_overlap)
 
         # Without overlap (rank 0 < rank 1, so RECV before SEND applies):
-        # RECVs are flushed before SENDs to the same peer, but still
-        # deferred to right before their consumers.
+        # RECVs are flushed before SENDs to the same peer, which may interpose
+        # a SEND between the RECV and its compute consumer. So on rank 0 we
+        # only assert that the RECV moved later than in the overlap=True
+        # schedule (i.e. deferral happened), not that it lands immediately
+        # before its consumer.
         recv_f0_pos_no_overlap = find_action(rank0_no_overlap, 2, RECV_F, 0)
-        # On rank 0 (lower rank), 2RECV_F0 may still be flushed before a SEND
-        # to the same peer (rank 1), so it isn't required to land immediately
-        # before its consumer. But it must have moved later than in the
-        # overlap=True schedule, demonstrating deferral.
         self.assertGreater(recv_f0_pos_no_overlap, recv_f0_pos_overlap)
 
-        # On rank 1 (higher rank, no flush constraint), every standalone RECV
-        # must be placed immediately before the compute op that consumes it.
-        # This is the core invariant _defer_recv_ops is supposed to guarantee.
+        # On rank 1 (higher rank, no flush constraint) the strict invariant
+        # holds: every standalone RECV is placed immediately before the
+        # compute op that consumes it. Apply the strict
+        # assertEqual(recv_pos, consumer_pos - 1) check that is the core
+        # invariant _defer_recv_ops is supposed to guarantee.
         rank1_no_overlap = schedule_ops_no_overlap[1]
         rank1_overlap = schedule_ops_overlap[1]
 
-        def _assert_recv_immediately_precedes_consumer(actions):
-            non_none = [a for a in actions if a is not None]
-            for i, a in enumerate(non_none):
-                if a.computation_type not in (RECV_F, RECV_B):
-                    continue
-                self.assertLess(
-                    i,
-                    len(non_none) - 1,
-                    f"RECV {a} on rank 1 has no following consumer",
-                )
-                consumer = non_none[i + 1]
-                # Consumer may be a compute op or a compound action whose
-                # sub_actions contain the matching compute op.
-                consumer_subs = (
-                    consumer.sub_actions
-                    if consumer.sub_actions is not None
-                    else (consumer,)
-                )
-                if a.computation_type == RECV_F:
-                    expected = (a.stage_index, F, a.microbatch_index)
-                    matched = any(
-                        (s.stage_index, s.computation_type, s.microbatch_index)
-                        == expected
-                        for s in consumer_subs
-                    )
-                else:
-                    matched = any(
-                        s.stage_index == a.stage_index
-                        and s.computation_type in (B, I)
-                        and s.microbatch_index == a.microbatch_index
-                        for s in consumer_subs
-                    )
-                self.assertTrue(
-                    matched,
-                    f"RECV {a} on rank 1 is not immediately followed by its "
-                    f"consumer (next action: {consumer})",
-                )
+        # Spot-check a representative pair using the literal find_action style.
+        recv_f0_pos_rank1 = find_action(rank1_no_overlap, 1, RECV_F, 0)
+        f0_pos_rank1 = find_action(rank1_no_overlap, 1, F, 0)
+        self.assertEqual(recv_f0_pos_rank1, f0_pos_rank1 - 1)
 
-        _assert_recv_immediately_precedes_consumer(rank1_no_overlap)
+        # Generalize: every RECV on rank 1 is immediately followed by its
+        # consumer (handles compound actions like OVERLAP_F_B by inspecting
+        # sub_actions).
+        non_none = [a for a in rank1_no_overlap if a is not None]
+        for i, a in enumerate(non_none):
+            if a.computation_type not in (RECV_F, RECV_B):
+                continue
+            self.assertLess(
+                i,
+                len(non_none) - 1,
+                f"RECV {a} on rank 1 has no following consumer",
+            )
+            consumer = non_none[i + 1]
+            consumer_subs = (
+                consumer.sub_actions
+                if consumer.sub_actions is not None
+                else (consumer,)
+            )
+            if a.computation_type == RECV_F:
+                matched = any(
+                    s.stage_index == a.stage_index
+                    and s.computation_type == F
+                    and s.microbatch_index == a.microbatch_index
+                    for s in consumer_subs
+                )
+            else:
+                matched = any(
+                    s.stage_index == a.stage_index
+                    and s.computation_type in (B, I)
+                    and s.microbatch_index == a.microbatch_index
+                    for s in consumer_subs
+                )
+            self.assertTrue(
+                matched,
+                f"RECV {a} on rank 1 is not immediately followed by its "
+                f"consumer (next action: {consumer})",
+            )
 
         # Sanity: total RECV count should be unchanged by deferral.
         recv_count_overlap = sum(
