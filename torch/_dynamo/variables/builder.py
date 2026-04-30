@@ -1201,7 +1201,7 @@ class VariableBuilder:
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if isinstance(self.source, CurrentStreamSource):
-                # Reuse the index pre-allocated in SymbolicStreamState.__init__
+                # Reuse the index registered by SymbolicStreamState on demand.
                 index = CURRENT_STREAM_INDEX
             else:
                 index = register_user_object(value, self.source)

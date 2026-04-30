@@ -2849,12 +2849,14 @@ class OutputGraph(OutputGraphCommon):
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         torch._dynamo.graph_bytecode_inputs.__name__,
-                        "store_user_object_weakrefs",
+                        "store_user_object_weakrefs_by_index",
                     )
                 )
 
                 tmp_vars = []
-                for constructor in index_to_bytecode_constructor.values():
+                user_object_indices = tuple(sorted(index_to_bytecode_constructor))
+                for index in user_object_indices:
+                    constructor = index_to_bytecode_constructor[index]
                     constructor(cg)
                     var_name = (
                         self.new_var()
@@ -2863,10 +2865,11 @@ class OutputGraph(OutputGraphCommon):
                     cg.store(var_name)
                     tmp_vars.append(var_name)
 
+                cg.append_output(cg.create_load_const(user_object_indices))
                 for var_name in tmp_vars:
                     cg.append_output(cg.create_load(var_name))
 
-                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.call_function(len(user_object_indices) + 1, False)
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):

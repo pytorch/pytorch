@@ -2,14 +2,17 @@
 import re
 import unittest
 import weakref
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.graph_bytecode_inputs import (
+    FIRST_USER_OBJECT_INDEX,
     reset_user_object_tracking,
-    store_user_object_weakrefs,
+    store_user_object_weakrefs_by_index,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_utils import requires_cuda
@@ -41,6 +44,56 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def test_event_weakref(self):
         e = torch.Event()
         weakref.ref(e)
+
+    def test_stream_state_is_lazy_for_non_stream_graphs(self):
+        def fn(x):
+            return x + 1
+
+        with (
+            patch.object(torch.accelerator, "is_available", return_value=True),
+            patch.object(
+                torch.accelerator,
+                "current_stream",
+                side_effect=AssertionError("current_stream should be lazy"),
+            ) as current_stream,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(torch.ones(1)), torch.ones(1) + 1)
+
+        current_stream.assert_not_called()
+
+    def test_event_record_rescans_delayed_input_mutations(self):
+        from torch._dynamo.variables.streams import EventVariable, StreamVariable
+
+        class FakeOutput:
+            def __init__(self) -> None:
+                self.checked_input_mutation = False
+
+            def check_input_mutation_on_current_stream(self, tx) -> None:
+                self.checked_input_mutation = True
+
+            def check_event_record_after_input_mutation(self, stream_id) -> None:
+                if not self.checked_input_mutation:
+                    raise AssertionError(
+                        "input mutations were not checked before record"
+                    )
+
+            def create_proxy(self, *args, **kwargs):
+                return None
+
+        class FakeStream:
+            device = torch.device("cuda")
+
+        output = FakeOutput()
+        tx = SimpleNamespace(output=output)
+        stream = StreamVariable(
+            cast(Any, None), cast(torch.Stream, FakeStream()), user_object_index=1
+        )
+        event = EventVariable(
+            cast(Any, None), cast(torch.Event, object()), user_object_index=2
+        )
+
+        event.call_method(tx, "record", [stream], {})
 
     @requires_cuda
     def test_stream_enter_exit(self):
@@ -652,11 +705,13 @@ class <lambda>(torch.nn.Module):
         try:
             s0 = torch.Stream()
             s1 = torch.Stream()
-            store_user_object_weakrefs(s0, s1)
+            s0_index = FIRST_USER_OBJECT_INDEX
+            s1_index = FIRST_USER_OBJECT_INDEX + 1
+            store_user_object_weakrefs_by_index((s0_index, s1_index), s0, s1)
 
             sample_inputs = [
-                (0, 1),
-                (1, 0),
+                (s0_index, s1_index),
+                (s1_index, s0_index),
             ]
             for args in sample_inputs:
                 opcheck(fork_stream, args)
@@ -676,11 +731,17 @@ class <lambda>(torch.nn.Module):
             s1 = torch.Stream()
             e0 = torch.Event()
             e1 = torch.Event()
-            store_user_object_weakrefs(s0, s1, e0, e1)
+            s0_index = FIRST_USER_OBJECT_INDEX
+            s1_index = FIRST_USER_OBJECT_INDEX + 1
+            e0_index = FIRST_USER_OBJECT_INDEX + 2
+            e1_index = FIRST_USER_OBJECT_INDEX + 3
+            store_user_object_weakrefs_by_index(
+                (s0_index, s1_index, e0_index, e1_index), s0, s1, e0, e1
+            )
 
             sample_inputs = [
-                (2, 0),
-                (3, 1),
+                (e0_index, s0_index),
+                (e1_index, s1_index),
             ]
             for args in sample_inputs:
                 opcheck(wait_event, args)
@@ -698,11 +759,16 @@ class <lambda>(torch.nn.Module):
             s0 = torch.Stream()
             s1 = torch.Stream()
             s2 = torch.Stream()
-            store_user_object_weakrefs(s0, s1, s2)
+            s0_index = FIRST_USER_OBJECT_INDEX
+            s1_index = FIRST_USER_OBJECT_INDEX + 1
+            s2_index = FIRST_USER_OBJECT_INDEX + 2
+            store_user_object_weakrefs_by_index(
+                (s0_index, s1_index, s2_index), s0, s1, s2
+            )
 
             sample_inputs = [
-                (0, 1),
-                (2, 0),
+                (s0_index, s1_index),
+                (s2_index, s0_index),
             ]
             for args in sample_inputs:
                 opcheck(wait_stream, args)

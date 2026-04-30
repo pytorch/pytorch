@@ -13,9 +13,8 @@ from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
+    register_current_stream,
     register_graph_created_object,
-    register_user_object,
-    reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
 from .base import VariableTracker
@@ -264,19 +263,21 @@ class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
     def __init__(self) -> None:
-        from ..source import CurrentStreamSource
+        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque()
+        self.initialized = False
 
-        cur_stack: list[StreamVariable] = []
+    def _ensure_initialized(self) -> None:
+        if self.initialized:
+            return
+
+        self.initialized = True
         if torch.accelerator.is_available():
-            # Reset the registry so the current stream is guaranteed index 0.
-            reset_user_object_tracking()
             stream = torch.accelerator.current_stream()
             source = CurrentStreamSource(stream.device)
-            # Register the current stream so it gets index 0 (registry is
-            # fresh at tracing start).  The inductor wrapper updates this
-            # entry at runtime so cudagraph capture uses the capture stream
-            # instead of this stale trace-time stream.
-            index = register_user_object(stream, source)
+            # Register the current stream at index 0.  The inductor wrapper
+            # updates this entry at runtime so cudagraph capture uses the
+            # capture stream instead of this stale trace-time stream.
+            index = register_current_stream(stream, source)
             assert index == CURRENT_STREAM_INDEX, (
                 f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
                 f"got {index}"
@@ -285,19 +286,17 @@ class SymbolicStreamState:
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
             stream_var.user_object_index = index  # type: ignore[union-attr]
-            cur_stack = [stream_var]  # type: ignore[list-item]
-
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
-            cur_stack
-        )
+            self.cur_stream_stack.append(stream_var)  # type: ignore[arg-type]
 
     def enter_stream(self, stream: "StreamVariable") -> None:
+        self._ensure_initialized()
         self.cur_stream_stack.append(stream)
 
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
     def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
+        self._ensure_initialized()
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
@@ -306,10 +305,13 @@ class SymbolicStreamState:
         return self.cur_stream_stack[-1]
 
     def in_stream_context(self) -> bool:
+        # Keep this lazy: pure Dynamo graphs that never touch streams should
+        # not initialize accelerator stream state just to answer this check.
         return len(self.cur_stream_stack) > 0
 
     def cur_stream_id(self) -> int:
         """Get a Python object id for the current stream without realizing lazy variables."""
+        self._ensure_initialized()
         stream = self.cur_stream_stack[-1]
         if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
             return id(stream.peek_value())
@@ -446,6 +448,7 @@ class StreamVariable(StreamContextVariable):
         elif name == "record_event":
             from .builder import wrap_fx_proxy
 
+            tx.output.check_input_mutation_on_current_stream(tx)
             tx.output.check_event_record_after_input_mutation(id(self.value))
             if args and isinstance(args[0], EventVariable):
                 event_var = args[0]
@@ -622,6 +625,7 @@ class EventVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "record":
             stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+            tx.output.check_input_mutation_on_current_stream(tx)
             tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
             tx.output.create_proxy(
                 "call_function",

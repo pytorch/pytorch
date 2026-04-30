@@ -1083,7 +1083,7 @@ main()
 
             insts = list(dis.get_instructions(out_code))
             # Find the CALL that invokes the compiled graph function
-            # (not an earlier CALL from e.g. store_user_object_weakrefs).
+            # (not an earlier CALL from e.g. store_user_object_weakrefs_by_index).
             # The compiled fn is loaded via LOAD_GLOBAL __compiled_fn_*.
             load_graph_idx = next(
                 i
@@ -1168,7 +1168,7 @@ main()
 
                 insts = list(dis.get_instructions(out_code))
                 # Find the CALL that invokes the compiled graph function
-                # (not an earlier CALL from e.g. store_user_object_weakrefs).
+                # (not an earlier CALL from e.g. store_user_object_weakrefs_by_index).
                 load_graph_idx = next(
                     i
                     for i, inst in enumerate(insts)
