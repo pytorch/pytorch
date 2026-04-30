@@ -51,6 +51,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                    const Tensor& orig_query,
                                                    bool unsqueezed) {
   using namespace mps;
+  // MPSGraph fallback path doesn't combine causal + attn_mask correctly
+  TORCH_CHECK(!(is_causal && attn_mask.has_value()),
+              "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* qTensor = nil;

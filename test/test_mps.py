@@ -10394,6 +10394,21 @@ class TestSDPA(TestCaseMPS):
         y_cpu = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu)
         self._compare_tensors(y_mps.cpu(), y_cpu)
 
+    def test_sdpa_causal_with_attn_mask_raises(self):
+        # Passing both is_causal=True and an explicit attn_mask is ill-defined
+        # input and must raise rather than crash
+        torch.manual_seed(0)
+        q = torch.randn(1, 2, 4, 64, device="mps")
+        k = torch.randn(1, 2, 16, 64, device="mps")
+        v = torch.randn(1, 2, 16, 64, device="mps")
+        mask = torch.zeros(1, 2, 4, 16, dtype=torch.bool, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
+            ):
+                F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=True)
+
     @unittest.skip("Full attention fast kernel not implemented yet")
     @parametrize("dtype", [torch.float16, torch.float32])
     @parametrize("layout", ["contiguous", "mT"])
