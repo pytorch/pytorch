@@ -1854,6 +1854,53 @@ class TYPE_MATCH : public LeafGuard {
   intptr_t _expected;
 };
 
+// Type match that unwraps FakeScriptObject before checking. During outer
+// AOTAutograd tracing, opaque objects (e.g. DeviceMesh) are wrapped in a
+// FakeScriptObject for FX tracing; at runtime Dynamo sees the real object.
+// The guard must pass in both cases.
+class FAKE_SCRIPT_TYPE_MATCH : public LeafGuard {
+ public:
+  FAKE_SCRIPT_TYPE_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object fake_script_object_type,
+      py::object type_id,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _fake_script_object_type(std::move(fake_script_object_type)),
+        _expected(py::cast<intptr_t>(std::move(type_id))) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int is_fake = PyObject_IsInstance(value, _fake_script_object_type.ptr());
+    if (is_fake == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    if (is_fake == 1) {
+      PyObject* real_obj = PyObject_GetAttrString(value, "real_obj");
+      if (real_obj == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      bool result = Py_TYPE(real_obj) == (void*)_expected;
+      Py_DECREF(real_obj);
+      return result;
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return Py_TYPE(value) == (void*)_expected;
+  }
+
+ private:
+  // The FakeScriptObject Python class, used for the isinstance check.
+  py::object _fake_script_object_type;
+  // id of the expected (unwrapped) type.
+  intptr_t _expected;
+};
+
 class ID_MATCH : public LeafGuard {
  public:
   // obj_id = id(obj)
@@ -7341,6 +7388,17 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &TYPE_MATCH::check);
+  py::class_<
+      FAKE_SCRIPT_TYPE_MATCH,
+      LeafGuard,
+      std::shared_ptr<FAKE_SCRIPT_TYPE_MATCH>>(py_m, "FAKE_SCRIPT_TYPE_MATCH")
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::list,
+           py::object>())
+      .def("__call__", &FAKE_SCRIPT_TYPE_MATCH::check);
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &ID_MATCH::check);
@@ -7681,6 +7739,21 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<TYPE_MATCH>(
                 self.get_root(),
                 std::move(value),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fake_script_type_match_guard",
+          [](GuardManager& self,
+             py::object fake_script_object_type,
+             py::object type_id,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FAKE_SCRIPT_TYPE_MATCH");
+            self.add_leaf_guard(std::make_shared<FAKE_SCRIPT_TYPE_MATCH>(
+                self.get_root(),
+                std::move(fake_script_object_type),
+                std::move(type_id),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })

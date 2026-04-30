@@ -335,6 +335,13 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_fake_script_type_match_guard(
+        self,
+        fake_script_object_type: type,
+        type_id: int,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_dict_version_guard(
         self,
         value: Any,
