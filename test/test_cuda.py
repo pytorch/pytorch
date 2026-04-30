@@ -2462,6 +2462,82 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_rng_concurrent_captures(self):
+        """Test that multiple threads can capture graphs with RNG concurrently."""
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        g0 = torch.cuda.CUDAGraph()
+        g1 = torch.cuda.CUDAGraph()
+
+        buf0 = torch.empty(8, device="cuda")
+        buf1 = torch.empty(8, device="cuda")
+
+        first_started = threading.Event()
+        second_started = threading.Event()
+        first_done = threading.Event()
+        errors = []
+
+        def capture0():
+            try:
+                with torch.cuda.stream(s0):
+                    g0.capture_begin(capture_error_mode="thread_local")
+                    buf0.uniform_()
+                    first_started.set()
+                    second_started.wait(timeout=30)
+                    g0.capture_end()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                first_started.set()
+                first_done.set()
+
+        def capture1():
+            try:
+                first_started.wait(timeout=30)
+                with torch.cuda.stream(s1):
+                    g1.capture_begin(capture_error_mode="thread_local")
+                    second_started.set()
+                    first_done.wait(timeout=30)
+                    buf1.uniform_()
+                    g1.capture_end()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                second_started.set()
+                first_done.set()
+
+        threads = [
+            threading.Thread(target=capture0),
+            threading.Thread(target=capture1),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        if errors:
+            raise errors[0] if len(errors) == 1 else RuntimeError(errors)
+
+        with torch.cuda.stream(s0):
+            self.assertFalse(torch.cuda.is_current_stream_capturing())
+        with torch.cuda.stream(s1):
+            self.assertFalse(torch.cuda.is_current_stream_capturing())
+
+        torch.cuda.current_stream().wait_stream(s0)
+        torch.cuda.current_stream().wait_stream(s1)
+
+        buf0.zero_()
+        buf1.zero_()
+        g0.replay()
+        g1.replay()
+        torch.cuda.synchronize()
+
+        self.assertFalse(torch.allclose(buf0, torch.zeros_like(buf0)))
+        self.assertFalse(torch.allclose(buf1, torch.zeros_like(buf1)))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_rng_after_failed_capture(self):
         """Test that a stream can be captured again for RNG after a failed capture."""
         if TEST_WITH_ROCM and self.expandable_segments:

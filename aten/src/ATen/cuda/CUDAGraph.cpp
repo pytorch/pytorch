@@ -345,10 +345,12 @@ void CUDAGraph::reset() {
     capture_ended_ = false;
   }
   if (has_graph_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
     has_graph_ = false;
   }
   if (has_graph_exec_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
     has_graph_exec_ = false;
   }
