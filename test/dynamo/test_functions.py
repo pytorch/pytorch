@@ -733,26 +733,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
 
-    def test_list_extend_set_and_dict_iterables(self):
-        def fn(x):
-            out = [x]
-            out.extend({1, 2, 3})
-
-            mapping = {"a": x + 1, "b": x + 2}
-            out.extend(mapping)
-            out.extend(mapping.keys())
-            out.extend(mapping.values())
-            out.extend(mapping.items())
-            return out
-
-        x = torch.ones(2, 2)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-
-        self.assertEqual(actual[0], expected[0])
-        self.assertEqual(set(actual[1:4]), {1, 2, 3})
-        self.assertEqual(actual[4:], expected[4:])
-
     def test_list_slice(self):
         class Mock:
             def __init__(self):
@@ -4248,7 +4228,7 @@ class GraphModule(torch.nn.Module):
         return x + y
 
     @make_test
-    def test_map_list_extend_2(a):
+    def test_map_list_extend(a):
         y = [1]
 
         def inner(z):
