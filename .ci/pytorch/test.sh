@@ -457,6 +457,19 @@ test_dtensor() {
   assert_git_not_dirty
 }
 
+test_distributed_no_spmd_types() {
+  # Verify that distributed tests work when spmd_types is not installed,
+  # gated by the package being unavailable, or by stubs.
+  pip uninstall -y spmd_types
+  # shellcheck disable=SC2046
+  time python test/run_test.py \
+    --include \
+      $(find test/distributed/tensor -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|distributed/tensor/|' | sort | tr '\n' ' ') \
+      distributed/_composable/fsdp/test_fully_shard_spmd_types \
+    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_h100_distributed() {
   # Distributed tests at H100
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -2344,6 +2357,8 @@ elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
+elif [[ "${TEST_CONFIG}" == distributed_no_spmd_types ]]; then
+  test_distributed_no_spmd_types
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
