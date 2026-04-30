@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import hashlib
+import inspect
 import math
 import operator
 from collections.abc import Callable
@@ -402,17 +403,33 @@ def gemm_epilogue_fusion(
     if kernel_options is None:
         kernel_options = {"backend": "TRITON"}
 
-    def body_fn(*args):
-        return epilogue_fn(gemm_op(*args, **gemm_kwargs))
+    def body_fn(*args, **body_kwargs):
+        return epilogue_fn(gemm_op(*args, **body_kwargs))
 
     return _gemm_epilogue_fusion(
         gemm_op, body_fn, gemm_args, gemm_kwargs, kernel_options
     )
 
 
+def _body_accepts_kwargs(body_fn, kwargs) -> bool:
+    if not kwargs:
+        return False
+    signature = inspect.signature(body_fn)
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    ) or all(key in signature.parameters for key in kwargs)
+
+
+def _call_gemm_epilogue_body(body_fn, args, kwargs):
+    if _body_accepts_kwargs(body_fn, kwargs):
+        return body_fn(*args, **kwargs)
+    return body_fn(*args)
+
+
 @_gemm_epilogue_fusion.py_impl(DispatchKey.CompositeExplicitAutograd)
 def gemm_epilogue_fusion_dense(gemm_op, body_fn, args, kwargs, kernel_options):
-    return body_fn(*args, **kwargs)
+    return _call_gemm_epilogue_body(body_fn, args, kwargs)
 
 
 _gemm_epilogue_fusion.py_autograd_impl(
@@ -426,7 +443,7 @@ def gemm_epilogue_fusion_fake_tensor_mode(
 ):
     flat_args = pytree.tree_leaves(args)
     with mode:
-        return body_fn(*flat_args, **kwargs)
+        return body_fn(*flat_args)
 
 
 @_gemm_epilogue_fusion.py_functionalize_impl
@@ -461,7 +478,7 @@ def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
 ):
     if proxy_mode.enable_tracing:
         flat_args = tuple(pytree.tree_leaves(args))
-        body_graph = reenter_make_fx(body_fn)(*flat_args, **kwargs)
+        body_graph = reenter_make_fx(body_fn)(*flat_args)
         _, body_graph_name = unique_graph_id(
             proxy_mode, prefix="gemm_epilogue_fusion_body_graph"
         )
@@ -477,7 +494,7 @@ def gemm_epilogue_fusion_proxy_torch_dispatch_mode(
             {},
             name="gemm_epilogue_fusion",
         )
-        out = body_fn(*flat_args, **kwargs)
+        out = body_fn(*flat_args)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
