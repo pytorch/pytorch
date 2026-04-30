@@ -25,12 +25,18 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         layout = kwargs.pop("layout")
         epilogue_name = kwargs.pop("epilogue_name")
         epilogue_source = kwargs.pop("epilogue_source")
+        gemm_op = kwargs.pop("gemm_op")
+        alpha = kwargs.pop("alpha")
+        beta = kwargs.pop("beta")
         return QuackGemmEpilogueTemplateCaller(
             name=f"quack_gemm_epilogue_{next(self.index_counter)}",
             input_nodes=input_nodes,
             layout=layout,
             epilogue_name=epilogue_name,
             epilogue_source=epilogue_source,
+            gemm_op=gemm_op,
+            alpha=alpha,
+            beta=beta,
         )
 
 
@@ -42,6 +48,9 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         layout: Layout,
         epilogue_name: str,
         epilogue_source: str,
+        gemm_op: str,
+        alpha: float,
+        beta: float,
     ) -> None:
         super().__init__(
             name=name,
@@ -51,6 +60,9 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         )
         self.epilogue_name = epilogue_name
         self.epilogue_source = epilogue_source
+        self.gemm_op = gemm_op
+        self.alpha = alpha
+        self.beta = beta
 
     def benchmark(self, *args: Any, out: Any) -> float:
         return 0.0
@@ -62,6 +74,9 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 epilogue_name=self.epilogue_name,
                 epilogue_source=self.epilogue_source,
+                gemm_op=self.gemm_op,
+                alpha=self.alpha,
+                beta=self.beta,
             )
         )
 
@@ -72,7 +87,10 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         raise NotImplementedError("QuACK GEMM epilogue templates are codegen-only")
 
     def hash_key(self) -> str:
-        return code_hash(f"{self.epilogue_name}\n{self.epilogue_source}")
+        return code_hash(
+            f"{self.gemm_op}\n{self.alpha}\n{self.beta}\n"
+            f"{self.epilogue_name}\n{self.epilogue_source}"
+        )
 
     def info_dict(self) -> dict[str, Any]:
         return {"backend": "QuACK", "template": "quack_gemm_epilogue"}

@@ -8412,24 +8412,47 @@ def hints_wrapper_lowering(subgraph, args, kwargs, hints):
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     backend = kernel_options.get("backend", "TRITON")
     if backend == "QUACK":
-        if gemm_op != torch.ops.aten.mm.default or gemm_kwargs:
+        quack_gemm_ops = {
+            torch.ops.aten.mm.default: ("mm", 0, 1),
+            torch.ops.aten.addmm.default: ("addmm", 1, 2),
+            torch.ops.aten.bmm.default: ("bmm", 0, 1),
+            torch.ops.aten.baddbmm.default: ("baddbmm", 1, 2),
+        }
+        if gemm_op not in quack_gemm_ops:
             raise NotImplementedError(
-                "QUACK GEMM epilogue backend currently supports only aten.mm.default"
+                "QUACK GEMM epilogue backend currently supports only "
+                "aten.mm/addmm/bmm/baddbmm"
             )
         from torch._inductor.kernel.quack_gemm_epilogue import (
             quack_gemm_epilogue_template,
         )
         from torch._inductor.select_algorithm import autotune_select_algorithm
 
+        alpha = gemm_kwargs.get("alpha", 1.0)
+        beta = gemm_kwargs.get("beta", 1.0)
+        if alpha != 1.0 or beta != 1.0:
+            raise NotImplementedError(
+                "QUACK GEMM epilogue backend currently supports only default "
+                "alpha=1.0 and beta=1.0"
+            )
         epilogue_key, epilogue_source = materialize_quack_epilogue(
             subgraph.graph_module
         )
-        m, n = args[0].get_size()[0], args[1].get_size()[1]
+        gemm_op_name, mat1_idx, mat2_idx = quack_gemm_ops[gemm_op]
+        mat1, mat2 = args[mat1_idx], args[mat2_idx]
+        if gemm_op_name in ("mm", "addmm"):
+            m, n = mat1.get_size()[0], mat2.get_size()[1]
+            size = [m, n]
+            stride = [n, 1]
+        else:
+            b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
+            size = [b, m, n]
+            stride = [m * n, n, 1]
         layout = ir.FixedLayout(
-            args[0].get_device_or_error(),
-            args[0].get_dtype(),
-            [m, n],
-            [n, 1],
+            mat1.get_device_or_error(),
+            mat1.get_dtype(),
+            size,
+            stride,
         )
         input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
         choices: list[Any] = []
@@ -8439,6 +8462,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             layout=layout,
             epilogue_name=epilogue_key,
             epilogue_source=epilogue_source,
+            gemm_op=gemm_op_name,
+            alpha=alpha,
+            beta=beta,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout

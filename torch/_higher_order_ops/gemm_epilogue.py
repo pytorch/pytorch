@@ -28,17 +28,25 @@ _SUPPORTED_GEMM_OPS = {
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
 
 
-def _find_single_mm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
-    mm_nodes = [
+_QUACK_SUPPORTED_GEMM_OPS = {
+    torch.ops.aten.mm.default,
+    torch.ops.aten.addmm.default,
+    torch.ops.aten.bmm.default,
+    torch.ops.aten.baddbmm.default,
+}
+
+
+def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
+    gemm_nodes = [
         node
         for node in graph_module.graph.nodes
-        if node.op == "call_function" and node.target == torch.ops.aten.mm.default
+        if node.op == "call_function" and node.target in _QUACK_SUPPORTED_GEMM_OPS
     ]
-    if len(mm_nodes) != 1:
+    if len(gemm_nodes) != 1:
         raise NotImplementedError(
-            "QUACK GEMM epilogue backend currently supports one aten.mm.default body"
+            "QUACK GEMM epilogue backend currently supports one mm/addmm/bmm/baddbmm body"
         )
-    return mm_nodes[0]
+    return gemm_nodes[0]
 
 
 class _QuackCuteDSLBody:
@@ -214,7 +222,7 @@ def _quack_cute_epilogue_code(
     from torch._inductor.virtualized import ops, V
     from torch.utils._sympy.value_ranges import ValueRanges
 
-    mm_node = _find_single_mm_node(graph_module)
+    mm_node = _find_single_quack_gemm_node(graph_module)
     kernel = _QuackCuteDSLKernel()
     handler = ModificationWrapperCuteDSL(kernel, 0, {}, None)
     env: dict[torch.fx.Node, Any] = {
