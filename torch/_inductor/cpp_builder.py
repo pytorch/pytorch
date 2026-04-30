@@ -1357,8 +1357,8 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implemented more math libraries than clang, for performance proposal.
-    We need preload them like openmp library.
+    Intel Compiler implemented more math libraries than clang, for performance purposes.
+    We need to preload them like openmp library.
     """
     preload_list = [
         "libiomp5md.dll",  # openmp

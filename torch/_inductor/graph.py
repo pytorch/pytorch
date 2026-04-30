@@ -980,8 +980,8 @@ class GraphLowering(torch.fx.Interpreter):
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
-           We need convert it to channels last layout which results in the second copy.
-        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
+           We need to convert it to channels last layout which results in the second copy.
+        With rule 2, we make sure all the tensors in the chain use channels last layout. So both copies
         can be saved.
         """
         last_conv = None
@@ -1968,7 +1968,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # 2: as_strided ops, we need to make sure its input has same size/stride with
             # eager model to align with eager behavior.
             as_strided_ops = [
                 torch.ops.aten.as_strided.default,

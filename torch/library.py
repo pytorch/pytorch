@@ -1149,7 +1149,7 @@ def register_fake(
                         and will error you're trying to register a fake impl to
                         an operator that already has a fake impl. This also only
                         applies if the custom operator was not created via
-                        torch.library.custom_op, as overriding and existing fake
+                        torch.library.custom_op, as overriding an existing fake
                         impl is already allowed.
 
     Examples:
