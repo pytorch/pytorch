@@ -8261,7 +8261,12 @@ class DynamicSelectStorageOffset(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.index, unbacked_only)
+        return (
+            get_free_symbols(self.index, unbacked_only)
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.base_offset, unbacked_only))
+            .union(get_free_symbols(self.base_dim_stride, unbacked_only))
+        )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
@@ -8312,8 +8317,11 @@ class DynamicSliceSize(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.start, unbacked_only).union(
-            get_free_symbols(self.end, unbacked_only)
+        return (
+            get_free_symbols(self.start, unbacked_only)
+            .union(get_free_symbols(self.end, unbacked_only))
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.step, unbacked_only))
         )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:

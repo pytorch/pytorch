@@ -380,6 +380,12 @@
   "GB0035": [
     {
       "Gb_type": "Data-dependent branching with non-constant __bool__",
+      "Context": "value: {value}, result: {result}",
+      "Explanation": "Attempted to perform data-dependent branching on a user-defined object with non-constant truthiness.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Data-dependent branching with non-constant __bool__",
       "Context": "method: {x}, result: {result}",
       "Explanation": "Attempted to perform data-dependent branching on a user-defined object with a __bool__ method that did not return a constant.",
       "Hints": []
@@ -2139,6 +2145,14 @@
         "and passed as an argument.",
         "If the module is a class attribute, access it via self.module_name."
       ]
+    }
+  ],
+  "GB5904": [
+    {
+      "Gb_type": "unsupported __getitem__ (sq_item)",
+      "Context": "sq_item_impl {self} {key}",
+      "Explanation": "Dynamo does not know how to handle sq_item on {self}",
+      "Hints": []
     }
   ],
   "GB0163": [
