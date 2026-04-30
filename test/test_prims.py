@@ -508,7 +508,7 @@ instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 
 class TestPrimsPhiloxOnCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @dtypes(torch.float32)
     def test_philox_rand(self, device, dtype):
@@ -538,7 +538,7 @@ class TestPrimsPhiloxOnCUDA(TestCase):
                 self.assertEqual(a, b)
 
 
-instantiate_device_type_tests(TestPrimsPhiloxOnCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestPrimsPhiloxOnCUDA, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 if __name__ == "__main__":

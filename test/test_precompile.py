@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
@@ -2643,15 +2644,15 @@ class TestPrecompile(TestCase):
         xt = torch.randn(8, 4)
         self.assertEqual(f_c(m, xt), m(xt))
 
-    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
+    @unittest.skipUnless(TEST_CUDA or TEST_XPU, "needs CUDA/XPU rng state")
     def test_functionalized_rng_matches_eager_cpu(self):
         # Under functionalized RNG the dropout draw is seeded from the global generator,
         # so seeding torch.manual_seed identically before the artifact run and before eager
         # makes both draw the SAME dropout mask: the artifact output is numerically EQUAL
         # to eager (a stronger check than structure-only). This runs on CPU tensors, but
-        # functionalize_rng_ops still seeds via CUDARngStateHelper.get_torch_state_as_tuple,
-        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
-        # (mirroring test_functionalized_rng_supported). The CUDA functionalized path uses
+        # functionalize_rng_ops still seeds via RngStateHelper.get_torch_state_as_tuple,
+        # which needs a CUDA or XPU rng state, so the whole test is gated on TEST_CUDA or
+        # TEST_XPU (mirroring test_functionalized_rng_supported). The CUDA/XPU path uses
         # different Philox offset bookkeeping than eager, so this numeric equivalence is
         # CPU-tensor-only (see test_functionalized_rng_supported for the device-generic
         # structural check).
@@ -4094,13 +4095,13 @@ class TestPrecompileNumerics(TestCase):
         self.assertEqual(x, torch.ones(4, device=device))
         self.assertEqual(out, torch.ones(4, device=device))
 
-    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
+    @unittest.skipUnless(TEST_CUDA or TEST_XPU, "needs CUDA/XPU rng state")
     def test_functionalized_rng_supported(self, device):
         # Functionalized RNG (dropout) threads seed/offset; the AOT backend composes
         # the RNG wrapper in. The artifact runs and produces a valid dropout mask. Even
-        # for a CPU tensor the wrapper seeds from CUDARngStateHelper.get_torch_state_as_tuple,
-        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
-        # rather than on the tensor's device.
+        # for a CPU tensor the wrapper seeds from RngStateHelper.get_torch_state_as_tuple,
+        # which needs a CUDA or XPU rng state, so the whole test is gated on TEST_CUDA or
+        # TEST_XPU rather than on the tensor's device.
         import torch._functorch.config as functorch_config
 
         x = make_tensor((64,), device=device, dtype=torch.float32)
@@ -4379,7 +4380,7 @@ class TestPrecompileNumerics(TestCase):
                 self.assertEqual(out, expected)
 
 
-instantiate_device_type_tests(TestPrecompileNumerics, globals())
+instantiate_device_type_tests(TestPrecompileNumerics, globals(), allow_xpu=True)
 
 
 _FRESH_PROCESS_LOADER = """

@@ -7,7 +7,11 @@ from torch import _prims
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
+from torch._prims_common import (
+    CUDARngStateHelper,
+    make_contiguous_strides_for,
+    PHILOX_BACKENDS,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -16,12 +20,17 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.types import _device, _dtype
 
 
-def throw_on_non_cuda(device):
-    raise RuntimeError(
-        f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
-        f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
-        "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
-    )
+def throw_on_non_philox_device(device):
+    if device.type not in PHILOX_BACKENDS:
+        raise RuntimeError(
+            f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
+            f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
+            "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
+        )
+
+
+# Back-compat alias for external callers that imported the old name.
+throw_on_non_cuda = throw_on_non_philox_device
 
 
 def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
@@ -111,14 +120,18 @@ def register_philox_rand():
         else:
             devices = [device]
 
-        if device.type != "cuda":
-            raise throw_on_non_cuda(device)
+        throw_on_non_philox_device(device)
+        device_mod = getattr(torch, device.type)
 
-        with torch.random.fork_rng(devices):
+        with torch.random.fork_rng(devices, device_type=device.type):
+            # CUDARngStateHelper is a back-compat alias for the device-agnostic
+            # RngStateHelper which routes via torch.accelerator.current_accelerator().
             CUDARngStateHelper.set_torch_state_tensor(seed, offset)
             random_values = torch.rand(shape, device=device, dtype=dtype)
+            new_offset = device_mod._get_rng_state_offset(device)
 
-        return random_values, philox_rand_offset(shape)
+        consumed = new_offset - int(offset.item())
+        return random_values, torch.scalar_tensor(consumed, dtype=torch.int64)
 
     register_rng_prim(
         name=name,

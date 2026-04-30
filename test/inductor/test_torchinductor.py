@@ -13961,7 +13961,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f"functionalization of rng ops supported only on {GPU_TYPE}",
     )
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
-    @expectedFailureXPU
     @skip_if_gpu_halide  # rand
     @xfail_if_mps
     def test_philox_rand(self):
