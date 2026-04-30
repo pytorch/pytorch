@@ -2210,27 +2210,38 @@ def alert_not_deterministic(caller: str):
             )
 
 
-class CUDARngStateHelper:
+class RngStateHelper:
+    @staticmethod
+    def _get_accelerator_module():
+        if not torch.accelerator.is_available():
+            raise RuntimeError("No accelerator is available")
+        return torch.get_device_module()
+
     @staticmethod
     def get_torch_state_as_tuple(
         fake_mode: AbstractContextManager[Any] = nullcontext(),
     ):
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA not available")
-
+        mod = RngStateHelper._get_accelerator_module()
         with fake_mode:
-            seed = torch.tensor(torch.cuda.initial_seed())
-            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            seed = torch.tensor(mod.initial_seed())
+            offset = torch.tensor(mod._get_rng_state_offset())
             return seed, offset
 
     @staticmethod
     def set_torch_state_tensor(seed, offset):
         # Rng state is [64-bit seed, 64-bit offset]
+        mod = RngStateHelper._get_accelerator_module()
         seed_portion = seed.reshape([1]).view(torch.uint8)
         offset_portion = offset.reshape([1]).view(torch.uint8)
         new_state = torch.cat([seed_portion, offset_portion])
-        torch.cuda.set_rng_state(new_state)
+        mod.set_rng_state(new_state)
 
     @staticmethod
     def set_new_offset(relative_offset):
-        torch.cuda._set_rng_state_offset(relative_offset.item())
+        mod = RngStateHelper._get_accelerator_module()
+        mod._set_rng_state_offset(relative_offset.item())
+
+
+# Back-compat alias: the helper used to be CUDA-only. Keep the old name so
+# external imports (e.g. vLLM, third-party AOTAutograd users) keep working.
+CUDARngStateHelper = RngStateHelper
