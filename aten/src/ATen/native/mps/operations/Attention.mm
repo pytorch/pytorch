@@ -218,8 +218,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
       auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
       bool has_mask = mask_.has_value();
 
-      const std::string kname =
-          fmt::format("sdpa_vector_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
+      const std::string kname = fmt::format(
+          "sdpa_vector_{}_{}_{}{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1), is_causal ? "_causal" : "");
       auto attentionPSO = lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
@@ -302,8 +302,11 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      const std::string kname_pass1 =
-          fmt::format("sdpa_vector_2pass_1_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
+      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1_{}_{}_{}{}",
+                                                  scalarToMetalTypeString(q_),
+                                                  q_.size(-1),
+                                                  v_.size(-1),
+                                                  is_causal ? "_causal" : "");
       const std::string kname_pass2 =
           fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), v_.size(-1));
       auto sdpa_vector_pass1PSO = lib.getPipelineStateForFunc(kname_pass1);
@@ -721,7 +724,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
 
   // boolean to decide if we can use kernel paths
-  bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
+  bool supports_fast_sdpa = supports_sdpa_vector && !(is_causal && mask_.has_value());
 
   // Prefill kernel: long-Q path. Requires Q/K/V to share the same
   // head dim, the head dim to be one of the instantiated shapes, the dtype to
