@@ -6873,6 +6873,22 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    def test_mempool_delete_while_other_pool_active(self):
+        torch.cuda.empty_cache()
+        pool_to_delete = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool_to_delete):
+            x = torch.empty(4, device="cuda")
+        del x
+
+        active_pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(active_pool):
+            del pool_to_delete
+            gc.collect()
+            y = torch.empty(4, device="cuda")
+
+        del y, active_pool
+        torch.cuda.empty_cache()
+
     @serialTest()
     def test_nested_mempool(self):
         torch.cuda.empty_cache()

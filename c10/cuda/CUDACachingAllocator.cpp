@@ -3711,9 +3711,11 @@ class DeviceCachingAllocator {
   }
 
   /**
-   * If mempool_id is {0,0} (the default pool) and there are no
-   * currently capturing memory pools, free the default pool's blocks
-   * and also free the blocks of the freeable private pools.
+   * If any allocations are being diverted to a specific pool, avoid
+   * synchronizing and freeing blocks until the diversion ends.
+   *
+   * If mempool_id is {0,0} (the default pool), free the default pool's
+   * blocks and also free the blocks of the freeable private pools.
    *
    * If mempool_id corresponds to a private pool that is freeable,
    * call synchronize_and_free_events() on that private pool. Free the
@@ -3722,8 +3724,11 @@ class DeviceCachingAllocator {
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
-    if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      return false;
+    }
+
+    if (mempool_id.first == 0 && mempool_id.second == 0) {
       // If there is no active mempool, we work on releasing *all* blocks.
 
       // First ensure that all blocks that can't currently be allocated due to
