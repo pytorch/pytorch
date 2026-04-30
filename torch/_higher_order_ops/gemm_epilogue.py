@@ -412,6 +412,90 @@ def gemm_epilogue_fusion(
     )
 
 
+def mm_epilogue(
+    input: Any,
+    mat2: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    kernel_options: dict[str, Any] | None = None,
+):
+    return gemm_epilogue_fusion(
+        torch.ops.aten.mm.default,
+        (input, mat2),
+        epilogue_fn,
+        kernel_options=kernel_options,
+    )
+
+
+def addmm_epilogue(
+    input: Any,
+    mat1: Any,
+    mat2: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+    kernel_options: dict[str, Any] | None = None,
+):
+    return gemm_epilogue_fusion(
+        torch.ops.aten.addmm.default,
+        (input, mat1, mat2),
+        epilogue_fn,
+        gemm_kwargs={"beta": beta, "alpha": alpha},
+        kernel_options=kernel_options,
+    )
+
+
+def bmm_epilogue(
+    input: Any,
+    mat2: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    kernel_options: dict[str, Any] | None = None,
+):
+    return gemm_epilogue_fusion(
+        torch.ops.aten.bmm.default,
+        (input, mat2),
+        epilogue_fn,
+        kernel_options=kernel_options,
+    )
+
+
+def baddbmm_epilogue(
+    input: Any,
+    batch1: Any,
+    batch2: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+    kernel_options: dict[str, Any] | None = None,
+):
+    return gemm_epilogue_fusion(
+        torch.ops.aten.baddbmm.default,
+        (input, batch1, batch2),
+        epilogue_fn,
+        gemm_kwargs={"beta": beta, "alpha": alpha},
+        kernel_options=kernel_options,
+    )
+
+
+def matmul_epilogue(
+    input: Any,
+    other: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    kernel_options: dict[str, Any] | None = None,
+):
+    if input.dim() == 2 and other.dim() == 2:
+        return mm_epilogue(input, other, epilogue_fn, kernel_options=kernel_options)
+    if input.dim() == 3 and other.dim() == 3:
+        return bmm_epilogue(input, other, epilogue_fn, kernel_options=kernel_options)
+    raise NotImplementedError(
+        "matmul_epilogue currently supports only 2D mm and 3D bmm inputs"
+    )
+
+
 def _body_accepts_kwargs(body_fn, kwargs) -> bool:
     if not kwargs:
         return False
