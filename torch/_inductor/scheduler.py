@@ -33,7 +33,7 @@ from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import ComputedBuffer, Pointwise
+from .ir import ComputedBuffer
 
 
 if TYPE_CHECKING:
@@ -2158,13 +2158,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         assert self.node is not None
         return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
 
-    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
-        if not isinstance(self.node, ir.UserDefinedTritonKernel):
-            return ([], [])
-        assert len(self.node.mutable_args) == 1
-        numel = math.prod(self.node.mutable_args[0].shape)
-        return ([numel], [])
-
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.node, ir.ExternKernel)
         return self.node.codegen(wrapper)
@@ -3108,9 +3101,6 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
 
     def is_extern(self) -> bool:
         return True
-
-    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
-        return self.kernel_node.get_ranges()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -7417,16 +7407,12 @@ class Scheduler:
                 why("node1 is extern but not a triton kernel")
                 return False
 
-            if not config.epilogue_fusion_user_defined_triton_kernel:
-                why("epilogue fusion for user defined triton kernel is disabled")
-                return False
-
             if not node1.node.arg_accesses.only_tt_stores:
                 why("node1's triton kernel has non-store writes")
                 return False
 
             write_deps = list(node1.node.arg_accesses.read_writes.writes)
-            if len(write_deps) != 1:
+            if len(write_deps) != 1 or len(node1.node.mutable_args) != 1:
                 why("node1's triton kernel has multiple outputs")
                 return False
 
@@ -7448,8 +7434,6 @@ class Scheduler:
                     return False
                 if not isinstance(arg.data.data, ir.ComputedBuffer):
                     return False
-                if not isinstance(arg.data.data.data, ir.Pointwise):
-                    return False
                 if not all(r == 0 for r in arg.data.data.data.ranges):
                     return False
                 return True
@@ -7469,10 +7453,10 @@ class Scheduler:
             if not isinstance(node2, SchedulerNode):
                 why("node1 is extern but node2 is not SchedulerNode")
                 return False
-            if not isinstance(node2.node, ComputedBuffer):
-                why("node1 is extern but node2.node is not SchedulerNode")
-                return False
-            if not isinstance(node2.node.data, Pointwise):
+
+            if not isinstance(node2.node, ComputedBuffer) or not isinstance(
+                node2.node.data, ir.Pointwise
+            ):
                 why("node1 is extern but node2.node.data is not Pointwise")
                 return False
 
@@ -7481,7 +7465,7 @@ class Scheduler:
             # The epilogue can only read from the output buffer.
             # Any other tensor/s would require additional load expressions.
             if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("epilogue reads from buffers other than the mutated output")
+                why("node2 reads from buffers other than the mutated output")
                 return False
 
             # the epilogue depends on expressions which may not available in the user triton kernel
@@ -7490,11 +7474,8 @@ class Scheduler:
             for symbol in node2_inner_fn_free_symbols:
                 usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
                 if any(usage != "load" for usage in usages):
+                    why("node2 requires expressions not available in node1")
                     return False
-
-            if node1.node.mutable_args[0].layout != node2.node.layout:
-                why("node1 and node2 uses different buf layouts")
-                return False
 
             def _is_other_node_that_references_mutation_buffer(
                 other_node: BaseSchedulerNode,
