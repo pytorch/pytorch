@@ -365,7 +365,7 @@ class OptimizerSingleTensorPattern(Pattern):
     the kernels are relatively small.
 
     Pattern:
-    XXXXX: _single_tenser_<OPTIMIZER_NAME>
+    XXXXX: _single_tensor_<OPTIMIZER_NAME>
 
     Algorithm:
     String match
