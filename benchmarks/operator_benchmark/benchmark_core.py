@@ -357,27 +357,45 @@ class BenchmarkRunner:
         ) and curr_test_total_time > self.args.min_time_per_test
 
     def _launch_forward(self, test_case, iters, print_per_iter):
-        """Use Python's timeit module to measure execution time (unit: second)."""
-        cuda_sync = "cuda" in test_case.test_config.test_name
+        """Use Python's timeit module to measure execution time (unit: second).
+
+        The trigger flag was historically ``cuda_sync = "cuda" in test_name``
+        which meant xpu runs never actually synced the GPU inside the
+        stmt (they fell into the no-sync ``timeit.timeit`` path), so
+        the timer captured host-submit time only — xpu kernels were
+        still running when the timer stopped, artificially deflating
+        the reported wall.
+
+        Fix: treat cuda and xpu the same — both go through the
+        ``Timer.adaptive_autorange`` path, both sync their GPU inside
+        the stmt.  The cpu branch keeps the plain ``timeit.timeit``
+        path.  Return value is ``result.median * iters`` (matching
+        the original cuda logic), so ``_measure_metrics`` downstream
+        sees the same units for both GPU devices.
+        """
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
 
-        if not cuda_sync:
+        if not gpu_sync:
             forward_time = timeit.timeit(
-                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+                functools.partial(func, iters, print_per_iter, gpu_sync), number=1
             )
             return forward_time
-        # Stable timing with Timer
+        # Stable timing with Timer; stmt runs iters forwards + device sync.
+        # `cuda_sync` is still the parameter name on ``run_forward`` for
+        # backwards compat; semantically it means "sync the GPU".
         timer = Timer(
             stmt="func(iters, print_per_iter, cuda_sync)",
             globals={
                 "func": func,
                 "iters": iters,
                 "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
+                "cuda_sync": gpu_sync,
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)

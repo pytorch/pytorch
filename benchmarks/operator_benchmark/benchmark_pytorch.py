@@ -20,6 +20,31 @@ microbenchmarks.
 """
 
 
+def _sync_current_device(inputs):
+    """Sync whichever GPU device the benchmark's inputs live on.
+
+    The benchmark harness historically only called
+    ``torch.cuda.synchronize()``, which meant xpu runs never actually
+    waited for the GPU before stopping the timer — the reported wall
+    captured host submit time only.  This helper picks the right sync
+    based on the device of one of the input tensors.
+    """
+    if isinstance(inputs, dict):
+        it = iter(inputs.values())
+    else:
+        it = iter(inputs or [])
+    for v in it:
+        if isinstance(v, torch.Tensor):
+            dev = v.device.type
+            if dev == "cuda":
+                torch.cuda.synchronize(torch.cuda.current_device())
+            elif dev == "xpu":
+                torch.xpu.synchronize(torch.xpu.current_device())
+            return
+    # no tensor inputs — nothing to sync
+    return
+
+
 class TorchBenchmarkBase(torch.nn.Module):
     """This is a base class used to create Pytorch operator benchmark.
     module_name is the name of the operator being benchmarked.
@@ -200,7 +225,10 @@ class PyTorchOperatorTestCase:
             self._compile_forward_graph = self._generate_compile_forward_graph()
         self._compile_forward_graph(num_runs)
         if cuda_sync:
-            torch.cuda.synchronize(torch.cuda.current_device())
+            # Despite the legacy parameter name, sync the device that
+            # actually holds the inputs (cuda or xpu).  See the note
+            # in benchmark_core._launch_forward.
+            _sync_current_device(self.op_bench.inputs)
 
     def _print_per_iter(self):
         # print last 50 values
@@ -225,14 +253,14 @@ class PyTorchOperatorTestCase:
                 start_time = time.time()
                 self.output = self.op_bench.forward_impl_eager()
                 if cuda_sync:
-                    torch.cuda.synchronize(torch.cuda.current_device())
+                    _sync_current_device(self.op_bench.inputs)
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward_impl_eager()
             if cuda_sync:
-                torch.cuda.synchronize(torch.cuda.current_device())
+                _sync_current_device(self.op_bench.inputs)
 
     def _output_mean(self):
         """TODO (mingzhe): it is not necessary to sum up everything by myself,
