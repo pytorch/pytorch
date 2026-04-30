@@ -11,6 +11,8 @@
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
+// TODO: enable AOR here too, similar to vec_float.h
+
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

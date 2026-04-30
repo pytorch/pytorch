@@ -792,6 +792,42 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
+if(USE_ARM_OPTIMIZED_ROUTINES AND NOT INTERN_BUILD_MOBILE)
+  set(AOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/optimized-routines")
+  set(AOR_MATH_ROOT "${AOR_ROOT}/math")
+  # AOR does not provide CMake
+  # Expose its public math header like Sleef's generated build/include headers.
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include")
+  file(COPY "${AOR_MATH_ROOT}/include/mathlib.h" DESTINATION "${CMAKE_BINARY_DIR}/include")
+  file(GLOB AOR_GENERIC_MATH_SRCS "${AOR_MATH_ROOT}/*.c")
+  file(GLOB AOR_AARCH64_MATH_SRCS "${AOR_MATH_ROOT}/aarch64/*.c")
+  file(GLOB AOR_SVE_MATH_SRCS "${AOR_MATH_ROOT}/aarch64/sve/*.c")
+  file(GLOB AOR_ADVSIMD_MATH_SRCS "${AOR_MATH_ROOT}/aarch64/advsimd/*.c")
+  # Note: AOR only ships makefiles
+  add_library(arm_optimized_routines_math STATIC
+    ${AOR_GENERIC_MATH_SRCS}
+    ${AOR_AARCH64_MATH_SRCS}
+    ${AOR_SVE_MATH_SRCS}
+    ${AOR_ADVSIMD_MATH_SRCS})
+  target_include_directories(arm_optimized_routines_math
+    PUBLIC "${AOR_MATH_ROOT}/include"
+    PRIVATE
+      "${AOR_MATH_ROOT}"
+      "${AOR_MATH_ROOT}/aarch64/sve"
+      "${AOR_MATH_ROOT}/aarch64/advsimd")
+  target_compile_options(arm_optimized_routines_math PRIVATE
+    -O3
+    -fPIC
+    -frounding-math
+    -fexcess-precision=standard
+    -fno-stack-protector
+    -ffp-contract=fast
+    -fno-math-errno)
+  set_property(TARGET arm_optimized_routines_math PROPERTY FOLDER "dependencies")
+  list(APPEND ATen_THIRD_PARTY_INCLUDE "${AOR_MATH_ROOT}/include")
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS arm_optimized_routines_math)
+endif()
+
 if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)
   add_definitions(-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1)

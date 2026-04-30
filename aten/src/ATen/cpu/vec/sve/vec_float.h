@@ -10,6 +10,14 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC_WITH_AOR)
+extern "C" {
+#include <mathlib.h>
+}
+#define USE_AOR(aor_code, non_aor_code) aor_code
+#else
+#define USE_AOR(aor_code, non_aor_code) non_aor_code
+#endif
 
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
@@ -178,42 +186,62 @@ class Vectorized<float> {
     return values;
   }
   Vectorized<float> acos() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_acosf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos)));
   }
   Vectorized<float> acosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acoshfx_u10sve(values)), map(std::acosh));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_acoshf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_acoshfx_u10sve(values)),
+            map(std::acosh)));
   }
   Vectorized<float> asin() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_asinfx_u10sve(values)), map(std::asin));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_asinf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_asinfx_u10sve(values)), map(std::asin)));
   }
   Vectorized<float> asinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_asinhfx_u10sve(values)), map(std::asinh));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_asinhf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_asinhfx_u10sve(values)),
+            map(std::asinh)));
   }
   Vectorized<float> atan() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_atanfx_u10sve(values)), map(std::atan));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_atanf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_atanfx_u10sve(values)), map(std::atan)));
   }
   Vectorized<float> atanh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_atanhfx_u10sve(values)), map(std::atanh));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_atanhf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_atanhfx_u10sve(values)),
+            map(std::atanh)));
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
-    USE_SLEEF(
-        { return Vectorized<float>(Sleef_atan2fx_u10sve(values, b)); },
+    USE_AOR(
         {
-          __at_align__ float tmp[size()];
-          __at_align__ float tmp_b[size()];
-          store(tmp);
-          b.store(tmp_b);
-          for (int64_t i = 0; i < size(); i++) {
-            tmp[i] = std::atan2(tmp[i], tmp_b[i]);
-          }
-          return loadu(tmp);
-        });
+          return Vectorized<float>(
+              _ZGVsMxvv_atan2f(values, b, svptrue_b32()));
+        },
+        USE_SLEEF(
+            { return Vectorized<float>(Sleef_atan2fx_u10sve(values, b)); },
+            {
+              __at_align__ float tmp[size()];
+              __at_align__ float tmp_b[size()];
+              store(tmp);
+              b.store(tmp_b);
+              for (int64_t i = 0; i < size(); i++) {
+                tmp[i] = std::atan2(tmp[i], tmp_b[i]);
+              }
+              return loadu(tmp);
+            }));
   }
   Vectorized<float> copysign(const Vectorized<float>& sign) const {
     USE_SLEEF(
@@ -230,27 +258,38 @@ class Vectorized<float> {
         });
   }
   Vectorized<float> erf() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_erff(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf)));
   }
   Vectorized<float> erfc() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_erfcfx_u15sve(values)), map(std::erfc));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_erfcf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_erfcfx_u15sve(values)), map(std::erfc)));
   }
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
   Vectorized<float> exp() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_expfx_u10sve(values)), map(std::exp));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_expf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_expfx_u10sve(values)), map(std::exp)));
   }
   Vectorized<float> exp2() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_exp2fx_u10sve(values)), map(std::exp2));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_exp2f(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_exp2fx_u10sve(values)), map(std::exp2)));
   }
   Vectorized<float> expm1() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_expm1fx_u10sve(values)), map(std::expm1));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_expm1f(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_expm1fx_u10sve(values)),
+            map(std::expm1)));
   }
   // Implementation copied from Arm Optimized Routines:
   // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
@@ -351,18 +390,23 @@ class Vectorized<float> {
         });
   }
   Vectorized<float> hypot(const Vectorized<float>& b) const {
-    USE_SLEEF(
-        { return Vectorized<float>(Sleef_hypotfx_u05sve(values, b)); },
+    USE_AOR(
         {
-          __at_align__ float tmp[size()];
-          __at_align__ float tmp_b[size()];
-          store(tmp);
-          b.store(tmp_b);
-          for (int64_t i = 0; i < size(); i++) {
-            tmp[i] = std::hypot(tmp[i], tmp_b[i]);
-          }
-          return loadu(tmp);
-        });
+          return Vectorized<float>(
+              _ZGVsMxvv_hypotf(values, b, svptrue_b32()));
+        },
+        USE_SLEEF(
+            { return Vectorized<float>(Sleef_hypotfx_u05sve(values, b)); },
+            {
+              __at_align__ float tmp[size()];
+              __at_align__ float tmp_b[size()];
+              store(tmp);
+              b.store(tmp_b);
+              for (int64_t i = 0; i < size(); i++) {
+                tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+              }
+              return loadu(tmp);
+            }));
   }
   Vectorized<float> i0() const {
     return map(calc_i0);
@@ -408,37 +452,55 @@ class Vectorized<float> {
         });
   }
   Vectorized<float> log() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_logfx_u10sve(values)), map(std::log));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_logf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_logfx_u10sve(values)), map(std::log)));
   }
   Vectorized<float> log2() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log2fx_u10sve(values)), map(std::log2));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_log2f(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_log2fx_u10sve(values)), map(std::log2)));
   }
   Vectorized<float> log10() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log10fx_u10sve(values)), map(std::log10));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_log10f(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_log10fx_u10sve(values)),
+            map(std::log10)));
   }
   Vectorized<float> log1p() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log1pfx_u10sve(values)), map(std::log1p));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_log1pf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_log1pfx_u10sve(values)),
+            map(std::log1p)));
   }
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_sinf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin)));
   }
   Vectorized<float> sinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinhfx_u10sve(values)), map(std::sinh));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_sinhf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_sinhfx_u10sve(values)), map(std::sinh)));
   }
   Vectorized<float> cos() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_cosf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos)));
   }
   Vectorized<float> cosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_coshfx_u10sve(values)), map(std::cosh));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_coshf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_coshfx_u10sve(values)), map(std::cosh)));
   }
   Vectorized<float> ceil() const {
     return svrintp_f32_x(ptrue, values);
@@ -453,51 +515,16 @@ class Vectorized<float> {
     return svrinti_f32_x(ptrue, values);
   }
   Vectorized<float> tan() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan));
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_tanf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan)));
   }
-  // Implementation is picked from
-  // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
   Vectorized<float> tanh() const {
-    // Constants used for the tanh calculation.
-    const svfloat32_t CONST_1 =
-        svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
-    const svfloat32_t CONST_2 = svdup_n_f32(
-        2.f); // Constant 2.0f for the tanh formula (used in exp(2x)).
-    const svfloat32_t CONST_MIN_TANH = svdup_n_f32(
-        -10.f); // Minimum threshold for input values to prevent overflow.
-    const svfloat32_t CONST_MAX_TANH = svdup_n_f32(
-        10.f); // Maximum threshold for input values to prevent overflow.
-
-    // Step 1: Clamp the values within the range [-10, 10] to prevent overflow
-    // during exponentiation. The tanh function approaches ±1 rapidly as the
-    // input grows large, so we limit the input range to avoid numerical
-    // instability. svmax_f32_z ensures values are greater than -10, and
-    // svmin_f32_z ensures they are less than 10.
-    svfloat32_t x = svmin_f32_z(
-        ptrue, svmax_f32_z(ptrue, values, CONST_MIN_TANH), CONST_MAX_TANH);
-
-    // Step 2: Calculate exp(2 * x), where x is the clamped value.
-    // svmul_f32_z computes 2 * x, and exp_u20() computes the exponential of
-    // the result (via Vectorized<float>, then auto-converts back to
-    // svfloat32_t).
-    svfloat32_t exp2x =
-        Vectorized<float>(svmul_f32_z(ptrue, CONST_2, x)).exp_u20();
-
-    // Step 3: Calculate the numerator of the tanh function, which is exp(2x)
-    // - 1.
-    svfloat32_t num = svsub_f32_z(ptrue, exp2x, CONST_1);
-
-    // Step 4: Calculate the denominator of the tanh function, which is exp(2x)
-    // + 1.
-    svfloat32_t den = svadd_f32_z(ptrue, exp2x, CONST_1);
-
-    // Step 5: Calculate the tanh function as the ratio of the numerator and
-    // denominator: num / den.
-    svfloat32_t tanh = svdiv_f32_z(ptrue, num, den);
-
-    // Return the calculated tanh values.
-    return tanh;
+    return USE_AOR(
+        Vectorized<float>(_ZGVsMxv_tanhf(values, svptrue_b32())),
+        USE_SLEEF(
+            Vectorized<float>(Sleef_tanhfx_u10sve(values)), map(std::tanh)));
   }
   Vectorized<float> trunc() const {
     return svrintz_f32_x(ptrue, values);
@@ -516,18 +543,23 @@ class Vectorized<float> {
     return svdivr_f32_x(ptrue, svsqrt_f32_x(ptrue, values), ONE_F32);
   }
   Vectorized<float> pow(const Vectorized<float>& b) const {
-    USE_SLEEF(
-        { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
+    USE_AOR(
         {
-          __at_align__ float tmp[size()];
-          __at_align__ float tmp_b[size()];
-          store(tmp);
-          b.store(tmp_b);
-          for (int64_t i = 0; i < size(); i++) {
-            tmp[i] = std::pow(tmp[i], tmp_b[i]);
-          }
-          return loadu(tmp);
-        });
+          return Vectorized<float>(
+              _ZGVsMxvv_powf(values, b, svptrue_b32()));
+        },
+        USE_SLEEF(
+            { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
+            {
+              __at_align__ float tmp[size()];
+              __at_align__ float tmp_b[size()];
+              store(tmp);
+              b.store(tmp_b);
+              for (int64_t i = 0; i < size(); i++) {
+                tmp[i] = std::pow(tmp[i], tmp_b[i]);
+              }
+              return loadu(tmp);
+            }));
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

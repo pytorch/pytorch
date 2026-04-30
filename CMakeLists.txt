@@ -411,6 +411,10 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_ARM_OPTIMIZED_ROUTINES
+  "Use Arm Optimized Routines for AArch64 vector math." ON
+  "LINUX;CPU_AARCH64" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
 set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
 if(LINUX AND CPU_AARCH64)
@@ -1041,6 +1045,10 @@ if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
+if(USE_ARM_OPTIMIZED_ROUTINES AND NOT INTERN_BUILD_MOBILE)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC_WITH_AOR")
+  add_definitions(-DAT_BUILD_ARM_VEC_WITH_AOR)
+endif()
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")

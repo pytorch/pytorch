@@ -10,6 +10,11 @@
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
 #endif
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC_WITH_AOR)
+extern "C" {
+#include <mathlib.h>
+}
+#endif
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
@@ -41,6 +46,11 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
+#endif
+#if defined(AT_BUILD_ARM_VEC_WITH_AOR)
+#define USE_AOR(aor_code, non_aor_code) aor_code
+#else
+#define USE_AOR(aor_code, non_aor_code) non_aor_code
 #endif
 
 template <int index, bool mask_val>
@@ -267,22 +277,51 @@ class Vectorized<float> {
   Vectorized<float> conj() const {
     return *this;
   }
-#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(      \
-    name, sleef_name)                                                        \
-  Vectorized<float> name() const {                                           \
-    return USE_SLEEF(Vectorized<float>(sleef_name(values)), map(std::name)); \
+#define DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAMES( \
+    name, sleef_name, aor_name)                                  \
+  Vectorized<float> name() const {                               \
+    return USE_AOR(                                              \
+        Vectorized<float>(aor_name(values)),                     \
+        USE_SLEEF(                                               \
+            Vectorized<float>(sleef_name(values)),               \
+            map(std::name)));                                    \
   }
 
-#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(name)      \
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+#define DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME( \
+    name, aor_name)                                             \
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAMES(      \
+      name, Sleef_##name##f4_u10, aor_name)
+
+#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
+    name, sleef_name)                                                   \
+  Vectorized<float> name() const {                                      \
+    return USE_SLEEF(                                                   \
+        Vectorized<float>(sleef_name(values)),                          \
+        map(std::name));                                                \
+  }
+
+#define DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(name)            \
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(       \
       name, Sleef_##name##f4_u10)
 
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acosh)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asin)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asinh)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atan)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atanh)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      acos,
+      _ZGVnN4v_acosf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      acosh,
+      _ZGVnN4v_acoshf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      asin,
+      _ZGVnN4v_asinf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      asinh,
+      _ZGVnN4v_asinhf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      atan,
+      _ZGVnN4v_atanf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      atanh,
+      _ZGVnN4v_atanhf)
 
 #define DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
     name, sleef_name)                                                    \
@@ -296,20 +335,44 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME( \
       name, Sleef_##name##f4_u10)
 
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(atan2)
+#define DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAMES( \
+    name, sleef_name, aor_name)                                   \
+  Vectorized<float> name(const Vectorized<float>& arg) const {    \
+    return USE_AOR(                                               \
+        Vectorized<float>(aor_name(values, arg.values)),          \
+        USE_SLEEF(                                                \
+            Vectorized<float>(sleef_name(values, arg.values)),    \
+            map2(arg, std::name)));                               \
+  }
+
+#define DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAME( \
+    name, aor_name)                                             \
+  DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAMES(     \
+      name, Sleef_##name##f4_u10, aor_name)
+
+  DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAME(
+      atan2,
+      _ZGVnN4vv_atan2f)
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       copysign,
       Sleef_copysignf4)
   Vectorized<float> erf() const;
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAMES(
       erfc,
-      Sleef_erfcf4_u15)
+      Sleef_erfcf4_u15,
+      _ZGVnN4v_erfcf)
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      exp,
+      _ZGVnN4v_expf_1u)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      exp2,
+      _ZGVnN4v_exp2f_1u)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      expm1,
+      _ZGVnN4v_expm1f)
   // Implementation copied from Arm Optimized Routine
   // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/advsimd/expf.c
   inline Vectorized<float> vexpq_f32_u20() const {
@@ -400,9 +463,10 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       fmod,
       Sleef_fmodf4)
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
+  DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAMES(
       hypot,
-      Sleef_hypotf4_u05)
+      Sleef_hypotf4_u05,
+      _ZGVnN4vv_hypotf)
   Vectorized<float> i0() const {
     return map(calc_i0);
   }
@@ -418,18 +482,34 @@ class Vectorized<float> {
   Vectorized<float> igammac(const Vectorized<float>& x) const {
     return map2(x, calc_igammac);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log10)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log1p)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(log2)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      log,
+      _ZGVnN4v_logf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      log10,
+      _ZGVnN4v_log10f)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      log1p,
+      _ZGVnN4v_log1pf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      log2,
+      _ZGVnN4v_log2f)
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       nextafter,
       Sleef_nextafterf4)
   Vectorized<float> frac() const;
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sinh)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cosh)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      sin,
+      _ZGVnN4v_sinf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      sinh,
+      _ZGVnN4v_sinhf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      cos,
+      _ZGVnN4v_cosf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      cosh,
+      _ZGVnN4v_coshf)
   Vectorized<float> ceil() const {
     return map(at::native::ceil_impl);
   }
@@ -444,8 +524,12 @@ class Vectorized<float> {
     // the nearest even integer.
     return map(at::native::round_impl);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tan)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tanh)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      tan,
+      _ZGVnN4v_tanf)
+  DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME(
+      tanh,
+      _ZGVnN4v_tanhf)
   Vectorized<float> trunc() const {
     return Vectorized<float>(vrndq_f32(values));
   }
@@ -459,7 +543,9 @@ class Vectorized<float> {
   Vectorized<float> rsqrt() const {
     return this->sqrt().reciprocal();
   }
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC(pow)
+  DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAME(
+      pow,
+      _ZGVnN4vv_powf)
   Vectorized<float> operator==(const Vectorized<float>& other) const {
     return Vectorized<float>(
         vreinterpretq_f32_u32(vceqq_f32(values, other.values)));
@@ -657,38 +743,19 @@ Vectorized<float> inline fnmsub(
 }
 
 inline Vectorized<float> Vectorized<float>::erf() const {
-  // constants
-  const Vectorized<float> neg_zero_vec(-0.f);
-  const Vectorized<float> one_vec(1.0f);
-  const Vectorized<float> p(0.3275911f);
-  const Vectorized<float> p1(0.254829592f);
-  const Vectorized<float> p2(-0.284496736f);
-  const Vectorized<float> p3(1.421413741f);
-  const Vectorized<float> p4(-1.453152027f);
-  const Vectorized<float> p5(1.061405429f);
-  // sign(x)
-  auto sign_mask = neg_zero_vec & *this;
-  auto abs_vec = this->abs();
-  // t = 1 / (p * abs(x) + 1)
-  auto tmp0 = fmadd(p, abs_vec, one_vec);
-  auto t = one_vec / tmp0;
-  // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
-  auto tmp1 = fmadd(p5, t, p4);
-  auto tmp2 = fmadd(tmp1, t, p3);
-  auto tmp3 = fmadd(tmp2, t, p2);
-  auto r = fmadd(tmp3, t, p1);
-  // - exp(- x * x)
-  auto pow_2 = (*this) * (*this);
-  auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-  auto tmp4 = neg_pow_2.vexpq_f32_u20();
-  auto tmp5 = tmp4 ^ neg_zero_vec;
-  // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
-  auto tmp6 = t * tmp5;
-  auto tmp7 = fmadd(tmp6, r, one_vec);
-  return tmp7 ^ sign_mask;
+  return USE_AOR(
+      Vectorized<float>(_ZGVnN4v_erff(values)),
+      USE_SLEEF(
+          Vectorized<float>(Sleef_erff4_u10(values)), map(std::erf)));
 }
+#undef DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAMES
+#undef DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAME
+#undef DEFINE_AOR_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_NAMES
+#undef DEFINE_AOR_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_NAME
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
+#undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
+#undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME
 #endif /* defined(aarch64) */
 
 } // namespace CPU_CAPABILITY
