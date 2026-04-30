@@ -17,6 +17,7 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -214,205 +215,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager1(self):
-        def fn(x):
-            s = torch.cuda.Stream()
-            x = torch.mul(x, 5)
-            x = torch.add(x, 2)
-            current_stream = torch.cuda.current_stream()
-            s.wait_stream(current_stream)
-            with torch.cuda.stream(s):
-                x = torch.relu(x)
-            current_stream.wait_stream(s)
-            x = torch.add(x, 1)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """9""")
-
-    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_across_graph_break(self):
-        def fn(x):
-            s = torch.cuda.Stream()
-            x = torch.mul(x, 5)
-            x = torch.add(x, 2)
-
-            print("foo")
-
-            tcs = torch.cuda.stream(s)
-            current_stream = torch.cuda.current_stream()
-            s.wait_stream(current_stream)
-
-            with tcs:
-                x = torch.relu(x)
-
-            current_stream.wait_stream(s)
-            x = torch.add(x, 1)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
-
-    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager2(self):
-        def fn(x, s):
-            x = torch.mul(x, 5)
-            x = torch.add(x, 2)
-
-            current_stream = torch.cuda.current_stream()
-            s.wait_stream(current_stream)
-
-            with torch.cuda.stream(s):
-                x = torch.relu(x)
-
-            current_stream.wait_stream(s)
-            with torch.cuda.stream(current_stream):
-                x = torch.relu(x)
-
-            s2 = torch.cuda.Stream()
-            s2.wait_stream(current_stream)
-            with torch.cuda.stream(s2):
-                x = torch.relu(x)
-
-            current_stream.wait_stream(s2)
-            x = torch.add(x, 1)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        s = torch.cuda.Stream()
-        ref = fn(x, s)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn(x, s)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 18)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_method(self):
-        def fn(x):
-            x = torch.mul(x, 1)
-            x = torch.add(x, 2)
-
-            new_stream = torch.cuda.Stream()
-            cur_stream = torch.cuda.current_stream()
-            new_stream.wait_stream(cur_stream)
-
-            with torch.cuda.stream(new_stream):
-                x = torch.sin(x)
-                x = torch.add(x, 3)
-
-            cur_stream.wait_stream(new_stream)
-
-            x = torch.add(x, 4)
-            cur_stream.query()
-            cur_stream.synchronize()
-
-            with torch.cuda.stream(new_stream):
-                x = torch.add(x, 5)
-            new_stream.synchronize()
-
-            x = torch.relu(x)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """15""")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_constant(self):
-        def fn(x):
-            x = torch.mul(x, 1)
-            x = torch.add(x, 2)
-
-            cur_stream = torch.cuda.current_stream()
-            if cur_stream is not None:
-                return x + 1
-            return x - 1
-
-        def fn2(x):
-            x = torch.mul(x, 1)
-            x = torch.add(x, 2)
-
-            cur_stream = torch.cuda.current_stream()
-            if cur_stream != "const_str":
-                return x + 1
-            return x - 1
-
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
-        res = opt_fn(x)
-        res2 = opt_fn2(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(ref, res2)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_stream(self):
-        def fn(x, s0, s1):
-            if s0 == s1:
-                return x + 1
-            else:
-                return x - 1
-
-        s0 = torch.cuda.Stream()
-        s1 = torch.cuda.Stream()
-        x = torch.randn(2, 2)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        ref0 = fn(x, s0, s1)
-        res0 = opt_fn(x, s0, s1)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(ref0, res0)
-
-        ref1 = fn(x, s1, s1)
-        res1 = opt_fn(x, s1, s1)
-        # We have a re-compilation because of changing inputs
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(ref1, res1)
-
-        torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        ref1 = fn(x, s1, s1)
-        res1 = opt_fn(x, s1, s1)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(ref1, res1)
-
-        ref0 = fn(x, s0, s1)
-        res0 = opt_fn(x, s0, s1)
-        # We have a re-compilation because of changing inputs
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skip(
@@ -2315,6 +2117,397 @@ class GraphModule(torch.nn.Module):
         self.assertGreater(len(counters["graph_break"]), 0)
 
 
+class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager1(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_across_graph_break(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            tcs = torch.cuda.stream(s)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
+            with tcs:
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager2(self):
+        def fn(x, s):
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            with torch.cuda.stream(current_stream):
+                x = torch.relu(x)
+
+            s2 = torch.cuda.Stream()
+            s2.wait_stream(current_stream)
+            with torch.cuda.stream(s2):
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s2)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        s = torch.cuda.Stream()
+        ref = fn(x, s)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, s)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 18)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            new_stream = torch.cuda.Stream()
+            cur_stream = torch.cuda.current_stream()
+            new_stream.wait_stream(cur_stream)
+
+            with torch.cuda.stream(new_stream):
+                x = torch.sin(x)
+                x = torch.add(x, 3)
+
+            cur_stream.wait_stream(new_stream)
+
+            x = torch.add(x, 4)
+            cur_stream.query()
+            cur_stream.synchronize()
+
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 5)
+            new_stream.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_compared_with_constant(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            if cur_stream is not None:
+                return x + 1
+            return x - 1
+
+        def fn2(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            if cur_stream != "const_str":
+                return x + 1
+            return x - 1
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        res2 = opt_fn2(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref, res2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_compared_with_stream(self):
+        def fn(x, s0, s1):
+            if s0 == s1:
+                return x + 1
+            else:
+                return x - 1
+
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        x = torch.randn(2, 2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref0, res0)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref1, res1)
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref1, res1)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref0, res0)
+
+
+class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
+    def test_stream_context_manager1(self, device):
+        def fn(x):
+            s = torch.Stream(device=device)
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            current_stream = torch.accelerator.current_stream()
+            s.wait_stream(current_stream)
+            with s:
+                x = torch.relu(x)
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=device)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    def test_stream_across_graph_break(self, device):
+        def fn(x):
+            s = torch.Stream(device=device)
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            current_stream = torch.accelerator.current_stream()
+            s.wait_stream(current_stream)
+
+            with s:
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=device)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    def test_stream_context_manager2(self, device):
+        def fn(x, s):
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            current_stream = torch.accelerator.current_stream()
+            s.wait_stream(current_stream)
+
+            with s:
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            with current_stream:
+                x = torch.relu(x)
+
+            s2 = torch.Stream(device=device)
+            s2.wait_stream(current_stream)
+            with s2:
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s2)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=device)
+        s = torch.Stream(device=device)
+        ref = fn(x, s)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, s)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 18)
+
+    def test_stream_method(self, device):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            new_stream = torch.Stream(device=device)
+            cur_stream = torch.accelerator.current_stream()
+            new_stream.wait_stream(cur_stream)
+
+            with new_stream:
+                x = torch.sin(x)
+                x = torch.add(x, 3)
+
+            cur_stream.wait_stream(new_stream)
+
+            x = torch.add(x, 4)
+            cur_stream.query()
+            cur_stream.synchronize()
+
+            with new_stream:
+                x = torch.add(x, 5)
+            new_stream.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=device)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
+
+    def test_stream_compared_with_constant(self, device):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.accelerator.current_stream()
+            if cur_stream is not None:
+                return x + 1
+            return x - 1
+
+        def fn2(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.accelerator.current_stream()
+            if cur_stream != "const_str":
+                return x + 1
+            return x - 1
+
+        x = torch.randn((2, 2), device=device)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        res2 = opt_fn2(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref, res2)
+
+    def test_stream_compared_with_stream(self, device):
+        def fn(x, s0, s1):
+            if s0 == s1:
+                return x + 1
+            else:
+                return x - 1
+
+        s0 = torch.Stream(device=device)
+        s1 = torch.Stream(device=device)
+        x = torch.randn(2, 2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref0, res0)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref1, res1)
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref1, res1)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref0, res0)
+
+
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -3361,6 +3554,9 @@ class GraphModule(torch.nn.Module):
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
+instantiate_device_type_tests(
+    CtxManagerTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
