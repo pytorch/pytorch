@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, NamedTuple, Protocol
+from typing import Any, cast, Literal, NamedTuple, Protocol
 
 import torch
 import torch.distributed as dist
@@ -1499,6 +1499,100 @@ def _add_send_recv(
     return comm_actions
 
 
+def _defer_recv_ops(
+    actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+) -> dict[int, list[_Action]]:
+    """
+    Defers RECV operations to reduce interference with unrelated compute ops,
+    while maintaining deadlock-safe ordering via rank-parity P2P ordering.
+
+    By default, the schedule places RECV ops as early as possible (ASAP) to overlap
+    P2P communication with computation. However, on some platforms (e.g., AMD ROCm),
+    a pending RECV can block unrelated compute ops that also use the communication
+    fabric (e.g., FSDP allgather inside a forward pass), creating pipeline bubbles.
+
+    This function defers each RECV to as late as possible, subject to:
+      1. A RECV must appear before the compute op that consumes its data.
+      2. Deadlock avoidance via rank-parity ordering (see pytorch/pytorch#172668):
+         - When current rank > peer rank: SEND before RECV is safe, so deferred
+           RECVs from that peer are NOT flushed before SENDs to that peer.
+         - When current rank < peer rank: RECV before SEND is required, so
+           deferred RECVs from that peer ARE flushed before SENDs to that peer.
+
+    This breaks circular waits: the lower-ranked side always posts RECV first,
+    providing the matching target for the higher-ranked side's SEND.
+    """
+    RECV_F = _ComputationType.RECV_F
+    RECV_B = _ComputationType.RECV_B
+    SEND_F = _ComputationType.SEND_F
+    SEND_B = _ComputationType.SEND_B
+
+    def _recv_peer_rank(action: _Action) -> int:
+        if action.computation_type == RECV_F:
+            return stage_to_rank(action.stage_index - 1)
+        else:
+            return stage_to_rank(action.stage_index + 1)
+
+    def _send_peer_rank(action: _Action) -> int:
+        if action.computation_type == SEND_F:
+            return stage_to_rank(action.stage_index + 1)
+        else:
+            return stage_to_rank(action.stage_index - 1)
+
+    result: dict[int, list[_Action]] = {}
+    for rank, action_list in actions.items():
+        new_actions: list[_Action] = []
+        deferred: dict[tuple[int, _ComputationType, int | None], _Action] = {}
+
+        for action in action_list:
+            if action.computation_type in (RECV_F, RECV_B):
+                key = (
+                    action.stage_index,
+                    action.computation_type,
+                    action.microbatch_index,
+                )
+                deferred[key] = action
+                continue
+
+            if action.computation_type in (SEND_F, SEND_B):
+                peer = _send_peer_rank(action)
+                # Rank-parity rule: only flush RECVs when rank < peer
+                # (lower rank does RECV before SEND)
+                if rank < peer:
+                    to_flush = [
+                        k for k, v in deferred.items() if _recv_peer_rank(v) == peer
+                    ]
+                    for key in to_flush:
+                        new_actions.append(deferred.pop(key))
+
+            # Constraint 1: before a compute op, flush the RECV it consumes
+            consumers = (
+                action.sub_actions if action.sub_actions is not None else (action,)
+            )
+            for sub in consumers:
+                if sub.computation_type == FORWARD:
+                    key = (sub.stage_index, RECV_F, sub.microbatch_index)
+                    if key in deferred:
+                        new_actions.append(deferred.pop(key))
+                elif sub.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                    key = (sub.stage_index, RECV_B, sub.microbatch_index)
+                    if key in deferred:
+                        new_actions.append(deferred.pop(key))
+
+            new_actions.append(action)
+
+        if deferred:
+            raise AssertionError(
+                f"Malformed input schedule on rank {rank}: leftover RECV ops "
+                f"with no consumer found: {list(deferred.values())}. "
+                "Every RECV must be consumed by a downstream compute op."
+            )
+
+        result[rank] = new_actions
+    return result
+
+
 def _validate_schedule(
     actions: dict[int, list[_Action | None]],
     pp_group_size: int,
@@ -1731,7 +1825,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
             for rank in self.pipeline_order:
                 writer.writerow(self.pipeline_order[rank])
 
-    def _load_csv(self, filename, format="compute_only"):
+    def _load_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
+    ):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
 
@@ -2038,6 +2136,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """
 
     def __init__(self, *args, **kwargs):
+        self._defer_pp_recv: bool = kwargs.pop("defer_pp_recv", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2094,7 +2193,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def _prepare_schedule_with_comms(
         self,
         actions: dict[int, list[_Action | None]],
-        format: str = "compute_only",
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
     ):
         """
         Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
@@ -2142,10 +2241,20 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
             )
+
+            if self._defer_pp_recv:
+                self.pipeline_order_with_comms = _defer_recv_ops(
+                    self.pipeline_order_with_comms,
+                    stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
-    def _load_csv(self, filename: str, format: str = "compute_only"):
+    def _load_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_only",
+    ):
         """Loads a csv in simple format and then lowers it to include communication actions
 
         format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
@@ -2166,7 +2275,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
-    def _dump_csv(self, filename: str, format: str = "compute_comms"):
+    def _dump_csv(
+        self,
+        filename: str,
+        format: Literal["compute_only", "compute_comms"] = "compute_comms",
+    ):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
         if format == "compute_only":
             if self.pipeline_order is None:
@@ -2480,6 +2593,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         super().__init__(
             stages=stages,
@@ -2488,6 +2602,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -2715,6 +2830,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -2726,6 +2842,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2822,6 +2939,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -2835,6 +2953,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3017,6 +3136,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3030,6 +3150,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3201,6 +3322,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        defer_pp_recv: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3214,6 +3336,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            defer_pp_recv=defer_pp_recv,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
