@@ -1030,8 +1030,19 @@ class profile(_KinetoProfile):
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
         prev_schedule_action = self._prev_schedule_action
-        self.step_num += 1
-        schedule_action = self.schedule(self.step_num)
+        next_step = self.step_num + 1
+        schedule_action = self.schedule(next_step)
+
+        # Note that we check schedule validity BEFORE changing the profiler's
+        # internal state. This prevents the profiler from being in an invalid
+        # state.
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+
+        self.step_num = next_step
         self.current_action = schedule_action
         self._prev_schedule_action = schedule_action
 
@@ -1064,11 +1075,6 @@ class profile(_KinetoProfile):
         # - prev_action == RECORD_AND_SAVE is excluded: the natural (R&S, *)
         #   transitions already call prepare_trace, so overriding here would
         #   skip the reset and waste the next cycle.
-        if schedule_action == ProfilerAction.DEVICE_STOPPED:
-            raise ValueError(
-                "ProfilerAction.DEVICE_STOPPED is set internally by the "
-                "profiler and must not be returned by a user-provided schedule"
-            )
 
         if prev_action == ProfilerAction.DEVICE_STOPPED:
             at_cycle_boundary = (
