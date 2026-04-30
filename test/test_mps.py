@@ -1534,20 +1534,38 @@ class TestMPS(TestCaseMPS):
     @parametrize("shape", [(2, 13, 1024), (6, 6, 634), (1, 3, 28, 315),
                            (1, 12, 4, 512), (1, 1, 5, 6, 1024)])
     @parametrize("transposed_weight", [False, True])
-    def test_linear_nd_determinism(self, dtype, shape, transposed_weight):
-        # Regression test for https://github.com/pytorch/pytorch/issues/180776
-        # F.linear on MPS with >2D fp16/bf16 inputs and no bias produced
-        # different results across consecutive calls.
-        # transposed_weight=True forces the MPSGraph path (non-contiguous weight).
+    @parametrize("backward", [False, True])
+    def test_linear_nd_determinism(self, dtype, shape, transposed_weight, backward):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180776 (forward)
+        # and https://github.com/pytorch/pytorch/issues/181936 (backward).
+        # F.linear on MPS with >2D fp16/bf16 inputs produced different results
+        # across consecutive calls. transposed_weight=True forces the
+        # non-contiguous-weight path.
         h = shape[-1]
         x = torch.randn(shape, dtype=dtype, device="mps")
         if transposed_weight:
             w = torch.randn(h, h, dtype=dtype, device="mps").t()
         else:
             w = torch.randn(h, h, dtype=dtype, device="mps")
-        first = F.linear(x, w).clone()
-        second = F.linear(x, w).clone()
-        self.assertEqual(first, second, atol=0, rtol=0)
+        if not backward:
+            first = F.linear(x, w).clone()
+            second = F.linear(x, w).clone()
+            self.assertEqual(first, second, atol=0, rtol=0)
+            return
+
+        grad = torch.randn(shape, dtype=dtype, device="mps")
+
+        def run():
+            x0 = x.clone().requires_grad_()
+            w0 = w.clone().requires_grad_()
+            y = F.linear(x0, w0)
+            y.backward(grad)
+            return x0.grad.clone(), w0.grad.clone()
+
+        gx1, gw1 = run()
+        gx2, gw2 = run()
+        self.assertEqual(gx1, gx2, atol=0, rtol=0)
+        self.assertEqual(gw1, gw2, atol=0, rtol=0)
 
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)

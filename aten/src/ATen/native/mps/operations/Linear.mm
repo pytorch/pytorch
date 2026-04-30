@@ -266,6 +266,84 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   return weight_arg.dim() != 1 ? output : output.squeeze(-1);
 }
 
+// MPP-based grad_input: grad_input[M,K] = grad_output[M,N] @ weight[N,K].
+static void _mps_linear_backward_input_mpp(const Tensor& grad_output_2d, const Tensor& weight, Tensor& grad_input_2d) {
+  int64_t M = grad_output_2d.size(0);
+  int64_t N = grad_output_2d.size(1);
+  int64_t K = weight.size(1);
+
+  auto tile_sizes = select_tile_sizes(M, K);
+  int64_t TILE_M = tile_sizes.first;
+  int64_t TILE_K = tile_sizes.second;
+
+  bool aligned = (M % TILE_M == 0) && (K % TILE_K == 0);
+  const char* variant = aligned ? "aligned" : "dyn";
+
+  auto dtype_str = scalarToMetalTypeString(grad_output_2d);
+  auto tile_str = std::to_string(TILE_M) + "x" + std::to_string(TILE_K);
+  auto func_name = std::string("mpp_linear_backward_input_") + variant + "_" + tile_str + "_" + dtype_str;
+  auto stream = getCurrentMPSStream();
+  auto pso = lib.getPipelineStateForFunc(func_name);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      stream->endKernelCoalescing();
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
+      mtl_setArgs(computeEncoder, grad_output_2d, weight, grad_input_2d, sizes);
+
+      NSUInteger simd_w = [pso threadExecutionWidth];
+      NSUInteger threads_per_tg = simd_w * 4;
+      uint32_t num_tg_x = static_cast<uint32_t>((K + TILE_K - 1) / TILE_K);
+      uint32_t num_tg_y = static_cast<uint32_t>((M + TILE_M - 1) / TILE_M);
+
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(num_tg_x, num_tg_y, 1)
+                     threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
+    }
+  });
+}
+
+// MPP-based grad_weight: grad_weight[N,K] = grad_output[M,N]^T @ input[M,K].
+static void _mps_linear_backward_weight_mpp(const Tensor& grad_output_2d, const Tensor& input_2d, Tensor& grad_weight) {
+  int64_t M = grad_output_2d.size(0);
+  int64_t N = grad_output_2d.size(1);
+  int64_t K = input_2d.size(1);
+
+  auto tile_sizes = select_tile_sizes(N, K);
+  int64_t TILE_N = tile_sizes.first;
+  int64_t TILE_K = tile_sizes.second;
+
+  bool aligned = (N % TILE_N == 0) && (K % TILE_K == 0);
+  const char* variant = aligned ? "aligned" : "dyn";
+
+  auto dtype_str = scalarToMetalTypeString(grad_output_2d);
+  auto tile_str = std::to_string(TILE_N) + "x" + std::to_string(TILE_K);
+  auto func_name = std::string("mpp_linear_backward_weight_") + variant + "_" + tile_str + "_" + dtype_str;
+  auto stream = getCurrentMPSStream();
+  auto pso = lib.getPipelineStateForFunc(func_name);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      stream->endKernelCoalescing();
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
+      mtl_setArgs(computeEncoder, grad_output_2d, input_2d, grad_weight, sizes);
+
+      NSUInteger simd_w = [pso threadExecutionWidth];
+      NSUInteger threads_per_tg = simd_w * 4;
+      uint32_t num_tg_x = static_cast<uint32_t>((K + TILE_K - 1) / TILE_K);
+      uint32_t num_tg_y = static_cast<uint32_t>((N + TILE_N - 1) / TILE_N);
+
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(num_tg_x, num_tg_y, 1)
+                     threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
+    }
+  });
+}
+
 static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
   TORCH_CHECK(grad_output.is_mps(), "mps_linear_backward: grad_output needs to be mps layout");
   TORCH_CHECK(weight.device().is_mps() && supportedFloatingOrComplexType(weight),
@@ -414,6 +492,37 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(const Tensor& input,
                                                        const Tensor& weight,
                                                        std::array<bool, 3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
+
+  const bool is_complex = input.is_complex() || grad_output.is_complex() || weight.is_complex();
+
+  // MPP path: matches the forward — same matmul2d kernel family, just with
+  // different transpose flags, so the backward is deterministic on M5
+  // (MPSGraph reductions are not). Reshapes leading dims into a 2D matmul.
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS) && !is_complex) {
+    auto input_c = input.contiguous();
+    auto grad_output_c = grad_output.contiguous();
+    auto weight_c = weight.contiguous();
+    int64_t K = weight_c.size(1);
+    int64_t N = weight_c.size(0);
+    int64_t M = grad_output_c.numel() / N;
+    auto grad_output_2d = grad_output_c.view({M, N});
+    auto input_2d = input_c.view({M, K});
+
+    if (output_mask[0]) {
+      grad_input = at::empty(input.sizes(), grad_output.options());
+      auto grad_input_2d = grad_input.view({M, K});
+      _mps_linear_backward_input_mpp(grad_output_2d, weight_c, grad_input_2d);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::empty({N, K}, grad_output.options());
+      _mps_linear_backward_weight_mpp(grad_output_2d, input_2d, grad_weight);
+    }
+    if (output_mask[2]) {
+      grad_bias = grad_output_2d.sum(0);
+    }
+    return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  }
+
   if (output_mask[0]) {
     grad_input = _mps_linear_backward_input(input.sizes(), grad_output, weight);
   }
