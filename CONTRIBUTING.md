@@ -1209,15 +1209,10 @@ Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issu
 
 PyTorch uses [lintrunner](https://github.com/pytorch/pytorch/wiki/lintrunner)
 for linting, which runs clang-tidy and other checks. You can lint your changes
-locally with:
+locally with `spin`:
 
 ```bash
-make lint
-```
-
-or use `spin` for finer control:
-
-```bash
+spin lint        # run default lint on all files
 spin quicklint   # lint files changed in the latest commit and working directory
 spin quickfix    # auto-fix lint issues on changed files
 ```
