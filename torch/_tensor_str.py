@@ -291,7 +291,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
 
 # formatter2 is only used for printing complex tensors.
 # For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
-# and tensor.imag respesectively
+# and tensor.imag respectively
 def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
     dim = self.dim()
 
