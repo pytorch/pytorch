@@ -93,19 +93,6 @@ struct CompiledAutogradThreadingDebugCheck {
   bool incremented{true};
 };
 
-struct ThreadCallback : Node {
-  explicit ThreadCallback(std::function<void()> callback)
-      : callback_(std::move(callback)) {}
-
-  variable_list apply(variable_list&& /* inputs */) override {
-    callback_();
-    return {};
-  }
-
- private:
-  std::function<void()> callback_;
-};
-
 } // namespace
 
 // Threads spawned by the engine are assigned a 'worker_device' specifying
@@ -1506,6 +1493,24 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
+void Engine::execute_node_with_graph_task(std::shared_ptr<Node> graph_root) {
+  initialize_device_threads_pool();
+  init_local_ready_queue();
+
+  c10::SmallVector<Node*, 4> graph_roots{graph_root.get()};
+  auto graph_task = std::make_shared<GraphTask>(
+      /* keep_graph */ false,
+      /* grad_mode */ false,
+      /* reentrant_depth */ worker_device == NO_DEVICE ? 0 : total_depth + 1,
+      /* cpu_ready_queue */ local_ready_queue,
+      /* graph_roots */ std::move(graph_roots));
+
+  auto future = execute_with_graph_task(
+      graph_task, std::move(graph_root), InputBuffer(0));
+  future->waitAndThrow();
+  graph_task->warning_handler_.replay_warnings();
+}
+
 // note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
@@ -1544,46 +1549,8 @@ void Engine::queue_callback(std::function<void()> callback) {
   current_graph_task->final_callbacks_.emplace_back(std::move(callback));
 }
 
-// We use this to do housekeeping on-demand e.g., when the user requests
-// cuBLAS workspaces to be cleared
-void Engine::execute_callback_on_device_threads(
-    c10::DeviceIndex device_count,
-    std::function<void()> callback) {
-  if (!device_threads_started_.load(std::memory_order_acquire) ||
-      device_count <= 0) {
-    return;
-  }
-
-  const auto queue_count =
-      std::min(device_ready_queues_.size(), static_cast<size_t>(device_count));
-  std::vector<std::shared_ptr<GraphTask>> graph_tasks;
-  graph_tasks.reserve(queue_count);
-
-  for (const auto i : c10::irange(queue_count)) {
-    if (worker_device == static_cast<int>(i)) {
-      callback();
-      continue;
-    }
-
-    auto callback_node = std::make_shared<ThreadCallback>(callback);
-    c10::SmallVector<Node*, 4> graph_roots{callback_node.get()};
-    auto graph_task = std::make_shared<GraphTask>(
-        /* keep_graph */ false,
-        /* grad_mode */ false,
-        /* reentrant_depth */ 0,
-        /* cpu_ready_queue */ std::make_shared<ReadyQueue>(),
-        /* graph_roots */ std::move(graph_roots));
-    graph_task->owner_ = static_cast<int>(i);
-
-    device_ready_queues_.at(i)->push(
-        NodeTask(graph_task, std::move(callback_node), InputBuffer(0)));
-    graph_tasks.emplace_back(std::move(graph_task));
-  }
-
-  for (const auto& graph_task : graph_tasks) {
-    graph_task->future_result_->waitAndThrow();
-    graph_task->warning_handler_.replay_warnings();
-  }
+bool Engine::device_threads_started() const {
+  return device_threads_started_.load(std::memory_order_acquire);
 }
 
 bool Engine::is_checkpoint_valid() {

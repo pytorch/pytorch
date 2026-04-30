@@ -167,6 +167,9 @@ struct TORCH_API Engine {
       c10::intrusive_ptr<Node> graph_root,
       InputBuffer&& input_buffer);
 
+  // Executes an internal synthetic Node through the normal GraphTask machinery.
+  void execute_node_with_graph_task(std::shared_ptr<Node> graph_root);
+
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return std::make_unique<AnomalyMetadata>();
   }
@@ -191,9 +194,7 @@ struct TORCH_API Engine {
 
   void queue_callback(std::function<void()> callback);
 
-  void execute_callback_on_device_threads(
-      c10::DeviceIndex device_count,
-      std::function<void()> callback);
+  bool device_threads_started() const;
 
   bool is_checkpoint_valid();
 
