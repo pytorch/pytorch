@@ -222,7 +222,7 @@ static PySequenceMethods THPSize_as_sequence = {
 #if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
 static Py_hash_t THPSize_hash(PyObject* self) {
   /*
-  Python 3.14 introduce a caching mechanism for tuple hashing which is stored
+  Python 3.14 introduced a caching mechanism for tuple hashing which is stored
   in the `ob_hash` field. The caching mechanism relies on a sentinel value (-1)
   to indicate the hash has not yet been computed.
   For some unknown reason, this field is initialized with 0 when Size is
