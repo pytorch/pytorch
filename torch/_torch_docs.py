@@ -1936,6 +1936,14 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. note::
+
+    This function is overloaded and the second argument is positional-only
+    in practice. When using keyword arguments, use ``sections`` for an int
+    or ``indices`` for a list/tuple of ints (e.g.
+    ``torch.tensor_split(x, sections=3)`` or
+    ``torch.tensor_split(x, indices=(1, 6))``).
+
 Args:
     input (Tensor): the tensor to split
     indices_or_sections (Tensor, int or list or tuple of ints):
