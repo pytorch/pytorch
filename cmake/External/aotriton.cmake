@@ -239,12 +239,20 @@ if(NOT __AOTRITON_INCLUDED)
     message(STATUS "Download AOTriton pre-compiled GPU images from ${__AOTRITON_URL}.")
   endfunction()
 
+  # By default AOTriton's lib/ and include/ are distributed with torch
+  # adding hundreds of MiB and avoiding a separate AOTriton install
+  # For distros which have AOTriton as an installable package this can be disabled
+  # to avoid duplicating AOTriton into torch
+  option(BUILD_AOTRITON_INTO_WHEEL "Copy AOTriton lib/ and include/ into the torch install tree so they ship in the wheel" ON)
+
   # Note it is INSTALL"ED"
   if(DEFINED ENV{AOTRITON_INSTALLED_PREFIX})
-    install(DIRECTORY
-            $ENV{AOTRITON_INSTALLED_PREFIX}/lib
-            $ENV{AOTRITON_INSTALLED_PREFIX}/include
-            DESTINATION ${__AOTRITON_INSTALL_DIR})
+    if(BUILD_AOTRITON_INTO_WHEEL)
+      install(DIRECTORY
+              $ENV{AOTRITON_INSTALLED_PREFIX}/lib
+              $ENV{AOTRITON_INSTALLED_PREFIX}/include
+              DESTINATION ${__AOTRITON_INSTALL_DIR})
+    endif()
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
