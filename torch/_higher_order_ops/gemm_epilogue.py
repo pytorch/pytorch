@@ -25,7 +25,7 @@ _SUPPORTED_GEMM_OPS = {
     torch.ops.aten.baddbmm.default,
     torch.ops.aten._scaled_mm.default,
 }
-_SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CPP", "CUTEDSL", "QUACK"}
+_SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
 
 
 def _find_single_mm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:

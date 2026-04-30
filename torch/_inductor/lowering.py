@@ -8445,7 +8445,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         )
         return (node,)
 
-    fusible_template_backends = {"TRITON", "CUTLASS", "CPP"}
+    fusible_template_backends = {"TRITON", "CUTLASS"}
     if backend not in fusible_template_backends:
         raise NotImplementedError(
             f"GEMM epilogue backend {backend} does not support Inductor template "
