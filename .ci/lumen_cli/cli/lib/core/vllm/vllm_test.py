@@ -175,7 +175,7 @@ class VllmTestRunner(BaseRunner):
             "-o test/cuda.txt "
             "--index-strategy unsafe-best-match "
             "--constraint snapshot_constraint.txt "
-            "--torch-backend cu129"
+            "--torch-backend cu130"
         )
         pip_install_packages(requirements="test/cuda.txt", prefer_uv=True)
         logger.info("Done. installed requirements for test dependencies")

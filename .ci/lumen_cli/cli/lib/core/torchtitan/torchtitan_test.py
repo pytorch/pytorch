@@ -28,7 +28,7 @@ class TorchtitanTestRunner(BaseRunner):
                 "torchao",
                 "torchcomms",
                 "--index-url",
-                "https://download.pytorch.org/whl/nightly/cu129",
+                "https://download.pytorch.org/whl/nightly/cu130",
             ],
         )
         with working_directory(self.work_directory):
