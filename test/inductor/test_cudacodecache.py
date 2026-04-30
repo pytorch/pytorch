@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
+import unittest
 
 import torch
 from torch._inductor.async_compile import AsyncCompile
@@ -38,6 +39,7 @@ int saxpy(int n, float a, float *x, float *y) {
 
 class TestCUDACodeCache(InductorTestCase):
     @requires_cuda_and_triton
+    @unittest.skipUnless(nvcc_exist(), "requires nvcc")
     def test_cuda_load(self):
         with fresh_cache():
             # Test both .o and .so compilation.
@@ -66,6 +68,7 @@ class TestCUDACodeCache(InductorTestCase):
             torch.testing.assert_close(y, expected_y)
 
     @requires_cuda_and_triton
+    @unittest.skipUnless(nvcc_exist(), "requires nvcc")
     def test_compilation_error(self):
         with fresh_cache():
             error_source_code = _SOURCE_CODE.replace("saxpy_device", "saxpy_wrong", 1)
@@ -73,6 +76,7 @@ class TestCUDACodeCache(InductorTestCase):
                 CUDACodeCache.compile(error_source_code, "o")
 
     @requires_cuda_and_triton
+    @unittest.skipUnless(nvcc_exist(), "requires nvcc")
     def test_async_compile(self):
         with fresh_cache():
             async_compile = AsyncCompile()
