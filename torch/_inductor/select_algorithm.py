@@ -1195,7 +1195,7 @@ class TritonTemplateKernel(TritonKernel):
                     V.kernel.cse.store_cache[name] = value
                     if name in V.kernel.prologue_fused_inputs:
                         # We load masked out values with 0, then apply a prologue.
-                        # The masked out values may not necessariliy be 0 any more
+                        # The masked out values may not necessarily be 0 any more
                         # so we need to reapply the mask.
                         value_dtype = value.dtype
                         value_str = str(value)
