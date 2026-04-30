@@ -1,0 +1,11 @@
+import cutlass
+import cutlass.cute as cute
+from cutlass._mlir.dialects import math as mlir_math
+import operator
+
+@cute.jit
+def {{ epilogue_name }}(acc):
+{% for line in body_lines %}
+    {{ line }}
+{% endfor %}
+    return {{ result }}

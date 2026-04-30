@@ -13,6 +13,7 @@ from ..scheduler import (
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
+from .quack_gemm_epilogue_scheduling import QuackGemmEpilogueScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
@@ -47,6 +48,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
+        self._quack_gemm_epilogue_scheduling = QuackGemmEpilogueScheduling(scheduler)
         self._nv_universal_gemm_scheduling = NVUniversalGemmScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
@@ -59,6 +61,8 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._rocm_cpp_scheduling
         if self._cutedsl_scheduling.is_cutedsl_template(node):
             return self._cutedsl_scheduling
+        if self._quack_gemm_epilogue_scheduling.is_quack_gemm_epilogue_template(node):
+            return self._quack_gemm_epilogue_scheduling
         if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
             return self._nv_universal_gemm_scheduling
         return self._triton_scheduling
@@ -76,6 +80,12 @@ class CUDACombinedScheduling(BaseScheduling):
         elif self._cutedsl_scheduling.is_cutedsl_template(
             node1
         ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
+            return False
+        elif self._quack_gemm_epilogue_scheduling.is_quack_gemm_epilogue_template(
+            node1
+        ) or self._quack_gemm_epilogue_scheduling.is_quack_gemm_epilogue_template(
+            node2
+        ):
             return False
         # NVIDIA Universal GEMM doesn't support vertical fusion currently
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
@@ -96,6 +106,12 @@ class CUDACombinedScheduling(BaseScheduling):
                 return self._cutedsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
+            if self._quack_gemm_epilogue_scheduling.is_quack_gemm_epilogue_template(
+                node
+            ):
+                return self._quack_gemm_epilogue_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )
             if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
                 return self._nv_universal_gemm_scheduling.can_fuse_horizontal(
                     node1, node2
@@ -129,6 +145,14 @@ class CUDACombinedScheduling(BaseScheduling):
             assert not epilogue_nodes
             assert not prologue_nodes
             return self._cutedsl_scheduling.codegen_template(
+                template_node, epilogue_nodes, prologue_nodes
+            )
+        elif self._quack_gemm_epilogue_scheduling.is_quack_gemm_epilogue_template(
+            template_node
+        ):
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            return self._quack_gemm_epilogue_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
