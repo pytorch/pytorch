@@ -1,3 +1,5 @@
+#include <ATen/Config.h>
+#if AT_MKL_ENABLED()
 #include <ATen/mkl/MKLGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <cstdint>
@@ -153,3 +155,4 @@ c10::intrusive_ptr<c10::TensorImpl> MKLGeneratorImpl::get_state() const {
 }
 
 } // namespace at
+#endif // AT_MKL_ENABLED()
