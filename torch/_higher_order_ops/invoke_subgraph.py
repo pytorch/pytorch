@@ -1146,6 +1146,22 @@ def invoke_subgraph_inductor_compile(
 
     if inductor_config_patches is None:
         inductor_config_patches = {}
+
+    # Saved tensors flow across the HOP boundary into a separately-compiled bw
+    # subgraph whose IR was traced with natural (unpadded) strides. Mark every
+    # output of this subgraph as user-visible so Inductor's comprehensive_padding
+    # leaves their strides alone — otherwise the bw's assert_size_stride on the
+    # incoming saved tensor will fire (e.g. F.linear output padded 200008 -> 200064).
+    from torch._inductor.compile_fx import _recursive_record_user_visible_output_idxs
+
+    output_node = next(iter(gm.graph.find_nodes(op="output")))
+    output_node.meta["user_visible_output_idxs"] = [
+        idx
+        for idx in range(len(output_node.args[0]))
+        if isinstance(output_node.args[0][idx], torch.fx.Node)
+    ]
+    _recursive_record_user_visible_output_idxs(gm)
+
     compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
     compiled_fn_inner = compile_fn(gm, example_inputs)
     if not compiled_fn_inner._boxed_call:
