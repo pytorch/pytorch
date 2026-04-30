@@ -705,7 +705,6 @@ class TestNumPyInterop(TestCase):
         y = opt_f(x)
         self.assertEqual(y, f(x))
 
-
     @onlyCPU
     def test_array_wrap_numpy2_no_deprecation_warning(self, device):
         # gh-180657: NumPy 2 added context/return_scalar params to __array_wrap__.
