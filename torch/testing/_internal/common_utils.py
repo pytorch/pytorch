@@ -1053,6 +1053,12 @@ def parse_cmd_line_args():
 
     set_rng_seed()
 
+def _get_int_signal() -> signal.Signals:
+    """Get the interruption signal. SIGINT for unix, SIGTERM for windows."""
+    if IS_WINDOWS:
+        return signal.SIGTERM  # type: ignore[attr-defined]
+    else:
+        return signal.SIGINT
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1067,8 +1073,11 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
-        # send SIGINT to give pytest a chance to make xml
-        p.send_signal(signal.SIGINT)
+        # Send the interrupt signal returned by `_get_int_signal()` to give
+        # pytest a chance to write XML: SIGINT on Unix-like platforms, but
+        # SIGTERM on Windows, where the Unix-style SIGINT handling is not used
+        # in the same way for subprocess interruption.
+        p.send_signal(_get_int_signal())
         exit_status = None
         try:
             exit_status = p.wait(timeout=5)
