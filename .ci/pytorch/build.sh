@@ -286,6 +286,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     install_torchao
   fi
 
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
+    install_torchcomms
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     echo "Checking that xpu is compiled"
     pushd dist/
