@@ -20,12 +20,4 @@ AOTI_TORCH_EXPORT const std::string& get_torch_exception_what();
 /// exception is stored for the thread.
 AOTI_TORCH_EXPORT const std::string&
 get_torch_exception_what_without_backtrace();
-
-/// Configures the backtrace printing state for the calling thread. Returns the
-/// previous state.
-AOTI_TORCH_EXPORT bool torch_exception_state_set_exception_printing(
-    const bool should_print);
-
-/// Retrieves the backtrace printing state for this thread.
-AOTI_TORCH_EXPORT bool torch_exception_state_get_exception_printing();
 } // namespace torch::csrc::shim::details

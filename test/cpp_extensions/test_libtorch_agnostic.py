@@ -1998,11 +1998,6 @@ except RuntimeError as e:
         """Test exception what() handling."""
         import libtorch_agn_2_13 as libtorch_agnostic
 
-        # Verify that the default is to initialise with printing the backtrace
-        self.assertTrue(
-            libtorch_agnostic.ops.my_torch_exception_get_exception_printing()
-        )
-
         # We'll subtract two tensors of different sizes to create an exception.
         a = torch.randn(3, 4, device=device)
         b = torch.randn(1, 2, device=device)
@@ -2051,12 +2046,6 @@ except RuntimeError as e:
         self.assertTrue(
             with_backtrace.count("\n") > 10
         )  # Conservative, backtrace is 25 lines.
-
-        # Confirm that the exception printing is still back to default, we didn't forget to restore
-        # the desired state.
-        self.assertTrue(
-            libtorch_agnostic.ops.my_torch_exception_get_exception_printing()
-        )
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)

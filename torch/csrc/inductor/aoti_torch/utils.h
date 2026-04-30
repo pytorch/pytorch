@@ -20,31 +20,16 @@
     torch::csrc::shim::details::set_torch_exception_what(e.what());         \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         e.what_without_backtrace());                                        \
-    if (torch::csrc::shim::details::                                        \
-            torch_exception_state_get_exception_printing()) {               \
-      LOG(ERROR) << "Exception in aoti_torch: "                             \
-                 << torch::csrc::shim::details::get_torch_exception_what(); \
-    }                                                                       \
     return AOTI_TORCH_FAILURE;                                              \
   } catch (const std::exception& e) {                                       \
     torch::csrc::shim::details::set_torch_exception_what(e.what());         \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         torch::csrc::shim::details::get_torch_exception_what());            \
-    if (torch::csrc::shim::details::                                        \
-            torch_exception_state_get_exception_printing()) {               \
-      LOG(ERROR) << "Exception in aoti_torch: "                             \
-                 << torch::csrc::shim::details::get_torch_exception_what(); \
-    }                                                                       \
     return AOTI_TORCH_FAILURE;                                              \
   } catch (...) {                                                           \
     torch::csrc::shim::details::set_torch_exception_what("UNKNOWN");        \
     torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
         torch::csrc::shim::details::get_torch_exception_what());            \
-    if (torch::csrc::shim::details::                                        \
-            torch_exception_state_get_exception_printing()) {               \
-      LOG(ERROR) << "Exception in aoti_torch: "                             \
-                 << torch::csrc::shim::details::get_torch_exception_what(); \
-    }                                                                       \
     return AOTI_TORCH_FAILURE;                                              \
   }                                                                         \
   return AOTI_TORCH_SUCCESS;

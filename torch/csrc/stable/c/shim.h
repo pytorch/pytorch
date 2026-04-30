@@ -238,17 +238,6 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what();
 /// thread is shutdown.
 AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
 
-/// Configures whether the exception and its backtrace should be printed.
-/// This sets the flag only for the calling thread, printing in other threads is
-/// unmodified.
-/// The function returns the previously stored boolean value.
-AOTI_TORCH_EXPORT bool torch_exception_set_exception_printing(
-    bool should_print);
-
-/// Retrieves whether exception printing is enabled for the calling thread,
-/// without modifying it.
-AOTI_TORCH_EXPORT bool torch_exception_get_exception_printing();
-
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 /**

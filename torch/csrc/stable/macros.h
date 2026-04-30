@@ -1,6 +1,9 @@
+#pragma once
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/macros/Macros.h>
 
+#include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -40,29 +43,24 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   std::stringstream ss;
   ss << call << " API call failed at " << file << ", line " << line;
   ss << ", with: " << torch_exception_get_what_without_backtrace();
+
+  std::time_t t = std::time(nullptr);
+  std::tm tm = *std::localtime(&t);
+  std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
+            << line << " ]" << torch_exception_get_what();
   throw std::runtime_error(ss.str());
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
-
-// Worker function for the error check, its first argument is a unique variable
-// name that is used to store the previous printing state, we do this to ensure
-// that we don't accidentally shadow variables in the outer scope.
-#define STABLE_TORCH_ERROR_CODE_CHECK_IMPL(variable_name, call)               \
-  {                                                                           \
-    const bool variable_name = torch_exception_set_exception_printing(false); \
-    if ((call) != TORCH_SUCCESS) {                                            \
-      torch_exception_set_exception_printing(variable_name);                  \
-      torch::stable::detail::throw_exception(#call, __FILE__, __LINE__);      \
-    }                                                                         \
-    torch_exception_set_exception_printing(variable_name);                    \
-  }
 
 // This macro is similar to the header-only macro TORCH_ERROR_CODE_CHECK, but
 // this macro is NOT header-only! It depends on the stable ABI but provides more
 // info in the exception, including the error message as retrieved through the c
 // shims from the original error message.
-#define STABLE_TORCH_ERROR_CODE_CHECK(call) \
-  STABLE_TORCH_ERROR_CODE_CHECK_IMPL(       \
-      C10_ANONYMOUS_VARIABLE(previous_exception_printing), call)
+#define STABLE_TORCH_ERROR_CODE_CHECK(call)                            \
+  if ((call) != TORCH_SUCCESS) {                                       \
+    torch::stable::detail::throw_exception(#call, __FILE__, __LINE__); \
+  }
 
+#else
+#define STABLE_TORCH_ERROR_CODE_CHECK(call) TORCH_ERROR_CODE_CHECK(call)
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
