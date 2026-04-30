@@ -30,7 +30,6 @@ from ..exc import (
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 
 
 if TYPE_CHECKING:
@@ -156,6 +155,12 @@ def type_implements_tp_iter(obj_type: type) -> bool:
 def type_implements_tp_iternext(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
+
+
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, slot)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -481,8 +486,166 @@ def generic_getiter(
             )
         return res
     elif pysequence_check(T):
+        from .functions import UserFunctionVariable
+
         return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
             tx, [obj], {}
         )
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
+
+
+# ---------------------------------------------------------------------------
+# Binary-op dispatch (CPython's abstract.c: binary_op1 / binary_op)
+# https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L927 (binary_op1)
+# ---------------------------------------------------------------------------
+
+NB_SLOT_MAPPING = {
+    "nb_or": PyNumberSlots.NB_OR,
+    "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
+}
+
+
+def is_nb_not_implemented(result: VariableTracker) -> bool:
+    return result.is_constant_match(NotImplemented)
+
+
+def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
+    """Check if w's underlying Python type is a proper subtype of v's."""
+    try:
+        return issubclass(w.python_type(), v.python_type())
+    except NotImplementedError:
+        return False
+
+
+#   Calling scheme used for binary operations:
+#
+#   Order operations are tried until either a valid result or error:
+#     w.op(v,w)[*], v.op(v,w), w.op(v,w)
+#
+#   [*] only when Py_TYPE(v) != Py_TYPE(w) && Py_TYPE(w) is a subclass of
+#       Py_TYPE(v)
+
+
+def binary_op1(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_slot: str,
+) -> VariableTracker:
+    """CPython's binary_op1: try v's slot, then w's slot with subclass priority.
+
+    Each VT that participates provides a ``<op_slot>_impl(self, tx, other,
+    reverse)`` method. ``reverse=False`` means "self is left operand" (forward,
+    e.g. ``__or__``), ``reverse=True`` means "self is right operand" (reverse,
+    e.g. ``__ror__``). For built-in types the flag is ignored because their
+    slots check both operands symmetrically.
+
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L926-L977
+    """
+    impl_attr = f"{op_slot}_impl"
+    v_slot = getattr(type(v), impl_attr, None)
+    w_slot = getattr(type(w), impl_attr, None)
+
+    # Same class → only call once (CPython: slotw = NULL if same type)
+    if v.python_type() is w.python_type():
+        w_slot = None
+    # Same implementation (inherited) → skip w
+    elif v_slot is w_slot:
+        w_slot = None
+
+    if v_slot is not None:
+        # Subclass priority: if w's Python type is a proper subtype of v's
+        # Python type and overrides the slot, try w first (CPython abstract.c:952-960).
+        if w_slot is not None and is_python_subtype(w, v):
+            # CPython ALWAYS calls the slot with (v, w), even for reverse slots.
+            # Since w_slot is a method call, we use reverse=True to indicate w
+            # is the right operand, matching CPython's semantics.
+            result = w_slot(w, tx, v, True)
+            if not is_nb_not_implemented(result):
+                return result
+            w_slot = None
+        result = v_slot(v, tx, w, False)
+        if not is_nb_not_implemented(result):
+            return result
+    if w_slot is not None:
+        result = w_slot(w, tx, v, True)
+        if not is_nb_not_implemented(result):
+            return result
+    return ConstantVariable.create(NotImplemented)
+
+
+def binary_op(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_slot: str,
+    op_symbol: str,
+) -> VariableTracker:
+    """CPython's binary_op: binary_op1 + TypeError fallback.
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L997-L1020
+    """
+
+    result = binary_op1(tx, v, w, op_slot)
+    if is_nb_not_implemented(result):
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+        )
+    return result
+
+
+#  Binary in-place operators
+#
+#    The in-place operators are defined to fall back to the 'normal', non
+#    in-place operations, if the in-place methods are not in place.
+#
+#    - If the left hand object has the appropriate struct members, and they are
+#      filled, call the appropriate function and return the result.  No coercion
+#      is done on the arguments; the left-hand object is the one the operation
+#      is performed on, and it's up to the function to deal with the right-hand
+#      object.
+#
+#    - Otherwise, in-place modification is not supported. Handle it exactly as a
+#      non in-place operation of the same kind.
+
+
+def binary_iop1(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    iop_slot: str,
+    op_slot: str,
+) -> VariableTracker:
+    v_type = maybe_get_python_type(v)
+
+    if type_implements_nb_slot(v_type, NB_SLOT_MAPPING[iop_slot]):
+        impl_attr = f"{iop_slot}_impl"
+        slot = getattr(type(v), impl_attr)
+        result = slot(v, tx, w)
+        if not is_nb_not_implemented(result):
+            return result
+
+    return binary_op1(tx, v, w, op_slot)
+
+
+def binary_iop(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    iop_slot: str,
+    op_slot: str,
+    op_symbol: str,
+) -> VariableTracker:
+    """CPython's binary_iop: try inplace slot, fallback to binary_op1.
+
+    Combines binary_iop1 + TypeError fallback from binary_iop.
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1229-L1270 (binary_iop1, binary_iop)
+    """
+    result = binary_iop1(tx, v, w, iop_slot, op_slot)
+    if is_nb_not_implemented(result):
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+        )
+    return result
