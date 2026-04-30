@@ -133,7 +133,9 @@ inline void throw_error_for_complex_autograd(
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(const Variable& var, std::shared_ptr<Node> grad_fn) {
+inline void rebase_history(
+    const Variable& var,
+    c10::intrusive_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     impl::rebase_history(var, {std::move(grad_fn), 0});
@@ -142,7 +144,7 @@ inline void rebase_history(const Variable& var, std::shared_ptr<Node> grad_fn) {
 
 inline void rebase_history(
     const std::vector<Variable>& vars,
-    const std::shared_ptr<Node>& grad_fn) {
+    const c10::intrusive_ptr<Node>& grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {

@@ -107,7 +107,7 @@ void replicate_grad_edges(
     const std::vector<std::shared_ptr<ModuleType>>& replicas,
     const std::vector<Device>& devices) {
   for (auto& parameter : module->named_parameters(/*recurse=*/false)) {
-    auto grad_fn = std::make_shared<ReduceAdd>((*parameter).device());
+    auto grad_fn = c10::make_intrusive<ReduceAdd>((*parameter).device());
     grad_fn->set_next_edges(autograd::collect_next_edges(*parameter));
 
     for (const auto i : c10::irange(devices.size())) {
@@ -117,7 +117,7 @@ void replicate_grad_edges(
 
   for (auto& buffer : module->named_buffers(/*recurse=*/false)) {
     if (buffer.value().requires_grad()) {
-      auto grad_fn = std::make_shared<ReduceAdd>((*buffer).device());
+      auto grad_fn = c10::make_intrusive<ReduceAdd>((*buffer).device());
       grad_fn->set_next_edges(autograd::collect_next_edges(*buffer));
 
       for (const auto i : c10::irange(devices.size())) {
