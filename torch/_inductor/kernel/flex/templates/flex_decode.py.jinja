@@ -119,7 +119,7 @@
 
     # Make sure each split is a multiple of BLOCK_N
     if HAS_FULL_BLOCKS:
-        # TODO do the a optimization as partial blocks once vllm is
+        # TODO do the optimization as partial blocks once vllm is
         # able to pass in full blocks:
         # https://github.com/vllm-project/vllm/blob/61249b177de1566027fc74e9b51b45a4c973eb47/vllm/v1/attention/backends/flex_attention.py#L615-L616
         TILE_KV_OG = tl.cdiv(KV_LEN, SPLIT_KV)
@@ -128,7 +128,7 @@
     TILE_KV = tl.cdiv(TILE_KV_OG, BLOCK_N) * BLOCK_N
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
-    # Calculate KV blocks that belong this CTA.
+    # Calculate KV blocks that belong to this CTA.
     block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
     block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
 

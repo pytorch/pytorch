@@ -30,7 +30,7 @@ translation_validation_no_bisect = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
 )
 # Checks whether replaying ShapeEnv events on a freshly constructed one yields
-# the a ShapeEnv with the same state. This should be used only in testing.
+# a ShapeEnv with the same state. This should be used only in testing.
 check_shape_env_recorded_events = False
 
 # TODO: Perhaps consider allowing unions for the configs below (so you can hit
