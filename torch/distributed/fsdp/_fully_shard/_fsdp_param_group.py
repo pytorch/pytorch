@@ -627,7 +627,8 @@ class FSDPParamGroup:
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
                 elif (
-                    fsdp_param.sharded_param.requires_grad
+                    self.reduce_scatter_unused_params
+                    and fsdp_param.sharded_param.requires_grad
                     and self._zero_buf is not None
                 ):
                     # Models like the Qwen3 with mixture of experts will trigger different experts in different ranks.
