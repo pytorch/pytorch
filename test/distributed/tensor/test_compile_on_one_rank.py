@@ -155,6 +155,21 @@ class TestCompileOnOneRank(DTensorTestBase):
 
     @with_comms
     @dist_config.patch(compile_on_one_rank=True)
+    def test_all_reduce_with_explicit_pg_input(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        def f(t, group):
+            t = t.clone()
+            dist.all_reduce(t, group=group)
+            return t + 1
+
+        x = torch.arange(4, dtype=torch.float32, device=self.device_type)
+        opt = torch.compile(f, backend="inductor", fullgraph=True)
+        out = opt(x, pg)
+        self.assertEqual(out, f(x, pg))
+
+    @with_comms
+    @dist_config.patch(compile_on_one_rank=True)
     def test_compiled_dtensor_rng_op_graph_consistency(self):
         """Compiled random ops on sharded DTensors should produce identical graphs."""
         mesh = self.build_device_mesh()
