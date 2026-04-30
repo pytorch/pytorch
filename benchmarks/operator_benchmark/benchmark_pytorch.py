@@ -213,18 +213,18 @@ class PyTorchOperatorTestCase:
         )
         return compiled_forward_consume
 
-    def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
+    def run_jit_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
         """Run the forward path of an op with JIT mode"""
         if self._jit_forward_graph is None:
             self._jit_forward_graph = self._generate_jit_forward_graph()
         self._jit_forward_graph(num_runs)
 
-    def run_compile_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
+    def run_compile_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
         """Run the forward path of an op with compile mode"""
         if self._compile_forward_graph is None:
             self._compile_forward_graph = self._generate_compile_forward_graph()
         self._compile_forward_graph(num_runs)
-        if cuda_sync:
+        if gpu_sync:
             # Despite the legacy parameter name, sync the device that
             # actually holds the inputs (cuda or xpu).  See the note
             # in benchmark_core._launch_forward.
@@ -246,20 +246,20 @@ class PyTorchOperatorTestCase:
                 )
             )
 
-    def run_forward(self, num_runs, print_per_iter, cuda_sync):
+    def run_forward(self, num_runs, print_per_iter, gpu_sync):
         """Run the forward path of an op with eager mode"""
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward_impl_eager()
-                if cuda_sync:
+                if gpu_sync:
                     _sync_current_device(self.op_bench.inputs)
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward_impl_eager()
-            if cuda_sync:
+            if gpu_sync:
                 _sync_current_device(self.op_bench.inputs)
 
     def _output_mean(self):
@@ -272,12 +272,12 @@ class PyTorchOperatorTestCase:
         """
         self.mean = self.output.mean()
 
-    def run_backward(self, num_runs, print_per_iter=False, cuda_sync=False):
+    def run_backward(self, num_runs, print_per_iter=False, gpu_sync=False):
         """Run the backward path of an op in many iterations"""
         # TODO: can we use JIT here to reduce python overhead?
         for _ in range(num_runs):
             self.mean.backward(retain_graph=True)
-        if cuda_sync:
+        if gpu_sync:
             torch.cuda.synchronize()
 
 
