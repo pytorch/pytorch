@@ -356,7 +356,7 @@ def export_for_aoti_minifier(
 ) -> torch.nn.Module | None:
     # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
     # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
-    # In these case, we return None. Otherwise, we return the exported graph module.
+    # In these cases, we return None. Otherwise, we return the exported graph module.
     # This won't affect the minifier result because the minifier is only responsible for catching
     # errors in AOTI, not export.
     #
