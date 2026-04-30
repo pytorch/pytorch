@@ -6,4 +6,6 @@ set -xe
 # see: https://github.com/pytorch/pytorch/issues/133437
 LIBNONSHARED=$(gcc -print-file-name=libstdc++_nonshared.a)
 nm -g $LIBNONSHARED | grep " T " | grep recursive_directory_iterator | cut -c 20-  > weaken-symbols.txt
-objcopy --weaken-symbols weaken-symbols.txt $LIBNONSHARED $LIBNONSHARED
+if [ $(wc -l weaken-symbols.txt | cut -d ' ' -f 1) != "0" ]; then
+    objcopy --weaken-symbols weaken-symbols.txt $LIBNONSHARED $LIBNONSHARED
+fi

@@ -84,7 +84,7 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export ACL_ROOT_DIR=/acl
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
     # shellcheck disable=SC1091
     source /opt/riscv-cross-env/bin/activate
@@ -103,6 +103,47 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
   sudo chown -R jenkins /var/lib/jenkins/workspace /opt
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+  # FAILED: caffe2/CMakeFiles/torch_cpu.dir/__/torch/csrc/distributed/rpc/rpc_agent.cpp.o
+  # /opt/cache/bin/sccache /opt/cache/bin/c++ -DAT_PER_OPERATOR_HEADERS -DCAFFE2_BUILD_MAIN_LIB -DCPUINFO_SUPPORTED_PLATFORM=1 -DENABLE_IPC_FABRIC -DFMT_HEADER_ONLY=1 -DHAVE_MALLOC_USABLE_SIZE=1 -DHAVE_MMAP=1 -DHAVE_POSIX_FALLOCATE=1 -DHAVE_SHM_OPEN=1 -DHAVE_SHM_UNLINK=1 -DKINETO_NAMESPACE=libkineto -DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS -DONNXIFI_ENABLE_EXT=1 -DONNX_ML=1 -DONNX_NAMESPACE=onnx_torch -DUSE_C10D_GLOO -DUSE_DISTRIBUTED -DUSE_EXTERNAL_MZCRC -DUSE_RPC -DUSE_TENSORPIPE -D_FILE_OFFSET_BITS=64 -Dtorch_cpu_EXPORTS -I/var/lib/jenkins/workspace/build/aten/src -I/var/lib/jenkins/workspace/aten/src -I/var/lib/jenkins/workspace/build -I/var/lib/jenkins/workspace -I/var/lib/jenkins/workspace/nlohmann -I/var/lib/jenkins/workspace/moodycamel -I/var/lib/jenkins/workspace/torch/csrc/api -I/var/lib/jenkins/workspace/torch/csrc/api/include -I/var/lib/jenkins/workspace/caffe2/aten/src/TH -I/var/lib/jenkins/workspace/build/caffe2/aten/src/TH -I/var/lib/jenkins/workspace/build/caffe2/aten/src -I/var/lib/jenkins/workspa
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp: In static member function ‘static bool torch::distributed::rpc::RpcAgent::isCurrentRpcAgentSet()’:
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp:259:26: error: ‘std::shared_ptr<_Tp> std::atomic_load(const shared_ptr<_Tp>*) [with _Tp = torch::distributed::rpc::RpcAgent]’ is deprecated: use 'std::atomic<std::shared_ptr<T>>' instead [-Werror=deprecated-declarations]
+  #   259 |   return std::atomic_load(&currentRpcAgent_) != nullptr;
+  #       |          ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
+  # In file included from /usr/include/c++/14/memory:81,
+  #                  from /var/lib/jenkins/workspace/c10/util/Backtrace.h:5,
+  #                  from /var/lib/jenkins/workspace/c10/util/Exception.h:7,
+  #                  from /var/lib/jenkins/workspace/c10/util/DeadlockDetection.h:4,
+  #                  from /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp:1:
+  # /usr/include/c++/14/bits/shared_ptr_atomic.h:142:5: note: declared here
+  #   142 |     atomic_load(const shared_ptr<_Tp>* __p)
+  #       |     ^~~~~~~~~~~
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp: In static member function ‘static std::shared_ptr<torch::distributed::rpc::RpcAgent> torch::distributed::rpc::RpcAgent::getCurrentRpcAgent()’:
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp:263:53: error: ‘std::shared_ptr<_Tp> std::atomic_load(const shared_ptr<_Tp>*) [with _Tp = torch::distributed::rpc::RpcAgent]’ is deprecated: use 'std::atomic<std::shared_ptr<T>>' instead [-Werror=deprecated-declarations]
+  #   263 |   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
+  #       |                                     ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
+  # /usr/include/c++/14/bits/shared_ptr_atomic.h:142:5: note: declared here
+  #   142 |     atomic_load(const shared_ptr<_Tp>* __p)
+  #       |     ^~~~~~~~~~~
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp: In static member function ‘static void torch::distributed::rpc::RpcAgent::setCurrentRpcAgent(std::shared_ptr<torch::distributed::rpc::RpcAgent>)’:
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp:277:40: error: ‘bool std::atomic_compare_exchange_strong(shared_ptr<_Tp>*, shared_ptr<_Tp>*, shared_ptr<_Tp>) [with _Tp = torch::distributed::rpc::RpcAgent]’ is deprecated: use 'std::atomic<std::shared_ptr<T>>' instead [-Werror=deprecated-declarations]
+  #   277 |     std::atomic_compare_exchange_strong(
+  #       |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+  #   278 |         &currentRpcAgent_, &previousAgent, std::move(rpcAgent));
+  #       |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # /usr/include/c++/14/bits/shared_ptr_atomic.h:290:5: note: declared here
+  #   290 |     atomic_compare_exchange_strong(shared_ptr<_Tp>* __p, shared_ptr<_Tp>* __v,
+  #       |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # /var/lib/jenkins/workspace/torch/csrc/distributed/rpc/rpc_agent.cpp:286:29: error: ‘std::shared_ptr<_Tp> std::atomic_exchange(shared_ptr<_Tp>*, shared_ptr<_Tp>) [with _Tp = torch::distributed::rpc::RpcAgent]’ is deprecated: use 'std::atomic<std::shared_ptr<T>>' instead [-Werror=deprecated-declarations]
+  #   286 |         std::atomic_exchange(&currentRpcAgent_, std::move(rpcAgent));
+  #       |         ~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # /usr/include/c++/14/bits/shared_ptr_atomic.h:225:5: note: declared here
+  #   225 |     atomic_exchange(shared_ptr<_Tp>* __p, shared_ptr<_Tp> __r)
+  #       |     ^~~~~~~~~~~~~~~
+  # cc1plus: all warnings being treated as errors
+  export CFLAGS="${CFLAGS} -Wno-error=deprecated-declarations"
 fi
 
 # Use special scripts for Android builds
@@ -217,7 +258,7 @@ fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -243,6 +284,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
   if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
@@ -401,7 +443,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   PYTHONPATH=. python tools/stats/export_test_times.py
 fi
-# don't do this for s390x or riscv64 as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+# don't do this for s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   print_sccache_stats
 fi

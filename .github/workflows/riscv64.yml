@@ -19,6 +19,6 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-noble-riscv64-py3.12-gcc14
-      docker-image-name: pytorch-linux-noble-riscv64-py3.12-gcc14
+      docker-image-name: pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
       runner: linux.c7i.2xlarge
     secrets: inherit

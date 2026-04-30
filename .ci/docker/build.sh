@@ -76,9 +76,12 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
-elif [[ "$image" == *riscv* ]]; then
-  # Use RISC-V specific Dockerfile
+elif [[ "$image" == *riscv*cross* ]]; then
+  # Use RISC-V cross-compilation specific Dockerfile
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
+elif [[ "$image" == *riscv64* ]]; then
+  # Use RISC-V specific Dockerfile
+  DOCKERFILE="${OS}-riscv64/Dockerfile"
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
@@ -268,6 +271,12 @@ case "$tag" in
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
     GCC_VERSION=14
+    PYTHON_VERSION=3.12
+    OPENBLAS=yes
+    OPENBLAS_VERSION="v0.3.33"
+    ;;
+  pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
+    GCC_VERSION=14
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -350,6 +359,7 @@ docker buildx build \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
+       --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
@@ -393,7 +403,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if [[ "$image" == *riscv* ]]; then
+  if [[ "$image" == *riscv*cross* ]]; then
     # Check RISC-V cross-compilation toolchain version
     if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
       echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"

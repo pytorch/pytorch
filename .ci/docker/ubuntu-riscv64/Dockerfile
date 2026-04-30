@@ -5,7 +5,10 @@ FROM ubuntu:${UBUNTU_VERSION} as base
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
+ENV PIP_EXTRA_INDEX_URL=https://gitlab.com/api/v4/projects/riseproject%2Fpython%2Fwheel_builder/packages/pypi/simple
+ENV PIP_PREFER_BINARY=true
 
+ARG GCC_VERSION
 ARG CLANG_VERSION
 
 # Include BUILD_ENVIRONMENT environment variable in image
@@ -34,18 +37,14 @@ COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
 RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
-ARG ANACONDA_PYTHON_VERSION
-ARG PYTHON_FREETHREADED
-ARG DOCS
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
-ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
-ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-ENV DOCS=$DOCS
-COPY requirements-ci.txt requirements-docs.txt /opt/conda/
-COPY ./common/install_conda.sh install_conda.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_magma_conda.sh install_magma_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+ARG PYTHON_VERSION
+ARG PIP_CMAKE
+# Put venv into the env vars so users don't need to activate it
+ENV PATH /var/lib/jenkins/ci_env/bin:$PATH
+ENV VIRTUAL_ENV /var/lib/jenkins/ci_env
+COPY requirements-ci.txt /opt/requirements-ci.txt
+COPY ./common/install_python.sh install_python.sh
+RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -55,23 +54,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 # Install lcov for C++ code coverage
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
-
-# Install cuda and cudnn
-ARG CUDA_VERSION
-COPY ./common/install_cuda.sh install_cuda.sh
-COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl* /ci_commit_pins/
-COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
-ENV DESIRED_CUDA ${CUDA_VERSION}
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
-# No effect if cuda not installed
-ENV USE_SYSTEM_NCCL=1
-ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
-ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
-
-
-ARG CUDA_VERSION
 
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
@@ -89,22 +71,7 @@ COPY ./common/install_mingw.sh install_mingw.sh
 RUN if [ -n "${INSTALL_MINGW}" ]; then bash ./install_mingw.sh; fi
 RUN rm install_mingw.sh
 
-ARG TRITON
-ARG TRITON_CPU
-
-# Create a separate stage for building Triton and Triton-CPU.  install_triton
-# will check for the presence of env vars
-FROM base as triton-builder
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/triton.txt triton.txt
-COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
-RUN bash ./install_triton.sh
-
 FROM base as final
-COPY --from=triton-builder /opt/triton /opt/triton
-RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
-RUN rm -rf /opt/triton
 
 ARG EXECUTORCH
 # Build and install executorch
@@ -147,25 +114,8 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
-# Build TSan-instrumented CPython for thread sanitizer testing
-ARG TSAN
-COPY ./common/install_cpython.sh install_cpython.sh
-COPY requirements-ci.txt /tmp/requirements-ci.txt
-RUN if [ -n "${TSAN}" ]; then \
-      CC=clang-18 CXX=clang++-18 \
-      CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh && \
-      /opt/python/cp314-cp314t+tsan/bin/pip install -r /tmp/requirements-ci.txt; \
-    fi
-RUN rm -f install_cpython.sh /tmp/requirements-ci.txt
-
-# (optional) Build ACL
-ARG ACL
-COPY ./common/install_acl.sh install_acl.sh
-RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
-RUN rm install_acl.sh
-ENV INSTALLED_ACL ${ACL}
-
 ARG OPENBLAS
+ARG OPENBLAS_VERSION
 COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
@@ -183,14 +133,7 @@ COPY ./common/install_jni.sh install_jni.sh
 COPY ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-# Install Open MPI for CUDA
-COPY ./common/install_openmpi.sh install_openmpi.sh
-RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
-RUN rm install_openmpi.sh
-
-# AWS specific CUDA build guidance
-ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
-ENV CUDA_PATH /usr/local/cuda
+RUN chown -R jenkins:jenkins /var/lib/jenkins/ci_env
 
 USER jenkins
 CMD ["bash"]
