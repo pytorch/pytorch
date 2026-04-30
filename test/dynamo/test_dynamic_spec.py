@@ -90,6 +90,15 @@ class TestIntSpecConstruction(TestCase):
         s = IntSpec.static()
         self.assertEqual(s._type, IntSpecType.STATIC)
         self.assertIsNone(s._value)
+        # ``name=None`` auto-fills with a stable per-instance handle.
+        self.assertTrue(s._name.startswith("_intspec_static_"))
+
+    def test_anonymous_specs_have_distinct_names(self):
+        # Two anonymous specs of the same mode get different auto-names so
+        # they can be distinguished in error messages / logs.
+        a = IntSpec.static()
+        b = IntSpec.static()
+        self.assertNotEqual(a._name, b._name)
 
     def test_backed(self):
         s = IntSpec.backed("batch", min=1, max=64, guarding_hint=32)
@@ -173,8 +182,11 @@ class TestIntSpecConstruction(TestCase):
         )
 
     def test_repr(self):
-        # Anonymous, no fields set.
-        self.assertEqual(repr(IntSpec.static()), "IntSpec(type=STATIC)")
+        # Anonymous: name is auto-generated; check shape via prefix since
+        # the trailing id-hex is process-dependent.
+        anon = repr(IntSpec.static())
+        self.assertTrue(anon.startswith("IntSpec(name='_intspec_static_"))
+        self.assertIn("type=STATIC", anon)
         # Named + value.
         self.assertEqual(
             repr(IntSpec.static("x", value=10)),
