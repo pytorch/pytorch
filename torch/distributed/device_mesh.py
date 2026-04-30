@@ -576,6 +576,10 @@ else:
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
+            # When torchcomms is enabled with a fake backend (e.g. disabled mesh dimensions), use hashed PG names so they
+            # stay consistent with the hash-based names produced by split_group for real backends. Sequential integer names
+            # from new_group are not resolvable from compiled code when mixed with split_group hash names.
+            use_hashed = dist_config.use_torchcomms and backend == "fake"
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
@@ -585,6 +589,7 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    use_local_synchronization=use_hashed,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
