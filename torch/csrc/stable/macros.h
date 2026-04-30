@@ -47,7 +47,8 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
   std::time_t t = std::time(nullptr);
   std::tm tm = *std::localtime(&t);
   std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
-            << line << " ]" << torch_exception_get_what();
+            << line
+            << "] Exception in aoti_torch: " << torch_exception_get_what();
   throw std::runtime_error(ss.str());
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)

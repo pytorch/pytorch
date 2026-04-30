@@ -86,7 +86,8 @@ class StableLibrary final {
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION));
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION));
 #else
     STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_library_impl(lib_, name, fn));
 #endif
