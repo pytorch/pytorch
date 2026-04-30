@@ -36,6 +36,7 @@ int saxpy(int n, float a, float *x, float *y) {
 }
 """
 
+
 @unittest.skipUnless(nvcc_exist(), "requires nvcc")
 class TestCUDACodeCache(InductorTestCase):
     @requires_cuda_and_triton
