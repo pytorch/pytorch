@@ -94,6 +94,7 @@ register_op_strategy(
         aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
+        aten.view_copy.dtype,
         aten.zero_.default,
         prims.view_of.default,
     ]
@@ -197,7 +198,9 @@ register_op_strategy(
     [
         aten.ones_like.default,
         aten.rand_like.default,
+        aten.rand_like.generator,
         aten.randn_like.default,
+        aten.randn_like.generator,
         aten.zeros_like.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
@@ -209,8 +212,13 @@ register_op_strategy(
 @register_op_strategy(
     [
         aten.randint_like.default,
+        aten.randint_like.generator,
         aten.randint_like.low_dtype,
         aten.randint_like.low_dtype_out,
+        aten.randint_like.low_generator_dtype,
+        # NOTE: randint_like.Tensor and randint_like.Tensor_generator are excluded
+        # because their kernel requires `high` to be a CPU scalar tensor, which is
+        # incompatible with DTensor's FakeTensor-based sharding propagation.
     ],
     schema_info=RuntimeSchemaInfo(3, ["dtype"]),
 )
@@ -1068,7 +1076,8 @@ def index_select_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+    [aten.index.Tensor, aten.index.Tensor_hacked_twin],
+    schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
 def index_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -1149,7 +1158,12 @@ def index_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_put.default, aten.index_put_.default, aten._index_put_impl_.default],
+    [
+        aten.index_put.default,
+        aten.index_put_.default,
+        aten.index_put.hacked_twin,
+        aten._index_put_impl_.default,
+    ],
     schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
 def index_put_single_dim_strategy(
