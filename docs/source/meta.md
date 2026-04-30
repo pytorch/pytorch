@@ -86,6 +86,36 @@ manually:
 Linear(in_features=20, out_features=30, bias=True)
 ```
 
+## Loading large checkpoints with less memory
+
+When loading a large `state_dict`, initializing the module normally and then
+calling {meth}`~torch.nn.Module.load_state_dict` can temporarily hold two copies
+of the parameters in CPU memory: one copy in the module and one copy in the
+loaded `state_dict`.  You can avoid allocating parameter storage during module
+construction by creating the module on the meta device, and then assigning the
+loaded tensors into the module:
+
+```python
+state_dict = torch.load("checkpoint.pt", mmap=True, weights_only=True)
+
+with torch.device("meta"):
+    module = MyModule(...)
+
+module.load_state_dict(state_dict, assign=True)
+```
+
+The `mmap=True` argument maps the checkpoint storages from disk instead of
+reading all storages into CPU memory immediately.  The `assign=True` argument
+replaces the module parameters and buffers with the tensors from the
+`state_dict` instead of copying into already-initialized parameters.  If you use
+`assign=True`, create the optimizer after calling
+{meth}`~torch.nn.Module.load_state_dict`, so the optimizer references the final
+parameters.
+
+This pattern reduces the CPU memory peak for loading large checkpoints.  It does
+not reduce the memory required to hold the final model parameters on their target
+device.
+
 {mod}`torch._subclasses.meta_utils` contains undocumented utilities for taking
 an arbitrary Tensor and constructing an equivalent meta Tensor with high
 fidelity.  These APIs are experimental and may be changed in a BC breaking way
