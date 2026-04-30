@@ -198,7 +198,7 @@ class TORCH_API RpcAgent {
   // before every RPC process exits.
   virtual void join(bool shutdown = false, float timeout = 0) = 0;
 
-  // Synchronize the this process with other ``RpcAgent`` processes. Block until
+  // Synchronize this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
