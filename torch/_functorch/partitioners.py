@@ -1054,7 +1054,7 @@ def _extract_fwd_bwd_modules(
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
-        # we need to peak one node further to see if this wait_tensor is dead as well.
+        # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
             n.target is torch.ops._c10d_functional.wait_tensor.default
             and len(n.users) == 0
