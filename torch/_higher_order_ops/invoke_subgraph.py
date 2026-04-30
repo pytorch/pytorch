@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import threading
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -97,6 +98,34 @@ def _extract_nested_region_config(fn):
         ):
             return gm_to_compile.meta["nested_region_config"].decompositions
     return None
+
+
+# Per-call id used by downstream graph passes to pair fw and bw
+# invoke_subgraph HOP nodes (e.g. run_joint_graph_passes_on_hops). The
+# autograd Function pushes the id around its fw and bw dispatches; the
+# proxy-mode handler stamps it on the resulting FX nodes via
+# meta["custom"]["call_id"].
+_invoke_subgraph_call_state = threading.local()
+
+
+def _next_invoke_subgraph_call_id() -> int:
+    counter = getattr(_invoke_subgraph_call_state, "counter", 0)
+    _invoke_subgraph_call_state.counter = counter + 1
+    return counter
+
+
+def _current_invoke_subgraph_call_id() -> int | None:
+    return getattr(_invoke_subgraph_call_state, "current", None)
+
+
+@contextlib.contextmanager
+def _set_invoke_subgraph_call_id(call_id: int):
+    prev = getattr(_invoke_subgraph_call_state, "current", None)
+    _invoke_subgraph_call_state.current = call_id
+    try:
+        yield
+    finally:
+        _invoke_subgraph_call_state.current = prev
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -632,6 +661,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._subgraph = subgraph
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
+        ctx._call_id = _next_invoke_subgraph_call_id()
         # We snapshot the dispatch keys in forward for materializing the
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -639,7 +669,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
         save_values_for_backward(ctx, operands)
 
-        with torch._C._AutoDispatchBelowAutograd():
+        with (
+            torch._C._AutoDispatchBelowAutograd(),
+            _set_invoke_subgraph_call_id(ctx._call_id),
+        ):
             out = invoke_subgraph(
                 subgraph,
                 f"fw_{identifier}",
@@ -789,9 +822,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 identifier, tangent_metadata, bw_graph
             )
 
-        grads = invoke_subgraph(
-            bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
-        )[: -output_metadata.num_fw_outs]
+        with _set_invoke_subgraph_call_id(ctx._call_id):
+            grads = invoke_subgraph(
+                bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
+            )[: -output_metadata.num_fw_outs]
         return None, None, None, *grads
 
 
@@ -1072,11 +1106,17 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         ):
             nested_config = gm.meta["nested_region_config"]
             break
-    if nested_config is not None:
+
+    call_id = _current_invoke_subgraph_call_id()
+
+    if nested_config is not None or call_id is not None:
         node = out_proxy.node
         if "custom" not in node.meta:
             node.meta["custom"] = {}
-        node.meta["custom"]["nested_region_config"] = nested_config
+        if nested_config is not None:
+            node.meta["custom"]["nested_region_config"] = nested_config
+        if call_id is not None:
+            node.meta["custom"]["call_id"] = call_id
 
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(

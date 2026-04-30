@@ -801,6 +801,13 @@ def run_joint_graph_passes_on_hops(
 
     NB: This pass works for invoke_subgraph today because we took extra care in
     the Autograd.Dispatch key of invoke_subgraph to vastly simplify Step 1.
+
+    NB: This pass only matches **top-level** invoke_subgraph HOP nodes in
+    `joint_gm`. It does not recurse into subgraph modules, so when one
+    `nested_compile_region` is invoked from inside another, the inner
+    invoke_subgraph HOPs live inside the outer's subgraph module and are not
+    paired here. Top-level HOPs are still paired correctly via `call_id`;
+    recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
 
@@ -841,17 +848,69 @@ def run_joint_graph_passes_on_hops(
     if not bw_hop_nodes:
         return joint_gm
 
-    if len(fw_hop_nodes) != len(bw_hop_nodes):
-        raise AssertionError(
-            f"expected len(fw_hop_nodes) == len(bw_hop_nodes), "
-            f"got {len(fw_hop_nodes)} != {len(bw_hop_nodes)}"
-        )
+    # The fw and bw HOP counts are not necessarily equal. A fw HOP can have no
+    # corresponding bw HOP when autograd never runs backward through that call
+    # — e.g. the user does `x_d = x.detach().requires_grad_()` between two
+    # regions, or some outputs are not used in the loss. Likewise, multiple fw
+    # calls in the same compile region can share a single bw if autograd dedups
+    # or DCEs intermediate bws.
+    #
+    # Pair fw and bw HOPs by `call_id` — a per-call counter stamped by
+    # InvokeSubgraphAutogradOp's fw/bw on each FX node. This is unambiguous
+    # regardless of how autograd dispatched the backward (single outer
+    # `.backward()`, per-iter `.backward()` in a loop, interleaved regions).
+    fws_by_call_id: dict[int, torch.fx.Node] = {}
+    for fw in fw_hop_nodes:
+        cid = fw.meta.get("custom", {}).get("call_id")
+        if cid is None:
+            continue
+        if cid in fws_by_call_id:
+            raise AssertionError(
+                f"duplicate call_id={cid} on fw HOPs "
+                f"{fws_by_call_id[cid].name!r} and {fw.name!r}"
+            )
+        fws_by_call_id[cid] = fw
 
-    # Create a bw to hop node mapping. This helps us in identifying the bw and
-    # fw subgraph pairs without relying on the identifier. This is important
-    # because we can have different subgraphs for bwd for same subgraph in the
-    # fwd because of differing strides in the backward.
-    bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
+    bw_to_fw_hop_node: dict[torch.fx.Node, torch.fx.Node] = {}
+    paired_fws: set[torch.fx.Node] = set()
+    for bw in bw_hop_nodes:
+        cid = bw.meta.get("custom", {}).get("call_id")
+        if cid is None:
+            raise AssertionError(
+                f"bw HOP {bw.args[1]!r} has no call_id in meta['custom']"
+            )
+        fw = fws_by_call_id.get(cid)
+        if fw is None:
+            raise AssertionError(
+                f"could not find matching fw HOP for bw {bw.args[1]!r} "
+                f"with call_id={cid} (fw call_ids: {sorted(fws_by_call_id)})"
+            )
+        bw_to_fw_hop_node[bw] = fw
+        paired_fws.add(fw)
+
+    # Extra fws share a compile region with a paired bw but have no bw of
+    # their own (autograd may dedup or DCE the bw). They still must be
+    # rewritten to call the new partitioned fw subgraph, otherwise the output
+    # signatures diverge from the rewritten paired fws. Key by the bw
+    # identifier so the key matches `new_hop_graphs`.
+    fw_args_to_bw_identifier: dict[str, str] = {}
+    for bw, fw in bw_to_fw_hop_node.items():
+        fw_arg = fw.args[1]
+        bw_arg = bw.args[1]
+        if not (isinstance(fw_arg, str) and isinstance(bw_arg, str)):
+            raise AssertionError(
+                f"expected fw/bw invoke_subgraph HOP args[1] to be str identifiers, "
+                f"got fw={type(fw_arg)}, bw={type(bw_arg)}"
+            )
+        fw_args_to_bw_identifier.setdefault(fw_arg, bw_arg.removeprefix("bw"))
+    extra_fws_by_id: dict[str, list[torch.fx.Node]] = defaultdict(list)
+    for fw in fw_hop_nodes:
+        if fw in paired_fws:
+            continue
+        bw_ident_key = fw_args_to_bw_identifier.get(fw.args[1])
+        if bw_ident_key is None:
+            continue
+        extra_fws_by_id[bw_ident_key].append(fw)
 
     for node in bw_hop_nodes:
         identifier = node.args[1].removeprefix("bw")
@@ -863,7 +922,19 @@ def run_joint_graph_passes_on_hops(
 
         # Collect some information from the forward hop graph
         fw_hop_node = bw_to_fw_hop_node[node]
-        fw_hop_gm = getattr(joint_gm, fw_hop_node.args[0].target)
+        fw_subgraph_attr = fw_hop_node.args[0]
+        if not isinstance(fw_subgraph_attr, torch.fx.Node):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                f"got {type(fw_subgraph_attr)}"
+            )
+        fw_subgraph_attr_target = fw_subgraph_attr.target
+        if not isinstance(fw_subgraph_attr_target, str):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0].target to be str, "
+                f"got {type(fw_subgraph_attr_target)}"
+            )
+        fw_hop_gm = getattr(joint_gm, fw_subgraph_attr_target)
         if not isinstance(fw_hop_gm, torch.fx.GraphModule):
             raise AssertionError(
                 f"expected fw_hop_gm to be GraphModule, got {type(fw_hop_gm)}"
@@ -1029,10 +1100,16 @@ def run_joint_graph_passes_on_hops(
         extra_fw_outputs = []
 
         # Insert the new_fw_hop_gm into the joint_gm
+        fw_subgraph_attr = fw_node.args[0]
+        if not isinstance(fw_subgraph_attr, torch.fx.Node):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                f"got {type(fw_subgraph_attr)}"
+            )
         with joint_gm.graph.inserting_after(fw_node):
             new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
-            new_fw_mod_attr.meta = copy.copy(fw_node.args[0].meta)
+            new_fw_mod_attr.meta = copy.copy(fw_subgraph_attr.meta)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
         with joint_gm.graph.inserting_after(new_fw_mod_attr):
@@ -1111,6 +1188,35 @@ def run_joint_graph_passes_on_hops(
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
+
+    # Rewrite extra (unpaired) fws to call the new partitioned fw subgraph.
+    # Their additional saved-tensor outputs become dead and are pruned by
+    # eliminate_dead_code.
+    for identifier, extras in extra_fws_by_id.items():
+        if not new_hop_graphs[identifier].partitioning_done:
+            continue
+        new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
+        if new_fw_hop_gm is None:
+            continue
+        for fw_node in extras:
+            fw_subgraph_attr = fw_node.args[0]
+            if not isinstance(fw_subgraph_attr, torch.fx.Node):
+                raise AssertionError(
+                    f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                    f"got {type(fw_subgraph_attr)}"
+                )
+            with joint_gm.graph.inserting_after(fw_node):
+                new_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
+                new_attr = joint_gm.graph.get_attr(new_attr_name)
+                new_attr.meta = copy.copy(fw_subgraph_attr.meta)
+            with joint_gm.graph.inserting_after(new_attr):
+                new_fw_node = joint_gm.graph.call_function(
+                    the_function=invoke_subgraph,
+                    args=(new_attr, new_attr_name, *fw_node.args[2:]),
+                )
+                propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
+            fw_node.replace_all_uses_with(new_fw_node)
+            joint_gm.graph.erase_node(fw_node)
 
     joint_gm.graph.eliminate_dead_code()
     joint_gm.graph.lint()

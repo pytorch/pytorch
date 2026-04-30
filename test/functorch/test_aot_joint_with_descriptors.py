@@ -1250,11 +1250,11 @@ class inner_f(torch.nn.Module):
             """\
 ('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod'})
 [('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
-('call_function', 'invoke_subgraph', {'mod_name': 'my_mod'})
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod', 'call_id': 1})
 ('call_function', 'getitem', {'mod_name': 'my_mod'})
 ('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
 [('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('placeholder', 'arg1_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'}), ('call_function', 'cos', {'mod_name': 'bar'}), ('call_function', 'mul_2', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
-('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
+('call_function', 'invoke_subgraph_1', {'call_id': 1, 'mod_name': 'my_mod'})
 ('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",
         )
 

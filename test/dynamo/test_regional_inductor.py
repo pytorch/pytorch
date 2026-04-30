@@ -1307,6 +1307,196 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 original_mincut_partitioner
             )
 
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_multi_invocation_chunked_loss_with_backward(self, serialize):
+        # Single nested_compile_region invoked many times in a for-loop, summed,
+        # then a single outer .backward(). Exercises pairing fw/bw HOPs by
+        # call_id when there are multiple fw calls per region.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, targets_chunks):
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_two_regions_chunked_loss(self, serialize):
+        # Two nested_compile_regions composed in one fwd+bwd: `attn` called per
+        # layer, `chunk_loss` called per chunk. The fw and bw HOP counts per
+        # region differ, so positional zip-pairing fails; call_id pairing works.
+        nested_config = get_invoke_subgraph_compile_options()
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def attn(q, k):
+            return (q * k).sum(dim=-1, keepdim=True) + q
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def chunk_loss(logits, targets):
+            return (logits - targets).pow(2).mean()
+
+        def fn(x, y, targets_chunks):
+            for _ in range(3):
+                x = attn(x, y)
+            x_d = x.detach().requires_grad_()
+            total = sum(chunk_loss(x_d, t) for t in targets_chunks)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(8, 4, requires_grad=True)
+        targets_chunks = [torch.randn(8, 4) for _ in range(4)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), y.detach().clone(), targets_chunks)
+        out_loss, out_grad = opt_fn(x, y, targets_chunks)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
+    @parametrize("serialize", [False])
+    def test_one_fw_subgraph_multiple_bw_subgraphs(self, serialize):
+        # Same fw region called 5 times under dynamic batch dim. The tangents
+        # flowing into each call have different strides depending on their
+        # position in the fw graph, so AOTAutograd's lazy-bw cache produces
+        # multiple bw subgraphs for the same fw — bw HOPs end up with args[1]
+        # like `bw_subgraph_0_0`, `bw_subgraph_0_1`, etc., even though all fws
+        # share `fw_subgraph_0`. Each bw has its own joint partitioning, and
+        # call_id pairing routes each bw to the fw call with the matching
+        # primals — gradients must match eager.
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            a = gn(x)
+            a2 = gn(a)
+            b = torch.sin(a2)
+            c = gn(b)
+            c2 = gn(c)
+            return c.sum() + c2.sum() + gn(x).sum()
+
+        x = torch.randn(8, 16, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        x_ref = x.detach().clone().requires_grad_(True)
+        torch._dynamo.mark_dynamic(x_ref, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_nested_compile_region_basic_nesting(self, serialize):
+        # Outer nested_compile_region calls inner nested_compile_region once.
+        # `run_joint_graph_passes_on_hops` only sees the outer HOP at the joint
+        # graph level; inner is inside outer's subgraph and is handled by
+        # recursive regional inductor compilation, not by the joint partitioner.
+        # call_id pairing for the visible (outer) HOP must still hold.
+        @torch.compiler.nested_compile_region
+        def inner(x):
+            return x * 2
+
+        @torch.compiler.nested_compile_region
+        def outer(x):
+            return inner(x) + 1
+
+        def fn(x):
+            return outer(x).sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        ref = fn(x_ref)
+        ref.backward()
+        out = opt_fn(x)
+        out.backward()
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    @parametrize("serialize", [False])
+    @torch._dynamo.config.patch("trace_autograd_ops", True)
+    def test_nested_compile_region_multi_invocation(self, serialize):
+        # Outer is called multiple times in a Python for-loop; each outer call
+        # also invokes inner. Joint pass sees N outer fws and N outer bws (one
+        # per call); call_id pairs them correctly. Inner HOPs are nested inside
+        # each outer subgraph and not visible to the joint pass.
+        @torch.compiler.nested_compile_region
+        def inner(x, t):
+            return (x - t).pow(2)
+
+        @torch.compiler.nested_compile_region
+        def outer(x, t):
+            return inner(x, t).mean()
+
+        def fn(x, ts):
+            x_d = x.detach().requires_grad_()
+            total = sum(outer(x_d, t) for t in ts)
+            total.backward()
+            return total.detach(), x_d.grad.detach()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        ts = [torch.randn(8, 4) for _ in range(3)]
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+
+        ref_loss, ref_grad = fn(x.detach().clone(), ts)
+        out_loss, out_grad = opt_fn(x, ts)
+        self.assertEqual(out_loss, ref_loss)
+        self.assertEqual(out_grad, ref_grad)
+
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
 
