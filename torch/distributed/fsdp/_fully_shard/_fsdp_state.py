@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
@@ -419,6 +420,18 @@ class FSDPState(_State):
         # (unlike _register_post_backward_hook which wraps (args, kwargs))
         tensors = collect_grad_tensors(output)
         for t in tensors:
+            if t._base is not None:
+                cls = ", ".join(type(m).__name__ for m in self._modules) or "?"
+                warnings.warn(
+                    f"FSDP2-wrapped module ({cls}) returned a view tensor. "
+                    "An in-place op on this view (e.g., `x += y`) will silently "
+                    "drop the pre-backward hook and skip the all-gather, which "
+                    "can cause backward to fail or produce wrong gradients. "
+                    "Use out-of-place ops (`out = out + y`, not `out += y`) or "
+                    "`.clone()` the output before any in-place op.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             t.register_hook(self._pre_backward)
         return output
 
