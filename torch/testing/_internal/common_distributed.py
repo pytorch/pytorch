@@ -763,7 +763,7 @@ def retrieve_result_from_completion_queue(
         if timeout is not None:
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                return RuntimeError(f"Process timed out out after {elapsed}s")
+                return RuntimeError(f"Process timed out after {elapsed}s")
 
 
 # Most tests operate with this worldsize
