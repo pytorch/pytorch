@@ -591,6 +591,10 @@ enable_cpp_framelocals_guard_eval = True
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False
 
+# Reuse previously traced inline FX regions for calls with the same code object
+# and flattened tensor input metadata.
+inline_trace_cache = True
+
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True
 track_nodes_for_deduplication = False

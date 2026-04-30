@@ -11,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import traceback
 import types
 import typing
 import unittest
@@ -167,6 +168,251 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
+
+    def test_inline_trace_cache_reuses_same_shape_function(self):
+        def block(x):
+            return torch.cos(torch.sin(x + 1.0)) * 2.0
+
+        def fn(x):
+            x = x + 0.0
+            for _ in range(4):
+                x = block(x)
+            return x
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(3, 4)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 1)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 3)
+
+    def test_inline_trace_cache_keys_on_tensor_stride(self):
+        def block(x):
+            return torch.cos(torch.sin(x + 1.0)) * 2.0
+
+        def fn(x, y):
+            x = x.as_strided(x.shape, x.stride())
+            y = y.as_strided(y.shape, y.stride())
+            return block(x) + block(y)
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 2).t()
+        self.assertEqual(x.shape, y.shape)
+        self.assertNotEqual(x.stride(), y.stride())
+        self.assertTrue(same(opt_fn(x, y), fn(x, y)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 2)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_keys_on_callsite(self):
+        def block(x):
+            return torch.cos(torch.sin(x + 1.0)) * 2.0
+
+        def fn(x):
+            x = x + 0.0
+            y = block(x)
+            z = block(x)
+            return y + z
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(2, 3)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 2)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_rejects_tensor_subclasses(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+        from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
+
+        class TensorProxy(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def block(x):
+            return torch.cos(torch.sin(x + 1.0)) * 2.0
+
+        def fn(x):
+            x = x + 0.0
+            for _ in range(2):
+                x = block(x)
+            return x
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        original = InliningInstructionTranslator.inline_trace_cache_info.__func__
+        accepted_subclass_input = False
+
+        def wrapped_inline_trace_cache_info(cls, parent, func, args, kwargs):
+            nonlocal accepted_subclass_input
+            result = original(cls, parent, func, args, kwargs)
+            if result is not None and any(
+                type(arg) is TensorWithTFOverrideVariable for arg in args
+            ):
+                accepted_subclass_input = True
+            return result
+
+        x = torch.randn(2, 3).as_subclass(TensorProxy)
+        with patch.object(
+            InliningInstructionTranslator,
+            "inline_trace_cache_info",
+            classmethod(wrapped_inline_trace_cache_info),
+        ):
+            self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(accepted_subclass_input)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 0)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_rejects_constant_inputs(self):
+        def same_object(a, b):
+            return a is b
+
+        def fn(x):
+            a = b = "xyzpdq"
+            c = a[:3] + b[3:]
+            return (
+                x + (1 if same_object(a, b) else 0) + (10 if same_object(a, c) else 0)
+            )
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(())
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 0)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    @torch._dynamo.config.patch(inline_trace_cache=False)
+    def test_inline_trace_cache_disabled(self):
+        def block(x):
+            return torch.cos(torch.sin(x + 1.0)) * 2.0
+
+        def fn(x):
+            x = x + 0.0
+            for _ in range(4):
+                x = block(x)
+            return x
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(3, 4)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 0)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_rejects_inplace_mutation(self):
+        def block(x):
+            return x.add_(1.0)
+
+        def fn(x):
+            x = x.clone()
+            for _ in range(2):
+                x = block(x)
+            return x
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(3, 4)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 0)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_rejects_setitem_mutation(self):
+        def block(x):
+            x[0] = 1.0
+            return x.sum()
+
+        def fn(x):
+            x = x.clone()
+            out = x.sum() * 0.0
+            for _ in range(2):
+                out = out + block(x)
+            return out
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(3, 4)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 0)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 0)
+
+    def test_inline_trace_cache_clones_tuple_return(self):
+        def block(x):
+            return torch.sin(x), torch.cos(x)
+
+        def fn(x):
+            x = x + 0.0
+            for _ in range(3):
+                y, z = block(x)
+                x = y + z
+            return x
+
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(3, 4)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["inline_trace_cache"]["stored"], 1)
+        self.assertEqual(counters["inline_trace_cache"]["hit"], 2)
+
+    def test_side_effects_clone_copies_inline_cache_snapshot_fields(self):
+        from torch._dynamo.side_effects import SideEffects
+
+        class OutputGraph:
+            pass
+
+        output_graph = OutputGraph()
+        side_effects = SideEffects(output_graph)
+        side_effects.save_for_backward.append(("ctx", []))
+        side_effects.tensor_hooks[0] = ("tensor", "hook", "handle", "name")
+        mutation_key = object()
+        side_effects.mutation_user_stacks[mutation_key] = [traceback.extract_stack()]
+
+        cloned = side_effects.clone()
+
+        self.assertIsNot(cloned.save_for_backward, side_effects.save_for_backward)
+        self.assertIsNot(cloned.tensor_hooks, side_effects.tensor_hooks)
+        self.assertIsNot(
+            cloned.mutation_user_stacks[mutation_key],
+            side_effects.mutation_user_stacks[mutation_key],
+        )
+        side_effects.save_for_backward.append(("ctx2", []))
+        side_effects.tensor_hooks[1] = ("tensor2", "hook2", "handle2", "name2")
+        side_effects.mutation_user_stacks[mutation_key].append(
+            traceback.extract_stack()
+        )
+        self.assertNotEqual(cloned.save_for_backward, side_effects.save_for_backward)
+        self.assertNotEqual(cloned.tensor_hooks, side_effects.tensor_hooks)
+        self.assertNotEqual(
+            cloned.mutation_user_stacks[mutation_key],
+            side_effects.mutation_user_stacks[mutation_key],
+        )
 
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings

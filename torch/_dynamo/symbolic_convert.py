@@ -141,7 +141,13 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -5256,6 +5262,32 @@ def profile_inline_call(
             output.profiler_state.add_child_time(cumtime_ns)
 
 
+ConstantCacheKey: TypeAlias = tuple[type, int, Any]
+InlineTraceCacheCallsiteKey: TypeAlias = tuple[
+    tuple[types.CodeType, int | None, int], ...
+]
+InlineTraceCacheKey: TypeAlias = tuple[
+    types.CodeType,
+    InlineTraceCacheCallsiteKey,
+    tuple[tuple[Any, ...], ...],
+    tuple[tuple[str, ConstantCacheKey], ...],
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class InlineTraceCacheInfo:
+    key: InlineTraceCacheKey
+    input_nodes: tuple[torch.fx.Node, ...]
+    input_vts: tuple[VariableTracker, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class InlineTraceCacheEntry:
+    input_nodes: tuple[torch.fx.Node, ...]
+    nodes: tuple[torch.fx.Node, ...]
+    result: VariableTracker
+
+
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
@@ -5275,8 +5307,372 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
+            cache_info = cls.inline_trace_cache_info(parent, func, args, kwargs)
+            if cache_info is not None:
+                cached = parent.output.tracing_context.inline_trace_cache.get(
+                    cache_info.key
+                )
+                if cached is not None:
+                    result = cls.try_clone_inline_trace_cache(
+                        parent, cached, cache_info
+                    )
+                    if result is not None:
+                        counters["inline_trace_cache"]["hit"] += 1
+                        parent.has_no_inlined_calls = False
+                        parent.output.tracing_context.traced_code.append(
+                            func.get_code()
+                        )
+                        return result
+
+            prior_node_count = (
+                len(parent.output.graph.nodes) if cache_info is not None else None
+            )
+            prior_side_effects = (
+                parent.output.side_effects.clone() if cache_info is not None else None
+            )
             tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-            return tracer.inline_call_()
+            result = tracer.inline_call_()
+            if (
+                cache_info is not None
+                and prior_node_count is not None
+                and prior_side_effects is not None
+            ):
+                cls.maybe_save_inline_trace_cache(
+                    parent, cache_info, prior_node_count, prior_side_effects, result
+                )
+            return result
+
+    @staticmethod
+    def _tensor_dim_key(dim: Any) -> Any:
+        if isinstance(dim, torch.SymInt):
+            return dim.node.expr
+        return dim
+
+    @classmethod
+    def _tensor_dim_sequence_key(cls, shape: Any) -> tuple[Any, ...]:
+        return tuple(cls._tensor_dim_key(dim) for dim in shape)
+
+    @staticmethod
+    def _hashable_value_key(value: Any) -> ConstantCacheKey | None:
+        try:
+            hash(value)
+        except TypeError:
+            return None
+        return (type(value), id(value), value)
+
+    @staticmethod
+    def _callsite_key(parent: Any) -> InlineTraceCacheCallsiteKey:
+        frames: list[tuple[types.CodeType, int | None, int]] = []
+        tx = parent
+        while tx is not None:
+            inst = getattr(tx, "current_instruction", None)
+            frames.append((tx.f_code, getattr(inst, "offset", None), tx.lineno))
+            tx = getattr(tx, "parent", None)
+        return tuple(reversed(frames))
+
+    @staticmethod
+    @functools.cache
+    def _global_names_for_code(code: types.CodeType) -> tuple[str, ...]:
+        return tuple(
+            inst.argval
+            for inst in dis.get_instructions(code)
+            if inst.opname == "LOAD_GLOBAL" and isinstance(inst.argval, str)
+        )
+
+    @classmethod
+    def _tensor_input_key(cls, vt: TensorVariable) -> tuple[Any, ...] | None:
+        proxy = vt.as_proxy()
+        if not isinstance(proxy, torch.fx.Proxy):
+            return None
+        example_value = proxy.node.meta.get("example_value")
+        if not isinstance(example_value, torch.Tensor):
+            return None
+        if example_value.layout is not torch.strided:
+            return None
+        if example_value.is_nested:
+            return None
+        return (
+            "tensor",
+            cls._tensor_dim_sequence_key(example_value.shape),
+            cls._tensor_dim_sequence_key(example_value.stride()),
+            cls._tensor_dim_key(example_value.storage_offset()),
+            example_value.dtype,
+            example_value.device,
+            example_value.requires_grad,
+        )
+
+    @classmethod
+    def _global_key(
+        cls, parent: Any, func: BaseUserFunctionVariable, code: types.CodeType
+    ) -> tuple[tuple[str, ConstantCacheKey], ...] | None:
+        f_globals = func.get_globals()
+        global_keys: list[tuple[str, ConstantCacheKey]] = []
+        for name in cls._global_names_for_code(code):
+            if name not in f_globals:
+                continue
+
+            symbolic = parent.symbolic_globals.get(name)
+            if isinstance(symbolic, ConstantVariable):
+                value = symbolic.value
+            else:
+                value = f_globals[name]
+
+            value_key = cls._hashable_value_key(value)
+            if value_key is None:
+                return None
+            global_keys.append((name, value_key))
+
+        return tuple(global_keys)
+
+    @classmethod
+    def inline_trace_cache_info(
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> InlineTraceCacheInfo | None:
+        if not config.inline_trace_cache:
+            return None
+        if config.dont_skip_tracing:
+            return None
+        if parent.strict_checks_fn:
+            return None
+        if not parent.output.is_root_tracer():
+            return None
+        if torch._C._functorch.peek_interpreter_stack() is not None:
+            return None
+        if torch.autograd.forward_ad._current_level != -1:
+            return None
+        if not isinstance(func, UserFunctionVariable) or func.has_self():
+            return None
+
+        code = func.get_code()
+        if is_generator(code) or code.co_freevars:
+            return None
+
+        key_parts: list[tuple[Any, ...]] = []
+        input_nodes: list[torch.fx.Node] = []
+        input_vts: list[VariableTracker] = []
+
+        flat_args: list[tuple[str, Any, VariableTracker]] = [
+            ("arg", i, arg) for i, arg in enumerate(args)
+        ]
+        flat_args.extend(("kwarg", name, kwargs[name]) for name in sorted(kwargs))
+        realized_flat_args: list[tuple[str, Any, VariableTracker]] = []
+        for kind, name, vt in flat_args:
+            if isinstance(vt, LazyVariableTracker):
+                # Cache probing must not realize lazy inputs: realization can
+                # install guards and source metadata at the callsite instead of
+                # the callee bytecode location.
+                if not vt.is_realized():
+                    return None
+                vt = vt.unwrap()
+            realized_flat_args.append((kind, name, vt))
+        flat_args = realized_flat_args
+
+        if not all(type(vt) is TensorVariable for _, _, vt in flat_args):
+            return None
+
+        for kind, name, vt in flat_args:
+            assert type(vt) is TensorVariable
+            tensor_key = cls._tensor_input_key(vt)
+            if tensor_key is None:
+                return None
+            proxy = vt.as_proxy()
+            assert isinstance(proxy, torch.fx.Proxy)
+            input_nodes.append(proxy.node)
+            input_vts.append(vt)
+            key_parts.append((kind, name, tensor_key))
+
+        global_key = cls._global_key(parent, func, code)
+        if global_key is None:
+            return None
+
+        return InlineTraceCacheInfo(
+            key=(code, cls._callsite_key(parent), tuple(key_parts), global_key),
+            input_nodes=tuple(input_nodes),
+            input_vts=tuple(input_vts),
+        )
+
+    @staticmethod
+    def _node_target_name(node: torch.fx.Node) -> str:
+        target = node.target
+        return getattr(target, "__name__", str(target))
+
+    @classmethod
+    def _node_is_cacheable(cls, node: torch.fx.Node) -> bool:
+        # Keep the first implementation deliberately narrow: cloned inline
+        # regions are plain operator calls, not module calls or lifted attrs.
+        if node.op not in {"call_function", "call_method"}:
+            return False
+        # Tensor item assignment/deletion routes through Python operator targets
+        # that do not carry torch schemas or conventional mutable names.
+        if node.target in {operator.setitem, operator.delitem}:
+            return False
+        # Static schemas catch normal mutable ops. The name fallback catches
+        # Python/custom operators that follow the conventional trailing "_".
+        if cls._node_target_name(node).split(".", 1)[0].endswith("_"):
+            return False
+        schema = getattr(node.target, "_schema", None)
+        if schema is not None and getattr(schema, "is_mutable", False):
+            return False
+        return True
+
+    @classmethod
+    def _nodes_are_cacheable(
+        cls, nodes: Sequence[torch.fx.Node], input_nodes: Sequence[torch.fx.Node]
+    ) -> bool:
+        node_set = set(nodes)
+        input_node_set = set(input_nodes)
+
+        for node in nodes:
+            if not cls._node_is_cacheable(node):
+                return False
+
+            def check_arg(arg: Any) -> Any:
+                if isinstance(arg, torch.fx.Node) and (
+                    arg not in node_set and arg not in input_node_set
+                ):
+                    raise RuntimeError
+                return arg
+
+            try:
+                torch.fx.node.map_arg((node.args, node.kwargs), check_arg)
+            except RuntimeError:
+                return False
+
+        return True
+
+    @classmethod
+    def _result_is_cacheable(cls, result: VariableTracker) -> bool:
+        if isinstance(result, (TensorVariable, ConstantVariable)):
+            return True
+        if isinstance(result, TupleVariable):
+            return all(cls._result_is_cacheable(item) for item in result.items)
+        return False
+
+    @staticmethod
+    def _has_external_side_effects(
+        before: Any,
+        after: Any,
+    ) -> bool:
+        return (
+            before.store_attr_mutations != after.store_attr_mutations
+            or before.save_for_backward != after.save_for_backward
+            or before.tensor_hooks != after.tensor_hooks
+            or before.mutated_sources != after.mutated_sources
+            or before.has_existing_dict_mutation() != after.has_existing_dict_mutation()
+        )
+
+    @classmethod
+    def maybe_save_inline_trace_cache(
+        cls,
+        parent: Any,
+        cache_info: InlineTraceCacheInfo,
+        prior_node_count: int,
+        prior_side_effects: Any,
+        result: VariableTracker,
+    ) -> None:
+        if parent.output.should_exit:
+            return
+        if cls._has_external_side_effects(
+            prior_side_effects, parent.output.side_effects
+        ):
+            return
+        if not cls._result_is_cacheable(result):
+            return
+
+        new_nodes = tuple(
+            itertools.islice(parent.output.graph.nodes, prior_node_count, None)
+        )
+        if not cls._nodes_are_cacheable(new_nodes, cache_info.input_nodes):
+            return
+
+        parent.output.tracing_context.inline_trace_cache[cache_info.key] = (
+            InlineTraceCacheEntry(
+                input_nodes=cache_info.input_nodes,
+                nodes=new_nodes,
+                result=result,
+            )
+        )
+        counters["inline_trace_cache"]["stored"] += 1
+
+    @staticmethod
+    def _clone_node_meta(meta: dict[str, Any]) -> dict[str, Any]:
+        # The cache only stores narrow, pure call_function/call_method regions.
+        # Shallow-copy structural metadata and clone the tensor payloads known to
+        # be mutable downstream so the cached nodes are not corrupted by hits.
+        new_meta = copy.copy(meta)
+        for key in ("example_value", "val"):
+            value = new_meta.get(key)
+            if isinstance(value, torch.Tensor):
+                new_meta[key] = value.clone()
+        return new_meta
+
+    @classmethod
+    def _clone_cached_result(
+        cls,
+        parent: Any,
+        result: VariableTracker,
+        node_map: dict[torch.fx.Node, torch.fx.Node],
+        input_vt_map: dict[torch.fx.Node, VariableTracker],
+    ) -> VariableTracker | None:
+        if isinstance(result, TensorVariable):
+            old_node = result.as_proxy().node
+            if old_node in input_vt_map:
+                return input_vt_map[old_node]
+            new_node = node_map.get(old_node)
+            if new_node is None:
+                return None
+            proxy = torch.fx.Proxy(new_node, parent.output.current_tracer)
+            cloned = result.clone(proxy=proxy, source=None)
+            parent.output.current_tracer.record_proxyable_vt(cloned)
+            # _track_obj keeps the proxy alive, so the id-based side-effect
+            # table cannot observe a recycled id during this trace.
+            parent.output.side_effects._track_obj(
+                proxy, cloned, mutation_type_cls=AttributeMutationNew
+            )
+            return cloned
+
+        if isinstance(result, ConstantVariable):
+            return result
+
+        if isinstance(result, TupleVariable):
+            items = []
+            for item in result.items:
+                cloned_item = cls._clone_cached_result(
+                    parent, item, node_map, input_vt_map
+                )
+                if cloned_item is None:
+                    return None
+                items.append(cloned_item)
+            return result.clone(items=items, source=None)
+
+        return None
+
+    @classmethod
+    def try_clone_inline_trace_cache(
+        cls,
+        parent: Any,
+        entry: InlineTraceCacheEntry,
+        cache_info: InlineTraceCacheInfo,
+    ) -> VariableTracker | None:
+        node_map = dict(zip(entry.input_nodes, cache_info.input_nodes))
+        input_vt_map = dict(zip(entry.input_nodes, cache_info.input_vts))
+
+        for node in entry.nodes:
+            try:
+                new_node = parent.output.graph.node_copy(node, lambda n: node_map[n])
+            except KeyError:
+                return None
+            new_node.meta = cls._clone_node_meta(node.meta)
+            parent.output.current_tracer._used_names.add(new_node.name)
+            if config.use_graph_deduplication or config.track_nodes_for_deduplication:
+                parent.output.region_tracker.track_node(parent, new_node)
+            node_map[node] = new_node
+
+        return cls._clone_cached_result(parent, entry.result, node_map, input_vt_map)
 
     @staticmethod
     def check_inlineable(

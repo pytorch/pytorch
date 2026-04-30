@@ -294,17 +294,27 @@ class SideEffects:
         """Create a shallow copy"""
         ref = self.output_graph_weakref()
         assert ref is not None
-        return self.__class__(
+        clone = self.__class__(
             output_graph=ref,
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
             },
-            mutation_user_stacks=self.mutation_user_stacks,
+            mutation_user_stacks={
+                k: list(v) for k, v in self.mutation_user_stacks.items()
+            },
             keepalive=list(self.keepalive),
-            save_for_backward=self.save_for_backward,
-            tensor_hooks=self.tensor_hooks,
+            save_for_backward=list(self.save_for_backward),
+            tensor_hooks=dict(self.tensor_hooks),
         )
+        clone._has_existing_dict_mutation = self._has_existing_dict_mutation
+        clone.ca_final_callbacks_var = self.ca_final_callbacks_var
+        clone.ignore_mutation_on_these_variables = set(
+            self.ignore_mutation_on_these_variables
+        )
+        clone.mutated_sources = OrderedSet(self.mutated_sources)
+        clone.deferred_attr_mutations = dict(self.deferred_attr_mutations)
+        return clone
 
     def __contains__(self, item: Any) -> bool:
         return id(item) in self.id_to_variable
