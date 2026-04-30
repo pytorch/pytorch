@@ -45,6 +45,7 @@ Stats stats() {
 #include <algorithm>
 #include <climits>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -90,15 +91,20 @@ struct LibraryInfo {
   LibraryInfo(
       std::string name,
       uint64_t load_bias,
+      uint64_t first_addr,
       uint64_t last_addr,
       void* eh_frame_hdr_ptr_)
       : name_(std::move(name)),
         load_bias_(load_bias),
+        first_addr_(first_addr),
         last_addr_(last_addr),
         eh_frame_hdr_(eh_frame_hdr_ptr_) {}
 
   uint64_t load_bias() const {
     return load_bias_;
+  }
+  uint64_t first_addr() const {
+    return first_addr_;
   }
   uint64_t last_addr() const {
     return last_addr_;
@@ -116,7 +122,8 @@ struct LibraryInfo {
 
  private:
   std::string name_;
-  uint64_t load_bias_; // addr >= load_bias_
+  uint64_t load_bias_;
+  uint64_t first_addr_; // addr >= first_addr_
   uint64_t last_addr_; // addr < last_addr_
   EHFrameHdr eh_frame_hdr_;
 };
@@ -161,25 +168,27 @@ struct UnwindCache {
            size_t size [[maybe_unused]],
            void* data) {
           auto self = (UnwindCache*)data;
+          uint64_t load_bias = info->dlpi_addr;
+          uint64_t first_addr = std::numeric_limits<uint64_t>::max();
           uint64_t last_addr = 0;
           auto segments = (Elf64_Phdr*)info->dlpi_phdr;
           for (auto i : c10::irange(info->dlpi_phnum)) {
             if (segments[i].p_type == PT_LOAD) {
-              auto begin = ((uint64_t)info->dlpi_addr + segments[i].p_vaddr);
-              auto end = (begin + segments[i].p_memsz);
+              auto begin = load_bias + segments[i].p_vaddr;
+              auto end = begin + segments[i].p_memsz;
+              first_addr = std::min(begin, first_addr);
               last_addr = std::max(end, last_addr);
-            }
-            if (segments[i].p_type == PT_GNU_EH_FRAME) {
+            } else if (segments[i].p_type == PT_GNU_EH_FRAME) {
               std::string library_name = info->dlpi_name;
               if (library_name.empty()) {
                 library_name = process_name();
               }
-              auto eh_frame_hdr =
-                  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                  (void*)(segments[i].p_vaddr + info->dlpi_addr);
+              // NOLINTNEXTLINE(performance-no-int-to-ptr)
+              auto eh_frame_hdr = (void*)(load_bias + segments[i].p_vaddr);
               self->all_libraries_.emplace_back(
                   std::move(library_name),
-                  info->dlpi_addr,
+                  load_bias,
+                  first_addr,
                   last_addr,
                   eh_frame_hdr);
               return 0;
@@ -193,7 +202,7 @@ struct UnwindCache {
         all_libraries_.begin(),
         all_libraries_.end(),
         [](const LibraryInfo& lhs, const LibraryInfo& rhs) {
-          return lhs.load_bias() < rhs.load_bias();
+          return lhs.first_addr() < rhs.first_addr();
         });
   }
   void checkRefresh(std::shared_lock<std::shared_timed_mutex>& rdlock) {
@@ -271,20 +280,20 @@ struct UnwindCache {
     uint64_t high = all_libraries_.size();
     while (low + 1 < high) {
       auto mid = (low + high) / 2;
-      if (addr < all_libraries_.at(mid).load_bias()) {
+      if (addr < all_libraries_.at(mid).first_addr()) {
         high = mid;
       } else {
         low = mid;
       }
     }
     LibraryInfo* r = &all_libraries_.at(low);
-    if (addr < r->load_bias() || addr >= r->last_addr()) {
+    if (addr < r->first_addr() || addr >= r->last_addr()) {
       return nullptr;
     }
     return r;
   }
 
-  // sorted by load_bias
+  // sorted by first_addr
   std::vector<LibraryInfo> all_libraries_;
   ska::flat_hash_map<uint64_t, Unwinder> ip_cache_;
 
