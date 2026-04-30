@@ -168,7 +168,7 @@ def after_fork():
 try:
     os.register_at_fork(after_in_child=after_fork)
 except AttributeError:
-    pass  # register_at_fork does not exists on windows
+    pass  # register_at_fork does not exist on windows
 
 
 def get_compile_threads() -> int:

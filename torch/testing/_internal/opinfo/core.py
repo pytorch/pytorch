@@ -2011,7 +2011,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 #   paths of elementwise binary functions, as well as their handling of odd tensor
 #   sizes (like zero-dim tensors and tensors with zero elements).
 #
-# Each iterable will include an a tensor with no elements,
+# Each iterable will include a tensor with no elements,
 #   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
 #   a large 2D tensor.
 def generate_elementwise_binary_tensors(

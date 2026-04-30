@@ -222,7 +222,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
             is_needed = True
 
             if existing_views:
-                # Replace the view with the an existing view if available.
+                # Replace the view with an existing view if available.
                 alias = existing_views.get(to_type)
                 if alias:
                     is_needed = False
