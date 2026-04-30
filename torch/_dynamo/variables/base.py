@@ -18,8 +18,8 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
-import linecache
 import logging
+import textwrap
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
@@ -30,7 +30,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, istype
+from ..utils import cmp_name_to_op_mapping, format_source_range, istype
 
 
 if TYPE_CHECKING:
@@ -58,13 +58,16 @@ class SourceLocation:
     end_col_offset: int | None = None
 
     def format(self) -> str:
-        line = linecache.getline(self.filename, self.lineno).rstrip()
         result = f'  File "{self.filename}", line {self.lineno}\n'
-        if line:
-            result += f"    {line}\n"
-        if line and self.col_offset is not None and self.end_col_offset is not None:
-            num_carets = max(1, self.end_col_offset - self.col_offset)
-            result += "    " + " " * self.col_offset + "^" * num_carets + "\n"
+        source = format_source_range(
+            self.filename,
+            self.lineno,
+            self.end_lineno,
+            self.col_offset,
+            self.end_col_offset,
+        )
+        if source:
+            result += textwrap.indent(source.rstrip("\n"), "    ") + "\n"
         return result
 
 
