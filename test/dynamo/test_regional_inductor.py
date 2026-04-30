@@ -1556,6 +1556,58 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
 
+    @requires_cuda_and_triton
+    @parametrize("serialize", [False])
+    def test_comprehensive_padding_saved_tensor_stride(self, serialize):
+        # When an op inside a nested_compile_region produces a tensor whose
+        # natural stride exceeds padding_stride_threshold and is not
+        # 128-byte aligned, Inductor's comprehensive_padding pads its runtime
+        # stride. If that tensor is saved for backward, the bw subgraph
+        # (separately compiled, IR traced with natural strides) asserts the
+        # natural stride and crashes with assert_size_stride. The fix is to
+        # mark all subgraph outputs as user-visible inside
+        # invoke_subgraph_inductor_compile so Inductor preserves their strides.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+        # 2056 is divisible by 8 but not by 64, exceeds padding_stride_threshold (1024),
+        # so bf16 rows pad 2056 -> 2112 elements without the fix.
+        out_features = 2056
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(x, w):
+            logits = torch.nn.functional.linear(x, w)
+            return (logits * logits).sum()
+
+        def fn(x, w):
+            return loss_region(x, w)
+
+        x = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        w = torch.randn(
+            out_features, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        ref = fn(x_ref, w_ref)
+        ref.backward()
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            ),
+            fullgraph=True,
+        )
+        out = opt_fn(x, w)
+        out.backward()
+
+        self.assertEqual(out, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
