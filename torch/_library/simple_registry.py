@@ -64,8 +64,8 @@ class SimpleLibraryRegistry:
                 import torch._C
 
                 cpp_registry = (
-                    torch._C._get_cpp_symm_mem_args_registry()
-                )  # pyrefly: ignore [missing-attribute]
+                    torch._C._get_cpp_symm_mem_args_registry()  # pyrefly: ignore [missing-attribute]
+                )
                 cpp_args = cpp_registry.get(qualname, None)
             except ImportError:
                 pass
