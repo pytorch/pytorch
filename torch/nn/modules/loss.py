@@ -1467,6 +1467,20 @@ class LinearCrossEntropyLoss(_WeightedLoss):
 
         where :math:`N` is batch size.
 
+    Examples:
+        >>> torch.manual_seed(283)
+        >>> # Example of target with class indices
+        >>> loss = nn.LinearCrossEntropyLoss(5, 10, out_features=(4, 3))
+        >>> input = torch.randn(2, 5, requires_grad=True)
+        >>> target = torch.randint(0, 10, (2, 4, 3))
+        >>> output = loss(input, target)
+        >>> output.backward()
+        >>>
+        >>> # Example of target with class probabilities
+        >>> input = torch.randn(2, 5, requires_grad=True)
+        >>> target = torch.randn(2, 10, 4, 3).softmax(dim=1)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = [
@@ -1498,6 +1512,10 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         if weight is not None and weight.shape != (num_classes,):
             raise RuntimeError(
                 f"expected weight shape to be {(num_classes,)}, got {tuple(weight.shape)}"
+            )
+        if label_smoothing < 0 or label_smoothing > 1.0:
+            raise RuntimeError(
+                f"expected label_smoothing to be in range [0, 1], got {label_smoothing}"
             )
         super().__init__(
             weight=weight, size_average=None, reduce=None, reduction=reduction

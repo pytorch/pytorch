@@ -2030,7 +2030,7 @@ def cleanup_recompute_tags(
                 must_recompute(user) for user in node.users
             ):
                 # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
-                # This is to work around circular dependencies in Traceable FSDP2+AC.
+                # This is to work around circular dependencies with backward hooks + AC.
                 # Example:
                 # ```
                 # out = fully_shard(utils.checkpoint(module))(x)
@@ -3141,7 +3141,9 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
+        aggressive_recomputation_saved_values
+    )
     if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 

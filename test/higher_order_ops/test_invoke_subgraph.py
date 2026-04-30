@@ -3104,6 +3104,117 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_trace_autograd_ops_partitions_bw_invoke_subgraph(self):
+        """
+        Checks that the backward invoke_subgraphs have been partitioned.
+        """
+
+        @nested_compile_region
+        def gn(x, w):
+            return torch.matmul(x, w)
+
+        def fn(x, w):
+            # Call gn twice so it doesn't get inlined as single-use
+            out1 = gn(x, w)
+            out2 = gn(x, w)
+            loss = (out1 + out2).sum()
+            (grad_w,) = torch.autograd.grad(loss, w)
+            return loss.detach(), grad_w
+
+        x = torch.randn(4, 4)
+        w = torch.randn(4, 4, requires_grad=True)
+
+        ref = fn(x, w)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x, w)
+        self.assertEqual(ref, res)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4, 4]"):
+        partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', arg0_1, arg1_1);  partitioned_fw_subgraph_0_0 = None
+        getitem_8: "f32[4, 4]" = invoke_subgraph_4[1]
+        getitem: "f32[4, 4]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', arg0_1, arg1_1);  partitioned_fw_subgraph_0_1 = arg0_1 = arg1_1 = None
+        getitem_9: "f32[4, 4]" = invoke_subgraph_6[1]
+        getitem_1: "f32[4, 4]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[4, 4]" = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+        partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_0
+        invoke_subgraph_7 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_0', getitem_9, expand);  partitioned_bw_subgraph_0_1 = getitem_9 = None
+        getitem_3: "f32[4, 4]" = invoke_subgraph_7[1];  invoke_subgraph_7 = None
+        partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_8, expand);  partitioned_bw_subgraph_0_0 = getitem_8 = expand = None
+        getitem_6: "f32[4, 4]" = invoke_subgraph_5[1];  invoke_subgraph_5 = None
+        add_1: "f32[4, 4]" = torch.ops.aten.add.Tensor(getitem_3, getitem_6);  getitem_3 = getitem_6 = None
+        detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
+        return (detach, add_1)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4, 4]"):
+            mm: "f32[4, 4]" = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (mm,)
+
+    class repeated_subgraph1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4, 4]"):
+            mm: "f32[4, 4]" = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg1_1 = None
+            t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t, arg2_1);  t = arg2_1 = None
+            return (None, mm_1, mm)
+
+    class partitioned_fw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[4, 4]", primals_1: "f32[4, 4]"):
+            mm: "f32[4, 4]" = torch.ops.aten.mm.default(primals_0, primals_1);  primals_1 = None
+            t: "f32[4, 4]" = torch.ops.aten.t.default(primals_0);  primals_0 = None
+            return (mm, t)
+
+    class partitioned_bw_subgraph_0_0(torch.nn.Module):
+        def forward(self, t: "f32[4, 4]", tangents_0: "f32[4, 4]"):
+            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t, tangents_0);  t = tangents_0 = None
+            return (None, mm_1)
+""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True, inline_single_use_invoke_subgraph=False
+    )
+    def test_trace_autograd_ops_with_activation_checkpointing(self):
+        from torch.utils.checkpoint import checkpoint
+
+        @nested_compile_region
+        def gn(x):
+            return torch.matmul(x, x)
+
+        def fn(x):
+            def body(x):
+                y = torch.sin(x)
+                z = gn(y)
+                return torch.relu(z)
+
+            out1 = checkpoint(body, x, use_reentrant=False)
+            out2 = checkpoint(body, x, use_reentrant=False)
+            loss = (out1 + out2).sum()
+            (grad,) = torch.autograd.grad(loss, x)
+            return loss.detach(), grad
+
+        x = torch.randn(4, 4, requires_grad=True)
+
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
@@ -4699,6 +4810,102 @@ class TestInvokeSubgraphTrainStepCapture(TestCase):
         for node in invoke_nodes:
             self.assertIn("custom", node.meta)
             self.assertIn("nested_region_config", node.meta["custom"])
+
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        enable_invoke_subgraph_regional_compile=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_ac_invoke_subgraph_has_recomputed_blocks(self):
+        """When activation checkpointing wraps invoke_subgraph in a
+        train-step capture, the partitioned fw invoke_subgraph should be
+        recomputed by the remat pass, producing _recomputed nodes.
+        """
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        config = get_invoke_subgraph_compile_options(
+            decompositions=torch._decomp.core_aten_decompositions()
+        )
+
+        @nested_compile_region(options=config)
+        def nested_fn(x):
+            return x.sin()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = torch.utils.checkpoint.checkpoint(nested_fn, y, use_reentrant=False)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach()
+
+        backend = AotEagerAndRecordGraphs()
+        model = Model()
+        x = torch.randn(4, 4)
+        torch.compile(model, backend=backend, fullgraph=True)(x)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4, 4]", arg2_1: "f32[1, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1)
+        mm: "f32[4, 4]" = torch.ops.aten.mm.default(arg1_1, t);  t = None
+        partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', mm);  partitioned_fw_subgraph_0_0 = None
+        getitem: "f32[4, 4]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        detach_1: "f32[4, 4]" = torch.ops.aten.detach.default(getitem);  getitem = None
+        t_1: "f32[4, 1]" = torch.ops.aten.t.default(arg2_1)
+        mm_1: "f32[4, 1]" = torch.ops.aten.mm.default(detach_1, t_1)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(mm_1);  mm_1 = None
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[4, 1]" = torch.ops.aten.expand.default(ones_like, [4, 1]);  ones_like = None
+        t_2: "f32[1, 4]" = torch.ops.aten.t.default(expand)
+        mm_2: "f32[1, 4]" = torch.ops.aten.mm.default(t_2, detach_1);  t_2 = None
+        t_3: "f32[4, 1]" = torch.ops.aten.t.default(mm_2);  mm_2 = None
+        t_4: "f32[1, 4]" = torch.ops.aten.t.default(t_1);  t_1 = None
+        mm_3: "f32[4, 4]" = torch.ops.aten.mm.default(expand, t_4);  expand = t_4 = None
+        t_5: "f32[1, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
+        empty_like: "f32[4, 4]" = torch.ops.aten.empty_like.default(detach_1, pin_memory = False);  detach_1 = None
+        copy: "f32[4, 4]" = torch.ops.aten.copy.default(empty_like, mm_3);  empty_like = mm_3 = None
+        empty_like_1: "f32[1, 4]" = torch.ops.aten.empty_like.default(arg2_1, pin_memory = False);  arg2_1 = None
+        copy_1: "f32[1, 4]" = torch.ops.aten.copy.default(empty_like_1, t_5);  empty_like_1 = t_5 = None
+        partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
+        partitioned_fw_subgraph_0_0_recomputed = self.partitioned_fw_subgraph_0_0
+        invoke_subgraph_2_recomputed = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0_recomputed, 'partitioned_fw_subgraph_0_0', mm);  partitioned_fw_subgraph_0_0_recomputed = mm = None
+        getitem_3_recomputed: "f32[4, 4]" = invoke_subgraph_2_recomputed[1];  invoke_subgraph_2_recomputed = None
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_3_recomputed, copy);  partitioned_bw_subgraph_0_0 = getitem_3_recomputed = copy = None
+        getitem_1: "f32[4, 4]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        t_6: "f32[4, 4]" = torch.ops.aten.t.default(getitem_1);  getitem_1 = None
+        mm_4: "f32[4, 4]" = torch.ops.aten.mm.default(t_6, arg1_1);  t_6 = arg1_1 = None
+        t_7: "f32[4, 4]" = torch.ops.aten.t.default(mm_4);  mm_4 = None
+        t_8: "f32[4, 4]" = torch.ops.aten.t.default(t_7);  t_7 = None
+        empty_like_2: "f32[4, 4]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False);  arg0_1 = None
+        copy_2: "f32[4, 4]" = torch.ops.aten.copy.default(empty_like_2, t_8);  empty_like_2 = t_8 = None
+        detach_2: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
+        return (detach_2, copy_2, copy_1)
+    class partitioned_fw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[4, 4]"):
+            sin: "f32[4, 4]" = torch.ops.aten.sin.default(primals_0)
+            return (sin, primals_0)
+    class partitioned_bw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[4, 4]", tangents_0: "f32[4, 4]"):
+            cos: "f32[4, 4]" = torch.ops.aten.cos.default(primals_0);  primals_0 = None
+            mul: "f32[4, 4]" = torch.ops.aten.mul.Tensor(tangents_0, cos);  tangents_0 = cos = None
+            return (mul,)
+""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":

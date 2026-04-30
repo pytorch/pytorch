@@ -619,6 +619,133 @@ class AOTInductorTestsTemplate:
         self.assertEqual(new_expected, runner_call(test_inputs), atol=atol, rtol=rtol)
 
     @requires_gpu
+    def test_update_constant_buffer_mixed_device(self):
+        # Mixed-device model: GPU parameter + CPU buffer. Exercises
+        # update_constant_buffer with a constants_map containing tensors on
+        # different devices, which was previously rejected outright.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.cpu_bias = torch.randn(4, device="cpu")
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.cpu_bias.to(x.device)
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with (
+            torch.no_grad(),
+            config.patch({"always_keep_tensor_constants": True}),
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(4, 4, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # The compiler preserves the CPU constant (always_keep_tensor_constants)
+        # and also promotes a GPU copy used in forward. To keep inference
+        # correct, build new_weights from the runner's actual constants (which
+        # span both devices) and write the new bias data into both the CPU
+        # original and the GPU-promoted copy.
+        cmap = runner.extract_constants_map(False)
+
+        def build_new_weights():
+            new_w_pre = torch.randn(4, 4, device=self.device)
+            new_cpu_bias = torch.randn(4, device="cpu")
+            nw = {}
+            for name, t in cmap.items():
+                if "w_pre" in name:
+                    nw[name] = new_w_pre
+                elif "cpu_bias" in name:
+                    nw[name] = new_cpu_bias.to(t.device)
+                else:
+                    self.fail(f"unexpected constant {name}")
+            return nw, new_w_pre, new_cpu_bias
+
+        # Sanity: the runner actually holds constants on more than one device.
+        devices_seen = {t.device.type for t in cmap.values()}
+        self.assertIn("cpu", devices_seen)
+        self.assertIn(self.device, devices_seen)
+        cpu_constant_name = next(
+            name for name, t in cmap.items() if t.device.type == "cpu"
+        )
+        device_constant_name = next(
+            name for name, t in cmap.items() if t.device.type == self.device
+        )
+
+        # Mixed-device update on the active buffer.
+        new_weights, new_w_pre, new_cpu_bias = build_new_weights()
+        model.w_pre = new_w_pre
+        model.cpu_bias = new_cpu_bias
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, False, False)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Mixed-device update on the inactive buffer, then swap.
+        new_weights, new_w_pre, new_cpu_bias = build_new_weights()
+        model.w_pre = new_w_pre
+        model.cpu_bias = new_cpu_bias
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, True, False)
+        # Not yet swapped: output should still match the previous update.
+        new_output = runner_call(test_inputs)
+        self.assertEqual(output, new_output)
+        runner.swap_constant_buffer()
+        new_output = runner_call(test_inputs)
+        self.assertEqual(expected, new_output)
+
+        bad_cpu_update = {
+            cpu_constant_name: torch.randn(
+                cmap[cpu_constant_name].shape,
+                device=self.device,
+                dtype=cmap[cpu_constant_name].dtype,
+            )
+        }
+        with self.assertRaises(RuntimeError):
+            runner.update_constant_buffer(bad_cpu_update, False, False)
+
+        bad_user_managed_update = {
+            device_constant_name: torch.randn(
+                cmap[device_constant_name].shape,
+                device="cpu",
+                dtype=cmap[device_constant_name].dtype,
+            )
+        }
+        with self.assertRaises(RuntimeError):
+            runner.update_constant_buffer(
+                bad_user_managed_update,
+                True,
+                False,
+                True,
+            )
+
+    @requires_gpu
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -4787,6 +4914,18 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args, dynamic_shapes=dynamic_shapes)
 
+    def test_grid_sampler_3d(self):
+        class M(torch.nn.Module):
+            def forward(self, input, grid):
+                return torch.grid_sampler_3d(input, grid, 0, 0, True)
+
+        # input: (N, C, D_in, H_in, W_in), grid: (N, D_out, H_out, W_out, 3)
+        example_args = (
+            torch.randn(1, 1, 4, 4, 4, device=self.device),
+            torch.randn(1, 2, 2, 2, 3, device=self.device),
+        )
+        self.check_model(M(), example_args)
+
     def test_proxy_executor_permute(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -4834,6 +4973,38 @@ class AOTInductorTestsTemplate:
         example_args = ()
         m = M()
         self.check_model(m, example_args)
+
+    def test_proxy_executor_error_message_preserved(self):
+        @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
+        def validate_input(x: torch.Tensor) -> torch.Tensor:
+            if x.isnan().any():
+                raise RuntimeError("NaN detected in input tensor")
+            return x.clone()
+
+        @validate_input.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        from torch._inductor.lowering import make_fallback
+
+        make_fallback(torch.ops.aoti_test.validate_input.default, warn=False)
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = torch.ops.aoti_test.validate_input(x)
+                return x * 2
+
+        m = M()
+        sample = torch.ones(3, device=self.device)
+        so_path = AOTIRunnerUtil.compile(m, (sample,))
+        aoti_module = torch._inductor.aoti_load_package(so_path)
+        result = aoti_module(sample)
+        self.assertTrue(torch.allclose(result, sample * 2))
+        nan_input = torch.tensor([1.0, float("nan"), 3.0], device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "NaN detected in input tensor"):
+            aoti_module(nan_input)
+        result2 = aoti_module(sample)
+        self.assertTrue(torch.allclose(result2, sample * 2))
 
     def test_fqn(self):
         class NestedChild(torch.nn.Module):

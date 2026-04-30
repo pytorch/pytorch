@@ -661,7 +661,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             uses_cpp_saved_variable_cls = True
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
-            ptr = "shared_from_this()" if is_output else ""
+            ptr = "getptr()" if is_output else ""
             unpack.append(f"auto {name} = {name}_.unpack({ptr});")
             getter_definitions.append(
                 GETTER_DEFINITION_SAVEDVAR.substitute(
@@ -703,7 +703,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            ptr = "shared_from_this()" if is_output else "nullptr"
+            ptr = "getptr()" if is_output else "nullptr"
             unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
             asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(

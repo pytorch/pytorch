@@ -79,6 +79,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
+    xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
@@ -6834,6 +6835,14 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_clone_dropout(self):
+        def fn(x):
+            y = x.t().contiguous()
+            return torch.nn.functional.dropout(y)
+
+        self.common(fn, (torch.randn(3, 4),))
+
     def test_masked_fill(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
@@ -7342,6 +7351,26 @@ class CommonTemplate:
             return y + x
 
         self.common(fn, (torch.randn(2, 4),))
+
+    def test_same_meta_non_tensor(self):
+        from torch._inductor.fx_passes.post_grad import same_meta
+
+        g = torch.fx.Graph()
+        n1 = g.create_node("placeholder", "x")
+        n2 = g.create_node("placeholder", "y")
+
+        n1.meta["val"] = torch.SymInt(42)
+        n2.meta["val"] = torch.SymInt(42)
+        self.assertFalse(same_meta(n1, n2))
+
+        n1.meta["val"] = None
+        n2.meta["val"] = torch.randn(4)
+        self.assertFalse(same_meta(n1, n2))
+
+        t = torch.randn(4)
+        n1.meta["val"] = t
+        n2.meta["val"] = t
+        self.assertTrue(same_meta(n1, n2))
 
     def test_remove_noop_slice(self):
         def f(x):
@@ -8507,13 +8536,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
-        # MPS has correctness problem for transposed sort before MacOS15
+        # MPS has correctness problem for transposed sort before MacOS15.
+        # Size is chosen above the single-block Metal path threshold so the
+        # MPSGraph fallback (where the pre-15 bug exists) is exercised.
         ctx = (
             contextlib.nullcontext()
             if self.device != "mps" or MACOS_VERSION >= 15.0
             else self.assertRaises(AssertionError)
         )
-        inp = torch.randn(128, 10).transpose(0, 1)
+        inp = torch.randn(4097, 10).transpose(0, 1)
         with ctx:
             self.common(fn, (inp, False))
             self.common(fn, (inp, True))
@@ -14166,6 +14197,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
     @slowTest
     def test_fuse_large_params(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("Metal has a 31-buffer argument limit per kernel")
+
         def pt2_optimizer_step(optimizer):
             @torch.compile()
             def f():
@@ -16691,6 +16725,10 @@ if RUN_GPU:
 
             return kernels
 
+        # On Blackwell+, #179729 raised the split-reduction no-split threshold to 524288,
+        # so the 256*256=65536-element reduction below no longer splits and produces 1 kernel
+        # instead of the expected 2.
+        @xfailIfSM100OrLater
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 

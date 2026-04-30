@@ -668,7 +668,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device_constant(a):
-        return a + torch.ones(1, device=torch.device("cpu"))
+        return a + torch.ones(1)
 
     @make_test
     def test_tuple1(a, b):
@@ -732,6 +732,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [(a, b)]
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
+
+    def test_list_extend_set_and_dict_iterables(self):
+        def fn(x):
+            out = [x]
+            out.extend({1, 2, 3})
+
+            mapping = {"a": x + 1, "b": x + 2}
+            out.extend(mapping)
+            out.extend(mapping.keys())
+            out.extend(mapping.values())
+            out.extend(mapping.items())
+            return out
+
+        x = torch.ones(2, 2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(set(actual[1:4]), {1, 2, 3})
+        self.assertEqual(actual[4:], expected[4:])
 
     def test_list_slice(self):
         class Mock:
@@ -1278,7 +1298,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device(x):
-        if not x.is_cuda:
+        if x.device.type == "cpu":
             return x + 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -1311,10 +1331,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
+        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -3992,9 +4012,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def func():
-            make_tensor = partial(
-                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
-            )
+            make_tensor = partial(torch.rand, dtype=torch.float16, requires_grad=True)
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
             make_q_tensor = partial(
@@ -4230,7 +4248,7 @@ class GraphModule(torch.nn.Module):
         return x + y
 
     @make_test
-    def test_map_list_extend(a):
+    def test_map_list_extend_2(a):
         y = [1]
 
         def inner(z):
@@ -4256,9 +4274,9 @@ class GraphModule(torch.nn.Module):
         def self_fn(x):
             return x.unsqueeze_(dim=1) + 1
 
-        v = torch.ones([3], device="cpu")
+        v = torch.ones([3])
         # identical tensor since modify inplace
-        v2 = torch.ones([3], device="cpu")
+        v2 = torch.ones([3])
         opt_fn = torch.compile(fn, backend="eager")
         opt_self_fn = torch.compile(self_fn, backend="eager")
         self.assertEqual(v, v2)
@@ -4344,7 +4362,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return retry(cached_fn)(x)
 
-        x = torch.tensor(2.0, device="cpu")
+        x = torch.tensor(2.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
@@ -5288,11 +5306,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], zip)
 
-        # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        # If nopython, should raise Unsupported
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5330,10 +5348,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(res[1], map)
 
         # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5754,20 +5772,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             code = f.__code__
             defaults = f.__defaults__
             return x * len(defaults) * code.co_argcount
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_functools_partial_id(self):
-        def gn(a, b):
-            return a + b
-
-        partial_gn = functools.partial(gn, a=3)
-
-        def fn(x):
-            d = {id(partial_gn): 5}
-            return partial_gn(b=x) * d[id(partial_gn)]
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)

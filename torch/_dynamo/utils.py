@@ -1286,6 +1286,48 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ListVariable,
+            variables.TupleVariable,
+            variables.SetVariable,
+            variables.ConstDictVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -2358,9 +2400,13 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
 
 
 def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
-    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
+    """Copy a single dynamo attribute from src to dst, or remove it from dst
+    if src doesn't have it. Uses .copy() for container types (set, dict) to
+    avoid shared references between src and dst, and assigns directly for
+    primitive types like bool (e.g., _has_dynamo_dim_marking)."""
     if hasattr(src, attr):
-        setattr(dst, attr, getattr(src, attr).copy())
+        val = getattr(src, attr)
+        setattr(dst, attr, val.copy() if hasattr(val, "copy") else val)
     elif hasattr(dst, attr):
         delattr(dst, attr)
 
@@ -2378,6 +2424,8 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
 
 def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:

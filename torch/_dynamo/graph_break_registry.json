@@ -380,6 +380,12 @@
   "GB0035": [
     {
       "Gb_type": "Data-dependent branching with non-constant __bool__",
+      "Context": "value: {value}, result: {result}",
+      "Explanation": "Attempted to perform data-dependent branching on a user-defined object with non-constant truthiness.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Data-dependent branching with non-constant __bool__",
       "Context": "method: {x}, result: {result}",
       "Explanation": "Attempted to perform data-dependent branching on a user-defined object with a __bool__ method that did not return a constant.",
       "Hints": []
@@ -2141,6 +2147,14 @@
       ]
     }
   ],
+  "GB5904": [
+    {
+      "Gb_type": "unsupported __getitem__ (sq_item)",
+      "Context": "sq_item_impl {self} {key}",
+      "Explanation": "Dynamo does not know how to handle sq_item on {self}",
+      "Hints": []
+    }
+  ],
   "GB0163": [
     {
       "Gb_type": "Unsupported tensor subclass attribute access",
@@ -3452,6 +3466,28 @@
       ]
     }
   ],
+  "GB9840": [
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9158": [
+    {
+      "Gb_type": "Can't convert torch._check*() message closure",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function whose closure variables are Python constants.",
+      "Hints": [
+        "Remove closure variables that reference non-constant values, e.g. ",
+        "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
@@ -4637,6 +4673,16 @@
       "Gb_type": "rewrite_signature: cannot trace optional function input",
       "Context": "",
       "Explanation": "Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4347": [
+    {
+      "Gb_type": "Missing tp_iternext",
+      "Context": "next({self.python_type_name()})",
+      "Explanation": "Dynamo does not support next() on {self.python_type_name()}. Add tp_iternext_impl to this VariableTracker subclass.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

@@ -220,6 +220,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
+    def get_id_guard_type(self) -> Callable[..., Any] | None:
+        if self.source:
+            return GuardBuilder.CLASS_MATCH
+        return None
+
     def as_python_constant(self) -> type[object]:
         return self.value
 
@@ -1388,6 +1393,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or is_pybind11_enum_member(self.value):
             return self.value
 
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton.language as tl
+
+            if isinstance(self.value, tl.constexpr):
+                return self.value.value
+
         if self.is_pytree_constant_class and self.source:
             # NOTE pytree constants created in the torch.compile region will
             # NOT be guarded (even though they have a source set)
@@ -1553,6 +1566,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
+    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__next__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.tp_iternext_impl(tx)
+
+        if isinstance(method, types.FunctionType):
+            method_var = self.resolve_type_attr(tx, "__next__", method, self.source)
+            return method_var.call_function(tx, [], {})
+        return super().tp_iternext_impl(tx)
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         method = self._maybe_get_baseclass_method("__iter__")
         if (
@@ -1563,13 +1590,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self._base_vt.tp_iter_impl(tx)
 
         if isinstance(method, types.FunctionType):
-            source_fn = self.source and self.get_source_by_walking_mro(tx, "__iter__")
-            return variables.UserMethodVariable(
-                method,
-                self,
-                source_fn=source_fn,
-                source=self.source,
-            ).call_function(tx, [], {})
+            method_var = self.resolve_type_attr(tx, "__iter__", method, self.source)
+            return method_var.call_function(tx, [], {})
         return super().tp_iter_impl(tx)
 
     @staticmethod
@@ -1888,21 +1910,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         while True:
             try:
-                r = iter_.next_variable(tx)
+                r = iter_.tp_iternext_impl(tx)
                 result.append(r)
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
         return result
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.call_method(tx, "__next__", [], {})
-
     def is_supported_random(self) -> bool:
         try:
             return self.value in self._supported_random_functions()
-        except TypeError:
+        except (TypeError, AttributeError):
             # TypeError: unhashable type
+            # AttributeError: backing object may not be fully initialized
             return False
 
     def call_function(
@@ -3593,6 +3613,25 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def items(self) -> list[VariableTracker]:
         assert self._base_vt is not None
         return self._base_vt.items  # type: ignore[return-value]
+
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, _collections._tuplegetter):
+            # namedtuple fields are _tuplegetter descriptors implemented in C.
+            # Emulate _tuplegetter.__get__ via tracked tuple items because
+            # self.value may be a freshly-created empty tuple from
+            # SideEffects.get_example_value (tuple.__new__(cls) with no args)
+            # or otherwise underpopulated. Subclasses (NamedTupleVariable,
+            # StructSequenceVariable) may further override for their specific
+            # descriptor types.
+            _, (idx, _) = type_attr.__reduce__()
+            return self.items[idx]
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def call_method(
         self,

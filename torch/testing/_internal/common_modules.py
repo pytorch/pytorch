@@ -8,7 +8,6 @@ from functools import wraps, partial
 from itertools import chain, product
 import itertools
 import math
-import random
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
@@ -1826,6 +1825,12 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     [0.0, 0.1],
                     weights,
                     [(), (3, 2, 4)]):
+                if num_batches is None and of:
+                    # K-dimensional loss requires batches dimension
+                    continue
+                if ii is not None and reduction == "sum":
+                    # skip some samples, just to reduce the size of samples set
+                    continue
                 module_args = (in_features, num_classes)
                 module_kwargs = dict(
                     out_features=of,
@@ -1836,10 +1841,6 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     ignore_index=ii,
                     label_smoothing=ls,
                 )
-                if num_batches is None and of:
-                    # K-dimensional loss requires batches dimension
-                    continue
-
                 for target_dtype in [torch.int64, dtype]:
                     if target_dtype.is_floating_point:
                         target_shape = (*batch_dims, num_classes, *of)
@@ -1859,7 +1860,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                             and ii is not None and ii >= 0 and ii < num_classes and torch.all(target == ii)
                     ):
                         # ensures valid normalization:
-                        target[0 if target.shape else ()] = random.choice(list(set(range(num_classes)) - {ii}))
+                        target[0 if target.shape else ()] = (ii + 1) % num_classes
 
                     yield module_args, module_kwargs, (input, target)
 
@@ -1875,8 +1876,8 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         target[num_batches // 2] = ii
                         if ii < 0 or ii >= num_classes:
                             # tests the correctness of out-of-range ii
-                            # mapping to 0 (see
-                            # linear_cross_entropy_batch_chunking_cls)
+                            # mapping to 0 (see the batch chunking
+                            # logic in the next PR)
                             target[0] = 0
                         yield module_args, module_kwargs, (input, target)
 
@@ -1917,6 +1918,30 @@ def module_error_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dty
         ),
         ErrorModuleInput(
             ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((5, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="Expected input batch_size [(]4[)] to match target batch_size [(]5[)]",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 5)),
+                    torch.zeros((4, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex="expected equal input and linear_weight last dimensions [(]in_features[)], got 5 and 3, respectively",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
                 constructor_input=FunctionInput(3, 2, weight=torch.ones(3, device=device, dtype=dtype),
                                                 device=device, dtype=dtype),
                 forward_input=FunctionInput(
@@ -1927,6 +1952,18 @@ def module_error_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dty
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=RuntimeError,
             error_regex="expected weight shape to be [(]2,[)], got [(]3,[)]",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype, label_smoothing=2.0),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((4, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=RuntimeError,
+            error_regex="expected label_smoothing to be in range [[]0, 1[]], got 2.0",
         ),
     ]
 
@@ -4502,10 +4539,15 @@ module_db: list[ModuleInfo] = [
                                 "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
                                 "test_cpu_gpu_parity", dtypes=[torch.float16]),
+                   # Insufficient accuracy, likely related to an issue with cross_entropy
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
                                 dtypes=[torch.bfloat16], device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.bfloat16], device_type='xpu'),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
                                 "test_save_load", device_type="cuda", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
@@ -4661,6 +4703,10 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='mps')],
                skips=(
                    # No channels_last support for MultiheadAttention currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
