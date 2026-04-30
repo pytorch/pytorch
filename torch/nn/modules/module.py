@@ -2602,7 +2602,7 @@ class Module:
             for key, value in local_state_dict.items():
                 if not key.startswith(prefix):
                     continue
-                input_name = key[len(prefix) :].split(".", 1)
+                input_name = key.removeprefix(prefix).split(".", 1)
                 if len(input_name) > 1 and input_name[0] in child_state_dicts:
                     child_state_dicts[input_name[0]][key] = value
 
