@@ -26,6 +26,7 @@ class GemmEpilogueOpInfo:
     mat1_index: int
     mat2_index: int
     is_batched: bool = False
+    supports_quack: bool = True
 
 
 GEMM_EPILOGUE_OPS = {
@@ -36,16 +37,23 @@ GEMM_EPILOGUE_OPS = {
         "baddbmm", 1, 2, is_batched=True
     ),
     torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
+    torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo(
+        "grouped_mm", 0, 1, supports_quack=False
+    ),
 }
 _SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
-_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm"
+_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
 
 
 def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
     gemm_nodes = [
         node
         for node in graph_module.graph.nodes
-        if node.op == "call_function" and node.target in GEMM_EPILOGUE_OPS
+        if (
+            node.op == "call_function"
+            and node.target in GEMM_EPILOGUE_OPS
+            and GEMM_EPILOGUE_OPS[node.target].supports_quack
+        )
     ]
     if len(gemm_nodes) != 1:
         raise NotImplementedError(
@@ -508,6 +516,48 @@ def baddbmm_epilogue(
         epilogue_fn,
         gemm_kwargs={"beta": beta, "alpha": alpha},
         kernel_options=kernel_options,
+    )
+
+
+def grouped_mm_epilogue(
+    mat_a: Any,
+    mat_b: Any,
+    epilogue_fn: Callable[[Any], Any],
+    *,
+    offs: Any | None = None,
+    bias: Any | None = None,
+    out_dtype: torch.dtype | None = None,
+    kernel_options: dict[str, Any] | None = None,
+):
+    gemm_args = [mat_a, mat_b]
+    offs_index = None
+    bias_index = None
+    if offs is not None:
+        offs_index = len(gemm_args)
+        gemm_args.append(offs)
+    if bias is not None:
+        bias_index = len(gemm_args)
+        gemm_args.append(bias)
+
+    def body_fn(*body_args):
+        body_offs = None if offs_index is None else body_args[offs_index]
+        body_bias = None if bias_index is None else body_args[bias_index]
+        return epilogue_fn(
+            torch.ops.aten._grouped_mm.default(
+                body_args[0],
+                body_args[1],
+                offs=body_offs,
+                bias=body_bias,
+                out_dtype=out_dtype,
+            )
+        )
+
+    return _gemm_epilogue_fusion(
+        torch.ops.aten._grouped_mm.default,
+        body_fn,
+        tuple(gemm_args),
+        {},
+        {"backend": "TRITON"} if kernel_options is None else kernel_options,
     )
 
 

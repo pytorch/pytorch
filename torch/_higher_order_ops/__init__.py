@@ -24,6 +24,7 @@ from torch._higher_order_ops.gemm_epilogue import (
     baddbmm_epilogue,
     bmm_epilogue,
     gemm_epilogue_fusion,
+    grouped_mm_epilogue,
     matmul_epilogue,
     mm_epilogue,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "addmm_epilogue",
     "bmm_epilogue",
     "baddbmm_epilogue",
+    "grouped_mm_epilogue",
     "matmul_epilogue",
     "with_effects",
     "tag_activation_checkpoint",
