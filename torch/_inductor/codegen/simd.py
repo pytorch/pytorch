@@ -1985,6 +1985,12 @@ class SIMDScheduling(BaseScheduling):
         ):
             return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
+        if isinstance(node1, scheduler.ExternKernelSchedulerNode) and isinstance(
+            node1.node, ir.UserDefinedTritonKernel
+        ):
+            # Fusion legality for UserDefinedTritonKernel is validated upstream.
+            return True
+
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
