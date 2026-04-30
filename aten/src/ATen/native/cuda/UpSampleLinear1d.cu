@@ -71,17 +71,17 @@ __global__ void upsample_linear1d_out_frame(
 
 // Unrolled version for upsample_linear1d_out_frame
 // This version exposes more parallelism by launching more threads.
-// Instead of each thread looping over "batchsize" and "channels", 
+// Instead of each thread looping over "batchsize" and "channels",
 // more threads are launched and each thread does only one interpolation
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_unrolled(
-    const int num_kernels,  
+    const int num_kernels,
     const accscalar_t rwidth,
     const bool align_corners,
     const PackedTensorAccessor64<const scalar_t, 3> idata,
     PackedTensorAccessor64<scalar_t, 3> odata) {
-  
+
   const int batchsize = idata.size(0);
   const int channels = idata.size(1);
   const int width1 = idata.size(2);
@@ -90,9 +90,9 @@ __global__ void upsample_linear1d_out_frame_unrolled(
   const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
   const int num_total = batchsize * channels * width2;
   if (thread_id >= num_total) return;
-  
+
   // Get a unique (n, c, index) from thread_id
-  const int n = thread_id / (channels * width2); 
+  const int n = thread_id / (channels * width2);
   const int c = (thread_id - n*(channels * width2)) / width2;
   const int index = thread_id - n*(channels * width2) - c*width2;
 
@@ -177,12 +177,12 @@ __global__ void upsample_linear1d_out_frame_backward(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_backward_unrolled(
-    const int num_kernels, 
+    const int num_kernels,
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 3> idata,
     const PackedTensorAccessor64<const scalar_t, 3> odata) {
-  
+
   const int batchsize = idata.size(0);
   const int channels = idata.size(1);
   const int width1 = idata.size(2);
@@ -193,10 +193,10 @@ __global__ void upsample_linear1d_out_frame_backward_unrolled(
   if (thread_id >= num_total) return;
 
   // Get a unique (n, c, index) from thread_id
-  const int n = thread_id / (channels * width2); 
+  const int n = thread_id / (channels * width2);
   const int c = (thread_id - n*(channels * width2)) / width2;
   const int index = thread_id - n*(channels * width2) - c*width2;
-  
+
   // Do only one backward interpolation for the (n, c, index) coordinate
   if (index < num_kernels) {
     const int w2 = index % width2;
@@ -242,7 +242,7 @@ static void upsample_linear1d_out_cuda_template(
   const int num_kernels = output_width;
   const int num_threads = 512;
   const int num_blocks = ceil_div(num_kernels, num_threads);
-  const int num_blocks_threshold = 128;
+  constexpr int num_blocks_threshold = 128;
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -259,7 +259,7 @@ static void upsample_linear1d_out_cuda_template(
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales);
-        
+
         const int batchsize = idata.size(0);
         const int channels  = idata.size(1);
         const size_t num_total = batchsize * channels * output_width;
@@ -271,7 +271,7 @@ static void upsample_linear1d_out_cuda_template(
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-    return;    
+    return;
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -335,7 +335,7 @@ static void upsample_linear1d_backward_out_cuda_template(
 
         const int batchsize = idata.size(0);
         const int channels  = idata.size(1);
-        const size_t num_total = batchsize * channels * output_width;    
+        const size_t num_total = batchsize * channels * output_width;
 
         upsample_linear1d_out_frame_backward_unrolled<scalar_t, accscalar_t>
             <<<ceil_div(num_total, (size_t)num_threads),
@@ -345,7 +345,7 @@ static void upsample_linear1d_backward_out_cuda_template(
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     return;
-  }  
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
