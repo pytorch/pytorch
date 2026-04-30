@@ -485,19 +485,22 @@ class DeviceTypeTestBase(TestCase):
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
 
     @classmethod
-    def set_test_configs(cls, **kwargs):
-        allowed = {
-            "op_overrides",
-            "op_allowlist",
-            "test_exclusions",
-        }
+    def set_test_configs(
+        cls,
+        *,
+        op_overrides=None,
+        op_allowlist=None,
+        test_exclusions=None,
+    ):
+        """
+        Sets the test configuration fields (op_overrides, op_allowlist, test_exclusions).
 
-        invalid_keys = set(kwargs) - allowed
-        if invalid_keys:
-            raise ValueError(f"Unsupported test configs: {invalid_keys}")
-
-        for key, value in kwargs.items():
-            setattr(cls, key, value)
+        This API replaces the full configuration in one call. Unspecified arguments
+        default to None, and all values overwrite any previously stored configuration.
+        """
+        cls.op_overrides = op_overrides
+        cls.op_allowlist = op_allowlist
+        cls.test_exclusions = test_exclusions
 
     # Creates device-specific tests.
     @classmethod
