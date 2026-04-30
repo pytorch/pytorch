@@ -2594,14 +2594,22 @@ class Module:
                 unexpected_keys,
                 error_msgs,
             )
+            child_state_dicts = {
+                name: {}
+                for name, child in module._modules.items()
+                if child is not None
+            }
+            for key, value in local_state_dict.items():
+                if not key.startswith(prefix):
+                    continue
+                input_name = key[len(prefix) :].split(".", 1)
+                if len(input_name) > 1 and input_name[0] in child_state_dicts:
+                    child_state_dicts[input_name[0]][key] = value
+
             for name, child in module._modules.items():
                 if child is not None:
                     child_prefix = prefix + name + "."
-                    child_state_dict = {
-                        k: v
-                        for k, v in local_state_dict.items()
-                        if k.startswith(child_prefix)
-                    }
+                    child_state_dict = child_state_dicts.pop(name)
                     load(child, child_state_dict, child_prefix)  # noqa: F821
 
             # Note that the hook can modify missing_keys and unexpected_keys.
