@@ -365,14 +365,7 @@ class BenchmarkRunner:
     def _launch_forward(self, test_case, iters, print_per_iter):
         """Use Python's timeit module to measure execution time (unit: second).
 
-        The trigger flag was historically ``cuda_sync = "cuda" in test_name``
-        which meant xpu runs never actually synced the GPU inside the
-        stmt (they fell into the no-sync ``timeit.timeit`` path), so
-        the timer captured host-submit time only — xpu kernels were
-        still running when the timer stopped, artificially deflating
-        the reported wall.
-
-        Fix: treat cuda and xpu the same — both go through the
+        Treat cuda and xpu the same — both go through the
         ``Timer.adaptive_autorange`` path, both sync their GPU inside
         the stmt.  The cpu branch keeps the plain ``timeit.timeit``
         path.  Return value is ``result.median * iters`` (matching
