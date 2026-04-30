@@ -24,6 +24,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.gemm_epilogue import _gemm_epilogue_fusion
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -8401,20 +8402,23 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 
 @register_lowering(hints_wrapper, type_promotion_kind=None)
 def hints_wrapper_lowering(subgraph, args, kwargs, hints):
-    operation_len = len(V.graph.operations)
-    must_fuse_gemm_epilogue = hints.get("gemm_epilogue_fusion") and hints.get(
-        "must_fuse"
-    )
+    return process_subgraph_nodes(subgraph.graph_module, list(args))
 
-    if must_fuse_gemm_epilogue:
-        with patch.object(config, "max_autotune_gemm", True):
-            output = process_subgraph_nodes(subgraph.graph_module, list(args))
-    else:
+
+@register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
+def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    backend = kernel_options.get("backend", "TRITON")
+    if backend != "TRITON":
+        raise NotImplementedError(
+            f"GEMM epilogue backend {backend} is not implemented in Inductor"
+        )
+
+    operation_len = len(V.graph.operations)
+    with patch.object(config, "max_autotune_gemm", True):
         output = process_subgraph_nodes(subgraph.graph_module, list(args))
 
-    if must_fuse_gemm_epilogue:
-        for op in V.graph.operations[operation_len:]:
-            op._gemm_epilogue_must_fuse = True
+    for op in V.graph.operations[operation_len:]:
+        op._gemm_epilogue_must_fuse = True
 
     return output
 

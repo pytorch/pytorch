@@ -18,7 +18,7 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
-    def test_exports_as_hints_wrapper_region(self):
+    def test_exports_as_gemm_epilogue_fusion_region(self):
         def fn(a, b):
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -28,9 +28,10 @@ class GemmEpilogueFusionTests(TestCase):
 
         gm, _ = torch._dynamo.export(fn, torch.randn(2, 3), torch.randn(3, 4))
 
-        self.assertIn("hints_wrapper", gm.code)
         self.assertIn("gemm_epilogue_fusion", gm.code)
-        self.assertIn("must_fuse", gm.code)
+        self.assertIn("{'backend': 'TRITON'}", gm.code)
+        self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
+        self.assertIn("relu", gm.gemm_epilogue_fusion_body_0.code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
