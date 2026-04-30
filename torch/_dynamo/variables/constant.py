@@ -455,6 +455,28 @@ its type to `common_constant_types`.
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
 
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_or.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5606 (long_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
+        # bool inherits int's nb_or via slot inheritance.
+        if not isinstance(self.value, (int, frozenset, type)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        result = self_.python_type().__or__(v, w)  # type: ignore[bad-argument-count]
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)

@@ -1117,7 +1117,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return a | b
 
         for arg in args:
-            with self.assertRaisesRegex(Unsupported, "Observed exception"):
+            with self.assertRaises(Unsupported):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
