@@ -4009,62 +4009,99 @@ class TestProfilerDeviceStopped(TestCase):
         """When DEVICE_STOPPED is entered from WARMUP (e.g. active=1
         schedule where every R&S step gets converted to DS), the
         (WARMUP, DEVICE_STOPPED) transition must fire on_trace_ready so
-        the user's callback is invoked. Without this, active=1 schedules
-        with persistent kineto_stopped would silently drop all callbacks."""
-        callbacks: list[ProfilerAction] = []
+        the user's callback is invoked exactly once per cycle. Without
+        this, active=1 schedules with persistent kineto_stopped would
+        silently drop all callbacks; with double-firing we'd produce
+        spurious callbacks."""
+        callback_count = [0]
 
         def handler(prof):
-            callbacks.append(prof.current_action)
+            callback_count[0] += 1
 
+        # active=1, warmup=1, repeat=3: cycle is W, R&S; with kineto_stopped
+        # on every step the entry guard converts each cycle's R&S to DS via
+        # (W, DS), and DS exits at cycle boundary via (DS, W).
         p = profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=2),
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=3),
             on_trace_ready=handler,
         )
 
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()  # step 0: WARMUP
-            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 0 -> 1: prev=W, schedule=R&S, kineto_stopped=T -> override
-            # to DS. (W, DS) fires start_trace + stop_trace + _trace_ready.
+            # Cycle 1: step 0 -> 1: (W, DS) fires _trace_ready. callback=1.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(callback_count[0], 1)
+            # step 1 -> 2: (DS, W) fires prepare_trace, no callback. callback=1.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            self.assertEqual(callback_count[0], 1)
+            # Cycle 2: step 2 -> 3: (W, DS) fires _trace_ready. callback=2.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(callback_count[0], 2)
             p.stop()
-
-        self.assertEqual(
-            len(callbacks), 1, "(WARMUP, DEVICE_STOPPED) must fire on_trace_ready"
-        )
 
     def test_start_after_stop_in_device_stopped(self):
         """A user may call start() after a stop() that left current_action
-        in DEVICE_STOPPED. The (NONE, DEVICE_STOPPED) transition is a no-op
-        rather than a hard error — pre-existing code allowed
-        restart-after-stop because missing action_map keys silently no-op."""
-        p = self._make_profiler(wait=0, warmup=1, active=1)
+        in DEVICE_STOPPED. The second start() must re-derive state from
+        the schedule (not trust the stale DS), so a real (NONE, X)
+        transition fires prepare_trace and the second run actually records."""
+        callback_count = [0]
 
+        def handler(prof):
+            callback_count[0] += 1
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1),
+            on_trace_ready=handler,
+        )
+
+        # Run 1: enter DEVICE_STOPPED, stop while in it.
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
         with patch(self.PATCH_TARGET, return_value=True):
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
+        # (W, DS) fired _trace_ready during run 1.
+        self.assertEqual(callback_count[0], 1)
 
-        # current_action stayed as DEVICE_STOPPED through stop(). start()
-        # must not raise on the (NONE, DEVICE_STOPPED) transition.
-        self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
-        p.start()
-        p.stop()
+        # Run 2: must actually profile, not be a silent no-op. step_num is
+        # carried over, so schedule(step_num=1) is the active step (R&S).
+        # start() re-derives current_action from the schedule, so we get
+        # (NONE, R&S) -> prepare_trace + start_trace.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            p.stop()
+        # (R&S, None) fires _trace_ready -> callback_count increments.
+        self.assertEqual(
+            callback_count[0],
+            2,
+            "second run must produce a trace, not silently no-op",
+        )
 
-    def test_user_schedule_returning_device_stopped_raises(self):
+    def test_user_schedule_returning_device_stopped_raises_at_init(self):
         """ProfilerAction.DEVICE_STOPPED is internal; user-provided
-        schedules must not return it. step() raises ValueError if a
-        schedule does, and leaves the profiler state untouched so the
-        user can stop() cleanly after catching the error."""
+        schedules must not return it. __init__ catches schedules that
+        return it at step 0 — without this check, start() would silently
+        no-op the (NONE, DS) transition and leave the profiler dead."""
+        with self.assertRaisesRegex(ValueError, "DEVICE_STOPPED is set internally"):
+            profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=lambda step: ProfilerAction.DEVICE_STOPPED,
+            )
 
-        # Schedule returns a normal action at step 0 (so __init__ /
-        # start() don't trip the check) and DEVICE_STOPPED afterwards.
+    def test_user_schedule_returning_device_stopped_raises_at_step(self):
+        """If the user schedule returns DEVICE_STOPPED on a later step,
+        step() raises ValueError and leaves the profiler state untouched
+        so the user can stop() cleanly after catching the error."""
+
         def bad_schedule(step):
             if step == 0:
                 return ProfilerAction.WARMUP

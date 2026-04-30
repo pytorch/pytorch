@@ -874,12 +874,18 @@ class profile(_KinetoProfile):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
-        self.current_action = self.schedule(self.step_num)
+        schedule_action = self.schedule(self.step_num)
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+        self.current_action = schedule_action
         # Raw schedule output of the previous step, separate from
         # current_action which step() may override to DEVICE_STOPPED. Used to
         # detect cycle boundaries (RECORD_AND_SAVE -> next) when warmup=0,
         # so DEVICE_STOPPED can exit and resume profiling on the new cycle.
-        self._prev_schedule_action = self.current_action
+        self._prev_schedule_action = schedule_action
         self.step_rec_fn: prof.record_function | None = None
 
         self.action_map: dict[
@@ -1010,6 +1016,20 @@ class profile(_KinetoProfile):
             self.execution_trace_observer.cleanup()
 
     def start(self) -> None:
+        # Re-derive state from the schedule rather than trusting any
+        # carryover from a previous run. step() may have overridden
+        # current_action to DEVICE_STOPPED; if a user calls stop() then
+        # start() again, that stale DS would no-op the (NONE, DS)
+        # transition and leave the profiler running with no Kineto session.
+        schedule_action = self.schedule(self.step_num)
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+
+        self.current_action = schedule_action
+        self._prev_schedule_action = schedule_action
         self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
