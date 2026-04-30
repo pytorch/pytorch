@@ -174,72 +174,18 @@ EOF
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
 
     # Add rocm repository
-    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-    echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
-                   rocm-dev \
-                   rocm-utils \
-                   rocm-libs \
-                   rccl \
-                   rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
+    export RELEASE_ID=20260430-25145509738  # Replace with actual date-runid
+    export GFX_ARCH=gfx950              # Replace with GFX Family from the mapping table
 
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
-    fi
-
-    if [[ $(ver $ROCM_VERSION) -lt $(ver 7.1) ]]; then
-      # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5, removed in ROCm 7.1
-      # search for all unversioned packages
-      # if search fails it will abort this script; use true to avoid case where search fails
-      MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
-      if [[ "x${MIOPENHIPGFX}" = x ]]; then
-        echo "miopen-hip-gfx package not available" && exit 1
-      else
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
-      fi
-    fi
-
-    # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
-    for kdb in /opt/rocm/share/miopen/db/*.kdb
-    do
-        sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
-    done
-
-    # ROCm 6.3 had a regression where initializing static code objects had significant overhead
-    # CI no longer builds for ROCm 6.3, but
-    # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
-        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
-            HIP_TAG=rocm-6.4.2
-            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
-        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
-            HIP_TAG=rocm-6.4.1
-            CLR_HASH=efe6c35790b9206923bfeed1209902feff37f386  # branch release/rocm-rel-6.4.1-statco-hotfix
-        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-            HIP_TAG=rocm-6.4.0
-            CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
-        fi
-        # clr build needs CppHeaderParser but can only find it using conda's python
-        python -m pip install CppHeaderParser
-        git clone https://github.com/ROCm/HIP -b $HIP_TAG
-        HIP_COMMON_DIR=$(readlink -f HIP)
-        git clone https://github.com/jeffdaily/clr
-        pushd clr
-        git checkout $CLR_HASH
-        popd
-        mkdir -p clr/build
-        pushd clr/build
-        # Need to point CMake to the correct python installation to find CppHeaderParser
-        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
-        make -j
-        cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
-        popd
-        rm -rf HIP clr
-    fi
+    # Step 4: Add repository and install
+    sudo apt update
+    sudo apt install -y ca-certificates
+    echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} stable main" \
+      | sudo tee /etc/apt/sources.list.d/rocm-nightly.list
+    sudo apt update
+    sudo apt install -y amdrocm-core-sdk-${GFX_ARCH}
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
