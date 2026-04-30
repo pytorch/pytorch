@@ -37,7 +37,7 @@ static void col2im_out_mps_template(const Tensor& input,
   auto stride_height = stride[0];
   auto stride_width = stride[1];
 
-  Tensor col_tensor = input.contiguous();
+  Tensor col_tensor = input;
   bool batched_input = true;
   if (col_tensor.dim() == 2) {
     batched_input = false;
@@ -49,6 +49,8 @@ static void col2im_out_mps_template(const Tensor& input,
   TORCH_CHECK(n_input_plane % (kernel_height * kernel_width) == 0, "col2im_mps: invalid number of input channels");
   auto n_output_plane = n_input_plane / (kernel_height * kernel_width);
   auto input_batch_stride = col_tensor.stride(0);
+  auto input_channel_stride = col_tensor.stride(1);
+  auto input_spatial_stride = col_tensor.stride(2);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   auto output_batch_stride = output.stride(0);
@@ -86,7 +88,9 @@ static void col2im_out_mps_template(const Tensor& input,
           std::array<uint32_t, 2>{static_cast<uint32_t>(dilation_height),
                                   static_cast<uint32_t>(dilation_width)}, // dilation_hw
           std::array<uint32_t, 2>{static_cast<uint32_t>(height_col), static_cast<uint32_t>(width_col)}, // col_hw
-          output_batch_stride);
+          output_batch_stride,
+          std::array<uint32_t, 2>{static_cast<uint32_t>(input_channel_stride),
+                                  static_cast<uint32_t>(input_spatial_stride)}); // col_inner_strides
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
   });
