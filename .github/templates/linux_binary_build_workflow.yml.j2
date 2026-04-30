@@ -17,36 +17,31 @@ name: !{{ build_environment }}
 
 {#- Per-OS values that shape the build/test runner labels.
     s390x runners are self-hosted, register only with the bare `linux.s390x`
-    label (no `lf.` prefix), and lack a host-level `docker` CLI compatible with
-    GHA's native `container:` directive. So s390x:
-    - keeps runner_prefix empty (no LF rollout on s390x runners), and
-    - routes to dedicated `_binary-{build,test}-linux-s390x.yml` reusables
-      that run `docker run` from a step (podman-compatible) instead of
-      relying on the container directive. -#}
+    label (no `lf.` prefix), and lack a host-level `docker` CLI compatible
+    with GHA's native `container:` directive. They share the same reusable
+    workflows but pass `use_container_directive: false` so the build/test
+    container is launched via `docker run` from a step instead. -#}
 {%- if "aarch64" in build_environment %}
   {%- set build_runs_on = "linux.arm64.r7g.12xlarge.memory" %}
   {%- set test_runs_on  = "linux.arm64.2xlarge" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
-  {%- set build_reusable = "_binary-build-linux.yml" %}
-  {%- set test_reusable  = "_binary-test-linux.yml" %}
+  {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
   {%- set test_runs_on  = "linux.s390x" %}
   {%- set alpine_image  = "docker.io/s390x/alpine" %}
   {%- set timeout_minutes = 420 %}
   {%- set runner_prefix = "" %}
-  {%- set build_reusable = "_binary-build-linux-s390x.yml" %}
-  {%- set test_reusable  = "_binary-test-linux-s390x.yml" %}
+  {%- set use_container_directive = false %}
 {%- else %}
   {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
   {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
   {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
-  {%- set build_reusable = "_binary-build-linux.yml" %}
-  {%- set test_reusable  = "_binary-test-linux.yml" %}
+  {%- set use_container_directive = true %}
 {%- endif %}
 
 on:
@@ -103,7 +98,7 @@ jobs:
   manywheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/!{{ build_reusable }}
+    uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     strategy:
       fail-fast: false
@@ -134,6 +129,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
+      use_container_directive: !{{ use_container_directive | string | lower }}
       ALPINE_IMAGE: "!{{ alpine_image }}"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
       timeout-minutes: !{{ timeout_minutes }}
@@ -149,7 +145,7 @@ jobs:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: [get-label-type, manywheel-build]
-    uses: ./.github/workflows/!{{ test_reusable }}
+    uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
       matrix:
@@ -186,6 +182,7 @@ jobs:
       build_environment: !{{ build_environment }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: ${{ matrix.runs_on }}
+      use_container_directive: !{{ use_container_directive | string | lower }}
       ALPINE_IMAGE: "!{{ alpine_image }}"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

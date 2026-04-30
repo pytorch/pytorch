@@ -51,7 +51,7 @@ jobs:
   manywheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux-s390x.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     strategy:
       fail-fast: false
@@ -124,6 +124,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: ""
       runs_on: linux.s390x
+      use_container_directive: false
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
       timeout-minutes: 420
@@ -136,7 +137,7 @@ jobs:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: [get-label-type, manywheel-build]
-    uses: ./.github/workflows/_binary-test-linux-s390x.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
       matrix:
@@ -210,6 +211,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runner_prefix: ""
       runs_on: ${{ matrix.runs_on }}
+      use_container_directive: false
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
