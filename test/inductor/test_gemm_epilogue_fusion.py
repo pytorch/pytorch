@@ -3,6 +3,7 @@
 import torch
 import torch._inductor.config as inductor_config
 from torch._C import FileCheck
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch._higher_order_ops import (
     addmm_epilogue,
     baddbmm_epilogue,
@@ -13,7 +14,10 @@ from torch._higher_order_ops import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
+)
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.inductor_utils import _quantize_tensorwise
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -78,7 +82,9 @@ class GemmEpilogueFusionTests(TestCase):
         batch_a = torch.randn(5, 2, 3)
         batch_b = torch.randn(5, 3, 4)
 
-        torch.testing.assert_close(mm_epilogue(a, b, lambda acc: acc.relu()), (a @ b).relu())
+        torch.testing.assert_close(
+            mm_epilogue(a, b, lambda acc: acc.relu()), (a @ b).relu()
+        )
         torch.testing.assert_close(
             addmm_epilogue(
                 bias, a, b, lambda acc: acc.relu(), alpha=0.5, beta=0.25
@@ -127,6 +133,25 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
+    def test_make_fx_preserves_gemm_kwargs(self):
+        def fn(bias, a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.addmm.default,
+                (bias, a, b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"alpha": 0.5, "beta": 0.25},
+            )
+
+        bias = torch.randn(2, 4)
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+
+        actual = make_fx(fn)(bias, a, b)(bias, a, b)
+
+        torch.testing.assert_close(
+            actual, torch.addmm(bias, a, b, alpha=0.5, beta=0.25).relu()
+        )
+
     def test_exports_as_gemm_epilogue_fusion_region(self):
         def fn(a, b):
             return gemm_epilogue_fusion(
@@ -168,6 +193,28 @@ class GemmEpilogueFusionTests(TestCase):
                 torch.ops.aten.addmm.default,
                 (bias, a, b),
                 lambda acc: acc.relu(),
+            )
+
+        bias = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+        a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        torch.testing.assert_close(actual, fn(bias, a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_").check_not("extern_kernels.addmm").run(code)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch(max_autotune_gemm=False)
+    def test_cuda_inductor_addmm_alpha_beta_epilogue_fuses(self):
+        def fn(bias, a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.addmm.default,
+                (bias, a, b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"alpha": 0.5, "beta": 0.25},
             )
 
         bias = torch.randn(128, 64, device="cuda", dtype=torch.float16)
@@ -242,7 +289,11 @@ class GemmEpilogueFusionTests(TestCase):
         b = w_fp8.t()
 
         actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale_a, scale_b
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale_a,
+            scale_b,
         )
 
         torch.testing.assert_close(
@@ -495,6 +546,28 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("gemm_epilogue(").check_not("call_quack_gemm_epilogue").check_not(
             "torch.ops.flex_gemm"
         ).check_not("extern_kernels.mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_honors_epilogue_add_alpha(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: torch.add(acc, 1.0, alpha=2.0).relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("@cute.jit").check("gemm_epilogue(").check_not(
+            "call_quack_gemm_epilogue"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_generates_cutedsl_math_epilogue(self):
