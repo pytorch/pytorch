@@ -6,6 +6,8 @@ from torch._C import FileCheck
 from torch._higher_order_ops import gemm_epilogue_fusion
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.inductor_utils import _quantize_tensorwise
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -167,6 +169,36 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, fn(bias, a, b), atol=1e-2, rtol=1e-2)
         FileCheck().check("triton_").check_not("extern_kernels.baddbmm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_scaled_mm_epilogue_fuses(self):
+        if not PLATFORM_SUPPORTS_FP8:
+            self.skipTest("FP8 is not supported")
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"out_dtype": torch.bfloat16},
+            )
+
+        x = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+        a, scale_a = _quantize_tensorwise(x, torch.float8_e4m3fn)
+        w_fp8, scale_b = _quantize_tensorwise(w, torch.float8_e4m3fn)
+        b = w_fp8.t()
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale_a, scale_b
+        )
+
+        torch.testing.assert_close(
+            actual, fn(a, b, scale_a, scale_b), atol=0.05, rtol=1e-2
+        )
+        FileCheck().check("triton_tem_fused__scaled_mm").check("maximum").check_not(
+            "extern_kernels._scaled_mm"
+        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):
