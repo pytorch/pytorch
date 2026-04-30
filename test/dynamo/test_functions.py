@@ -5286,11 +5286,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], zip)
 
-        # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        # If nopython, should raise Unsupported
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5328,10 +5328,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(res[1], map)
 
         # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
