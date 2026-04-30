@@ -1622,6 +1622,36 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         expected_tensor = torch.ones(3, 3) * 28
         self.assertEqual(tensor, expected_tensor)
 
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
+    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    def test_fake_backend_pg_names_w_torchcomms(self) -> None:
+        """Fake-backend PG names must be hash-based when torchcomms is enabled.
+
+        When torchcomms is enabled, split_group produces hash-based PG names
+        for real backends. Fake-backend dimensions (from backend_override)
+        must also use hash-based names; sequential integer names are not
+        resolvable from compiled code via the C++ GroupRegistry.
+        """
+        world_mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("world",)
+        )
+        # One fake dim and one real dim, mimicking torchtitan's
+        # unflatten_mesh for disabled parallelism dimensions.
+        mesh = world_mesh._unflatten(
+            0,
+            (1, self.world_size),
+            ("fake_dim", "real_dim"),
+            backend_override={"fake_dim": "fake"},
+        )
+        fake_pg_name = mesh._dim_group_names[0]
+        self.assertFalse(
+            fake_pg_name.isdigit(),
+            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            f"expected a hash-based name for torchcomms compatibility.",
+        )
+
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
