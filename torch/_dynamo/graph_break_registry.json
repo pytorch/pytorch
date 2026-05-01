@@ -380,6 +380,12 @@
   "GB0035": [
     {
       "Gb_type": "Data-dependent branching with non-constant __bool__",
+      "Context": "value: {value}, result: {result}",
+      "Explanation": "Attempted to perform data-dependent branching on a user-defined object with non-constant truthiness.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Data-dependent branching with non-constant __bool__",
       "Context": "method: {x}, result: {result}",
       "Explanation": "Attempted to perform data-dependent branching on a user-defined object with a __bool__ method that did not return a constant.",
       "Hints": []
@@ -692,6 +698,15 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute",
+      "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dyanmo only supports mutating `.data` of tensor created outside `torch.compile` region",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
@@ -722,6 +737,15 @@
     }
   ],
   "GB0058": [
+    {
+      "Gb_type": "Failed to set tensor attribute",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo doesn't support setting these tensor attributes",
+      "Hints": [
+        "Don't mutate attribute '{name}' on tensors, or ",
+        "move the mutation out of `torch.compile` region"
+      ]
+    },
     {
       "Gb_type": "Failed to set tensor attribute",
       "Context": "setattr({obj}, {name}, {val})",
@@ -2141,6 +2165,14 @@
       ]
     }
   ],
+  "GB5904": [
+    {
+      "Gb_type": "unsupported __getitem__ (sq_item)",
+      "Context": "sq_item_impl {self} {key}",
+      "Explanation": "Dynamo does not know how to handle sq_item on {self}",
+      "Hints": []
+    }
+  ],
   "GB0163": [
     {
       "Gb_type": "Unsupported tensor subclass attribute access",
@@ -2846,6 +2878,15 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dyanmo only supports mutating `.data` of tensor to a new one with the same dtype",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
@@ -3317,6 +3358,15 @@
     {
       "Gb_type": "TypedDict with optional keys",
       "Context": "str(self.value)",
+      "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
+      "Hints": [
+        "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "TypedDict with optional keys",
+      "Context": "str(self.value)",
       "Explanation": "Dyanmo does not support tracing TypedDict with optional keys",
       "Hints": [
         "Avoid using TypedDict with optional keys",
@@ -3552,6 +3602,12 @@
     }
   ],
   "GB0271": [
+    {
+      "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
+      "Context": "str(self.value)",
+      "Explanation": "Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
+      "Hints": []
+    },
     {
       "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
       "Context": "str(self.value)",
@@ -4618,6 +4674,16 @@
       "Context": "str(var)",
       "Explanation": "Expected {var} to be TensorVariable, SymNodeVariable, or ConstantVariable",
       "Hints": []
+    }
+  ],
+  "GB3006": [
+    {
+      "Gb_type": "tp_as_number slot not implemented",
+      "Context": "{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
+      "Explanation": "The type {self.python_type_name()} does not implement the {tp_slot_name}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0350": [

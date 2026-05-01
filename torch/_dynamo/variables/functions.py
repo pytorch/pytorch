@@ -297,7 +297,7 @@ def init_cellvars(
 ) -> None:
     """
     Update `result` to add mapping from local name to new cells created
-    directly by `code`, or update SideEffects in `parent` if the a local cell is
+    directly by `code`, or update SideEffects in `parent` if a local cell is
     already in `result` (cell argument).
     """
     side_effects = parent.output.side_effects
@@ -2771,9 +2771,6 @@ class FunctoolsPartialVariable(VariableTracker):
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
-        # fake_value is used for id calculation. Creating this value and id'ng
-        # on it is sufficient for the tracing purposes.
-        self.fake_value = functools.partial(identity)
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 

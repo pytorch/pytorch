@@ -37,8 +37,6 @@ __all__ = [
     "get_graph_provenance_json",
     "set_current_replay_node",
     "get_current_replay_node",
-    "set_regional_inductor_subgraph_name",
-    "get_regional_inductor_subgraph_name",
 ]
 
 current_meta: dict[str, Any] = {}
@@ -540,7 +538,7 @@ def get_current_replay_node() -> Node | None:
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
+def _set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
     """
     Set the name of the subgraph currently being sub-compiled by regional
     inductor (a scooped-out region or an invoke_subgraph submodule). Used to
@@ -556,7 +554,7 @@ def set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
 
 
 @compatibility(is_backward_compatible=False)
-def get_regional_inductor_subgraph_name() -> str | None:
+def _get_regional_inductor_subgraph_name() -> str | None:
     """
     Get the name of the subgraph currently being sub-compiled by regional
     inductor, or None.

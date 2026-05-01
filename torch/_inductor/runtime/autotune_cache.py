@@ -15,8 +15,7 @@ The caching system includes:
 Key components:
 - AutotuneCache: Main class for managing cache access and storage
 - AutotuneCacheBundler: Bundles multiple cache entries for efficient storage
-- LocalAutotuneCache: Handles filesystem-based caching
-- _LocalAutotuneCacheBackend: Low-level file operations for cache storage
+- LocalCacheBackend: Low-level file operations for cache storage
 - AutotuneCacheArtifact: Integration with PyTorch's artifact system
 
 This caching system is critical for performance as it eliminates the need to re-run
@@ -30,10 +29,13 @@ import logging
 import os
 import os.path
 import re
-from typing import Any, TYPE_CHECKING
+import threading
+import weakref
+from typing import Any
 from typing_extensions import override
 
 import torch
+from torch._guards import CompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._cache import (
     CacheArtifact,
@@ -46,15 +48,13 @@ from ..cache_key import AUTOTUNE_CACHE_KEY_STRATEGY
 from ..remote_cache import (
     create_cache,
     JsonDataTy,
+    LocalAutotuneCache,
+    LocalCacheBackend,
     RemoteCache,
-    RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
 from .triton_compat import Config, HAS_WARP_SPEC
 
-
-if TYPE_CHECKING:
-    from ..remote_cache import Sample
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 class AutotuneCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
-        autotune_cache = _LocalAutotuneCacheBackend()
+        autotune_cache = LocalCacheBackend()
         key = os.path.join(cache_dir(), self.key)
         autotune_cache._put(key, self.content)
 
@@ -114,9 +114,7 @@ class AutotuneCacheArtifact(CacheArtifact):
 
 @dataclasses.dataclass
 class AutotuneCache:
-    """
-    Coordinates local and remote autotune cache access for a single kernel.
-    """
+    """Coordinates local and remote autotune cache lookups for one kernel."""
 
     configs_hash: str
     local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
@@ -180,9 +178,17 @@ class AutotuneCache:
     def _read(self) -> dict[str, JsonDataTy] | None:
         if local_cache := self.local_cache:
             cache, key = local_cache
-            if best_config := cache.get(key):
-                if isinstance(best_config, dict):
-                    self._record_artifact(best_config)
+            AutotuneCacheBundler.sync()
+            best_config = cache.get(key)
+            if best_config is not None:
+                assert isinstance(best_config, dict)
+                # Imagine we have a new model that reuses some existing kernels that
+                # have already been compiled. If we didn't put() here on cache hit,
+                # then the new model would only bundle newly compiled kernels, not
+                # existing kernels that were already compiled and cached.
+                AutotuneCacheBundler.put(key, best_config)
+                self._record_artifact(best_config)
+                if best_config:
                     return best_config
 
         if remote_cache := self.remote_cache:
@@ -212,7 +218,12 @@ class AutotuneCache:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        local_cache = LocalAutotuneCache()
+        local_cache = create_cache(
+            "local-autotune",
+            local_cache_cls=LocalAutotuneCache.__name__,
+        )
+        if local_cache is None:
+            return
         self.local_cache = (local_cache, cache_key)
 
     # Set up remote caching information
@@ -344,14 +355,13 @@ class AutotuneCache:
 
 class _AutotuneCacheBundlerImpl:
     """
-    Caches a set of LocalAutotuneCacheBackend entries together in a single
-    cache.
+    Caches a set of local autotune entries together in a single cache.
     """
 
     _key: str
     _cache: RemoteCache[JsonDataTy]
 
-    # All known entries from LocalAutotuneCache.put()
+    # All known entries from local autotune cache writes.
     _entries: dict[str, JsonDataTy]
 
     def end_compile(self) -> None:
@@ -383,7 +393,7 @@ class _AutotuneCacheBundlerImpl:
         if not inductor_meta.get("autotune_local_cache", True):
             return False
 
-        # Check if the we're enabled via config
+        # Check if we're enabled via config
         if (
             bundled_autotune_remote_cache := inductor_meta.get(
                 "bundled_autotune_remote_cache"
@@ -420,14 +430,18 @@ class _AutotuneCacheBundlerImpl:
 
         # Go through the entries we got from the cache and save them locally.
         time_saved_ns = 0
+        local_cache = create_cache(
+            "local-autotune",
+            local_cache_cls=LocalAutotuneCache.__name__,
+        )
         for basename, data in entries.items():
             # Reconstruct the final filename (see put())
             root, ext = _splitext_nodot(basename)
             _, _, filename = codecache.get_path(root, ext)
             if isinstance(data, dict) and (tsns := data.get("time_saved_ns")):
                 time_saved_ns += int(tsns)  # type: ignore[arg-type]
-            local_cache = LocalAutotuneCache()
-            local_cache.put(filename, data)
+            if local_cache is not None:
+                local_cache.put(filename, data)
 
         codecache.add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
 
@@ -445,10 +459,38 @@ class _AutotuneCacheBundlerImpl:
 
 
 class AutotuneCacheBundler:
-    _bundler: _AutotuneCacheBundlerImpl | None = None
+    """Manages one bundled autotune cache write scope for a compile context."""
+
+    _context_bundlers: weakref.WeakKeyDictionary[
+        CompileContext, AutotuneCacheBundler
+    ] = weakref.WeakKeyDictionary()
+    _context_bundlers_lock = threading.Lock()
 
     def __init__(self) -> None:
-        pass
+        self._bundler: _AutotuneCacheBundlerImpl | None = None
+
+    @classmethod
+    def _get_context_bundler(
+        cls,
+        ctx: CompileContext | None = None,
+        *,
+        create: bool,
+    ) -> AutotuneCacheBundler | None:
+        if ctx is None:
+            return None
+
+        with cls._context_bundlers_lock:
+            bundler = cls._context_bundlers.get(ctx)
+            if bundler is None and create:
+                bundler = cls()
+                cls._context_bundlers[ctx] = bundler
+            assert bundler is None or isinstance(bundler, cls)
+            return bundler
+
+    @classmethod
+    def has_active_compile(cls, compile_context: CompileContext | None) -> bool:
+        context_bundler = cls._get_context_bundler(compile_context, create=False)
+        return context_bundler is not None and context_bundler._bundler is not None
 
     # Call this before we start any autotune computation for an inductor python
     # file. On a cache hit it copies the individual results into the local
@@ -461,8 +503,6 @@ class AutotuneCacheBundler:
         code: str | None = None,
         code_hash: str | None = None,
     ) -> None:
-        assert cls._bundler is None
-
         if code is not None:
             assert code_hash is None, "Cannot specify both code and code_hash"
             code_hash = _comment_stripped_hash(code)
@@ -472,6 +512,16 @@ class AutotuneCacheBundler:
             inductor_meta
         ):
             return
+
+        context_bundler = cls._get_context_bundler(
+            CompileContext.try_get(), create=True
+        )
+        if context_bundler is None:
+            log.debug(
+                "Skipping bundled autotune cache because compile_context is not set"
+            )
+            return
+        assert context_bundler._bundler is None
 
         cache = create_cache(
             "bundled-autotune-v1",
@@ -501,7 +551,7 @@ class AutotuneCacheBundler:
         if not bundler._load_cache():
             # We couldn't load from the cache - so save the data so we can store
             # the saved autotunes.
-            cls._bundler = bundler
+            context_bundler._bundler = bundler
 
         # If we get a cache hit don't bother saving any of the individual
         # autotune results.
@@ -511,18 +561,36 @@ class AutotuneCacheBundler:
     # those and put it into the cache.
     @classmethod
     def end_compile(cls) -> None:
-        if bundler := cls._bundler:
-            cls._bundler = None
+        if not (
+            context_bundler := cls._get_context_bundler(
+                CompileContext.try_get(), create=False
+            )
+        ):
+            return
+        if bundler := context_bundler._bundler:
+            context_bundler._bundler = None
             bundler.end_compile()
 
     @classmethod
     def sync(cls) -> None:
-        if bundler := cls._bundler:
+        if not (
+            context_bundler := cls._get_context_bundler(
+                CompileContext.try_get(), create=False
+            )
+        ):
+            return
+        if bundler := context_bundler._bundler:
             bundler.sync()
 
     @classmethod
     def put(cls, filename: str, data: JsonDataTy) -> None:
-        if bundler := cls._bundler:
+        if not (
+            context_bundler := cls._get_context_bundler(
+                CompileContext.try_get(), create=False
+            )
+        ):
+            return
+        if bundler := context_bundler._bundler:
             # The filename comes in as something like
             # "/tmp/tmp{random}/{aa}/{basename}.py" (where aa is
             # basename[1:3]). Strip it down and make sure that it looks like a path
@@ -631,49 +699,6 @@ def _load_cached_autotuning(
     # pyrefly: ignore [missing-attribute]
     matched_config.extra_options = extra_options
     return matched_config
-
-
-class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
-    @override
-    def _get(self, key: str) -> bytes | None:
-        try:
-            with open(key, "rb") as fd:
-                return fd.read()
-        except FileNotFoundError:
-            return None
-
-    @override
-    def _put(self, key: str, data: bytes) -> None:
-        os.makedirs(os.path.dirname(key), exist_ok=True)
-        from torch._inductor import codecache
-
-        codecache.write_atomic(key, data)
-
-
-class LocalAutotuneCache(RemoteCache[JsonDataTy]):
-    def __init__(self) -> None:
-        backend = _LocalAutotuneCacheBackend()
-        serde = RemoteCacheJsonSerde()
-        super().__init__(backend, serde)
-
-    @override
-    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
-        AutotuneCacheBundler.sync()
-        result = super()._get(key, sample)
-        if result is not None:
-            assert isinstance(result, dict)
-            # What? Why are we doing a put() here? Imagine we have a new model
-            # that reuses some existing kernels that have already been
-            # compiled. If we didn't do a `put` here (on cache hit) then the new
-            # model would only bundle *newly* compiled kernels, not existing
-            # kernels that were already compiled and cached.
-            AutotuneCacheBundler.put(key, result)
-        return result
-
-    @override
-    def _put(self, key: str, value: JsonDataTy, sample: Sample | None) -> None:
-        AutotuneCacheBundler.put(key, value)
-        super()._put(key, value, sample)
 
 
 def _splitext_nodot(basename: str) -> tuple[str, str]:
