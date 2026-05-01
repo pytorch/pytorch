@@ -107,6 +107,10 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- ASCII only in newly added code comments. Do not introduce Unicode characters
+  (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
+  Leave preexisting Unicode in untouched comments alone; only enforce this for
+  comments you are adding or rewriting.
 
 If uncertain, choose the simpler, more concise implementation.
 
