@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <c10/util/env.h>
 #include <torch/custom_class.h>
 
 #include <atomic>
@@ -222,6 +223,20 @@ size_t get_signal_pad_size() {
 
 void set_signal_pad_size(size_t size) {
   configured_signal_pad_size_.store(size, std::memory_order_release);
+}
+
+static std::optional<bool> pg_rendezvous_override_;
+
+bool use_pg_rendezvous() {
+  if (pg_rendezvous_override_.has_value()) {
+    return *pg_rendezvous_override_;
+  }
+  static auto val = c10::utils::check_env("TORCH_SYMMMEM_RENDEZVOUS_USE_PG");
+  return val == true;
+}
+
+void set_pg_rendezvous(bool enabled) {
+  pg_rendezvous_override_ = enabled;
 }
 
 bool has_allocator(c10::DeviceType device_type) {

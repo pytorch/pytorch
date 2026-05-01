@@ -775,12 +775,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 
   // Populate hostname field for host identification
   gethostname(local_req.hostname, sizeof(local_req.hostname));
-  // At large rank counts, the store-based O(N^2) all_gather dominates
-  // rendezvous latency. When TORCH_SYMMMEM_RENDEZVOUS_USE_PG=1, route the
-  // metadata exchange through the process group's NCCL all_gather for
-  // O(N) bandwidth and O(log N) latency. Only this first metadata gather
-  // is redirected; the handle exchange below still uses its existing
-  // transport (IpcChannel for posix FDs, store for fabric handles).
+  // At large rank counts, TCPStore gets overloaded during the metadata
+  // exchange. When PG rendezvous is enabled, route the metadata exchange
+  // through the process group's NCCL allgather instead.
   std::vector<RendezvousRequest> reqs = use_pg_rendezvous()
       ? pg_all_gather(group, block->device_idx, local_req)
       : storeExchange.all_gather(store, rank, world_size, local_req);
@@ -796,8 +793,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   if constexpr (!use_fabric_handle) {
     imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
   } else {
-    imported_handles =
-        storeExchange.all_gather(store, rank, world_size, block_handle);
+    imported_handles = use_pg_rendezvous()
+        ? pg_all_gather(group, block->device_idx, block_handle)
+        : storeExchange.all_gather(store, rank, world_size, block_handle);
   }
 
   std::vector<HandleType> handles(world_size);

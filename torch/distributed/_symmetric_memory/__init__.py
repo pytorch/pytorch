@@ -2083,6 +2083,32 @@ def set_signal_pad_size(size: int) -> None:
     _SymmetricMemory.signal_pad_size = size
 
 
+def set_pg_rendezvous(enabled: bool) -> None:
+    """
+    Enable or disable process-group-based rendezvous for symmetric memory.
+
+    When enabled, rendezvous metadata is exchanged via the ProcessGroup's NCCL
+    allgather instead of TCPStore, which gets overloaded at large rank counts.
+    Can also be enabled via the TORCH_SYMMMEM_RENDEZVOUS_USE_PG=1 env var.
+
+    Args:
+        enabled (bool): whether to use PG-based rendezvous.
+    """
+    _SymmetricMemory.set_pg_rendezvous(enabled)
+
+
+def get_pg_rendezvous() -> bool:
+    """
+    Return whether process-group-based rendezvous is enabled.
+
+    Returns:
+        bool: True if PG-based rendezvous is enabled (either programmatically
+            via :func:`set_pg_rendezvous` or via the
+            TORCH_SYMMMEM_RENDEZVOUS_USE_PG env var).
+    """
+    return _SymmetricMemory.get_pg_rendezvous()
+
+
 def get_signal_pad_size() -> int:
     r"""
     Get the current signal pad size for symmetric memory allocations.

@@ -31,10 +31,6 @@ bool allow_overlapping_devices() {
       true;
 }
 
-bool use_pg_rendezvous() {
-  return c10::utils::check_env("TORCH_SYMMMEM_RENDEZVOUS_USE_PG") == true;
-}
-
 std::vector<uint8_t> pg_all_gather_bytes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     const void* data,
@@ -46,32 +42,27 @@ std::vector<uint8_t> pg_all_gather_bytes(
   const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
 
   c10::cuda::CUDAGuard guard(device_idx);
-  auto stream = at::cuda::getCurrentCUDAStream(device_idx);
   auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
-  auto opts =
-      at::TensorOptions().dtype(at::kByte).device(device).pinned_memory(false);
 
-  at::Tensor in_buf = at::empty({static_cast<int64_t>(nbytes)}, opts);
-  if (nbytes > 0) {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        in_buf.data_ptr(), data, nbytes, cudaMemcpyHostToDevice, stream));
-  }
-  at::Tensor out_buf = at::empty({static_cast<int64_t>(total_bytes)}, opts);
+  at::Tensor in_buf = at::from_blob(
+                          const_cast<void*>(data),
+                          {static_cast<int64_t>(nbytes)},
+                          at::TensorOptions().dtype(at::kByte))
+                          .to(device);
+
+  at::Tensor out_buf = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      at::TensorOptions().dtype(at::kByte).device(device));
 
   c10d::AllgatherOptions ag_opts;
-  auto work = pg->_allgather_base(out_buf, in_buf, ag_opts);
-  work->wait();
+  ag_opts.asyncOp = false;
+  pg->_allgather_base(out_buf, in_buf, ag_opts);
 
+  at::Tensor result_cpu = out_buf.cpu();
   std::vector<uint8_t> flat(total_bytes);
-  if (nbytes > 0) {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        flat.data(),
-        out_buf.data_ptr(),
-        total_bytes,
-        cudaMemcpyDeviceToHost,
-        stream));
+  if (total_bytes > 0) {
+    std::memcpy(flat.data(), result_cpu.data_ptr(), total_bytes);
   }
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   return flat;
 }
 

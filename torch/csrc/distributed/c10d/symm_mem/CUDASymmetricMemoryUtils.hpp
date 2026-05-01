@@ -16,11 +16,6 @@ bool device_has_multicast_support(int device_idx);
 
 bool allow_overlapping_devices();
 
-// If true, rendezvous metadata (RendezvousRequest) is exchanged through the
-// ProcessGroup's NCCL all_gather instead of a TCPStore O(N^2) loop. Controlled
-// by the TORCH_SYMMMEM_RENDEZVOUS_USE_PG environment variable.
-bool use_pg_rendezvous();
-
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA();
 

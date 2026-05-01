@@ -200,6 +200,13 @@ TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
 
+// If true, rendezvous metadata is exchanged through the ProcessGroup's NCCL
+// all_gather instead of TCPStore, which gets overloaded at large rank counts.
+// Can be enabled programmatically via set_pg_rendezvous() or by setting the
+// TORCH_SYMMMEM_RENDEZVOUS_USE_PG environment variable.
+TORCH_API bool use_pg_rendezvous();
+TORCH_API void set_pg_rendezvous(bool enabled);
+
 // Get the current signal pad size for symmetric memory allocations.
 // Returns the user-configured size if set, otherwise returns the default size.
 TORCH_API size_t get_signal_pad_size();

@@ -1183,6 +1183,10 @@ Example:
             ::c10d::symmetric_memory::set_signal_pad_size(size);
           })
       .def_static(
+          "set_pg_rendezvous", &::c10d::symmetric_memory::set_pg_rendezvous)
+      .def_static(
+          "get_pg_rendezvous", &::c10d::symmetric_memory::use_pg_rendezvous)
+      .def_static(
           "get_mempool_allocator",
           &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
