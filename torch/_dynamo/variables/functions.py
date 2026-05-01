@@ -28,6 +28,7 @@ import importlib.util
 import inspect
 import itertools
 import logging
+import operator
 import os
 import sys
 import traceback
@@ -2951,6 +2952,41 @@ class PolyfilledFunctionVariable(VariableTracker):
                 )
             )
             return VariableTracker.build(tx, result)
+
+        # Special case for sum on a lazy Tensor.tolist() result.
+        if (
+            self.fn is builtins.sum
+            and args
+            and type(args[0]) is variables.TensorToListVariable
+        ):
+            start = None
+            can_use_tolist_sum = True
+            if len(args) == 1 and not kwargs:
+                pass
+            elif len(args) == 2 and not kwargs:
+                start = args[1]
+            elif len(args) == 1 and set(kwargs) == {"start"}:
+                start = kwargs["start"]
+            else:
+                can_use_tolist_sum = False
+
+            if can_use_tolist_sum:
+                if start is None:
+                    result = args[0].sym_sum(tx)
+                    if result is not None:
+                        return result
+                elif (
+                    isinstance(start, variables.ConstantVariable)
+                    and isinstance(start.as_python_constant(), int)
+                ) or (
+                    isinstance(start, variables.SymNodeVariable)
+                    and start.python_type() is int
+                ):
+                    result = args[0].sym_sum(tx)
+                    if result is not None:
+                        return variables.BuiltinVariable(operator.add).call_function(
+                            tx, [result, start], {}
+                        )
 
         # Special case for sum on tuple/list of ints
         if (

@@ -1788,6 +1788,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            from .tensor import materialize_tensor_tolist_args_kwargs
+
+            args, kwargs = materialize_tensor_tolist_args_kwargs(tx, args, kwargs)
+
             def check_any_unspec(x: VariableTracker) -> bool:
                 # NB: This includes UnspecializedPythonVariable
                 if x.is_tensor() or isinstance(x, SymNodeVariable):
@@ -2645,6 +2649,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import SymNodeVariable
         from .builder import wrap_fx_proxy
+        from .tensor import materialize_tensor_tolist_args_kwargs
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
@@ -2818,6 +2823,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        args, kwargs = materialize_tensor_tolist_args_kwargs(tx, args, kwargs)
 
         with ctx():
             tensor_variable = wrap_fx_proxy(

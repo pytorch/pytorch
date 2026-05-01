@@ -844,8 +844,8 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, item, l_x_);  wrap_body_1 = item = l_x_ = None
-        getitem_3: "i16[3]" = wrap[0];  wrap = None
-        return (getitem_3,)
+        getitem_1: "i16[3]" = wrap[0];  wrap = None
+        return (getitem_1,)
 
     class wrap_body_1(torch.nn.Module):
         def forward(self, item: "Sym(u0)", l_x_: "i16[3]"):

@@ -5133,6 +5133,10 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst: Instruction) -> None:
         self.replace_tos_if_return_is_generator()
+        if self.stack and type(self.stack[-1]) is variables.TensorToListVariable:
+            self.stack[-1] = variables.materialize_tensor_tolist_arg(
+                self.stack[-1], self, recursive=False
+            )
         assert self.instruction_pointer is not None
         assert self.start_point is not None
         get_metrics_context().increment(
@@ -5669,7 +5673,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()
+        result = self.pop()
+        if type(result) is variables.TensorToListVariable:
+            result = variables.materialize_tensor_tolist_arg(
+                result, self, recursive=False
+            )
+        self.symbolic_result = result
         self.instruction_pointer = None
         raise ReturnValueOp
 
@@ -5776,6 +5785,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
+        if type(top) is variables.TensorToListVariable:
+            top = variables.materialize_tensor_tolist_arg(top, self, recursive=False)
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError

@@ -114,6 +114,7 @@ from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
     SymNodeVariable,
+    TensorToListVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )
@@ -666,6 +667,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
+        def tensor_tolist_add_handler(
+            tx: "InstructionTranslator",
+            a: VariableTracker,
+            b: VariableTracker,
+        ) -> VariableTracker | None:
+            if not a.has_unpack_var_sequence(tx) or not b.has_unpack_var_sequence(tx):
+                return None
+            return ListVariable(
+                [*a.unpack_var_sequence(tx), *b.unpack_var_sequence(tx)],
+                mutation_type=ValueMutationNew(),
+            )
+
         list_like_addition_handlers: list[
             tuple[
                 tuple[
@@ -725,6 +738,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                         *b.items,
                     ]
                 ),
+            ),
+            (
+                (TensorToListVariable, VariableTracker),
+                tensor_tolist_add_handler,
+            ),
+            (
+                (VariableTracker, TensorToListVariable),
+                tensor_tolist_add_handler,
             ),
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
@@ -786,6 +807,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             ((TupleVariable, ConstantVariable), expand_list_like),
             ((ConstantVariable, ListVariable), expand_list_like),
             ((ConstantVariable, TupleVariable), expand_list_like),
+            (
+                (TensorToListVariable, ConstantVariable),
+                lambda tx, a, b: ListVariable(
+                    a.unpack_var_sequence(tx) * b.as_python_constant(),
+                    mutation_type=ValueMutationNew(),
+                ),
+            ),
+            (
+                (ConstantVariable, TensorToListVariable),
+                lambda tx, a, b: ListVariable(
+                    b.unpack_var_sequence(tx) * a.as_python_constant(),
+                    mutation_type=ValueMutationNew(),
+                ),
+            ),
         ]
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 

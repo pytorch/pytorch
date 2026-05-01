@@ -11595,6 +11595,97 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_sum_uses_lazy_reduction(self):
+        def fn(x):
+            return torch.tensor(sum(x.tolist()))
+
+        x = torch.arange(100, dtype=torch.int64)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertLess(counter.op_count, 10)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_sum_start_uses_lazy_reduction(self):
+        def fn(x):
+            return torch.tensor(sum(x.tolist(), 10))
+
+        def fn_kw(x):
+            return torch.tensor(sum(x.tolist(), start=10))
+
+        x = torch.arange(100, dtype=torch.int64)
+        for f in (fn, fn_kw):
+            eager = f(x)
+            counter = CompileCounter()
+            compiled = torch.compile(f, backend=counter, fullgraph=True)(x)
+            self.assertEqual(eager, compiled)
+            self.assertEqual(counter.frame_count, 1)
+            self.assertLess(counter.op_count, 10)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_list_ops_materialize(self):
+        def add_fn(x):
+            return x.tolist() + [4, 5]
+
+        def radd_fn(x):
+            return [4, 5] + x.tolist()
+
+        def mul_fn(x):
+            return x.tolist() * 3
+
+        def rmul_fn(x):
+            return 3 * x.tolist()
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        for f in (add_fn, radd_fn, mul_fn, rmul_fn):
+            eager = f(x)
+            counter = CompileCounter()
+            compiled = torch.compile(f, backend=counter, fullgraph=True)(x)
+            self.assertEqual(eager, compiled)
+            self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_list_mutation_materializes(self):
+        def fn(x):
+            lst = x.tolist()
+            lst.append(5)
+            return lst, len(lst), lst[-1], sum(lst)
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_as_torch_function_arg_materializes(self):
+        def fn(x, sections):
+            return torch.split(x, sections.tolist())
+
+        x = torch.arange(5, dtype=torch.int64)
+        sections = torch.tensor([2, 3], dtype=torch.int64)
+        eager = fn(x, sections)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x, sections)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tolist_as_torch_tensor_arg_uses_refs_tensor(self):
+        def fn(x):
+            return torch.tensor(x.tolist())
+
+        x = torch.tensor([5, 10, 15], dtype=torch.int64)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tolist_kd(self):
         def fn(x):
             new_list = []
