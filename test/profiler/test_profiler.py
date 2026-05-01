@@ -3824,8 +3824,7 @@ class TestProfilerDeviceStopped(TestCase):
 
         with patch(self.PATCH_TARGET, return_value=True):
             # step 1 -> 2: RECORD -> RECORD per schedule, but _is_kineto_stopped
-            # -> True overrides to DEVICE_STOPPED. Transition fires stop_trace +
-            # _trace_ready to save the collected data.
+            # -> True overrides to DEVICE_STOPPED.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             p.stop()
@@ -3850,9 +3849,11 @@ class TestProfilerDeviceStopped(TestCase):
         )
 
         with patch(self.PATCH_TARGET, return_value=False):
-            p.start()  # step 0: WARMUP
-            p.step()  # step 1: RECORD
-            p.step()  # step 2: RECORD_AND_SAVE
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
         with patch(self.PATCH_TARGET, return_value=True):
@@ -3884,7 +3885,7 @@ class TestProfilerDeviceStopped(TestCase):
         p = self._make_profiler(wait=0, warmup=1, active=4, repeat=2)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
-            # step 0 -> 1: WARMUP -> RECORD
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
@@ -3899,8 +3900,7 @@ class TestProfilerDeviceStopped(TestCase):
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             # step 4 -> 5: schedule rolls over to WARMUP (new cycle), exits
-            # DEVICE_STOPPED. The DEVICE_STOPPED -> WARMUP transition fires
-            # prepare_trace.
+            # DEVICE_STOPPED.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
@@ -3910,9 +3910,12 @@ class TestProfilerDeviceStopped(TestCase):
         NONE between cycles. DEVICE_STOPPED must still exit at cycle
         boundaries (RECORD_AND_SAVE -> next), otherwise the profiler would
         be stuck in DEVICE_STOPPED forever."""
-        # wait=0, warmup=0, active=3, repeat=2:
-        # step 0..1: RECORD; step 2: RECORD_AND_SAVE; step 3..4: RECORD;
-        # step 5: RECORD_AND_SAVE; step 6+: NONE.
+        # The normal schedule for wait=0, warmup=0, active=3, repeat=2:
+        # step 0..1: RECORD
+        # step 2:    RECORD_AND_SAVE
+        # step 3..4: RECORD
+        # step 5:    RECORD_AND_SAVE
+        # step 6+:   NONE
         p = self._make_profiler(wait=0, warmup=0, active=3, repeat=2)
 
         with patch(self.PATCH_TARGET, return_value=False):
@@ -3920,15 +3923,13 @@ class TestProfilerDeviceStopped(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 0 -> 1: RECORD -> DEVICE_STOPPED (entry)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
-            # step 1 -> 2: schedule says RECORD_AND_SAVE, persists DEVICE_STOPPED
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             # step 2 -> 3: prev raw schedule output was RECORD_AND_SAVE, so
             # this step is a cycle boundary. Exit DEVICE_STOPPED into
-            # current_action (RECORD) — fires prepare_trace + start_trace.
+            # current_action (RECORD)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
             p.stop()
@@ -3937,29 +3938,34 @@ class TestProfilerDeviceStopped(TestCase):
         """With wait > 0, the NONE phase between cycles is the natural
         exit path out of DEVICE_STOPPED. After the wait, profiling resumes
         normally through WARMUP and RECORD."""
-        # wait=2, warmup=1, active=2, repeat=2 (cycle length 5):
-        # step 0..1: NONE; step 2: WARMUP; step 3: RECORD; step 4: R&S;
-        # step 5..6: NONE; step 7: WARMUP; step 8: RECORD; step 9: R&S;
-        # step 10+: NONE.
+        # The normal schedule for wait=2, warmup=1, active=2, repeat=2 (cycle length 5):
+        # step 0..1: NONE
+        # step 2:    WARMUP
+        # step 3:    RECORD
+        # step 4:    R&S
+        # step 5..6: NONE
+        # step 7:    WARMUP
+        # step 8:    RECORD
+        # step 9:    R&S
+        # step 10+:  NONE
         p = self._make_profiler(wait=2, warmup=1, active=2, repeat=2)
 
         with patch(self.PATCH_TARGET, return_value=False):
-            p.start()  # step 0: NONE
-            p.step()  # step 1: NONE
+            p.start()
+            p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
-            p.step()  # step 2: WARMUP
+            p.step()
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
-            p.step()  # step 3: RECORD
+            p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 3 -> 4: RECORD -> DEVICE_STOPPED (entry)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
 
         with patch(self.PATCH_TARGET, return_value=False):
             # step 4 -> 5: schedule rolls into cycle 2's wait phase. NONE is
-            # in the exit set, so DEVICE_STOPPED exits. (DS, NONE) is no-op.
+            # in the exit set, so DEVICE_STOPPED exits.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             # step 5 -> 6: still in wait phase
@@ -3978,13 +3984,16 @@ class TestProfilerDeviceStopped(TestCase):
         cycle boundaries. DEVICE_STOPPED must persist through the entire
         warmup phase rather than oscillating WARMUP -> DEVICE_STOPPED ->
         WARMUP -> DEVICE_STOPPED on every step."""
-        # wait=0, warmup=3, active=2, repeat=1 (cycle length 5):
-        # step 0..2: WARMUP; step 3: RECORD; step 4: R&S; step 5+: NONE.
+        # The normal schedule for wait=0, warmup=3, active=2, repeat=1 (cycle length 5):
+        # step 0..2: WARMUP
+        # step 3:    RECORD
+        # step 4:    R&S
+        # step 5+:   NONE
         p = self._make_profiler(wait=0, warmup=3, active=2, repeat=1)
 
         with patch(self.PATCH_TARGET, return_value=True):
-            p.start()  # step 0: WARMUP
-            # step 0 -> 1: WARMUP -> DEVICE_STOPPED (entry)
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
             # step 1 -> 2: schedule still WARMUP (same warmup phase, NOT a
@@ -4018,7 +4027,7 @@ class TestProfilerDeviceStopped(TestCase):
         def handler(prof):
             callback_count[0] += 1
 
-        # active=1, warmup=1, repeat=3: cycle is W, R&S; with kineto_stopped
+        # Schedule active=1, warmup=1, repeat=3 cycles W, R&S; with kineto_stopped
         # on every step the entry guard converts each cycle's R&S to DS via
         # (W, DS), and DS exits at cycle boundary via (DS, W).
         p = profile(
@@ -4028,7 +4037,7 @@ class TestProfilerDeviceStopped(TestCase):
         )
 
         with patch(self.PATCH_TARGET, return_value=False):
-            p.start()  # step 0: WARMUP
+            p.start()
 
         with patch(self.PATCH_TARGET, return_value=True):
             # Cycle 1: step 0 -> 1: (W, DS) fires _trace_ready. callback=1.
@@ -4128,14 +4137,21 @@ class TestProfilerDeviceStopped(TestCase):
     def test_device_stopped_recovers_across_infinite_cycles(self):
         """With repeat=0 (infinite cycles), DEVICE_STOPPED entry and
         recovery must work across multiple cycles, not just one."""
-        # wait=0, warmup=1, active=2, repeat=0 (cycle length 3, infinite):
-        # step 0: W; step 1: R; step 2: R&S; step 3: W; step 4: R;
-        # step 5: R&S; step 6: W; ...
+        # Normal schedule for wait=0, warmup=1, active=2, repeat=0 (cycle length 3, infinite):
+        # step 0: WARMUP
+        # step 1: RECORD
+        # step 2: RECORD_AND_SAVE
+        # step 3: WARMUP
+        # step 4: RECORD
+        # step 5: RECORD_AND_SAVE
+        # step 6: WARMUP
+        # ...
         p = self._make_profiler(wait=0, warmup=1, active=2, repeat=0)
 
         with patch(self.PATCH_TARGET, return_value=False):
-            p.start()  # step 0: WARMUP
-            p.step()  # step 1: RECORD
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
         # Cycle 1: enter DS at the R&S step.
@@ -4166,8 +4182,9 @@ class TestProfilerDeviceStopped(TestCase):
         p = self._make_profiler(wait=2, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
-            # step 0 -> 1: NONE -> NONE. prev_action is NONE so the entry
-            # guard for DEVICE_STOPPED does not fire.
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            # prev_action is NONE so the entry guard for DEVICE_STOPPED does not
+            # fire.
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
@@ -4176,7 +4193,7 @@ class TestProfilerDeviceStopped(TestCase):
         p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
-            # step 0 -> 1: WARMUP -> RECORD_AND_SAVE
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
@@ -4242,7 +4259,9 @@ class TestProfilerDeviceStopped(TestCase):
             on_trace_ready=handler,
         )
 
-        p.start()  # step_num=0, WARMUP
+        p.start()
+        self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
         # Cycle 1: two RECORD steps with real workload (steps 1 and 2).
         for _ in range(2):
             torch.add(torch.ones(2, 2), torch.ones(2, 2))
