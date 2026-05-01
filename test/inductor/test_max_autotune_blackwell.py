@@ -7,6 +7,7 @@ from torch._inductor.template_heuristics.triton import (
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
+    CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -371,6 +372,29 @@ class TestBlackwellExhaustiveConfigs(TestCase):
         self.assertEqual(num_stages_values, self.VALID_NUM_STAGES)
         self.assertEqual(num_warps_values, self.VALID_NUM_WARPS)
         self.assertEqual(epilogue_subtile_values, self.VALID_EPILOGUE_SUBTILE)
+
+    def test_scaled_blackwell_tma_uses_scaled_persistent_configs(self):
+        """Verify scaled Blackwell TMA heuristic uses blackwell_scaled_persistent_mm_configs."""
+        heuristic = CUDAScaledBlackwellTMATemplateConfigHeuristic()
+
+        for cfg in heuristic.mm_configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+
+        expected_configs = heuristic.blackwell_scaled_persistent_mm_configs
+        self.assertEqual(len(heuristic.mm_configs), len(expected_configs))
+        for actual, expected in zip(heuristic.mm_configs, expected_configs):
+            self.assertEqual(actual.block_m, expected.block_m)
+            self.assertEqual(actual.block_n, expected.block_n)
+            self.assertEqual(actual.block_k, expected.block_k)
+            self.assertEqual(actual.num_stages, expected.num_stages)
+            self.assertEqual(actual.num_warps, expected.num_warps)
+
+        addmm_configs = heuristic.blackwell_persistent_addmm_configs
+        self.assertGreater(
+            len(heuristic.mm_configs),
+            len(addmm_configs),
+            "Scaled TMA should use the larger scaled_persistent list, not the small addmm list",
+        )
 
 
 if __name__ == "__main__":

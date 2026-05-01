@@ -617,7 +617,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 256, 128, 4, 4),
         ]
 
-        self.blackwell_scaled_persistent_mm_configs = [
+        self.blackwell_scaled_persistent_mm_configs: list[BaseConfig] = [
             BlackwellGPUGemmConfig(
                 block_m=c.block_m,
                 block_n=c.block_n,
@@ -2784,8 +2784,7 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune scaled_persistent_mm_configs for Blackwell
-        self.mm_configs = self.blackwell_persistent_addmm_configs
+        self.mm_configs = self.blackwell_scaled_persistent_mm_configs
 
 
 @register_template_heuristic(
