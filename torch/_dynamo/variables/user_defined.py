@@ -132,11 +132,27 @@ def is_standard_delattr(val: object) -> bool:
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
 
+    # pytest >= 8.4 moved RaisesContext into _pytest.raises and renamed it to RaisesExc,
+    # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
+    # in independent try blocks so that one missing symbol doesn't drop the others.
+    try:
+        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
+
+        f_ctxs.append(RaisesExc)
+        f_ctxs.append(RaisesGroup)
+    except ImportError:
+        pass
+
     try:
         from _pytest.python_api import RaisesContext  # type: ignore[attr-defined]
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
 
         f_ctxs.append(RaisesContext)
+    except ImportError:
+        pass
+
+    try:
+        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
+
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
