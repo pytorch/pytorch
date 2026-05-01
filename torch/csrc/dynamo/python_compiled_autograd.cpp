@@ -44,7 +44,7 @@ at trace time.
 
 Notes:
   - We require hooks to not change shapes of tensors.
-  - We require non-hook autograd nodes to be tracable.
+  - We require non-hook autograd nodes to be traceable.
 */
 
 namespace torch::dynamo::autograd {

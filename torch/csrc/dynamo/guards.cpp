@@ -7077,7 +7077,7 @@ void install_object_aliasing_guard(
     GuardManager* y,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds tensor X is tensor Y guard. This is a an example of relational guard.
+  // Adds tensor X is tensor Y guard. This is an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<OBJECT_ALIASING>(
       x->get_root(), std::move(verbose_code_parts), std::move(user_stack));
@@ -7100,7 +7100,7 @@ void install_no_tensor_aliasing_guard(
     const py::list& tensor_names,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks none of tensors alias. This is a an example of
+  // Adds a guard that checks none of tensors alias. This is an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
@@ -7129,7 +7129,7 @@ void install_symbolic_shape_guard(
     py::object py_addr_keep_alive,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks symbolic shapes. This is a an example of
+  // Adds a guard that checks symbolic shapes. This is an example of
   // relational guard. There is one guard object that is shared between
   // multiple guard managers.
   std::shared_ptr<RelationalGuard> guard =
