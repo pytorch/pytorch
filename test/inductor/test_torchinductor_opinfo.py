@@ -699,13 +699,6 @@ if TEST_WITH_ROCM:
         {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
     )
 
-# Ops whose backward uses exact comparisons (e.g. eq) on values that were
-# cast to a lower-precision dtype.  Without emulate_precision_casts the
-# rounding that would happen at a buffer store is skipped when the cast is
-# inlined, causing the comparison to fail and producing NaN gradients.
-inductor_emulate_precision_casts = {
-    ("linalg.norm", f16),
-}
 
 # Test with one sample only for following ops
 inductor_one_sample = defaultdict(dict)
@@ -1413,12 +1406,7 @@ class TestInductorOpInfo(TestCase):
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
-                    precision_ctx = (
-                        torch._inductor.config.patch("emulate_precision_casts", True)
-                        if (op_name, dtype) in inductor_emulate_precision_casts
-                        else contextlib.nullcontext()
-                    )
-                    with context_fn(), precision_ctx:
+                    with context_fn():
                         # Base kwargs
                         adjusted_kwargs = {
                             "check_lowp": False,
