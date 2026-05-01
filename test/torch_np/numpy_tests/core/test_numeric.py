@@ -1107,6 +1107,7 @@ class TestNonzeroAndCountNonzero(TestCase):
                 np.concatenate((np.arange(10 + i, 20 + i), [20 + i * 2])),
             )
 
+    @xpassIfTorchDynamo_np  # numpy 2.x removed top-level np.AxisError
     def test_count_nonzero_axis(self):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
