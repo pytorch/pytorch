@@ -874,6 +874,8 @@ class profile(_KinetoProfile):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
+        self.step_rec_fn: prof.record_function | None = None
+
         schedule_action = self.schedule(self.step_num)
         if schedule_action == ProfilerAction.DEVICE_STOPPED:
             raise ValueError(
@@ -886,7 +888,6 @@ class profile(_KinetoProfile):
         # detect cycle boundaries (RECORD_AND_SAVE -> next) when warmup=0,
         # so DEVICE_STOPPED can exit and resume profiling on the new cycle.
         self._prev_schedule_action = schedule_action
-        self.step_rec_fn: prof.record_function | None = None
 
         self.action_map: dict[
             tuple[ProfilerAction, ProfilerAction | None], list[Any]
@@ -980,13 +981,10 @@ class profile(_KinetoProfile):
             ],
             # Unreachable transitions:
             # - prev=NONE: step()'s entry guard excludes it, and start() and
-            #   __init__ both reject DEVICE_STOPPED from a user schedule, so
-            #   self.current_action is never DEVICE_STOPPED when
-            #   _transit_action(NONE, ...) is called.
+            #   __init__ both reject DEVICE_STOPPED from a user schedule.
             # - prev=RECORD_AND_SAVE: entry guard excludes it because the
-            #   natural (R&S, *) transitions already call prepare_trace,
-            #   which is the cycle-boundary cleanup. Forcing DEVICE_STOPPED
-            #   here would skip prepare_trace and waste the next cycle.
+            #   natural (R&S, *) transitions already do the right thing to
+            #   recover.
             (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
                 partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
             ],
@@ -1033,8 +1031,6 @@ class profile(_KinetoProfile):
         # overridden it to DEVICE_STOPPED. Without this, a subsequent start()
         # would transit (NONE, DEVICE_STOPPED) — unreachable by contract —
         # and leave the profiler running with no Kineto session.
-        # _prev_schedule_action must be a validated (non-DS) schedule output;
-        # __init__ and step() reject DEVICE_STOPPED before assigning it.
         if self._prev_schedule_action == ProfilerAction.DEVICE_STOPPED:
             raise AssertionError(
                 "_prev_schedule_action must never be DEVICE_STOPPED here"
