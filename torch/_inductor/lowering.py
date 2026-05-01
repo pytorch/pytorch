@@ -25,9 +25,9 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.gemm_epilogue import (
-    GEMM_EPILOGUE_OPS,
-    _SUPPORTED_GEMM_OP_NAMES,
     _gemm_epilogue_fusion,
+    _SUPPORTED_GEMM_OP_NAMES,
+    GEMM_EPILOGUE_OPS,
     materialize_quack_epilogue,
 )
 from torch._higher_order_ops.hints_wrap import hints_wrapper
@@ -8379,6 +8379,15 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Other nodes are executed via V.graph.run_node
 
     """
+    return process_subgraph_nodes_replacing_gemm(graph_module, args)
+
+
+def process_subgraph_nodes_replacing_gemm(
+    graph_module: torch.fx.GraphModule,
+    args: list[Any],
+    gemm_op: Callable[..., Any] | None = None,
+    gemm_replacement: Any = None,
+):
     output = _MISSING
 
     for i, node in enumerate(graph_module.graph.nodes):
@@ -8391,6 +8400,13 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
+            if (
+                gemm_op is not None
+                and node.op == "call_function"
+                and node.target == gemm_op
+            ):
+                V.graph.env[node] = gemm_replacement
+                continue
             # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
             saved_current_node = V.graph.current_node
             try:
@@ -8412,14 +8428,21 @@ def hints_wrapper_lowering(subgraph, args, kwargs, hints):
 
 @register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
+    split_k = kernel_options.get("SPLIT_K", False)
+    if split_k and (backend != "TRITON" or gemm_op != torch.ops.aten.mm.default):
+        raise NotImplementedError(
+            "GEMM epilogue SPLIT_K currently supports only the TRITON aten.mm path"
+        )
     if backend == "QUACK":
-        if gemm_op not in GEMM_EPILOGUE_OPS or not GEMM_EPILOGUE_OPS[
-            gemm_op
-        ].supports_quack:
+        if (
+            gemm_op not in GEMM_EPILOGUE_OPS
+            or not GEMM_EPILOGUE_OPS[gemm_op].supports_quack
+        ):
             raise NotImplementedError(
                 "QUACK GEMM epilogue backend currently supports only "
-                f"aten.{_SUPPORTED_GEMM_OP_NAMES} excluding grouped_mm"
+                f"aten.{_SUPPORTED_GEMM_OP_NAMES}"
             )
         from torch._inductor.kernel.quack_gemm_epilogue import (
             quack_gemm_epilogue_template,
@@ -8439,12 +8462,35 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 "QUACK _scaled_mm epilogue currently supports only "
                 "(A, B, scale_a, scale_b) with explicit out_dtype"
             )
+        if gemm_op == torch.ops.aten._grouped_mm.default:
+            grouped_mm_supported = (
+                len(args) == 3
+                and len(args[0].get_size()) == 2
+                and len(args[1].get_size()) in (2, 3)
+                and gemm_kwargs.get("bias") is None
+            )
+            varlen_k_layout_supported = len(args[1].get_size()) != 2 or (
+                args[0].get_stride()[0] == 1 and args[1].get_stride()[1] == 1
+            )
+            if not grouped_mm_supported or not varlen_k_layout_supported:
+                raise NotImplementedError(
+                    "QUACK grouped_mm epilogue currently supports only 2D/3D "
+                    "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
+                )
         epilogue_key, epilogue_source = materialize_quack_epilogue(
             subgraph.graph_module
         )
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = args[gemm_op_info.mat1_index], args[gemm_op_info.mat2_index]
-        if gemm_op_info.is_batched:
+        if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
+            m, n = mat1.get_size()[0], mat2.get_size()[2]
+            size = [m, n]
+            stride = [n, 1]
+        elif gemm_op == torch.ops.aten._grouped_mm.default:
+            groups, m, n = args[2].get_size()[0], mat1.get_size()[0], mat2.get_size()[1]
+            size = [groups, m, n]
+            stride = [m * n, n, 1]
+        elif gemm_op_info.is_batched:
             b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
             size = [b, m, n]
             stride = [m * n, n, 1]
@@ -8476,7 +8522,34 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         )
         return (node,)
 
-    fusible_template_backends = {"TRITON", "CUTLASS"}
+    if split_k:
+        from torch._inductor.kernel.mm import decompose_k_fp32_subgraph_template
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        mat1, mat2 = args
+        m, k = mat1.get_size()
+        n = mat2.get_size()[1]
+        layout = ir.FixedLayout(mat1.get_device(), torch.float32, [m, n])
+        kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.float32)
+        with config.patch(max_autotune_gemm=True):
+            choices = V.choices.get_template_configs(
+                kernel_inputs,
+                [decompose_k_fp32_subgraph_template],
+                "mm",
+            )
+            acc, _ = autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        output = process_subgraph_nodes_replacing_gemm(
+            subgraph.graph_module, list(args), gemm_op, acc
+        )
+        if isinstance(output, tuple):
+            return tuple(
+                to_dtype(item, mat1.get_dtype(), use_compute_types=False)
+                for item in output
+            )
+        return to_dtype(output, mat1.get_dtype(), use_compute_types=False)
+
+    fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])
     if backend not in fusible_template_backends:
         raise NotImplementedError(
             f"GEMM epilogue backend {backend} does not support Inductor template "
@@ -8488,6 +8561,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         patch.object(config, "max_autotune_gemm", True),
         patch.object(config, "max_autotune_gemm_backends", backend),
     ]
+    if backend == "TRITON":
+        patches.append(patch.object(config.triton, "num_decompose_k_splits", 0))
     if backend == "CUTLASS":
         patches.append(
             patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)

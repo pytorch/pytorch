@@ -3852,10 +3852,12 @@ class GemmEpilogueFusionHigherOrderVariable(WrapHigherOrderVariable):
             self._HOP_NAME,
         )
 
+        from torch._higher_order_ops.gemm_epilogue import _normalize_gemm_epilogue_op
+
         body_node = p_args[0]
         lifted_args = p_args[1:]
         p_args = (
-            args[0].as_python_constant(),
+            _normalize_gemm_epilogue_op(args[0].as_python_constant()),
             body_node,
             tuple(lifted_args),
             fn_kwargs,

@@ -5,7 +5,10 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 from ..ir import get_free_symbols
-from ..kernel.mm import decompose_k_subgraph_template
+from ..kernel.mm import (
+    decompose_k_fp32_subgraph_template,
+    decompose_k_subgraph_template,
+)
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
@@ -19,6 +22,7 @@ if TYPE_CHECKING:
 
 
 @register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
+@register_template_heuristic(decompose_k_fp32_subgraph_template.uid, None, op_name="mm")
 class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
@@ -28,10 +32,20 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     "xpu",
     op_name="mm",
 )
+@register_template_heuristic(
+    decompose_k_fp32_subgraph_template.uid,
+    "xpu",
+    op_name="mm",
+)
 # Register on CUDA (both NVIDIA and ROCm/HIP)
 # Runtime enablement is controlled by config.triton.num_decompose_k_splits (0 disables)
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
+    "cuda",
+    op_name="mm",
+)
+@register_template_heuristic(
+    decompose_k_fp32_subgraph_template.uid,
     "cuda",
     op_name="mm",
 )

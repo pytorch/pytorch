@@ -65,6 +65,9 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 f", scale_a={input_args[2]}, scale_b={input_args[3]}, "
                 f"out_dtype={qtb.out_dtype!r}"
             )
+        elif qtb.gemm_op == "grouped_mm":
+            call_args = [input_args[0], input_args[1]]
+            call_kwargs = f", offs={input_args[2]}, out_dtype={qtb.out_dtype!r}"
         else:
             call_args = [input_args[1], input_args[2]]
             call_kwargs = f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}"

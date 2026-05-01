@@ -4,7 +4,6 @@ import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._C import FileCheck
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch._higher_order_ops import (
     addmm_epilogue,
     baddbmm_epilogue,
@@ -16,6 +15,7 @@ from torch._higher_order_ops import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -33,21 +33,31 @@ class GemmEpilogueFusionTests(TestCase):
                 m, n, k, groups = 64, 128, 64, 2
                 a = torch.randn(m, k * groups, device=device, dtype=dtype)
                 b = torch.randn(n, k * groups, device=device, dtype=dtype).t()
-                offs = torch.arange(k, k * groups + 1, k, device=device, dtype=torch.int32)
+                offs = torch.arange(
+                    k, k * groups + 1, k, device=device, dtype=torch.int32
+                )
             case "2d/3d":
                 groups, m, n, k = 2, 64, 128, 64
                 a = torch.randn(m * groups, k, device=device, dtype=dtype)
-                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(-2, -1)
-                offs = torch.arange(m, m * groups + 1, m, device=device, dtype=torch.int32)
+                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )
+                offs = torch.arange(
+                    m, m * groups + 1, m, device=device, dtype=torch.int32
+                )
             case "3d/2d":
                 groups, m, n, k = 2, 64, 128, 64
                 a = torch.randn(groups, m, k, device=device, dtype=dtype)
                 b = torch.randn(n * groups, k, device=device, dtype=dtype).t()
-                offs = torch.arange(n, n * groups + 1, n, device=device, dtype=torch.int32)
+                offs = torch.arange(
+                    n, n * groups + 1, n, device=device, dtype=torch.int32
+                )
             case "3d/3d":
                 groups, m, n, k = 2, 64, 128, 64
                 a = torch.randn(groups, m, k, device=device, dtype=dtype)
-                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(-2, -1)
+                b = torch.randn(groups, n, k, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )
                 offs = None
             case _:
                 raise AssertionError(f"invalid grouped_mm op shape: {op}")
@@ -59,6 +69,18 @@ class GemmEpilogueFusionTests(TestCase):
 
         actual = gemm_epilogue_fusion(
             torch.ops.aten.mm.default,
+            (a, b),
+            lambda acc: acc.relu(),
+        )
+
+        torch.testing.assert_close(actual, (a @ b).relu())
+
+    def test_shorthand_mm_eager_matches_reference(self):
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+
+        actual = gemm_epilogue_fusion(
+            torch.mm,
             (a, b),
             lambda acc: acc.relu(),
         )
@@ -115,9 +137,7 @@ class GemmEpilogueFusionTests(TestCase):
             mm_epilogue(a, b, lambda acc: acc.relu()), (a @ b).relu()
         )
         torch.testing.assert_close(
-            addmm_epilogue(
-                bias, a, b, lambda acc: acc.relu(), alpha=0.5, beta=0.25
-            ),
+            addmm_epilogue(bias, a, b, lambda acc: acc.relu(), alpha=0.5, beta=0.25),
             torch.addmm(bias, a, b, alpha=0.5, beta=0.25).relu(),
         )
         torch.testing.assert_close(
@@ -133,9 +153,7 @@ class GemmEpilogueFusionTests(TestCase):
                 alpha=0.5,
                 beta=0.25,
             ),
-            torch.baddbmm(
-                batch_bias, batch_a, batch_b, alpha=0.5, beta=0.25
-            ).relu(),
+            torch.baddbmm(batch_bias, batch_a, batch_b, alpha=0.5, beta=0.25).relu(),
         )
         torch.testing.assert_close(
             matmul_epilogue(a, b, lambda acc: acc.relu()), torch.matmul(a, b).relu()
@@ -201,9 +219,23 @@ class GemmEpilogueFusionTests(TestCase):
         gm, _ = torch._dynamo.export(fn, torch.randn(2, 3), torch.randn(3, 4))
 
         self.assertIn("gemm_epilogue_fusion", gm.code)
-        self.assertIn("{'backend': 'TRITON'}", gm.code)
+        self.assertIn("{'backend': 'TRITON', 'SPLIT_K': False}", gm.code)
         self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
         self.assertIn("relu", gm.gemm_epilogue_fusion_body_0.code)
+
+    def test_shorthand_mm_exports_as_gemm_epilogue_fusion_region(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+            )
+
+        gm, _ = torch._dynamo.export(fn, torch.randn(2, 3), torch.randn(3, 4))
+
+        self.assertIn("gemm_epilogue_fusion", gm.code)
+        self.assertIn("aten.mm.default", gm.code)
+        self.assertIn("aten.mm.default", gm.gemm_epilogue_fusion_body_0.code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
@@ -226,6 +258,77 @@ class GemmEpilogueFusionTests(TestCase):
                 FileCheck().check("triton_").check("grouped_mm").check_not(
                     "extern_kernels._grouped_mm"
                 ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_grouped_mm_relu_to_quack_hook(self):
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(
+                a,
+                b,
+                lambda acc: acc.relu(),
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        for op in ("2d/3d", "2d/2d"):
+            with self.subTest(op=op):
+                a, b, offs = self._grouped_mm_inputs(op, "cuda")
+                if op == "2d/2d":
+                    a = a.t().contiguous().t()
+                    b = b.contiguous()
+
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
+                )
+
+                torch.testing.assert_close(actual, fn(a, b, offs), atol=1e-2, rtol=1e-2)
+                FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
+                    "offs="
+                ).check_not("extern_kernels._grouped_mm").run(code)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_triton_epilogue_split_k_allows_decompose_k(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "TRITON", "SPLIT_K": True},
+            )
+
+        a = torch.randn(8, 8192, device="cuda", dtype=torch.float16)
+        b = torch.randn(8192, 8, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("decompose_k_fp32_mm").run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    @inductor_config.patch(max_autotune_gemm=False)
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_triton_epilogue_disables_decompose_k(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: acc.relu(),
+            )
+
+        a = torch.randn(16, 64, device="cuda", dtype=torch.float16)
+        b = torch.randn(64, 16, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_").check_not("decompose_k_mm").run(code)
 
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
@@ -378,12 +481,12 @@ class GemmEpilogueFusionTests(TestCase):
             )
 
         m, k, n = 128, 32, 128
-        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16).to(
-            torch.float8_e4m3fn
+        a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        b = (
+            torch.eye(n, k, device="cuda", dtype=torch.bfloat16)
+            .to(torch.float8_e4m3fn)
+            .t()
         )
-        b = torch.eye(n, k, device="cuda", dtype=torch.bfloat16).to(
-            torch.float8_e4m3fn
-        ).t()
         scale_a = to_blocked(
             torch.full(
                 (m, ceil_div(k, 32)),
@@ -412,9 +515,9 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(
             actual, fn(a, b, scale_a, scale_b), atol=0.05, rtol=1e-2
         )
-        FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
-            "scale_a="
-        ).check("scale_b=").check_not("extern_kernels._scaled_mm").run(code)
+        FileCheck().check("@cute.jit").check("gemm_epilogue(").check("scale_a=").check(
+            "scale_b="
+        ).check_not("extern_kernels._scaled_mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):
