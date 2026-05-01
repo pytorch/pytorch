@@ -3525,6 +3525,111 @@ class TestAutotuneCache(TestCase):
         _, cache_info = artifacts
         self.assertEqual(cache_info.autotune_artifacts, [expected_artifact_key])
 
+    @config.patch({"bundled_autotune_remote_cache": True})
+    def test_autotune_cache_bundler_is_compile_context_scoped(self):
+        from torch._guards import compile_context, CompileContext
+        from torch._inductor.runtime.autotune_cache import AutotuneCacheBundler
+
+        class FakeBundledCache:
+            def __init__(self):
+                self.puts = []
+
+            def get(self, key):
+                return None
+
+            def put(self, key, data):
+                self.puts.append((key, data))
+
+        cache1 = FakeBundledCache()
+        cache2 = FakeBundledCache()
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "backend_hash": "backend",
+            "bundled_autotune_remote_cache": True,
+            "is_fbcode": False,
+        }
+
+        ctx1 = CompileContext(None)
+        ctx2 = CompileContext(None)
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            side_effect=[cache1, cache2],
+        ):
+            with compile_context(ctx1):
+                AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code1")
+                AutotuneCacheBundler.put("/tmp/cache/aa/entry1.best_config", {"ctx": 1})
+
+                with compile_context(ctx2):
+                    AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code2")
+                    AutotuneCacheBundler.put(
+                        "/tmp/cache/bb/entry2.best_config", {"ctx": 2}
+                    )
+                    AutotuneCacheBundler.end_compile()
+
+                AutotuneCacheBundler.put("/tmp/cache/aa/entry3.best_config", {"ctx": 1})
+                AutotuneCacheBundler.end_compile()
+
+        self.assertEqual(len(cache1.puts), 1)
+        self.assertEqual(
+            cache1.puts[0][1],
+            {
+                "entry1.best_config": {"ctx": 1},
+                "entry3.best_config": {"ctx": 1},
+            },
+        )
+        self.assertEqual(len(cache2.puts), 1)
+        self.assertEqual(cache2.puts[0][1], {"entry2.best_config": {"ctx": 2}})
+
+    @config.patch({"bundled_autotune_remote_cache": True})
+    def test_autotune_cache_bundler_runs_in_saved_compile_context(self):
+        from torch._guards import compile_context, CompileContext
+        from torch._inductor.output_code import CompiledFxGraph
+        from torch._inductor.runtime.autotune_cache import AutotuneCacheBundler
+
+        class FakeBundledCache:
+            def __init__(self):
+                self.puts = []
+
+            def get(self, key):
+                return None
+
+            def put(self, key, data):
+                self.puts.append((key, data))
+
+        cache = FakeBundledCache()
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "backend_hash": "backend",
+            "bundled_autotune_remote_cache": True,
+            "is_fbcode": False,
+        }
+
+        graph = CompiledFxGraph.__new__(CompiledFxGraph)
+        graph.fx_kwargs = {}
+        graph._compile_context = None
+
+        def current_callable(inputs):
+            AutotuneCacheBundler.put(
+                "/tmp/cache/aa/entry.best_config", {"ctx": "saved"}
+            )
+            return inputs
+
+        graph.current_callable = current_callable
+
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            return_value=cache,
+        ):
+            with compile_context(CompileContext(None)):
+                AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code")
+                graph._set_compile_context_for_autotune_cache()
+
+            self.assertEqual(graph(["result"]), ["result"])
+
+        self.assertEqual(len(cache.puts), 1)
+        self.assertEqual(cache.puts[0][1], {"entry.best_config": {"ctx": "saved"}})
+        self.assertIsNone(graph._compile_context)
+
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"use_static_triton_launcher": True})
