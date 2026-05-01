@@ -1886,6 +1886,37 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
                 with self.assertRaises(ValueError):
                     dist.BackendConfig(config_str)
 
+    def test_parse_backend_string(self):
+        from torch.distributed.distributed_c10d import _parse_backend_string
+
+        # Simple form maps to device(s) where the backend is the registered default.
+        self.assertEqual(_parse_backend_string("nccl"), {"cuda": "nccl"})
+        self.assertEqual(_parse_backend_string("NCCL"), {"cuda": "nccl"})
+        # gloo is the default for both cpu and mps in default_device_backend_map.
+        self.assertEqual(_parse_backend_string("gloo"), {"cpu": "gloo", "mps": "gloo"})
+
+        # Merged form returns exactly what was named, no synthesized defaults.
+        self.assertEqual(
+            _parse_backend_string("cpu:gloo,cuda:nccl"),
+            {"cpu": "gloo", "cuda": "nccl"},
+        )
+        self.assertEqual(
+            _parse_backend_string("CPU:GLOO , CUDA:NCCL"),
+            {"cpu": "gloo", "cuda": "nccl"},
+        )
+        # Unknown device types in merged form are accepted (no validation here).
+        self.assertEqual(_parse_backend_string("xpu:nccl"), {"xpu": "nccl"})
+
+        # Errors.
+        with self.assertRaisesRegex(ValueError, "Unknown backend"):
+            _parse_backend_string("definitely_not_a_backend")
+        with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
+            _parse_backend_string("cpu:gloo:extra")
+        with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
+            _parse_backend_string("cpu:gloo,bare")
+        with self.assertRaisesRegex(ValueError, "Duplicate device type"):
+            _parse_backend_string("cpu:gloo,cpu:dummy")
+
     def test_init_process_group_with_multiple_backends(self):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy

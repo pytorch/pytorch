@@ -1628,6 +1628,40 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
+    @with_comms(eager_init=True, backend="cpu:gloo,cuda:nccl")
+    def test_split_group_backend_filter_w_torchcomms(self) -> None:
+        # Hybrid parent (cpu:gloo + cuda:nccl); request only cuda:nccl in the
+        # child via the `backend` arg. eager_init=True binds device_id=cuda so
+        # nccl is the parent's default backend, satisfying the C++ check that
+        # the filter must include the default backend's device.
+        ranks = list(range(self.world_size))
+        pg = dist.distributed_c10d._get_default_group()
+
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        ng = dist.split_group(pg, pg_ranks_by_dim.tolist(), backend="cuda:nccl")
+        self.assertIsNotNone(ng)
+        self.assertEqual(
+            dist.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl"
+        )
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=ng)
+        expected_split_size = self.world_size // 2
+        self.assertEqual(
+            gpu_tensor,
+            torch.ones(3, 3, device=self.device_type) * expected_split_size,
+        )
+
+        # Backend name mismatch (parent has cuda:nccl, request cuda:gloo).
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            dist.split_group(pg, [ranks], backend="cuda:gloo")
+
+        # Device type not present in parent.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(pg, [ranks], backend="xpu:nccl")
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
     @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_device_mesh_w_torchcomms(self) -> None:
         mesh_shape = (2, 2, self.world_size // 4)
@@ -1658,7 +1692,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_fake_backend_pg_names_w_torchcomms(self) -> None:
         """Fake-backend PG names must be hash-based when torchcomms is enabled.
 

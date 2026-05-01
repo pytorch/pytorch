@@ -984,7 +984,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const std::optional<std::chrono::milliseconds>& timeout,
       const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& name,
-      const std::optional<std::string>& groupDesc);
+      const std::optional<std::string>& groupDesc,
+      const std::optional<std::vector<c10::Device>>& devices = std::nullopt);
 
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.

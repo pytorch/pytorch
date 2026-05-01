@@ -158,7 +158,8 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::chrono::milliseconds>& timeout,
     const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
     const std::optional<std::string>& name,
-    const std::optional<std::string>& desc) {
+    const std::optional<std::string>& desc,
+    const std::optional<std::vector<c10::Device>>& devices) {
   TORCH_CHECK(
       !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
@@ -169,6 +170,26 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
+  std::set<c10::DeviceType> deviceTypeFilter;
+  for (const auto& d : devices.value_or(std::vector<c10::Device>{})) {
+    deviceTypeFilter.insert(d.type());
+  }
+  if (!deviceTypeFilter.empty()) {
+    for (const auto& deviceType : deviceTypeFilter) {
+      TORCH_CHECK(
+          deviceTypeToBackendType_.count(deviceType) != 0,
+          "Requested device type for splitGroup is not present in the parent process group: ",
+          deviceType);
+    }
+    auto defaultBackendIt = std::find_if(
+        deviceTypeToBackendType_.begin(),
+        deviceTypeToBackendType_.end(),
+        [&](const auto& p) { return p.second == backendType_; });
+    TORCH_CHECK(
+        defaultBackendIt != deviceTypeToBackendType_.end() &&
+            deviceTypeFilter.count(defaultBackendIt->first) != 0,
+        "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
   std::vector<int> sorted_ranks = ranks;
   std::sort(sorted_ranks.begin(), sorted_ranks.end());
   c10::intrusive_ptr<ProcessGroup> newGroup;
@@ -184,6 +205,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
+
+    if (!deviceTypeFilter.empty() && deviceTypeFilter.count(deviceType) == 0) {
+      continue;
+    }
 
     auto parentBackend = getBackend(deviceType);
     auto backendOpts =

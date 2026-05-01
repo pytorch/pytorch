@@ -156,7 +156,8 @@ class PyProcessGroup : public ProcessGroup {
       const std::optional<std::chrono::milliseconds>& timeout,
       const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& group_name,
-      const std::optional<std::string>& group_desc) override {
+      const std::optional<std::string>& group_desc,
+      const std::optional<std::vector<c10::Device>>& devices) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup>, /* Return type */
         ProcessGroup, /* Parent class */
@@ -165,7 +166,8 @@ class PyProcessGroup : public ProcessGroup {
         timeout,
         opts,
         group_name,
-        group_desc);
+        group_desc,
+        devices);
   }
 
   c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
