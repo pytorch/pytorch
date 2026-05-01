@@ -398,7 +398,8 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
 static void check_mps_shape(MPSShape* shape) {
   for (NSNumber* elem in shape) {
     const auto val = [elem longValue];
-    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(), "MPSGraph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(),
+                "MPSGraph does not support tensor dims larger than INT_MAX");
   }
 }
 
