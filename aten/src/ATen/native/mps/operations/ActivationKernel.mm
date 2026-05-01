@@ -133,7 +133,7 @@ static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& n
 
 static void gelu_kernel(TensorIteratorBase& iter, GeluType approximate) {
   const char* name = (approximate == GeluType::Tanh) ? "gelu_tanh" : "gelu";
-  lib.exec_unary_kernel(iter, name, /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  lib.exec_unary_kernel(iter, name);
 }
 
 static void gelu_backward_kernel(TensorIteratorBase& iter, GeluType approximate) {

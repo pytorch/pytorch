@@ -256,14 +256,6 @@ REGISTER_UNARY_OP(gelu_tanh, float, float);
 REGISTER_UNARY_OP(gelu_tanh, half, half);
 REGISTER_UNARY_OP(gelu_tanh, bfloat, bfloat);
 
-REGISTER_UNARY_VEC4_OP(gelu, float, float);
-REGISTER_UNARY_VEC4_OP(gelu, half, half);
-REGISTER_UNARY_VEC4_OP(gelu, bfloat, bfloat);
-
-REGISTER_UNARY_VEC4_OP(gelu_tanh, float, float);
-REGISTER_UNARY_VEC4_OP(gelu_tanh, half, half);
-REGISTER_UNARY_VEC4_OP(gelu_tanh, bfloat, bfloat);
-
 struct gelu_backward_functor {
   template <typename T>
   inline T operator()(const T grad, const T self) {
