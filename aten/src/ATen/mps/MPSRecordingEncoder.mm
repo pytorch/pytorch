@@ -8,8 +8,7 @@
   std::unique_ptr<at::mps::MPSStream::CapturedMetalKernel> _pending;
 }
 
-- (instancetype)initWithEncoder:(id<MTLComputeCommandEncoder>)encoder
-                         stream:(at::mps::MPSStream*)stream {
+- (instancetype)initWithEncoder:(id<MTLComputeCommandEncoder>)encoder stream:(at::mps::MPSStream*)stream {
   if ((self = [super init])) {
     _inner = [encoder retain];
     _stream = stream;
@@ -61,28 +60,26 @@
   if (_pending) {
     [buffer retain];
     _pending->buffers.push_back({
-      (__bridge void*)buffer,
-      static_cast<size_t>(offset),
-      static_cast<unsigned>(index),
-      static_cast<size_t>([buffer length]),
+        (__bridge void*)buffer,
+        static_cast<size_t>(offset),
+        static_cast<unsigned>(index),
+        static_cast<size_t>([buffer length]),
     });
   }
   [_inner setBuffer:buffer offset:offset atIndex:index];
 }
 
-- (void)setBytes:(const void *)bytes length:(NSUInteger)length atIndex:(NSUInteger)index {
+- (void)setBytes:(const void*)bytes length:(NSUInteger)length atIndex:(NSUInteger)index {
   if (_pending) {
     at::mps::MPSStream::CapturedMetalKernel::BytesBinding b;
-    b.data.assign(static_cast<const uint8_t*>(bytes),
-                  static_cast<const uint8_t*>(bytes) + length);
+    b.data.assign(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + length);
     b.index = static_cast<unsigned>(index);
     _pending->bytes.push_back(std::move(b));
   }
   [_inner setBytes:bytes length:length atIndex:index];
 }
 
-- (void)dispatchThreads:(MTLSize)threadsPerGrid
-  threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup {
+- (void)dispatchThreads:(MTLSize)threadsPerGrid threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup {
   if (_pending) {
     _pending->gridX = threadsPerGrid.width;
     _pending->gridY = threadsPerGrid.height;
@@ -96,8 +93,7 @@
   [_inner dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 }
 
-- (void)dispatchThreadgroups:(MTLSize)threadgroupsPerGrid
-       threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup {
+- (void)dispatchThreadgroups:(MTLSize)threadgroupsPerGrid threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup {
   if (_pending) {
     _pending->gridX = threadgroupsPerGrid.width;
     _pending->gridY = threadgroupsPerGrid.height;

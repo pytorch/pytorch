@@ -546,19 +546,19 @@ void initModule(PyObject* module) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
   m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
-  m.def("_mps_graphCaptureBegin", []() {
+  m.def("_mps_metalGraphCaptureBegin", []() {
     at::mps::getDefaultMPSStream()->captureBegin();
   });
-  m.def("_mps_graphCaptureEnd", []() {
+  m.def("_mps_metalGraphCaptureEnd", []() {
     at::mps::getDefaultMPSStream()->captureEnd();
   });
-  m.def("_mps_graphCaptureReset", []() {
+  m.def("_mps_metalGraphCaptureReset", []() {
     at::mps::getDefaultMPSStream()->captureReset();
   });
-  m.def("_mps_graphCapturedStepCount", []() {
+  m.def("_mps_metalGraphCapturedStepCount", []() {
     return at::mps::getDefaultMPSStream()->capturedStepCount();
   });
-  m.def("_mps_graphReplay", []() {
+  m.def("_mps_metalGraphReplay", []() {
     at::mps::getDefaultMPSStream()->replay();
   });
   m.def("_mps_get_name", []() {

@@ -2,8 +2,8 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/mps/MPSStream.h>
 #import <ATen/mps/MPSRecordingEncoder.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/metal/error.h>
 
 @interface MPSGraphExecutionDescriptor ()
@@ -74,8 +74,7 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   }
   if (_captureMode.load(std::memory_order_acquire)) {
     if (!_recordingEncoder) {
-      _recordingEncoder = [[MPSRecordingEncoder alloc] initWithEncoder:_commandEncoder
-                                                               stream:this];
+      _recordingEncoder = [[MPSRecordingEncoder alloc] initWithEncoder:_commandEncoder stream:this];
     }
     return (id<MTLComputeCommandEncoder>)_recordingEncoder;
   }
@@ -253,8 +252,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
             [[NSMutableDictionary alloc] initWithCapacity:[feeds count]];
         for (MPSGraphTensor* t in feeds) {
           MPSGraphTensorData* tdata = (MPSGraphTensorData*)feeds[t];
-          feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape
-                                                            dataType:tdata.dataType] autorelease];
+          feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape dataType:tdata.dataType] autorelease];
         }
         exe = [[mpsGraph compileWithDevice:[MPSGraphDevice deviceWithMTLDevice:device()]
                                      feeds:feedShapes
@@ -268,13 +266,11 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       // Build ordered input/output arrays using the stable ordering from the executable.
       NSArray<MPSGraphTensor*>* feedTensors = exe.feedTensors;
       NSArray<MPSGraphTensor*>* targetTensors = exe.targetTensors;
-      NSMutableArray<MPSGraphTensorData*>* inputsArray =
-          [[NSMutableArray alloc] initWithCapacity:feedTensors.count];
+      NSMutableArray<MPSGraphTensorData*>* inputsArray = [[NSMutableArray alloc] initWithCapacity:feedTensors.count];
       for (MPSGraphTensor* t in feedTensors) {
         [inputsArray addObject:(MPSGraphTensorData*)feeds[t]];
       }
-      NSMutableArray<MPSGraphTensorData*>* resultsArray =
-          [[NSMutableArray alloc] initWithCapacity:targetTensors.count];
+      NSMutableArray<MPSGraphTensorData*>* resultsArray = [[NSMutableArray alloc] initWithCapacity:targetTensors.count];
       for (MPSGraphTensor* t in targetTensors) {
         [resultsArray addObject:(MPSGraphTensorData*)results[t]];
       }
@@ -386,8 +382,9 @@ void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> ker
 
 void MPSStream::replay() {
   if (_capturedSteps.empty()) {
-    TORCH_WARN("torch.mps.graph_replay() called with no captured steps. "
-               "Did the capture block contain any MPS ops?");
+    TORCH_WARN(
+        "torch.mps.metal_graph_replay() called with no captured steps. "
+        "Did the capture block contain any MPS ops?");
     return;
   }
   dispatch_sync_with_rethrow(_serialQueue, ^() {
@@ -398,10 +395,7 @@ void MPSStream::replay() {
         MPSGraphExecutable* exe = (__bridge MPSGraphExecutable*)step.exe;
         NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
         NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
-        [exe encodeToCommandBuffer:commandBuffer()
-                       inputsArray:ins
-                      resultsArray:outs
-               executionDescriptor:nil];
+        [exe encodeToCommandBuffer:commandBuffer() inputsArray:ins resultsArray:outs executionDescriptor:nil];
       } else {
         auto& mk = *step.metalKernel;
         auto enc = commandEncoder();
@@ -409,12 +403,15 @@ void MPSStream::replay() {
         [enc setComputePipelineState:pso];
         for (auto& b : mk.buffers) {
           auto mtlBuf = (__bridge id<MTLBuffer>)b.buffer;
-          TORCH_CHECK(
-            mtlBuf.length == b.bufferLength,
-            "Graph replay: buffer at index ", b.index,
-            " changed size from ", b.bufferLength, " to ", mtlBuf.length,
-            ". Tensor storage was reallocated between capture and replay. "
-            "Use .copy_() to update tensor data in-place.");
+          TORCH_CHECK(mtlBuf.length == b.bufferLength,
+                      "Graph replay: buffer at index ",
+                      b.index,
+                      " changed size from ",
+                      b.bufferLength,
+                      " to ",
+                      mtlBuf.length,
+                      ". Tensor storage was reallocated between capture and replay. "
+                      "Use .copy_() to update tensor data in-place.");
           [enc setBuffer:mtlBuf offset:b.offset atIndex:b.index];
         }
         for (auto& b : mk.bytes) {

@@ -234,21 +234,25 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 from contextlib import contextmanager
 
 
-class MPSGraph:
-    r"""Wraps a captured MPS graph for repeated replay.
+class MetalGraph:
+    r"""Wraps a captured Metal graph for repeated replay.
+
+    Records all MPS dispatches (MPSGraph ops, raw Metal kernels) into a
+    replayable sequence. Named MetalGraph because it captures across all
+    Metal dispatch paths, not just MPSGraph.
 
     Mirrors the interface of :class:`torch.cuda.CUDAGraph`.
 
     Usage::
 
-        g = torch.mps.MPSGraph()
+        g = torch.mps.MetalGraph()
 
-        with torch.mps.graph(g):
-            out = model(x)          # capture pass — ops recorded, outputs valid
+        with torch.mps.metal_graph(g):
+            out = model(x)  # capture pass - ops recorded, outputs valid
 
         for batch_data in loader:
-            x.copy_(batch_data)     # update input in-place
-            g.replay()              # re-run captured ops in a single dispatch
+            x.copy_(batch_data)  # update input in-place
+            g.replay()  # re-run captured ops in a single dispatch
             results.append(out.cpu())
 
     Constraints (identical to :class:`torch.cuda.CUDAGraph`):
@@ -260,11 +264,11 @@ class MPSGraph:
 
     def capture_begin(self) -> None:
         """Begin recording MPS ops into this graph."""
-        torch._C._mps_graphCaptureBegin()
+        torch._C._mps_metalGraphCaptureBegin()
 
     def capture_end(self) -> None:
         """Stop recording and finalise the captured graph."""
-        torch._C._mps_graphCaptureEnd()
+        torch._C._mps_metalGraphCaptureEnd()
 
     def replay(self) -> None:
         """Re-encode all captured ops in a single ``dispatch_sync``.
@@ -273,43 +277,43 @@ class MPSGraph:
         If no ops were captured (e.g. the model uses only non-capturable paths)
         a warning is issued and the call is a no-op.
         """
-        torch._C._mps_graphReplay()
+        torch._C._mps_metalGraphReplay()
 
     def reset(self) -> None:
         """Discard the captured graph so a new capture can be recorded."""
-        torch._C._mps_graphCaptureReset()
+        torch._C._mps_metalGraphCaptureReset()
 
 
 @contextmanager
-def graph(mpsgraph: MPSGraph):
-    r"""Context manager that captures MPS ops into *mpsgraph* for later replay.
+def metal_graph(metalgraph: MetalGraph):
+    r"""Context manager that captures MPS ops into *metalgraph* for later replay.
 
     Usage::
 
-        g = torch.mps.MPSGraph()
-        with torch.mps.graph(g):
+        g = torch.mps.MetalGraph()
+        with torch.mps.metal_graph(g):
             out = model(x)
         g.replay()
 
-    See :class:`MPSGraph` for constraints.
+    See :class:`MetalGraph` for constraints.
     """
-    mpsgraph.capture_begin()
+    metalgraph.capture_begin()
     try:
         yield
     finally:
-        mpsgraph.capture_end()
+        metalgraph.capture_end()
 
 
 @contextmanager
-def graph_capture():
-    r"""Context manager that records a sequence of MPS (MPSGraph) operations
-    for later replay via :func:`graph_replay`.
+def metal_graph_capture():
+    r"""Context manager that records a sequence of MPS operations
+    for later replay via :func:`metal_graph_replay`.
 
-    On entry the stream begins recording; every MPSGraph op executed inside
+    On entry the stream begins recording; every op executed inside
     the block is encoded normally (outputs are valid) and its executable +
-    buffer bindings are saved.  On exit recording stops.
+    buffer bindings are saved. On exit recording stops.
 
-    Subsequent calls to :func:`graph_replay` re-encode all saved ops in a
+    Subsequent calls to :func:`metal_graph_replay` re-encode all saved ops in a
     single ``dispatch_sync`` block, collapsing N per-op dispatches to one and
     eliminating their CPU overhead.
 
@@ -317,7 +321,7 @@ def graph_capture():
 
     * Tensor shapes must not change between the capture pass and replays.
     * Input data must be updated **in-place** via ``.copy_()`` before each
-      replay — do **not** create new tensors or reassign variables.
+      replay - do **not** create new tensors or reassign variables.
     * MPS profiling must be disabled during capture.
 
     Example::
@@ -325,29 +329,29 @@ def graph_capture():
         model.eval()
         x = torch.randn(batch, seq, d_model, device="mps")
 
-        with torch.mps.graph_capture():
-            out = model(x)          # runs once; ops recorded
+        with torch.mps.metal_graph_capture():
+            out = model(x)  # runs once; ops recorded
 
         for batch_data in loader:
-            x.copy_(batch_data)     # update input in-place
-            torch.mps.graph_replay()
+            x.copy_(batch_data)  # update input in-place
+            torch.mps.metal_graph_replay()
             results.append(out.cpu())
     """
-    torch._C._mps_graphCaptureBegin()
+    torch._C._mps_metalGraphCaptureBegin()
     try:
         yield
     finally:
-        torch._C._mps_graphCaptureEnd()
+        torch._C._mps_metalGraphCaptureEnd()
 
 
-def graph_replay() -> None:
-    r"""Replays the ops recorded by the most recent :func:`graph_capture` block.
+def metal_graph_replay() -> None:
+    r"""Replays the ops recorded by the most recent :func:`metal_graph_capture` block.
 
-    All captured MPSGraph ops are encoded to the command buffer inside a single
-    ``dispatch_sync``, eliminating per-op dispatch overhead.  Input tensors must
+    All captured ops are encoded to the command buffer inside a single
+    ``dispatch_sync``, eliminating per-op dispatch overhead. Input tensors must
     have been updated in-place before calling this function.
     """
-    torch._C._mps_graphReplay()
+    torch._C._mps_metalGraphReplay()
 
 
 from . import profiler
@@ -359,11 +363,11 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
-    "graph",
-    "graph_capture",
-    "graph_replay",
+    "metal_graph",
+    "metal_graph_capture",
+    "metal_graph_replay",
     "manual_seed",
-    "MPSGraph",
+    "MetalGraph",
     "seed",
     "set_rng_state",
     "synchronize",
