@@ -66,6 +66,7 @@ from ..scheduler import (
     SchedulerNode,
 )
 from ..shape_propagation import get_broadcasted_shape
+from ..stream_utils import get_raw_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
@@ -5465,7 +5466,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
