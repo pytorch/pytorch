@@ -2657,6 +2657,7 @@ class TestRollaxis(TestCase):
         (3, 4): (1, 2, 3, 4),
     }
 
+    @xpassIfTorchDynamo_np  # numpy 2.x removed top-level np.AxisError
     def test_exceptions(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4)
         assert_raises(np.AxisError, np.rollaxis, a, -5, 0)
@@ -2750,6 +2751,7 @@ class TestMoveaxis(TestCase):
             actual = np.moveaxis(x, source, destination).shape
             assert_(actual, expected)
 
+    @xpassIfTorchDynamo_np  # numpy 2.x removed top-level np.AxisError
     def test_errors(self):
         x = np.random.randn(1, 2, 3)
         assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
@@ -2854,6 +2856,7 @@ class TestCross(TestCase):
         assert_equal(np.cross(v.T, u), -z)
         assert_equal(np.cross(u, u), 0)
 
+    @xpassIfTorchDynamo_np  # numpy 2.x removed top-level np.AxisError
     def test_broadcasting_shapes(self):
         u = np.ones((2, 1, 3))
         v = np.ones((5, 3))
