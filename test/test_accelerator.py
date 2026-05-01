@@ -98,6 +98,18 @@ class TestAccelerator(TestCase):
             self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
 
+    def test_device_index_fullgraph(self):
+        def fn(x):
+            with torch.accelerator.device_index(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device=0)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_multi_device_context_manager(self):
         src_device = 0
