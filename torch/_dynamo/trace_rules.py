@@ -193,6 +193,13 @@ manual_torch_name_rule_map: dict[
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
+    "torch._check_with": TorchInGraphFunctionVariable,
+    "torch._check_index": TorchInGraphFunctionVariable,
+    "torch._check_value": TorchInGraphFunctionVariable,
+    "torch._check_type": TorchInGraphFunctionVariable,
+    "torch._check_not_implemented": TorchInGraphFunctionVariable,
+    "torch._check_tensor_all_with": TorchInGraphFunctionVariable,
+    "torch._check_tensor_all": TorchInGraphFunctionVariable,
     "torch._dynamo.decorators.override_optimization_hint": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state`, `torch.set_rng_state`, and
@@ -2385,14 +2392,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.__future__.set_overwrite_module_params_on_conversion",
         "torch.__getattr__",
         "torch._assert",
-        "torch._check_index",
         "torch._check_is_size",
-        "torch._check_not_implemented",
-        "torch._check_tensor_all_with",
-        "torch._check_tensor_all",
-        "torch._check_type",
-        "torch._check_value",
-        "torch._check_with",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",
@@ -3453,8 +3453,6 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
-    if not config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
@@ -3522,8 +3520,6 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    if not config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # By default, all functions under these modules are skipped.
