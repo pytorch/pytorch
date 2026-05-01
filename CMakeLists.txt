@@ -1487,5 +1487,11 @@ endif()
 # setuptools builds.
 include(cmake/FileMirroring.cmake)
 
+# Package data: install non-Python data files (type stubs, templates,
+# headers, etc.) into the torch package.  Previously declared via
+# setup.py package_data; now consolidated here for both scikit-build-core
+# and setuptools builds.
+include(cmake/PackageData.cmake)
+
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
