@@ -41,38 +41,37 @@ std::vector<uint8_t> pg_all_gather_bytes(
     size_t nbytes,
     int device_idx) {
   TORCH_CHECK(pg != nullptr, "pg_all_gather_bytes: null ProcessGroup");
-  const int world_size = pg->getSize();
+  const auto world_size = pg->getSize();
   TORCH_CHECK(world_size > 0);
+  const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
 
   c10::cuda::CUDAGuard guard(device_idx);
+  auto stream = at::cuda::getCurrentCUDAStream(device_idx);
   auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
   auto opts =
       at::TensorOptions().dtype(at::kByte).device(device).pinned_memory(false);
 
   at::Tensor in_buf = at::empty({static_cast<int64_t>(nbytes)}, opts);
   if (nbytes > 0) {
-    AT_CUDA_CHECK(cudaMemcpy(
-        in_buf.data_ptr(), data, nbytes, cudaMemcpyHostToDevice));
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        in_buf.data_ptr(), data, nbytes, cudaMemcpyHostToDevice, stream));
   }
-  at::Tensor out_buf =
-      at::empty({static_cast<int64_t>(world_size * nbytes)}, opts);
+  at::Tensor out_buf = at::empty({static_cast<int64_t>(total_bytes)}, opts);
 
   c10d::AllgatherOptions ag_opts;
   auto work = pg->_allgather_base(out_buf, in_buf, ag_opts);
   work->wait();
-  // wait() synchronizes the current stream with the NCCL stream; fence the
-  // device so the subsequent D2H copy observes the gathered payload
-  // regardless of which stream the copy is scheduled on.
-  AT_CUDA_CHECK(cudaDeviceSynchronize());
 
-  std::vector<uint8_t> flat(world_size * nbytes);
+  std::vector<uint8_t> flat(total_bytes);
   if (nbytes > 0) {
-    AT_CUDA_CHECK(cudaMemcpy(
+    AT_CUDA_CHECK(cudaMemcpyAsync(
         flat.data(),
         out_buf.data_ptr(),
-        world_size * nbytes,
-        cudaMemcpyDeviceToHost));
+        total_bytes,
+        cudaMemcpyDeviceToHost,
+        stream));
   }
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   return flat;
 }
 

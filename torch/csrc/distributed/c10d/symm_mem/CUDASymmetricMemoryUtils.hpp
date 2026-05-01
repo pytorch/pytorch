@@ -43,17 +43,19 @@ std::vector<T> pg_all_gather(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     int device_idx,
     const T& val) {
-  static_assert(std::is_trivially_copyable_v<T>);
+  static_assert(
+      std::is_trivially_copyable_v<T>,
+      "pg_all_gather requires a trivially copyable type");
   auto flat = pg_all_gather_bytes(pg, &val, sizeof(T), device_idx);
-  const int world_size = pg->getSize();
-  TORCH_CHECK(flat.size() == static_cast<size_t>(world_size) * sizeof(T));
-  std::vector<T> out;
-  out.reserve(world_size);
-  for (int r = 0; r < world_size; ++r) {
-    T v{};
-    std::memcpy(&v, flat.data() + r * sizeof(T), sizeof(T));
-    out.push_back(v);
-  }
+  const auto world_size = pg->getSize();
+  TORCH_CHECK(
+      flat.size() == static_cast<size_t>(world_size) * sizeof(T),
+      "pg_all_gather: expected ",
+      world_size * sizeof(T),
+      " bytes but got ",
+      flat.size());
+  std::vector<T> out(world_size);
+  std::memcpy(out.data(), flat.data(), flat.size());
   return out;
 }
 
