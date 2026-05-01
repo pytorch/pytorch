@@ -2884,7 +2884,14 @@ class TestPercentile(TestCase):
         o = np.ones((1,))
         np.percentile(d, 5, None, o, False, "linear")
 
-    @xpassIfTorchDynamo_np  # (reason="TODO: implement")
+    # numpy 2.x raises TypeError for complex percentile, so the @xfail would
+    # XPASS under TEST_WITH_TORCHDYNAMO + numpy 2.x. Skip there to keep the
+    # @xfail correct for eager (torch._numpy) and numpy 1.x dynamo.
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and np.__version__[0] == "2",
+        reason="numpy 2.x raises on complex percentile, would XPASS the @xfail",
+    )
+    @xfail  # (reason="TODO: implement")
     def test_complex(self):
         arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
         assert_raises(TypeError, np.percentile, arr_c, 0.5)
