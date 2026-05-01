@@ -10,6 +10,7 @@
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -202,9 +203,12 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
       bool is_nested,
       std::optional<at::ScalarType> grad_dtype) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
-        options, meta_shape, is_tensor_subclass, is_nested, grad_dtype);
+        options,
+        MetadataShape{std::in_place_type<SymIntSmallVec>, shape},
+        is_tensor_subclass,
+        is_nested,
+        grad_dtype);
     return input_nr;
   }
 
@@ -457,15 +461,22 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     });
   }
 
-  /// Returns the `PyObject` stored for this `Node` (for Python
-  /// interaction).
-  PyObject* pyobj() const noexcept {
-    return pyobj_;
+  /// Returns the PyObjectSlot for thread-safe Python object access.
+  c10::impl::PyObjectSlot* pyobj_slot() noexcept {
+    return &pyobj_slot_;
+  }
+  const c10::impl::PyObjectSlot* pyobj_slot() const noexcept {
+    return &pyobj_slot_;
   }
 
-  /// Sets the `PyObject` stored for this `Node` (for Python interaction).
-  void set_pyobj(PyObject* pyobj) noexcept {
-    pyobj_ = pyobj;
+  void incref_pyobject() const noexcept override {
+    pyobj_slot_.incref();
+  }
+  void decref_pyobject() const noexcept override {
+    pyobj_slot_.decref();
+  }
+  bool try_incref_pyobject() const noexcept override {
+    return pyobj_slot_.try_incref();
   }
 
   /// Returns the anomaly metadata stored for this `Node`.
@@ -673,7 +684,7 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   std::mutex mutex_;
 
   edge_list next_edges_;
-  PyObject* pyobj_ = nullptr; // weak reference
+  c10::impl::PyObjectSlot pyobj_slot_;
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
 
   // NOTE [Hooks ordering]
@@ -703,3 +714,17 @@ struct TraceableFunction : public Node {
 };
 
 } // namespace torch::autograd
+
+// Enable PyObject support for intrusive_ptr<Node> so that the refcount
+// machinery calls incref_pyobject/decref_pyobject on transitions.
+namespace c10::detail {
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<torch::autograd::Node, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+} // namespace c10::detail

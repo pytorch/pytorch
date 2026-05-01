@@ -43,6 +43,19 @@ class TestTSan(TestCase):
 
         run_concurrently([profile_work] + [work] * 8)
 
+    def test_concurrent_grad_fn(self):
+        # Concurrent access to tensor.grad_fn exercises the atomic
+        # PyObjectSlot on Node that lazily creates the Python wrapper.
+        def access_grad_fn(tensor):
+            return tensor.grad_fn
+
+        for _ in range(10):
+            x = torch.randn(4, requires_grad=True)
+            y = x * 2 + 1
+            grad_fns = run_concurrently(access_grad_fn, args=(y,), num_threads=4)
+            for gf in grad_fns:
+                self.assertIs(gf, y.grad_fn)
+
 
 if __name__ == "__main__":
     run_tests()

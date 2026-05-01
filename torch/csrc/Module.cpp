@@ -1686,7 +1686,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   torch::autograd::Node* node = nullptr;
   c10::intrusive_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata;
     node = node_sp.get();
   } else {
     node =
