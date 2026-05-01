@@ -74,21 +74,30 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             wrapper.quack_gemm_epilogue_defs.add(qtb.epilogue_name)
 
         input_args = [input.codegen_reference() for input in qtb.inputs]
+        epilogue_args = [input_args[i] for i in qtb.epilogue_arg_indices]
+        epilogue_kwargs = ""
+        if epilogue_args:
+            epilogue_kwargs = (
+                f", epilogue_args=({', '.join(epilogue_args)},), "
+                f"epilogue_arg_kinds={qtb.epilogue_arg_kinds!r}"
+            )
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
-            call_kwargs = ""
+            call_kwargs = epilogue_kwargs
         elif qtb.gemm_op == "scaled_mm":
             call_args = [input_args[0], input_args[1]]
             call_kwargs = (
                 f", scale_a={input_args[2]}, scale_b={input_args[3]}, "
-                f"out_dtype={qtb.out_dtype!r}"
+                f"out_dtype={qtb.out_dtype!r}{epilogue_kwargs}"
             )
         elif qtb.gemm_op == "grouped_mm":
             call_args = [input_args[0], input_args[1]]
-            call_kwargs = f", offs={input_args[2]}, out_dtype={qtb.out_dtype!r}"
+            call_kwargs = (
+                f", offs={input_args[2]}, out_dtype={qtb.out_dtype!r}{epilogue_kwargs}"
+            )
         else:
             call_args = [input_args[1], input_args[2]]
-            call_kwargs = f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}"
+            call_kwargs = f", C={input_args[0]}, alpha={qtb.alpha!r}, beta={qtb.beta!r}{epilogue_kwargs}"
         wrapper.writeline(
             f"{qtb.get_name()} = gemm_epilogue("
             f"{call_args[0]}, {call_args[1]}, "

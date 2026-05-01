@@ -29,6 +29,8 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         alpha = kwargs.pop("alpha")
         beta = kwargs.pop("beta")
         out_dtype = kwargs.pop("out_dtype", None)
+        epilogue_arg_indices = kwargs.pop("epilogue_arg_indices", ())
+        epilogue_arg_kinds = kwargs.pop("epilogue_arg_kinds", ())
         return QuackGemmEpilogueTemplateCaller(
             name=f"quack_gemm_epilogue_{next(self.index_counter)}",
             input_nodes=input_nodes,
@@ -39,6 +41,8 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             alpha=alpha,
             beta=beta,
             out_dtype=out_dtype,
+            epilogue_arg_indices=epilogue_arg_indices,
+            epilogue_arg_kinds=epilogue_arg_kinds,
         )
 
 
@@ -54,6 +58,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         alpha: float,
         beta: float,
         out_dtype: Any | None = None,
+        epilogue_arg_indices: tuple[int, ...] = (),
+        epilogue_arg_kinds: tuple[str, ...] = (),
     ) -> None:
         super().__init__(
             name=name,
@@ -67,6 +73,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.alpha = alpha
         self.beta = beta
         self.out_dtype = out_dtype
+        self.epilogue_arg_indices = epilogue_arg_indices
+        self.epilogue_arg_kinds = epilogue_arg_kinds
 
     def benchmark(self, *args: Any, out: Any) -> float:
         return 0.0
@@ -82,6 +90,8 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 alpha=self.alpha,
                 beta=self.beta,
                 out_dtype=self.out_dtype,
+                epilogue_arg_indices=self.epilogue_arg_indices,
+                epilogue_arg_kinds=self.epilogue_arg_kinds,
             )
         )
 
@@ -94,6 +104,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
     def hash_key(self) -> str:
         return code_hash(
             f"{self.gemm_op}\n{self.alpha}\n{self.beta}\n{self.out_dtype}\n"
+            f"{self.epilogue_arg_indices}\n{self.epilogue_arg_kinds}\n"
             f"{self.epilogue_name}\n{self.epilogue_source}"
         )
 

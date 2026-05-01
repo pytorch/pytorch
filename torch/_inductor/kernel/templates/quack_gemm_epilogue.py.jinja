@@ -4,7 +4,7 @@ from cutlass._mlir.dialects import math as mlir_math
 import operator
 
 @cute.jit
-def {{ epilogue_name }}(acc):
+def {{ epilogue_name }}(acc{% for arg in aux_args %}, {{ arg }}{% endfor %}):
 {% for line in body_lines %}
     {{ line }}
 {% endfor %}

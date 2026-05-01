@@ -6020,6 +6020,8 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         alpha: float,
         beta: float,
         out_dtype: Any | None = None,
+        epilogue_arg_indices: Sequence[int] = (),
+        epilogue_arg_kinds: Sequence[str] = (),
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render=None)
         self.epilogue_name = epilogue_name
@@ -6028,6 +6030,8 @@ class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
         self.alpha = alpha
         self.beta = beta
         self.out_dtype = out_dtype
+        self.epilogue_arg_indices = tuple(epilogue_arg_indices)
+        self.epilogue_arg_kinds = tuple(epilogue_arg_kinds)
 
     def should_allocate(self) -> bool:
         return False
