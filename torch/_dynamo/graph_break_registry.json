@@ -4750,14 +4750,6 @@
       ]
     }
   ],
-  "GB7444": [
-    {
-      "Gb_type": "register_hook with stride-dependent code",
-      "Context": "Hook accesses grad metadata (e.g. is_contiguous)",
-      "Explanation": "register_hook callbacks that branch on gradient metadata are not supported because grad properties are unknown at trace time.",
-      "Hints": []
-    }
-  ],
   "GB0355": [
     {
       "Gb_type": "non-single Tensor return unsupported",
