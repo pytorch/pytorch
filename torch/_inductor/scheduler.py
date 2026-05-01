@@ -11,12 +11,23 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
+import time
 import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    NamedTuple,
+    overload,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+)
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -137,6 +148,41 @@ class PendingFusion:
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
+
+
+class _LocalEntry(NamedTuple):
+    """One row of the post-rewrite slice the gate builds.
+
+    `cur` is the step the node currently wants to run at, `baseline`
+    is its original index (used to break ties when sorting), and
+    `node` is the slice member itself.
+    """
+
+    cur: int
+    baseline: int
+    node: BaseSchedulerNode
+
+
+@dataclasses.dataclass(slots=True)
+class ComboKernelMemoryContext:
+    """Shared state used by the memory-aware combo gate.
+
+    Candidate windows are evaluated independently against the original
+    schedule. Earlier accepted combos only contribute through `running_peak`,
+    which caps the cumulative peak drift from the original graph.
+    """
+
+    graph_outputs: OrderedSet[str]
+    node_to_idx: dict[BaseSchedulerNode, int]
+    baseline_peak: int = 0
+    # Running peak after earlier accepts. Bumped on each accept; the
+    # gate's threshold check still compares against `baseline_peak`
+    # (the original) so total drift is capped.
+    running_peak: int = 0
+    # Live bytes before each step in the original schedule. Combo windows
+    # are evaluated independently, so a window's entry memory is the
+    # precomputed baseline live-in at `region_start`.
+    baseline_live_before: list[int] = dataclasses.field(default_factory=list)
 
 
 class MixOrderReduction:
@@ -5077,49 +5123,122 @@ class Scheduler:
         nodes = self.topological_sort_schedule(nodes)
         return nodes
 
-    def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
+    @staticmethod
+    def _distance_windows(
+        nodes: list[BaseSchedulerNode],
+        node_to_idx: dict[BaseSchedulerNode, int],
+        max_distance: int,
+    ) -> Iterator[list[BaseSchedulerNode]]:
+        """Sort `nodes` by baseline index, then yield groups whose span
+        is at most `max_distance`. Start a new window whenever the next
+        node would push the span past the limit. Negative `max_distance`
+        means "no limit" — yield everything as one window.
         """
-        Groups parallel nodes
+        ordered = sorted(nodes, key=lambda n: node_to_idx[n])
+        if max_distance < 0:
+            if ordered:
+                yield ordered
+            return
+        window: list[BaseSchedulerNode] = []
+        window_min = -1
+        for n in ordered:
+            idx = node_to_idx[n]
+            if window and idx - window_min > max_distance:
+                yield window
+                window = []
+            if not window:
+                window_min = idx
+            window.append(n)
+        if window:
+            yield window
+
+    def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
+        """Group parallel nodes into combo kernels.
+
+        Each parallel group is split into windows whose baseline-index
+        span is at most `combo_kernel_max_distance` (set the config to a
+        negative value to disable splitting). If a peak-memory threshold is set,
+        each window goes through the gate, which simulates the
+        post-fusion peak and accepts the combo only if the peak stays
+        under the threshold; rejected windows are halved and retried.
+        Without a threshold, every window becomes a combo directly.
         """
         fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
         log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
+        enable_autotune = config.combo_kernels_autotune > 0
+
+        abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
+        pct_thr = config.combo_kernel_peak_memory_pct_threshold
+        memory_check = abs_thr_gb is not None or pct_thr is not None
+        max_distance = config.combo_kernel_max_distance
+        memory_sim_time = 0.0
+        mem_ctx: ComboKernelMemoryContext | None = None
+        if memory_check:
+            mem_ctx = self._init_peak_memory_context()
+            node_to_idx = mem_ctx.node_to_idx
+        else:
+            node_to_idx = {n: i for i, n in enumerate(self.nodes)}
+
+        def _register_accept(
+            combo_node: ForeachKernelSchedulerNode,
+            accepted: list[BaseSchedulerNode],
+            num: int,
+        ) -> None:
+            nonlocal count
+            count += 1
+            log.info(
+                "ComboKernels: Combining %d nodes for %d-th group",
+                len(accepted),
+                num,
+            )
+            for node in accepted:
+                fused_nodes.remove(node)
+            fused_nodes.add(combo_node)
+            self.name_to_fused_node.update(
+                {n.get_name(): combo_node for n in combo_node.get_nodes()}
+            )
+            stream = self.node_to_stream.get(accepted[0])
+            if stream is not None:
+                self.node_to_stream[combo_node] = stream
+
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
         ):
-            node_list = ForeachKernelSchedulerNode.combinable_nodes(node_list)
-            if len(node_list) < 2:
-                continue
             if num_ck_nodes is not None and count > num_ck_nodes:
                 break
-            if not self.speedup_by_combo_kernel(node_list):
-                log.debug("ComboKernels: Not speeding up %d-th group", num)
+            members = ForeachKernelSchedulerNode.combinable_nodes(node_list)
+            if len(members) < 2:
                 continue
-            count += 1
-            enable_autotune = config.combo_kernels_autotune > 0
-            group_snode = ForeachKernelSchedulerNode(
-                node_list[0].scheduler,
-                node_list,
-                use_custom_partition_algo=True,
-                enable_autotune=enable_autotune,
-            )
-            log.info(
-                "ComboKernels: Combining %d nodes for %d-th group",
-                len(node_list),
-                num,
-            )
-            for node in node_list:
-                fused_nodes.remove(node)
-            fused_nodes.add(group_snode)
-            self.name_to_fused_node.update(
-                {n.get_name(): group_snode for n in group_snode.get_nodes()}
-            )
-            # Propagate stream assignment so codegen can place the combo
-            # kernel in the correct stream context.
-            stream = self.node_to_stream.get(node_list[0])
-            if stream is not None:
-                self.node_to_stream[group_snode] = stream
+
+            for window in Scheduler._distance_windows(
+                members, node_to_idx, max_distance
+            ):
+                if num_ck_nodes is not None and count > num_ck_nodes:
+                    break
+                if len(window) < 2 or not self.speedup_by_combo_kernel(window):
+                    continue
+                if memory_check:
+                    assert mem_ctx is not None
+                    sim_start = time.perf_counter()
+                    self._try_combo_with_halving(
+                        window,
+                        num,
+                        mem_ctx,
+                        enable_autotune=enable_autotune,
+                        on_accept=_register_accept,
+                    )
+                    memory_sim_time += time.perf_counter() - sim_start
+                else:
+                    combo_node = ForeachKernelSchedulerNode(
+                        window[0].scheduler,
+                        window,
+                        use_custom_partition_algo=True,
+                        enable_autotune=enable_autotune,
+                    )
+                    _register_accept(combo_node, window, num)
+
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
@@ -5128,7 +5247,227 @@ class Scheduler:
             num_nodes_orig,
             len(self.nodes),
         )
+        if memory_check:
+            log.info(
+                "ComboKernels memory-aware: %.3fs spent in peak simulation",
+                memory_sim_time,
+            )
         self.prune_redundant_deps(self.nodes)
+
+    def _init_peak_memory_context(self) -> ComboKernelMemoryContext:
+        """Build the immutable baseline state the gate compares against:
+        original buffer lifetimes, original peak, and step indices.
+        """
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            assign_memory_planning_info_for_scheduler_nodes,
+            compute_memory_timeline,
+            get_freeable_input_buf,
+            live_memory_before_steps_from_buf_info_list,
+            peak_memory_from_buf_info_list,
+        )
+
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+
+        name_to_freeable = get_freeable_input_buf(self.nodes, graph_inputs)
+        assign_memory_planning_info_for_scheduler_buffers(self.nodes, self.name_to_buf)
+        assign_memory_planning_info_for_scheduler_nodes(
+            self.nodes,
+            self.name_to_fused_node,
+            self.name_to_buf,
+            name_to_freeable,
+        )
+        buf_info_list, _, _ = compute_memory_timeline(
+            self.nodes, name_to_freeable, graph_outputs
+        )
+        baseline_peak, _ = peak_memory_from_buf_info_list(
+            buf_info_list, len(self.nodes)
+        )
+        baseline_live_before = live_memory_before_steps_from_buf_info_list(
+            buf_info_list, len(self.nodes)
+        )
+
+        return ComboKernelMemoryContext(
+            graph_outputs=graph_outputs,
+            node_to_idx={node: idx for idx, node in enumerate(self.nodes)},
+            baseline_peak=baseline_peak,
+            running_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+        )
+
+    def _try_combo_with_memory_check(
+        self,
+        group_nodes: list[BaseSchedulerNode],
+        mem_ctx: ComboKernelMemoryContext,
+        enable_autotune: bool,
+    ) -> tuple[ForeachKernelSchedulerNode | None, int]:
+        """The gate: does fusing `group_nodes` into one combo keep peak
+        memory under the threshold?
+
+        Returns `(combo_node, combo_step)` if accepted, or `(None, 0)`
+        if rejected. The running peak lives on `mem_ctx.running_peak`.
+
+        The pretend rewrite only changes node order inside the window
+        `[region_start, region_end]` (the smallest range containing all
+        members). Inside that window:
+          - the members collapse into one combo node, all at `combo_step`,
+          - everything else is evaluated from the original schedule.
+        Outside the window, nothing moves. Earlier accepts are accounted
+        for only by `mem_ctx.running_peak`. The threshold is checked
+        against `mem_ctx.baseline_peak` (the original graph peak) so total
+        peak drift is capped.
+        """
+        from .memory import estimate_region_peak_memory
+
+        combo_node = ForeachKernelSchedulerNode(
+            group_nodes[0].scheduler,
+            group_nodes,
+            use_custom_partition_algo=True,
+            enable_autotune=enable_autotune,
+        )
+        # Wire the combo's pred_buffers from its members so the gate
+        # simulator can read `node.mpi_node.pred_buffers` uniformly.
+        combo_pred_buffers = OrderedSet()
+        for m in group_nodes:
+            combo_pred_buffers.update(m.mpi_node.pred_buffers)
+        combo_node.mpi_node = MemoryPlanningInfoForNode(
+            pred_buffers=combo_pred_buffers,
+        )
+
+        node_to_idx = mem_ctx.node_to_idx
+
+        # Single pass over group_nodes: build the set and find the
+        # min/max baseline index together.
+        group_set: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        region_start = sys.maxsize
+        region_end = -1
+        for n in group_nodes:
+            group_set.add(n)
+            idx = node_to_idx[n]
+            if idx < region_start:
+                region_start = idx
+            if idx > region_end:
+                region_end = idx
+
+        # Build the post-rewrite slice for [region_start, region_end].
+        local_entries: list[_LocalEntry] = []
+        inserted_combo = False
+
+        def add_local(node: BaseSchedulerNode, cur: int, baseline: int) -> None:
+            local_entries.append(_LocalEntry(cur, baseline, node))
+
+        for i in range(region_start, region_end + 1):
+            n = self.nodes[i]
+            if n in group_set:
+                if not inserted_combo:
+                    add_local(combo_node, region_start, i)
+                    inserted_combo = True
+                continue
+            add_local(n, i, i)
+
+        local_nodes = [
+            e.node for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
+        ]
+        local_nodes = self.topological_sort_schedule(local_nodes)
+
+        new_step = {n: region_start + i for i, n in enumerate(local_nodes)}
+        combo_step = new_step[combo_node]
+        for n in group_nodes:
+            new_step[n] = combo_step
+
+        def step_of(node: BaseSchedulerNode) -> int:
+            if node in new_step:
+                return new_step[node]
+            return node_to_idx[node]
+
+        # Combo windows are evaluated independently. The entry live set is
+        # therefore the original-schedule live memory before this region starts.
+        cur_memory = mem_ctx.baseline_live_before[region_start]
+
+        region_peak = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=step_of,
+            graph_outputs=mem_ctx.graph_outputs,
+            cur_memory=cur_memory,
+        )
+
+        # Compare against the *original* baseline peak (not the running
+        # peak) to cap total drift across many accepts.
+        original_peak = mem_ctx.baseline_peak
+        new_peak = max(mem_ctx.running_peak, region_peak)
+        delta = new_peak - original_peak
+        abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
+        pct_thr = config.combo_kernel_peak_memory_pct_threshold
+        limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
+        if pct_thr is not None:
+            limits.append(pct_thr * original_peak)
+        assert limits
+        accept = delta <= min(limits)
+
+        pct = (100.0 * delta / original_peak) if original_peak > 0 else 0.0
+        if not accept:
+            log.debug(
+                "ComboKernels memory-aware: rejected %d nodes "
+                "(peak delta %+d bytes = %.3f%%)",
+                len(group_nodes),
+                delta,
+                pct,
+            )
+            return None, 0
+
+        log.info(
+            "ComboKernels memory-aware: accepted %d nodes "
+            "(peak delta %+d bytes = %.3f%%)",
+            len(group_nodes),
+            delta,
+            pct,
+        )
+        mem_ctx.running_peak = new_peak
+        return combo_node, combo_step
+
+    def _try_combo_with_halving(
+        self,
+        candidate: list[BaseSchedulerNode],
+        num: int,
+        mem_ctx: ComboKernelMemoryContext,
+        *,
+        enable_autotune: bool,
+        on_accept: Callable[
+            [ForeachKernelSchedulerNode, list[BaseSchedulerNode], int], None
+        ],
+    ) -> None:
+        """Try the full candidate; on reject, halve at the
+        baseline-index midpoint and try each half.
+        """
+        n2i = mem_ctx.node_to_idx
+        # Push late then early so early pops first.
+        stack: list[list[BaseSchedulerNode]] = [candidate]
+        while stack:
+            subset = stack.pop()
+            if len(subset) < 2 or not self.speedup_by_combo_kernel(subset):
+                continue
+
+            combo_node, combo_step = Scheduler._try_combo_with_memory_check(
+                self, subset, mem_ctx, enable_autotune
+            )
+            if combo_node is not None:
+                on_accept(combo_node, subset, num)
+                continue
+
+            idxs = [n2i[n] for n in subset]
+            lo, hi = min(idxs), max(idxs)
+            if lo == hi:
+                continue
+            mid = (lo + hi) // 2
+            early = [n for n in subset if n2i[n] <= mid]
+            late = [n for n in subset if n2i[n] > mid]
+            if 2 <= len(late) < len(subset):
+                stack.append(late)
+            if 2 <= len(early) < len(subset):
+                stack.append(early)
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
