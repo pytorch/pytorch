@@ -936,6 +936,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
+            self.value is torch.accelerator.device_index
+            and not kwargs
+            and len(args) == 1
+        ):
+            if not args[0].is_python_constant():
+                raise_type_error(
+                    tx, "torch.accelerator.device_index() requires a constant argument"
+                )
+            return variables.AcceleratorDeviceIndexVariable.create(
+                tx, args[0].as_python_constant()
+            )
+        elif (
             issubclass(type(self.value), type)
             and hasattr(
                 self.value, "__enter__"
