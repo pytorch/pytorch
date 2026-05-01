@@ -624,8 +624,9 @@ auto get_generator_sources(
     return filtered_configs;
   };
   // Method for engine config generator based on fallback list
-  const auto fallback_method = [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
-                                   cudnn_frontend::OperationGraph& opGraph)
+  const auto fallback_method =
+      [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
+          cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
