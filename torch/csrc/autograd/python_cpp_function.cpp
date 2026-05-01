@@ -124,7 +124,7 @@ int THPCppFunction_clear(PyObject* self) {
 void THPCppFunction_dealloc(PyObject* self) {
   PyObject_GC_UnTrack(self);
   THPCppFunction_clear(self);
-  ((THPCppFunction*)self)->cdata.~shared_ptr();
+  ((THPCppFunction*)self)->cdata.~intrusive_ptr();
   Py_TYPE(self)->tp_free(self);
 }
 
@@ -282,7 +282,7 @@ static PyTypeObject* get_default_type() {
   return &(default_type.type);
 }
 
-PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
+PyObject* functionToPyObject(const c10::intrusive_ptr<Node>& cdata) {
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -309,7 +309,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     if (!obj)
       return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();
-    new (&f->cdata) std::shared_ptr<Node>(cdata);
+    new (&f->cdata) c10::intrusive_ptr<Node>(cdata);
 
     // No INCREF here as we only have a weak reference
     cdata->set_pyobj(obj.release());
