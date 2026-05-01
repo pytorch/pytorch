@@ -42,8 +42,8 @@ def get_shim_functions(
 
     Args:
         shim_files: List of paths to shim header files. If None, will use the
-                    default set of hand-written and generated shim headers
-                    under torch/csrc/stable and torch/csrc/inductor/aoti_torch.
+                    default set of shim headers under torch/csrc/stable and
+                    torch/csrc/inductor/aoti_torch (including generated shims)
     """
     if shim_files is None:
         repo_root = Path(__file__).resolve().parents[3]
