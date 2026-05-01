@@ -728,14 +728,15 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEI * input_,                                            \
           constant DTYPEI * other_,                                            \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI)]] kernel void  \
-      ::c10::metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(             \
-          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
-              out_,                                                            \
-          constant DTYPEI * input_,                                            \
-          constant DTYPEI * other_,                                            \
-          constant uint& numel,                                                \
-          uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI)]] kernel void ::    \
+          c10::metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(           \
+              device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * \
+                  out_,                                                        \
+              constant DTYPEI * input_,                                        \
+              constant DTYPEI * other_,                                        \
+              constant uint & numel,                                           \
+              uint tid);                                                       \
   template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
       metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
