@@ -3367,6 +3367,71 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         )
 
 
+class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
+    """Unit tests for Node-typed group_name handling in bucketing.
+
+    In compile-on-one-rank graphs, collective ops receive
+    their group_name as an FX Node reference rather than a string literal.
+    These tests verify the resolution helpers work correctly.
+    """
+
+    def _make_graph_with_pg_node(self, group_name_str: str):
+        class MockPG:
+            def __init__(self, name: str):
+                self.group_name = name
+
+        graph = torch.fx.Graph()
+        pg_node = graph.placeholder("group_name")
+        pg_node.meta["val"] = MockPG(group_name_str)
+        input_node = graph.placeholder("input")
+        input_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        return graph, pg_node, input_node
+
+    def test_resolve_group_name_string(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        self.assertEqual(_resolve_group_name("pg0"), "pg0")
+
+    def test_resolve_group_name_node(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        graph, pg_node, _ = self._make_graph_with_pg_node("pg0")
+        self.assertEqual(_resolve_group_name(pg_node), "pg0")
+
+    def test_ag_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ag_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ag_node = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            args=(input_node, 2, pg_node),
+        )
+        ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+
+    def test_rs_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _rs_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        rs_node = graph.call_function(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            args=(input_node, "sum", 2, pg_node),
+        )
+        rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+
+    def test_ar_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ar_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ar_node = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default,
+            args=(input_node, "sum", pg_node),
+        )
+        ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

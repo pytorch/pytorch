@@ -16,6 +16,7 @@ from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprin
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
     _get_collective_node_from_wait,
+    _resolve_group_name,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -118,7 +119,7 @@ def get_group_name(n: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    return kwargs["group_name"]
+    return _resolve_group_name(kwargs["group_name"])
 
 
 def get_custom_estimation(
@@ -1701,7 +1702,11 @@ def gather_node_runtime_estimations(
             compute_analytical,
         )
 
-    if log_estimations and collective_nodes:
+    # Skip analytical logging when a custom estimator is provided: the
+    # analytical estimates weren't used for scheduling, and the logging
+    # path calls into NCCL estimation which can crash when group_name
+    # is an FX Node (compile-on-one-rank graphs).
+    if log_estimations and collective_nodes and custom_runtime_estimation is None:
         from torch._inductor.fx_passes.node_runtime_estimation import (
             _log_collective_benchmarks,
         )
