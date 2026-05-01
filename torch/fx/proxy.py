@@ -480,7 +480,7 @@ class TracerBase:
         )
 
     @compatibility(is_backward_compatible=True)
-    def iter(self, obj: "Proxy") -> Iterator:
+    def iter(self, obj: "Proxy") -> Iterator:  # pyrefly: ignore[implicit-any]
         """Called when a proxy object is being iterated over, such as
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more

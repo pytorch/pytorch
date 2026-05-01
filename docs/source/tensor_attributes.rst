@@ -89,6 +89,9 @@ can be used, which returns ``True`` if the data type is a floating point data ty
 To find out if a :class:`torch.dtype` is a complex data type, the property :attr:`is_complex`
 can be used, which returns ``True`` if the data type is a complex data type.
 
+Each :class:`torch.dtype` has an :attr:`abbr` property that returns a short abbreviation
+string for the dtype (e.g., ``torch.float32.abbr`` returns ``"f32"``).
+
 .. _type-promotion-doc:
 
 When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote

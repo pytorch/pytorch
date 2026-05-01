@@ -80,7 +80,7 @@ def forward(self, t_1):
         # ReduceOp is baked as ``'sum'`` (its int value is read at rewrite
         # time) and its now-dead ``_torchbind_obj1`` get_attr / module attr
         # is stripped; the ProcessGroup ``get_attr`` is still referenced by
-        # the new functional call, so it stays for pass 2.
+        # the new functional call, so it stays for the unbox step.
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -111,7 +111,7 @@ def forward(self, t_1):
         self.assertEqual(gm(x), _f(x))
 
     def test_post_pass_gm_deepcopy(self):
-        # After pass 1 + pass 2 the gm holds a Python ``dist.ProcessGroup``
+        # After functionalize + unbox the gm holds a Python ``dist.ProcessGroup``
         # — still not pickleable, but ``_share_torchbind_and_process_group_on_deepcopy()``
         # makes the gm deepcopy-safe by sharing the PG by reference.
         # ``standalone_compile``'s own deepcopy of the gm relies on this.

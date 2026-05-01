@@ -463,9 +463,10 @@ def standalone_compile(
     with _standalone_context(gm, dynamic_shapes, aot):
         # compile_fx takes ownership of gm and may mutate it on cache miss.
         # Deepcopy first so the rewrites below land on the owned copy rather
-        # than the caller's gm. ``_unbox_process_group_torchbinds`` (later)
-        # leaves a Python ``dist.ProcessGroup`` on the gm which isn't
-        # pickleable; smuggle it through deepcopy as a shared reference.
+        # than the caller's gm. The gm may carry a non-pickleable torchbind
+        # ProcessGroup (or, after a previous unbox, a Python
+        # ``dist.ProcessGroup``); smuggle it through deepcopy as a shared
+        # reference instead of crashing.
         if not donate_graph_module:
             with _share_torchbind_and_process_group_on_deepcopy():
                 gm = copy.deepcopy(gm)

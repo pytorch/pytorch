@@ -493,19 +493,19 @@ class ScanAutogradOp(torch.autograd.Function):
 
 class ScanForwardIntermediatesHandlingPolicy(enum.Enum):
     """
-    Partitioner can add interemdiates to the output of original graph.
+    Partitioner can add intermediates to the output of original graph.
     These intermediates fall into 4 categories and we want to have different policies for handling them by
     modifying the graph:
 
     CLONE: we clone the intermediate when it is a carried input (i.e. init). In this case, this carry will be
         replaced with new values at each forward step so we need to clone the carry as part of return (i.e. ys)
-        so as to remove the aliasing and that each step's intermediate will be stacked together and saved in bacwkard.
+        so as to remove the aliasing and that each step's intermediate will be stacked together and saved in backward.
 
     REMOVE_XS: we remove the intermediate from output when it is part of xs. Since xs is read-only, in this case,
         we can directly save them for backward to use.
 
-    REMOVE_ADDITIONAL_INPUTS: we remove the intermediate from output when it is part of additinonal_inputs. additional_inputs
-        are also read-only in each step, we can directly save them for bacwkard to use. We differentiate XS and ADDITIONAL_INPUTS
+    REMOVE_ADDITIONAL_INPUTS: we remove the intermediate from output when it is part of additional_inputs. additional_inputs
+        are also read-only in each step, we can directly save them for backward to use. We differentiate XS and ADDITIONAL_INPUTS
         so that we could have different treatment for them in backward. In backward, we need to put xs intermediates in carry but
         put additional_inputs as backward scan's additional_inputs.
 
@@ -673,9 +673,9 @@ class ScanAutogradImpl:
         """
         Recall that fw_outputs = (*carry, *ys), bw_gm takes in (*fw_intermediates, *grad_carry, *grad_ys)
         and returns (*grad_init, *grad_xs, *grad_additional_inputs)
-        The bacwkard is a reversed scan that can be constructed as follows:
+        The backward is a reversed scan that can be constructed as follows:
 
-          grad_additonal_inputs = torch.zeros_like(additional_inputs)
+          grad_additional_inputs = torch.zeros_like(additional_inputs)
           bw_init = (grad_carry, grad_additional_inputs)
           bw_xs = (fw_intermediates, grad_ys)
           grad_init, grad_additional_inputs, grad_xs = scan(
