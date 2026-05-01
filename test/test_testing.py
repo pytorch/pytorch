@@ -576,6 +576,60 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
+class TestEnvironmentDefFlag(TestCase):
+    """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
+
+    def setUp(self):
+        import torch.testing._internal.common_utils as _cu
+        self._cu = _cu
+        self._defined: list[str] = []
+
+    def tearDown(self):
+        for name in self._defined:
+            if hasattr(self._cu, name):
+                delattr(self._cu, name)
+
+    def _def_flag(self, name, **kwargs):
+        from torch.testing._internal.common_utils import TestEnvironment
+        self._defined.append(name)
+        kwargs.setdefault("include_in_repro", False)
+        return TestEnvironment.def_flag(name, **kwargs)
+
+    def test_explicit_zero_overrides_implication(self):
+        # Regression: PYTORCH_TEST_WITH_ROCM=0 must override
+        # implied_by_fn=lambda: torch.version.hip is not None.
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_1": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_1", env_var="FOO_DF_1",
+                implied_by_fn=lambda: True))
+
+    def test_explicit_one_with_no_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_2": "1"}):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_2", env_var="FOO_DF_2",
+                implied_by_fn=lambda: False))
+
+    def test_unset_with_implication_true(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_3"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_3", env_var="FOO_DF_3",
+                implied_by_fn=lambda: True))
+
+    def test_unset_with_implication_false(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_4"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_4", env_var="FOO_DF_4",
+                implied_by_fn=lambda: False))
+
+    def test_default_true_explicit_zero_overrides_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_5": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_5", env_var="FOO_DF_5",
+                default=True, implied_by_fn=lambda: True))
+
+
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
     """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
 
