@@ -114,6 +114,18 @@ class TestXpu(TestCase):
             self.assertEqual(target_device, torch.xpu.current_device())
         self.assertEqual(current_device, torch.xpu.current_device())
 
+    def test_xpu_device(self):
+        def fn(x):
+            with torch.xpu.device(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="xpu")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
