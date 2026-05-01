@@ -23,16 +23,25 @@ import torch
 from torch.fx.graph_module import _del_attr, _get_attr
 
 
-def _resolve_reduce_op_str(gm: torch.fx.GraphModule, arg: torch.fx.Node) -> str:
+def _resolve_reduce_op_str(
+    gm: torch.fx.GraphModule, arg: torch.fx.node.Argument
+) -> str:
     """Get the lower-case op string (``"sum"``/``"avg"``/...) for a c10d
     ReduceOp ``get_attr`` arg, converting from the torchbind ScriptObject
     form if needed.
+
+    Only the ``get_attr`` (constant-baked) shape is supported today. Any
+    other producer (placeholder, call_function, ...) would require
+    ``_c10d_functional.*`` to accept ReduceOp directly (today it only
+    takes the string form); deferred to a follow-up PR.
     """
     import torch.distributed as dist
     from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
 
-    if arg.op != "get_attr":
-        raise AssertionError(f"expected get_attr, got op={arg.op!r}")
+    if not isinstance(arg, torch.fx.Node) or arg.op != "get_attr":
+        raise NotImplementedError(
+            f"ReduceOp arg must be a constant ``get_attr``; got {arg!r}."
+        )
     reduce_op = _get_attr(gm, arg.target)  # type: ignore[arg-type]
     if isinstance(reduce_op, torch.ScriptObject):
         reduce_op = dist.ReduceOp.RedOpType(reduce_op.op())  # type: ignore[attr-defined]
@@ -62,7 +71,9 @@ def _emit_collective_chain(
     val = output_t.meta.get("val")
     with gm.graph.inserting_before(before):
         ar = gm.graph.call_function(functional_target, (input_t, *extra_args, pg_arg))
-        wait = gm.graph.call_function(torch.ops._c10d_functional.wait_tensor.default, (ar,))
+        wait = gm.graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, (ar,)
+        )
         copy_ = gm.graph.call_function(torch.ops.aten.copy_.default, (output_t, wait))
         if val is not None:
             ar.meta["val"] = wait.meta["val"] = copy_.meta["val"] = val
@@ -151,27 +162,45 @@ def _rewrite_allreduce_(gm: torch.fx.GraphModule, node: torch.fx.Node) -> None:
     """
     tensors = node.args[0]
     pg_arg = node.args[1]
-    op_str = _resolve_reduce_op_str(gm, node.args[2])  # type: ignore[arg-type]
+    if not isinstance(tensors, (list, tuple)):
+        raise AssertionError(f"expected ``Tensor[]`` arg list, got {type(tensors)}")
+    if not isinstance(pg_arg, torch.fx.Node):
+        raise AssertionError(f"expected ProcessGroup as fx.Node, got {type(pg_arg)}")
+    op_str = _resolve_reduce_op_str(gm, node.args[2])
     custom = node.meta.get("custom")
-    waits = [
-        _emit_collective_chain(gm, node, t, t, torch.ops._c10d_functional.all_reduce.default, (op_str,), pg_arg, custom)  # type: ignore[arg-type]
-        for t in tensors  # type: ignore[union-attr]
-    ]
+    waits = []
+    for t in tensors:
+        if not isinstance(t, torch.fx.Node):
+            raise AssertionError(f"expected tensor entry as fx.Node, got {type(t)}")
+        waits.append(
+            _emit_collective_chain(
+                gm,
+                node,
+                t,
+                t,
+                torch.ops._c10d_functional.all_reduce.default,
+                (op_str,),
+                pg_arg,
+                custom,
+            )
+        )
     _redirect_inplace_collective_uses(gm, node, waits)
 
 
 _InplaceCollectiveRewrite = Callable[[torch.fx.GraphModule, torch.fx.Node], None]
 
 
-def _inplace_c10d_rewrites() -> dict[Any, _InplaceCollectiveRewrite]:
+def _inplace_c10d_rewrites() -> dict[Any, _InplaceCollectiveRewrite] | None:
     """Map inplace ``c10d.{op}_`` op targets to per-op rewrite functions.
+
+    Returns ``None`` if ``torch.distributed`` is not available.
 
     To support a new collective: write ``_rewrite_<op>_`` (typically a few
     lines using ``_resolve_reduce_op_str`` / ``_emit_collective_chain`` /
     ``_redirect_inplace_collective_uses``), then register it here.
     """
     if not torch.distributed.is_available():
-        return {}
+        return None
     return {
         torch.ops.c10d.allreduce_.default: _rewrite_allreduce_,
     }
@@ -183,13 +212,9 @@ def _functionalize_inplace_collectives(
     """Rewrite raw ``torch.ops.c10d.{op}_`` inplace calls in ``gm`` into
     ``_c10d_functional.{op}`` + ``wait_tensor`` + ``aten.copy_`` form so
     Inductor's collective machinery can recognize and lower them.
-
-    The ProcessGroup arg flows through as the original ``get_attr`` Node;
-    converting it into a ``group_name`` string is the responsibility of a
-    later pass.
     """
     rewrites = _inplace_c10d_rewrites()
-    if not rewrites:
+    if rewrites is None:
         return gm
 
     found = False
@@ -200,22 +225,23 @@ def _functionalize_inplace_collectives(
         if rewrite is None:
             continue
         rewrite(gm, node)
+        # Snapshot ``get_attr`` args before erasing the rewritten node.
         # Inplace c10d ops are impure; ``eliminate_dead_code`` keeps them
-        # alive even with no users, so erase the rewritten node explicitly.
+        # alive even with no users, so erase explicitly. Then drop any
+        # ``get_attr`` arg that became orphan (e.g. the ReduceOp whose
+        # value got baked into ``op_str``) along with its backing module
+        # attribute. Live ones (e.g. the ProcessGroup, still referenced
+        # by the new ``_c10d_functional`` call) are kept.
+        get_attr_args = [
+            a for a in node.args if isinstance(a, torch.fx.Node) and a.op == "get_attr"
+        ]
         gm.graph.erase_node(node)
+        for a in get_attr_args:
+            if not a.users:
+                _del_attr(gm, a.target)  # type: ignore[arg-type]
+                gm.graph.erase_node(a)
         found = True
 
-    if not found:
-        return gm
-
-    # Strip orphan ``get_attr`` nodes (typically the ReduceOp attrs that
-    # got embedded as constants) along with their backing module attributes.
-    # Live ``get_attr`` nodes (e.g. the ProcessGroup, still referenced by
-    # the rewritten ``_c10d_functional`` call) are kept.
-    for n in list(gm.graph.find_nodes(op="get_attr")):
-        if n.users:
-            continue
-        _del_attr(gm, n.target)  # type: ignore[arg-type]
-        gm.graph.erase_node(n)
-    gm.recompile()
+    if found:
+        gm.recompile()
     return gm
