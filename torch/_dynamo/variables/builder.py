@@ -1560,10 +1560,24 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            return UserDefinedClassVariable(
+            result = UserDefinedClassVariable(
                 value,
                 source=self.source,
             )
+
+            # Only track user-defined classes for mutation, not torch
+            # internals. Tracking torch classes (e.g. RemovableHandle) causes
+            # side effects like next_id increments to be replayed incorrectly,
+            # and source chains through C-level descriptors break guard
+            # evaluation.
+            mod = getattr(value, "__module__", None) or ""
+            if not mod.startswith(("torch.", "torch_")):
+                if value not in self.tx.output.side_effects:
+                    return self.tx.output.side_effects.track_object_existing(
+                        value, result
+                    )
+            return result
+
         elif type(value) is torch._C.Generator:
             # Generator is registered as an opaque reference type for make_fx
             # tracing, but in dynamo we handle it as a regular object so that
