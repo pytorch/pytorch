@@ -89,6 +89,74 @@ def forward(self, t_1):
     return add""",
         )
 
+    def test_multi_allreduce_make_fx_and_compile(self):
+        # Two ``dist.all_reduce`` calls. Verify that:
+        #   1) our pass on a make_fx-traced graph produces N independent
+        #      ``_c10d_functional.all_reduce`` chains, and
+        #   2) Dynamo + AOT autograd produce the same per-call structure
+        #      (the canonical shape — no batched form).
+        def g(t0, t1):
+            t0 = t0.clone()
+            t1 = t1.clone()
+            dist.all_reduce(t0)
+            dist.all_reduce(t1)
+            return t0 + t1
+
+        # (1) make_fx + our pass.
+        gm = make_fx(g)(torch.ones(4), torch.ones(4) * 2)
+        _functionalize_inplace_collectives(gm)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, t0_1, t1_1):
+    clone = torch.ops.aten.clone.default(t0_1);  t0_1 = None
+    clone_1 = torch.ops.aten.clone.default(t1_1);  t1_1 = None
+    _torchbind_obj0 = self._torchbind_obj0
+    all_reduce_default = torch.ops._c10d_functional.all_reduce.default(clone, 'sum', _torchbind_obj0);  _torchbind_obj0 = None
+    wait_tensor_default = torch.ops._c10d_functional.wait_tensor.default(all_reduce_default);  all_reduce_default = None
+    copy__default = torch.ops.aten.copy_.default(clone, wait_tensor_default);  clone = copy__default = None
+    _torchbind_obj2 = self._torchbind_obj2
+    all_reduce_default_1 = torch.ops._c10d_functional.all_reduce.default(clone_1, 'sum', _torchbind_obj2);  _torchbind_obj2 = None
+    wait_tensor_default_1 = torch.ops._c10d_functional.wait_tensor.default(all_reduce_default_1);  all_reduce_default_1 = None
+    copy__default_1 = torch.ops.aten.copy_.default(clone_1, wait_tensor_default_1);  clone_1 = copy__default_1 = None
+    add = torch.ops.aten.add.Tensor(wait_tensor_default, wait_tensor_default_1);  wait_tensor_default = wait_tensor_default_1 = None
+    return add""",
+        )
+
+        # (2) torch.compile path: capture AOT fwd graph via aot_autograd.
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+
+        captured: list[str] = []
+
+        def fw_compiler(fx_g, _):
+            captured.append(fx_g.code.strip())
+            return fx_g
+
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch.compile(g, backend=backend, fullgraph=True)(
+            torch.ones(4), torch.ones(4) * 2
+        )
+        self.assertEqual(len(captured), 1)
+        self.assertExpectedInline(
+            captured[0],
+            """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    all_reduce = torch.ops._c10d_functional.all_reduce.default(clone, 'sum', '0')
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(all_reduce);  all_reduce = None
+    copy = torch.ops.aten.copy.default(clone, wait_tensor);  clone = wait_tensor = None
+    all_reduce_1 = torch.ops._c10d_functional.all_reduce.default(clone_1, 'sum', '0')
+    wait_tensor_1 = torch.ops._c10d_functional.wait_tensor.default(all_reduce_1);  all_reduce_1 = None
+    copy_1 = torch.ops.aten.copy.default(clone_1, wait_tensor_1);  clone_1 = wait_tensor_1 = None
+    add = torch.ops.aten.add.Tensor(copy, copy_1);  copy = copy_1 = None
+    return (add,)""",
+        )
+
 
 if __name__ == "__main__":
     run_tests()

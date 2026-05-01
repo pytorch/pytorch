@@ -24,7 +24,6 @@ from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config
-from ._functionalize_collectives import _functionalize_inplace_collectives
 
 
 if TYPE_CHECKING:
@@ -457,11 +456,6 @@ def standalone_compile(
 
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
     with _standalone_context(gm, dynamic_shapes, aot):
-        # ``make_fx`` traces ``dist.*`` collectives as opaque ``c10d.{op}_``
-        # calls. Inductor's collective machinery only recognizes the
-        # ``_c10d_functional.{op}`` + ``wait_tensor`` form, so rewrite here
-        # before compile_fx runs.
-        gm = _functionalize_inplace_collectives(gm)
         # compile_fx takes ownership of gm and may mutate it on cache miss.
         if not donate_graph_module:
             gm = copy.deepcopy(gm)
