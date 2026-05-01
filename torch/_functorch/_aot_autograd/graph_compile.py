@@ -472,21 +472,6 @@ def aot_stage2_inference(
 
         fw_module = remat_using_tags_for_fwd_loss_bwd_graph(fw_module)
 
-    if _has_invoke_subgraph_node(fw_module):
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "aot_inference_graph_after_hop_passes",
-                "encoding": "string",
-            },
-            payload_fn=lambda: fw_module.print_readable(
-                print_output=False,
-                include_stride=True,
-                include_device=True,
-                expanded_def=True,
-            ),
-        )
-
     compiled_fw = _aot_stage2b_inference_compile(
         fw_module,
         updated_flat_args,  # type: ignore[arg-type]
@@ -800,15 +785,6 @@ def _get_partition_fn(
     if aot_config.partition_fn is None:
         raise AssertionError("aot_config.partition_fn must not be None")
     return used_hop_custom_partition, aot_config.partition_fn
-
-
-def _has_invoke_subgraph_node(gm: torch.fx.GraphModule):
-    from torch._higher_order_ops import invoke_subgraph
-
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and node.target is invoke_subgraph:
-            return True
-    return False
 
 
 def run_joint_graph_passes_on_hops(

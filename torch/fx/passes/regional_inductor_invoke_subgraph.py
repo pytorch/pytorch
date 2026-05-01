@@ -69,7 +69,6 @@ def _compile_submod(
             CacheArtifactManager.with_fresh_cache(),
             torch._functorch.config.patch("bundled_autograd_cache", True),
             _disable_remat_for_regional_subcompile(),
-            torch.fx.traceback.set_regional_inductor_subgraph_name(subgraph),
         ):
             # compile_fx can mutate gm
             gm = copy.deepcopy(submod)
