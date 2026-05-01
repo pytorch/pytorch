@@ -61,6 +61,41 @@ class TestTorchbindAOTI(TestCase):
             msg=f"Expected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
+    def test_mutating_custom_obj_after_load_affects_run(self):
+        # The central contract: IValues returned by get_custom_objs() share
+        # intrusive_ptr ownership with the live entries inside
+        # OSSProxyExecutor::custom_objs_, so mutating state on the returned
+        # custom-class instance affects subsequent run() invocations.
+        # Forward computes self.attr.add_tensor(x) + x, where Foo.add_tensor
+        # returns (x + y) * z. Foo.increment(k) does x += k, y += k.
+        device = "cuda" if HAS_CUDA else "cpu"
+        m = self._make_model().to(device)  # Foo(10, 20), so x+y == 30
+        x = torch.randn(2, 3, device=device)
+        ep = torch.export.export(m, (x,), strict=False)
+
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model", False, 1, -1)
+
+        # Baseline: (x + y == 30) * x + x
+        before = loader.run([x])[0]
+        torch.testing.assert_close(before, 30 * x + x)
+
+        # Mutate the live torchbind object via the snapshot returned by
+        # get_custom_objs(). After Foo.increment(5) we have (15, 25), so
+        # x + y == 40.
+        custom_objs = loader.get_custom_objs()
+        foo = next(
+            obj
+            for obj in custom_objs.values()
+            if isinstance(obj, torch.ScriptObject)
+            and obj._type().qualified_name() == "__torch__.torch.classes._TorchScriptTesting._Foo"
+        )
+        foo.increment(5)
+
+        # Re-run: the executor must observe the mutated state.
+        after = loader.run([x])[0]
+        torch.testing.assert_close(after, 40 * x + x)
+
     def test_custom_objs_empty_when_no_torchbind(self):
         # A plain model with no torchbind attrs should yield an empty map.
         class Plain(torch.nn.Module):
