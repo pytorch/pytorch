@@ -44,7 +44,7 @@ class TestTorchbindAOTI(TestCase):
 
         pt2_path = torch._inductor.aoti_compile_and_package(ep)
 
-        loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model")
+        loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model", False, 1, -1)
         custom_objs = loader.get_custom_objs()
 
         self.assertGreater(
@@ -73,7 +73,7 @@ class TestTorchbindAOTI(TestCase):
 
         pt2_path = torch._inductor.aoti_compile_and_package(ep)
 
-        loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model")
+        loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model", False, 1, -1)
         self.assertEqual(loader.get_custom_objs(), {})
 
 
