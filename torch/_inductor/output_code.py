@@ -27,7 +27,7 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
@@ -515,6 +515,7 @@ class CompiledFxGraph(OutputCode):
     # Running this graph under FakeTensorMode re-derives output shapes
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
+    _serialized_original_gm: bytes | None = None
 
     def __init__(
         self,
@@ -870,6 +871,23 @@ class CompiledFxGraph(OutputCode):
             self.mutated_input_idxs,
         )
 
+        if self._original_gm is None and self._serialized_original_gm is not None:
+            from torch._subclasses import FakeTensorMode
+            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            fake_mode = FakeTensorMode(
+                allow_non_fake_inputs=True,
+                shape_env=ShapeEnv(),
+            )
+            original_gm = cast(
+                torch.fx.GraphModule,
+                GraphPickler.loads(self._serialized_original_gm, fake_mode),
+            )
+            original_gm.recompile()
+            self._original_gm = original_gm
+            self._serialized_original_gm = None
+
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
@@ -908,7 +926,13 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
-        # Note: _original_gm is already picklable (metadata stripped at creation)
+        if self._original_gm is not None:
+            from torch.fx._graph_pickler import GraphPickler, Options
+
+            self._serialized_original_gm = GraphPickler.dumps(
+                self._original_gm, Options(ops_filter=None)
+            )
+            self._original_gm = None
         # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
         # so it doesn't need to be cleared
 
