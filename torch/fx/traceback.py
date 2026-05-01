@@ -1,6 +1,5 @@
 import copy
 import logging
-import threading
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -37,18 +36,10 @@ __all__ = [
     "get_graph_provenance_json",
     "set_current_replay_node",
     "get_current_replay_node",
-    "set_regional_inductor_subgraph_name",
-    "get_regional_inductor_subgraph_name",
 ]
 
 current_meta: dict[str, Any] = {}
 current_replay_node: Node | None = None
-# Thread-local holder for the optional name of the subgraph being compiled by a
-# nested/regional inductor compile (e.g. a regional inductor scooped-out region
-# or an invoke_subgraph submodule). Used to disambiguate trace_structured
-# records emitted from sub-compiles within a single frame. Used for debugging
-# only!
-_regional_inductor_subgraph_name_tls = threading.local()
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta = False
 # Preserve the "seq_nr" node meta field
@@ -536,32 +527,6 @@ def get_current_replay_node() -> Node | None:
     Get the currently replay node
     """
     return current_replay_node
-
-
-@compatibility(is_backward_compatible=False)
-@contextmanager
-def set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
-    """
-    Set the name of the subgraph currently being sub-compiled by regional
-    inductor (a scooped-out region or an invoke_subgraph submodule). Used to
-    tag trace_structured records so artifacts emitted from different
-    sub-compiles within the same frame can be distinguished.
-    """
-    saved = getattr(_regional_inductor_subgraph_name_tls, "value", None)
-    try:
-        _regional_inductor_subgraph_name_tls.value = name
-        yield
-    finally:
-        _regional_inductor_subgraph_name_tls.value = saved
-
-
-@compatibility(is_backward_compatible=False)
-def get_regional_inductor_subgraph_name() -> str | None:
-    """
-    Get the name of the subgraph currently being sub-compiled by regional
-    inductor, or None.
-    """
-    return getattr(_regional_inductor_subgraph_name_tls, "value", None)
 
 
 @compatibility(is_backward_compatible=False)
