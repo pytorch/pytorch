@@ -1301,19 +1301,21 @@ get_thread_local_native_sharding_propagator_cache() {
       thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
           py::capsule(new std::thread::id(this_thread_id), [](void* p) {
             auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            std::optional<NativeShardingPropagatorCache>* popt_cache = nullptr;
             {
               std::lock_guard<std::mutex> inner_lock(
                   native_sharding_propagator_cache_cleanup_mutex);
               auto it = all_thread_caches.find(*ptid);
               if (it != all_thread_caches.end()) {
-                // We need to both:
-                // 1) free python objects, and
-                it->second->reset();
-                // 2) make sure we don't try to come back and mess with
-                // a destroyed thread-local at module unload (e.g.,
-                // process exit) time.
+                popt_cache = it->second;
                 all_thread_caches.erase(it);
               }
+            }
+            if (popt_cache != nullptr) {
+              // Destroy cached py::object values outside the cleanup mutex
+              // since pybind/Python deallocators can re-enter Python and
+              // temporarily drop the GIL.
+              popt_cache->reset();
             }
             delete ptid;
           });
@@ -1888,7 +1890,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.ptr());
   }
   if (!comparison_key) {
     return false;

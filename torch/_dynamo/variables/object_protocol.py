@@ -30,7 +30,6 @@ from ..exc import (
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 
 
 if TYPE_CHECKING:
@@ -142,6 +141,12 @@ def type_implements_nb_float(obj_type: type) -> bool:
     return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
 
 
+def type_implements_mp_subscript(obj_type: type) -> bool:
+    """Check whether obj_type has tp_as_mapping->mp_subscript."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
+
+
 def type_implements_tp_iter(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
@@ -150,6 +155,12 @@ def type_implements_tp_iter(obj_type: type) -> bool:
 def type_implements_tp_iternext(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
+
+
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, slot)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -180,6 +191,29 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
                 *graph_break_hints.DYNAMO_BUG,
             ],
         )
+
+
+def validate_sequence_index(
+    tx: "InstructionTranslator",
+    key: VariableTracker,
+    container_name: str,
+) -> VariableTracker:
+    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
+
+    ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
+    """
+    key_type = maybe_get_python_type(key)
+    if key_type not in (int, bool, slice):
+        if not type_implements_nb_index(key_type):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                ],
+            )
+        key = key.nb_index_impl(tx)
+    return key
 
 
 def vt_mapping_size(
@@ -266,19 +300,65 @@ def vt_getitem(
       3. PyType_Check(o)              (L183-203) — type[int] → GenericAlias/__class_getitem__
 
     Branch 1 is the common path (list, tuple, dict, range all have mp_subscript).
-    TODO(follow-up): use has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT) to gate
-    Branch 1 and has_slot(seq_slots, PySequenceSlots.SQ_ITEM) to gate Branch 2,
-    matching CPython's dispatch order.
-    TODO(follow-up): Branch 2 (sq_item) for C extension types that only have
-    tp_as_sequence (e.g. deque — Modules/_collectionsmodule.c:1888).
-    Branch 3 is handled by TypingVariable.mp_subscript_impl for typing module types
-    and by BuiltinVariable for builtin types like list[int].
-
-    Types that work via constant fold fallback (no dedicated mp_subscript_impl):
-    TODO(follow-up): str (unicode_subscript, Objects/unicodeobject.c:13809)
-    TODO(follow-up): bytes (bytes_subscript, Objects/bytesobject.c)
+    Branch 2 fires for types with only sq_item (e.g. deque).
+    Branch 3 delegates to mp_subscript_impl for type objects (__class_getitem__).
     """
-    return obj.mp_subscript_impl(tx, key)
+    obj_type = maybe_get_python_type(obj)
+    # Branch 1: mp_subscript
+    if type_implements_mp_subscript(obj_type):
+        return obj.mp_subscript_impl(tx, key)
+    # Branch 2: sq_item (only if mp_subscript is absent)
+    # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
+    #          → PySequence_GetItem (wraps negative, calls sq_item)
+    if type_implements_sq_item(obj_type):
+        key_type = maybe_get_python_type(key)
+        if type_implements_nb_index(key_type):
+            key = key.nb_index_impl(tx)
+            return vt_sequence_getitem(tx, obj, key)
+        raise_type_error(
+            tx,
+            f"{obj_type.__name__} indices must be integers, not {key_type.__name__}",
+        )
+    # Branch 3: PyType_Check → __class_getitem__ (abstract.c L183-203)
+    # In 3.10+ type.__getitem__ sets mp_subscript so this is normally caught
+    # by Branch 1, but we check explicitly for safety.
+    if issubclass(obj_type, type):
+        return obj.mp_subscript_impl(tx, key)
+    # CPython: abstract.c L205
+    raise_type_error(tx, f"'{obj_type.__name__}' object is not subscriptable")
+
+
+def vt_sequence_getitem(
+    tx: "InstructionTranslator",
+    obj: VariableTracker,
+    index: VariableTracker,
+) -> VariableTracker:
+    """CPython's PySequence_GetItem — always sq_item, never mp_subscript.
+
+    ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L1874-L1902
+
+    Called by PyObject_GetItem branch 2, reversed() fallback, and the old
+    iteration protocol.  Wraps negative indices via sq_length before
+    dispatching to sq_item.
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_sq_item(obj_type):
+        # Negative index wrapping (abstract.c L2175-2183)
+        if isinstance(index, ConstantVariable):
+            index_val = index.as_python_constant()
+            if isinstance(index_val, int) and index_val < 0:
+                if type_implements_sq_length(obj_type):
+                    length = obj.sq_length(tx)
+                    index = ConstantVariable.create(
+                        index_val + length.as_python_constant()
+                    )
+        return obj.sq_item_impl(tx, index)
+
+    if type_implements_mp_subscript(obj_type):
+        raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
+
+    raise_type_error(tx, f"'{obj.python_type_name()}' object does not support indexing")
 
 
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
@@ -406,8 +486,166 @@ def generic_getiter(
             )
         return res
     elif pysequence_check(T):
+        from .functions import UserFunctionVariable
+
         return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
             tx, [obj], {}
         )
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
+
+
+# ---------------------------------------------------------------------------
+# Binary-op dispatch (CPython's abstract.c: binary_op1 / binary_op)
+# https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L927 (binary_op1)
+# ---------------------------------------------------------------------------
+
+NB_SLOT_MAPPING = {
+    "nb_or": PyNumberSlots.NB_OR,
+    "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
+}
+
+
+def is_nb_not_implemented(result: VariableTracker) -> bool:
+    return result.is_constant_match(NotImplemented)
+
+
+def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
+    """Check if w's underlying Python type is a proper subtype of v's."""
+    try:
+        return issubclass(w.python_type(), v.python_type())
+    except NotImplementedError:
+        return False
+
+
+#   Calling scheme used for binary operations:
+#
+#   Order operations are tried until either a valid result or error:
+#     w.op(v,w)[*], v.op(v,w), w.op(v,w)
+#
+#   [*] only when Py_TYPE(v) != Py_TYPE(w) && Py_TYPE(w) is a subclass of
+#       Py_TYPE(v)
+
+
+def binary_op1(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_slot: str,
+) -> VariableTracker:
+    """CPython's binary_op1: try v's slot, then w's slot with subclass priority.
+
+    Each VT that participates provides a ``<op_slot>_impl(self, tx, other,
+    reverse)`` method. ``reverse=False`` means "self is left operand" (forward,
+    e.g. ``__or__``), ``reverse=True`` means "self is right operand" (reverse,
+    e.g. ``__ror__``). For built-in types the flag is ignored because their
+    slots check both operands symmetrically.
+
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L926-L977
+    """
+    impl_attr = f"{op_slot}_impl"
+    v_slot = getattr(type(v), impl_attr, None)
+    w_slot = getattr(type(w), impl_attr, None)
+
+    # Same class → only call once (CPython: slotw = NULL if same type)
+    if v.python_type() is w.python_type():
+        w_slot = None
+    # Same implementation (inherited) → skip w
+    elif v_slot is w_slot:
+        w_slot = None
+
+    if v_slot is not None:
+        # Subclass priority: if w's Python type is a proper subtype of v's
+        # Python type and overrides the slot, try w first (CPython abstract.c:952-960).
+        if w_slot is not None and is_python_subtype(w, v):
+            # CPython ALWAYS calls the slot with (v, w), even for reverse slots.
+            # Since w_slot is a method call, we use reverse=True to indicate w
+            # is the right operand, matching CPython's semantics.
+            result = w_slot(w, tx, v, True)
+            if not is_nb_not_implemented(result):
+                return result
+            w_slot = None
+        result = v_slot(v, tx, w, False)
+        if not is_nb_not_implemented(result):
+            return result
+    if w_slot is not None:
+        result = w_slot(w, tx, v, True)
+        if not is_nb_not_implemented(result):
+            return result
+    return ConstantVariable.create(NotImplemented)
+
+
+def binary_op(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_slot: str,
+    op_symbol: str,
+) -> VariableTracker:
+    """CPython's binary_op: binary_op1 + TypeError fallback.
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L997-L1020
+    """
+
+    result = binary_op1(tx, v, w, op_slot)
+    if is_nb_not_implemented(result):
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+        )
+    return result
+
+
+#  Binary in-place operators
+#
+#    The in-place operators are defined to fall back to the 'normal', non
+#    in-place operations, if the in-place methods are not in place.
+#
+#    - If the left hand object has the appropriate struct members, and they are
+#      filled, call the appropriate function and return the result.  No coercion
+#      is done on the arguments; the left-hand object is the one the operation
+#      is performed on, and it's up to the function to deal with the right-hand
+#      object.
+#
+#    - Otherwise, in-place modification is not supported. Handle it exactly as a
+#      non in-place operation of the same kind.
+
+
+def binary_iop1(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    iop_slot: str,
+    op_slot: str,
+) -> VariableTracker:
+    v_type = maybe_get_python_type(v)
+
+    if type_implements_nb_slot(v_type, NB_SLOT_MAPPING[iop_slot]):
+        impl_attr = f"{iop_slot}_impl"
+        slot = getattr(type(v), impl_attr)
+        result = slot(v, tx, w)
+        if not is_nb_not_implemented(result):
+            return result
+
+    return binary_op1(tx, v, w, op_slot)
+
+
+def binary_iop(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    iop_slot: str,
+    op_slot: str,
+    op_symbol: str,
+) -> VariableTracker:
+    """CPython's binary_iop: try inplace slot, fallback to binary_op1.
+
+    Combines binary_iop1 + TypeError fallback from binary_iop.
+    https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1229-L1270 (binary_iop1, binary_iop)
+    """
+    result = binary_iop1(tx, v, w, iop_slot, op_slot)
+    if is_nb_not_implemented(result):
+        raise_type_error(
+            tx,
+            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+        )
+    return result

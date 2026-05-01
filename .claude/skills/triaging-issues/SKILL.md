@@ -173,7 +173,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | Label | When to use |
 |-------|-------------|
 | `oncall: jit` | TorchScript issues |
-| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining) |
+| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after applying this label, invoke the distributed triage sub-skill (`/distributed-triage` on this issue) for second-level triage — it will route to a sub-oncall, add module labels, and mark triaged. |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
