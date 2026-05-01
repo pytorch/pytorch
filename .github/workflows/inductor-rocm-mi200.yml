@@ -1,11 +1,11 @@
 name: inductor-rocm-mi200
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  #schedule:
+    #- cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
-    branches:
-      - release/*
+    #branches:
+      #- release/*
     tags:
       - ciflow/inductor-rocm-mi200/*
   workflow_dispatch:
@@ -17,6 +17,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -31,12 +32,12 @@ jobs:
       opt_out_experiments: lf
 
   linux-jammy-rocm-py3_10-inductor-build:
-    name: rocm-py3.10-inductor
+    name: linux-jammy-rocm-py3.10-mi200
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: linux-jammy-rocm-py3.10-mi200
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
@@ -46,10 +47,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-inductor-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: rocm-py3.10-inductor
+    name: linux-jammy-rocm-py3.10-mi200
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:

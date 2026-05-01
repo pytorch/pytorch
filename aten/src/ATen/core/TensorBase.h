@@ -24,7 +24,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -571,6 +570,10 @@ class TORCH_API TensorBase {
     return impl_->is_meta();
   }
 
+  bool is_fake() const {
+    return impl_->is_fake();
+  }
+
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
@@ -628,11 +631,9 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  // Implemented in aten/src/ATen/templates/TensorMethods.cpp
+  template <typename T>
   const T* const_data_ptr() const;
-
-  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;
@@ -859,7 +860,7 @@ class TORCH_API TensorBase {
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn() const;
 
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

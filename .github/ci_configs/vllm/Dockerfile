@@ -130,7 +130,7 @@ COPY . .
 RUN python3 use_existing_torch.py
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/build.txt
+    uv pip install --system -r requirements/build/cuda.txt
 
 ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \
@@ -145,6 +145,9 @@ ARG USE_SCCACHE
 ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
 ARG SCCACHE_REGION_NAME=us-west-2
 ARG SCCACHE_S3_NO_CREDENTIALS=0
+
+ARG torch_cuda_arch_list='8.0;8.9;9.0;10.0;12.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # Use sccache to speed up compilation
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -170,9 +173,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
     fi
-
-ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG vllm_target_device="cuda"
 ENV VLLM_TARGET_DEVICE=${vllm_target_device}
@@ -237,13 +237,13 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 ENV UV_LINK_MODE=copy
 
 # Install build and runtime dependencies
-COPY requirements/build.txt requirements/build.txt
+COPY requirements/build/cuda.txt requirements/build/cuda.txt
 COPY use_existing_torch.py use_existing_torch.py
 RUN python3 use_existing_torch.py
-RUN cat requirements/build.txt
+RUN cat requirements/build/cuda.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/build.txt
+    uv pip install --system -r requirements/build/cuda.txt
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"

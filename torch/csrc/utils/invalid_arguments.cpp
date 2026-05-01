@@ -52,7 +52,7 @@ struct NullableType : public Type {
   NullableType(std::unique_ptr<Type> type) : type(std::move(type)) {}
 
   bool is_matching(PyObject* object) override {
-    return object == Py_None || type->is_matching(object);
+    return Py_IsNone(object) || type->is_matching(object);
   }
 
   std::unique_ptr<Type> type;

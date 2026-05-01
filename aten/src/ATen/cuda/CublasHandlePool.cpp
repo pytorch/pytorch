@@ -4,11 +4,17 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <regex>
+#include <shared_mutex>
 #include <string>
 #include <tuple>
+
+#if defined(USE_ROCM)
+#include <rocblas/rocblas.h>
+#endif
 
 /**
  * Note [hipblaslt handles]
@@ -24,11 +30,21 @@
  * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
  * whereas for ROCm builds, it is a distinct function.
  *
+ * Additionally, hipblaslt cannot share a single handle across multiple streams.
+ * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
+ * pair, rather than just per-device like the cublas handle pool.
+ *
  * The workspace pools are separate for ROCm. On CUDA, the env var
  * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to opt-in to unifying the workspace pools.
  */
 
 namespace at::cuda {
+
+namespace {
+// -1 means no override; use env var / default
+std::atomic<int64_t> cublas_workspace_override{-1};
+std::atomic<int64_t> cublaslt_workspace_override{-1};
+} // namespace
 
 namespace {
 
@@ -53,8 +69,6 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
 
 // ugly hack until hipblasSetWorkspace exists
-#include <rocblas/rocblas.h>
-
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
     switch(error) {
     case rocblas_status_size_unchanged:
@@ -130,6 +144,24 @@ void clearCublasWorkspaces() {
   }
 }
 
+void clearCublasWorkspacesForStream(cudaStream_t stream) {
+  void* stream_ptr = static_cast<void*>(stream);
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
+  }
+}
+
 size_t parseChosenWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
@@ -144,10 +176,10 @@ size_t parseChosenWorkspaceSize() {
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
   const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
-  /* :4096:2:16:8 default, 32MiB for Hopper */
+  /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
-  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+  const bool use32mb = properties != nullptr && (properties->major == 9 || properties->major == 10 || properties->major == 12);
+  const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
   if (val) {
@@ -174,6 +206,19 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+#ifndef USE_ROCM
+inline bool unified_cublas_and_lt_workspaces() {
+  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
+#if !defined(FBCODE)
+  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
+#else
+  static bool unified = unified_env_var == true;
+#endif
+  return unified;
+}
+#endif
+
 size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
@@ -183,7 +228,9 @@ size_t parseCUDABlasLtWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  /* use CUDABlas default workspace size if unified */
+  /* otherwise, use default size in KiB according to #73328 */
+  size_t workspace_size = unified_cublas_and_lt_workspaces() ? parseChosenWorkspaceSize() / 1024 : 1024;
 #endif
 
   if (val.has_value()) {
@@ -207,23 +254,42 @@ size_t parseCUDABlasLtWorkspaceSize() {
 }
 
 size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
+  int64_t ov = cublas_workspace_override.load(std::memory_order_relaxed);
+  if (ov >= 0) {
+    return static_cast<size_t>(ov);
+  }
+  static size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
-#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+void setChosenWorkspaceSize(size_t size) {
+  cublas_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
+}
+
+void setCUDABlasLtWorkspaceSize(size_t size) {
+  cublaslt_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
+}
+
+void resetChosenWorkspaceSize() {
+  cublas_workspace_override.store(-1, std::memory_order_relaxed);
+}
+
+void resetCUDABlasLtWorkspaceSize() {
+  cublaslt_workspace_override.store(-1, std::memory_order_relaxed);
+}
 
 size_t getCUDABlasLtWorkspaceSize() {
-  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+  int64_t ov = cublaslt_workspace_override.load(std::memory_order_relaxed);
+  const size_t pool_size = [&] {
+    if (ov >= 0) {
+      return static_cast<size_t>(ov);
+    }
+    static size_t parsed_pool_size = parseCUDABlasLtWorkspaceSize();
+    return parsed_pool_size;
+  }();
 #ifndef USE_ROCM
-  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
-#if !defined(FBCODE)
-  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
-#else
-  static bool unified = unified_env_var == true;
-#endif
-  if (unified) {
-    auto cublasWorkspaceSize = getChosenWorkspaceSize();
+  if (unified_cublas_and_lt_workspaces()) {
+    size_t cublasWorkspaceSize = getChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
@@ -231,7 +297,7 @@ size_t getCUDABlasLtWorkspaceSize() {
                       " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
                       " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
                       " size will be limited to the CUBLAS workspace size.");
-      pool_size = cublasWorkspaceSize;
+      return cublasWorkspaceSize;
     }
   }
 #endif
@@ -254,13 +320,13 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
 
   size_t workspace_size = getChosenWorkspaceSize();
 
-  // Fast path: check if workspace already exists
+  // Fast path: check if workspace already exists and is large enough
   {
     std::shared_lock<std::shared_mutex> lock(workspace.mutex);
     auto workspace_it = workspace.map.find(key);
-    if (workspace_it != workspace.map.end()) {
+    if (workspace_it != workspace.map.end() && workspace_it->second.second >= workspace_size) {
       TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
-          handle, workspace_it->second.get(), workspace_size));
+          handle, workspace_it->second.first.get(), workspace_size));
       return;
     }
   }
@@ -268,29 +334,39 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
   // Slow path: allocate workspace outside the lock
   auto new_workspace = getNewWorkspace();
 
-  // Insert with lock (double-check in case another thread inserted while we
-  // were allocating)
+  // Insert with lock, replacing any undersized entry
   {
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it = workspace.map.try_emplace(key, std::move(new_workspace)).first;
+    workspace.map.insert_or_assign(key, std::make_pair(std::move(new_workspace), workspace_size));
+    auto workspace_it = workspace.map.find(key);
     TORCH_CUDABLAS_CHECK(
-        cublasSetWorkspace(handle, workspace_it->second.get(), workspace_size));
+        cublasSetWorkspace(handle, workspace_it->second.first.get(), workspace_size));
   }
 }
 
 void* getCUDABlasLtWorkspace() {
 #ifndef USE_ROCM
-  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
-  if (unified) {
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  if (unified_cublas_and_lt_workspaces()) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle(/*setup=*/false);
     auto stream = c10::cuda::getCurrentCUDAStream();
     cudaStream_t _stream = stream;
     auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
     auto& workspace = at::cuda::cublas_handle_stream_to_workspace();
-    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it = workspace.map.find(key);
-    TORCH_INTERNAL_ASSERT(workspace_it != workspace.map.end());
-    return workspace_it->second.mutable_get();
+    {
+      std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+      auto workspace_it = workspace.map.find(key);
+      if (workspace_it != workspace.map.end()) {
+        return workspace_it->second.first.mutable_get();
+      }
+    }
+    // First use for this handle+stream pair — allocate and insert directly.
+    // No need to call cublasSetWorkspace; Lt passes workspace explicitly.
+    auto new_workspace = getNewWorkspace();
+    {
+      std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+      auto workspace_it = workspace.map.try_emplace(key, std::make_pair(std::move(new_workspace), getChosenWorkspaceSize())).first;
+      return workspace_it->second.first.mutable_get();
+    }
   }
 #endif
   cublasLtHandle_t handle = getCurrentCUDABlasLtHandle();
@@ -300,29 +376,30 @@ void* getCUDABlasLtWorkspace() {
 
   auto& workspace = cublaslt_handle_stream_to_workspace();
 
-  // Fast path: check if workspace already exists
+  size_t workspace_size = getCUDABlasLtWorkspaceSize();
+
+  // Fast path: check if workspace already exists and is large enough
   {
     std::shared_lock<std::shared_mutex> lock(workspace.mutex);
     auto workspace_it = workspace.map.find(key);
-    if (workspace_it != workspace.map.end()) {
-      return workspace_it->second.mutable_get();
+    if (workspace_it != workspace.map.end() && workspace_it->second.second >= workspace_size) {
+      return workspace_it->second.first.mutable_get();
     }
   }
 
   // Slow path: allocate workspace outside the lock
   auto new_workspace = getNewCUDABlasLtWorkspace();
 
-  // Insert with lock (double-check in case another thread inserted while we
-  // were allocating)
+  // Insert with lock, replacing any undersized entry
   {
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it =
-          workspace.map.try_emplace(key, std::move(new_workspace)).first;
-    return workspace_it->second.mutable_get();
+    workspace.map.insert_or_assign(key, std::make_pair(std::move(new_workspace), workspace_size));
+    auto workspace_it = workspace.map.find(key);
+    return workspace_it->second.first.mutable_get();
   }
 }
 
-cublasHandle_t getCurrentCUDABlasHandle() {
+cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
@@ -330,8 +407,6 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   CUcontext pctx = nullptr;
   at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
   if (C10_UNLIKELY(!pctx)) {
-    // workaround for corner case where a primary context exists but is not
-    // the current context, seen in multithreaded use-cases
     TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
     at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
@@ -354,6 +429,11 @@ cublasHandle_t getCurrentCUDABlasHandle() {
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
+
+  if (!setup) {
+    return handle;
+  }
+
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
@@ -407,10 +487,14 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  // hipblaslt cannot share a single handle across multiple streams,
+  // so reserve a handle unique to each (device, stream) pair.
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto handle = myPoolWindow->reserve(device, static_cast<void*>(_stream));
   return handle;
 #else
-  return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
+  return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle(/*setup=*/false));
 #endif
 }
 

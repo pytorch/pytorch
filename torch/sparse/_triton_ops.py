@@ -9,7 +9,7 @@ import torch
 from torch._dynamo.utils import warn_once
 from torch.utils._triton import has_triton
 
-from ._triton_ops_meta import get_meta
+from ._triton_ops_meta import _get_device_name, get_meta
 
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
@@ -31,7 +31,7 @@ def check_bsr_layout(f_name, t):
 
 def check_device(f_name, t, device):
     check(
-        t.device == device and t.device.type == "cuda",
+        t.device == device and t.device.type in ("cuda", "xpu"),
         f"{f_name}(): all inputs are expected to be on the same GPU device.",
     )
 
@@ -529,7 +529,7 @@ def scatter_mm_meta(
     **extra,
 ):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         meta = get_meta(
             "scatter_mm",
             (M, K, N, Ms, Ks),
@@ -552,28 +552,28 @@ def scatter_mm_meta(
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 8
@@ -581,28 +581,28 @@ def scatter_mm_meta(
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -610,35 +610,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -646,35 +646,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 8
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 2
@@ -682,21 +682,21 @@ def scatter_mm_meta(
                 TILE_N = 256
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 2
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
@@ -785,7 +785,7 @@ def bsr_dense_addmm_meta(
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         if dtype is out_dtype:
             version_dtype = dtype
@@ -1339,28 +1339,17 @@ def bsr_dense_addmm(
         # pyrefly: ignore [unsupported-operation]
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
-            # pyrefly: ignore [bad-argument-count]
             beta,
             alpha,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_one=beta == 1,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_nonzero=beta != 0,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             alpha_is_one=alpha == 1,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             left_alpha_is_one=left_alpha_is_one,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             right_alpha_is_one=right_alpha_is_one,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_ROW=BM,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_INNER=BK,
-            # pyrefly: ignore [bad-keyword-argument]
             BLOCKSIZE_COL=BN,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             allow_tf32=dot_out_dtype == tl.float32,
-            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             acc_dtype=dot_out_dtype,
             **meta,
         )
@@ -1477,7 +1466,7 @@ if has_triton():
 
                 mat1_block = tl.load(
                     mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     mask=mask_k[None, :],
                     other=0.0,
                 )
@@ -1486,7 +1475,7 @@ if has_triton():
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     mask=mask_k[:, None],
                     other=0.0,
                 )
@@ -1681,17 +1670,12 @@ if has_triton():
                 beta,
                 is_beta_zero,
                 *blocksize,
-                # pyrefly: ignore [bad-argument-count]
                 k,
                 tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 acc_dtype=acc_dtype,
-                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 allow_tf32=allow_tf32,
-                # pyrefly: ignore [unexpected-keyword]
                 num_stages=1,
-                # pyrefly: ignore [unexpected-keyword]
                 num_warps=4,
             )
 
@@ -1976,7 +1960,6 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore [bad-argument-count]
                 row_block,
                 col_block,
                 max_row_nnz,
@@ -2151,11 +2134,8 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
-            # pyrefly: ignore [bad-argument-type]
             M,
-            # pyrefly: ignore [bad-argument-type]
             K,
-            # pyrefly: ignore [bad-argument-type]
             N,
             blocks,
             blocks.stride(0),
@@ -2174,9 +2154,7 @@ if has_triton():
             pq_indices,
             pq_indices.stride(0),
             pq_indices.stride(1),
-            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
-            # pyrefly: ignore [bad-argument-type]
             **meta,
         )
 
@@ -2373,7 +2351,6 @@ if has_triton():
         _scatter_mm6_kernel[grid](
             B,
             Ms,
-            # pyrefly: ignore [bad-argument-type]
             Ks,
             N,
             blocks,
@@ -2392,7 +2369,6 @@ if has_triton():
             r_offsets,
             p_offsets,
             q_offsets,
-            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
             **meta,
         )

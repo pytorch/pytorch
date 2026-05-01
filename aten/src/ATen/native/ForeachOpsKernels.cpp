@@ -20,6 +20,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_clone_native.h>
 #include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
@@ -364,6 +365,21 @@ FOREACH_BINARY_OP_LIST(div)
 FOREACH_BINARY_OP_LIST(clamp_min)
 FOREACH_BINARY_OP_LIST(clamp_max)
 FOREACH_BINARY_OP_LIST(pow)
+
+// _foreach_clone
+std::vector<Tensor> foreach_tensor_clone_slow(
+    TensorList self,
+    std::optional<MemoryFormat> memory_format) {
+  check_foreach_api_restrictions(self);
+
+  std::vector<Tensor> ret{};
+  ret.reserve(self.size());
+  for (const auto& t : self) {
+    ret.emplace_back(t.clone(memory_format));
+  }
+  return ret;
+}
+
 // _foreach_copy_
 void foreach_tensor_copy_list_kernel_slow_(
     TensorList self,
@@ -521,6 +537,9 @@ std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
+    TORCH_CHECK(
+        t.numel() > 0,
+        "_foreach_max cannot compute the maximum of an empty tensor; max over zero elements is undefined.");
     result.emplace_back(at::max(t));
   }
   return result;

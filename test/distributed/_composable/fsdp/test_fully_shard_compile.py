@@ -5,10 +5,15 @@ import copy
 import unittest
 
 import torch
+import torch._dynamo.compiled_autograd as compiled_autograd
 import torch._dynamo.testing
+import torch.nn as nn
+from torch._dynamo.utils import counters
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
+    MixedPrecisionPolicy,
     ShardingStrategy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
@@ -40,19 +45,16 @@ class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
-        """Verify that dynamo never traces into FSDP hooks."""
+        """Verify that dynamo never traces into FSDP hooks in forward or backward."""
         torch._dynamo.reset()
         trace_rules_check_count = 0
         HOOKS_FILE_NAME = "torch/distributed/fsdp/_fully_shard/_fsdp_state.py"
-        HOOK_WRAPPER_NAME = "wrapper"
 
         def patched_trace_rules_check(*args, **kwargs):
             nonlocal trace_rules_check_count
             f_code = args[0]
-            if (
-                hasattr(f_code, "co_filename")
-                and f_code.co_filename.endswith(HOOKS_FILE_NAME)
-                and f_code.co_name != HOOK_WRAPPER_NAME
+            if hasattr(f_code, "co_filename") and f_code.co_filename.endswith(
+                HOOKS_FILE_NAME
             ):
                 trace_rules_check_count += 1
             return orig_trace_rules_check(*args, **kwargs)
@@ -63,10 +65,94 @@ class TestFullyShardCompileCompute(FSDPTest):
         model = MLP(4).to(device_type)
         fully_shard(model)
         model.compile()
-        model(torch.randn((4, 4), device=device_type))
+        out = model(torch.randn((4, 4), device=device_type))
+        out.sum().backward()
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = orig_trace_rules_check
         self.assertEqual(trace_rules_check_count, 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_autograd_fsdp2_backward(self):
+        """
+        Verify that compiled autograd with FSDP2 backward does not crash and
+        that FSDP hooks cause graph breaks (due to _dynamo_disable).
+
+        For MLP(4) with a single fully_shard, the compiled autograd backward
+        graph has 2 graph breaks from _dynamo_disable on FSDP hooks:
+          1. _pre_backward tensor hook (registered on FSDP module output)
+          2. post_backward (called from RegisterPostBackwardFunction.backward)
+        _root_post_backward_final_callback runs outside the compiled autograd
+        scope as a queued engine callback.
+        """
+        torch._dynamo.reset()
+        counters.clear()
+        model = MLP(4).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model)
+        fully_shard(ref_model)
+        inp = torch.randn((4, 4), device=device_type)
+
+        # Eager reference
+        ref_out = ref_model(inp)
+        ref_out.sum().backward()
+
+        backend_count = 0
+        orig_aot_eager = torch._dynamo.lookup_backend("aot_eager")
+
+        def counting_backend(gm, example_inputs):
+            nonlocal backend_count
+            backend_count += 1
+            return orig_aot_eager(gm, example_inputs)
+
+        def compiler_fn(gm):
+            return torch.compile(gm, backend=counting_backend)
+
+        with compiled_autograd._enable(compiler_fn):
+            out = model(inp)
+            out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # 2 graph breaks from _dynamo_disable on FSDP hooks split the
+        # compiled autograd graph into 2 sub-graphs compiled by the backend:
+        #   graph break 1: _pre_backward tensor hook
+        #   graph break 2: post_backward (from RegisterPostBackwardFunction)
+        self.assertEqual(backend_count, 2)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_compile_optimizer_uneven_shard(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/176667
+        # When a param dim is not divisible by world_size, FSDP2 creates
+        # param._local_tensor as a narrow view of an N-D padded tensor, while
+        # grad._local_tensor is a view of a 1-D flat gradient buffer. Dynamo
+        # must not reuse param's symbolic context for the grad.
+        torch._dynamo.reset()
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        # 47 out_channels not divisible by world_size=2, forcing uneven sharding
+        with torch.device("meta"):
+            model = nn.Conv2d(3, 47, 3, padding=1)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=False)
+        model.to_empty(device=device_type)
+        with torch.no_grad():
+            for p in model.parameters():
+                p.uniform_(-0.01, 0.01)
+
+        opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+        x = torch.randn(4, 3, 8, 8, device=device_type, dtype=torch.bfloat16)
+
+        # Eager warmup
+        model(x).sum().backward()
+        opt.step()
+        opt.zero_grad(set_to_none=True)
+
+        # Compiled optimizer step
+        model(x).sum().backward()
+        torch.compile(opt.step)()
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

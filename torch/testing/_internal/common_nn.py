@@ -24,7 +24,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Union, Any
+from typing import Any
 from collections.abc import Callable
 from collections.abc import Sequence
 
@@ -508,7 +508,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -611,7 +611,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -668,7 +668,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -2844,6 +2844,27 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
         )
 
 
+def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        weight=None,
+                                        ignore_index=None,
+                                        reduction='mean',
+                                        label_smoothing=0.0):
+    num_classes = linear_weight.shape[0]
+    out_features = linear_weight.shape[1:-1]
+    in_features = linear_weight.shape[-1]
+    num_batches = input.shape[:-1]
+    logits = F.linear(
+        input,
+        linear_weight.reshape((-1, in_features))
+    ).reshape((*num_batches, num_classes, *out_features))
+    ignore_index = ignore_index if ignore_index is not None else -100
+    return F.cross_entropy(
+        logits, target, weight=weight,
+        reduction=reduction, ignore_index=ignore_index,
+        label_smoothing=label_smoothing
+    )
+
+
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -3086,7 +3107,8 @@ loss_reference_fns: dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
 }
 
 
@@ -3231,7 +3253,7 @@ class NNTestCase(TestCase):
     @abstractmethod
     def _backward(self, module: nn.Module,
                   input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
+                  grad_output: torch.Tensor | Sequence[torch.Tensor],
                   create_graph: bool = False):
         raise NotImplementedError
 

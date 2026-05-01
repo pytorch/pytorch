@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import NamedTuple, Optional, overload, TypeVar, Union
+from typing import NamedTuple, overload, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,6 +20,7 @@ from torch._prims_common import (
     TensorLikeType,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._inspect import _fast_bind
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -116,7 +117,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Optional[Sequence[str]] = None,
+        type_promoting_args: Sequence[str] | None = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
@@ -129,7 +130,7 @@ class elementwise_type_promotion_wrapper:
         @torch._disable_dynamo
         @wraps(fn)
         def _fn(*args, **kwargs):
-            bound = sig.bind(*args, **kwargs)
+            bound = _fast_bind(sig, *args, **kwargs)
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
@@ -188,7 +189,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 def _maybe_resize_out(
     out: TensorLikeType,
     shape: ShapeType,
-    memory_format: Optional[torch.memory_format] = None,
+    memory_format: torch.memory_format | None = None,
 ):
     if _resize_output_check(out, shape):
         return out.resize_(shape, memory_format=memory_format)
@@ -483,7 +484,7 @@ def backwards_not_supported(prim):
 # TODO: this wrapper is currently untested
 def elementwise_unary_scalar_wrapper(
     fn: Callable[_P, _T],
-) -> Callable[_P, Union[_T, NumberType]]:
+) -> Callable[_P, _T | NumberType]:
     """
     Allows unary operators that accept tensors to work with Python numbers.
     """

@@ -100,7 +100,7 @@ class Vectorized<BFloat16> {
     std::memcpy(
         reinterpret_cast<bfloat16_t*>(ptr),
         reinterpret_cast<const bfloat16_t*>(tmp),
-        count * sizeof(bfloat16_t));
+        std::min<int64_t>(count, size()) * sizeof(bfloat16_t));
   }
   const BFloat16& operator[](int idx) const = delete;
   BFloat16& operator[](int idx) = delete;
@@ -586,7 +586,7 @@ Vectorized<BFloat16> inline fmadd(
   return a * b + c;
 }
 
-#endif // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
 } // namespace CPU_CAPABILITY
 } // namespace vec

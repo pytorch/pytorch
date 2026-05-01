@@ -27,8 +27,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -61,6 +63,8 @@ test_failures = {
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
+    "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu", "mps")
@@ -77,7 +81,6 @@ test_failures = {
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_select_scatter_dtype_consistency_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
@@ -132,6 +135,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic numerical mismatch for this generated test.
+        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
+            )
+        )
 
 
 class TestInductorDynamic(TestCase):
@@ -1017,21 +1030,21 @@ class TestInductorDynamic(TestCase):
             batch_dim = input_layouts[0].size[0]
             if call_count == 1:
                 # testing fn_1
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) is None
-                ), "Should not be statically known on first call"
+                if (
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim)
+                    is not None
+                ):
+                    raise AssertionError("Should not be statically known on first call")
             elif call_count == 2:
                 # testing fn_2
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), (
-                    "Should be limited to exactly 5 on second call due to multiple constraints"
-                )
+                if PythonWrapperCodegen.statically_known_int_or_none(batch_dim) != 5:
+                    raise AssertionError(
+                        "Should be limited to exactly 5 on second call due to multiple constraints"
+                    )
             elif call_count == 2:
                 # testing fn_3
-                assert (
-                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be exactly 5 on third call"
+                if PythonWrapperCodegen.statically_known_int_or_none(batch_dim) != 5:
+                    raise AssertionError("Should be exactly 5 on third call")
 
         class TestWrapperCodegen(PythonWrapperCodegen):
             def __init__(self, *args, **kwargs):
@@ -1188,7 +1201,7 @@ class TestInductorDynamic(TestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
@@ -1215,7 +1228,8 @@ class TestInductorDynamic(TestCase):
         FileCheck().check_not("@triton_heuristics.persistent").run(source_codes[0])
         expected = reduce_bounded(x, y)
 
-        assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
+        if not torch.allclose(result, expected, atol=1e-3, rtol=1e-3):
+            raise AssertionError
 
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):

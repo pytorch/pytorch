@@ -3,9 +3,10 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/env.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/macros.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -912,20 +913,6 @@ __global__ void tile_reduce_kernel(
 #endif
 }
 
-#define AT_DISPATCH_CASE_CONVERT(enum_type, scalar_type, ...)               \
-  case enum_type: {                                                         \
-    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
-    using scalar_t = scalar_type;                                           \
-    return __VA_ARGS__();                                                   \
-  }
-
-#define AT_DISPATCH_NVSHMEM_FLOATS(scalar_type, name, ...)                  \
-  AT_DISPATCH_SWITCH(                                                       \
-      scalar_type, name,                                                    \
-      AT_DISPATCH_CASE_CONVERT(at::kBFloat16, __nv_bfloat16, __VA_ARGS__);  \
-      AT_DISPATCH_CASE_CONVERT(at::kHalf, __half, __VA_ARGS__);             \
-      AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
-
 void tile_reduce(
     at::Tensor& in_tile,
     at::Tensor& out_tile,
@@ -974,7 +961,7 @@ void tile_reduce(
       &root,
       &teams_dev};
 
-  AT_DISPATCH_NVSHMEM_FLOATS(in_tile.scalar_type(), "tile_reduce", [&]() {
+  AT_DISPATCH_NV_FLOATS(in_tile.scalar_type(), "tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
         dim3(nblocks),
@@ -1057,7 +1044,7 @@ void multi_root_tile_reduce(
       &root,
       &teams_dev};
 
-  AT_DISPATCH_NVSHMEM_FLOATS(out_tile.scalar_type(), "multi_root_tile_reduce", [&]() {
+  AT_DISPATCH_NV_FLOATS(out_tile.scalar_type(), "multi_root_tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
         dim3(nblocks),

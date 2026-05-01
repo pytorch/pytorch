@@ -15,7 +15,6 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce, partial
-from typing import Union, Optional
 from torch._prims_common import DimsType
 from packaging import version
 from torch.testing._internal.common_device_type import (
@@ -28,11 +27,12 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
-     skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
+     skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIf,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -662,6 +662,22 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    def test_cholesky_upper_reconstructs(self, device, dtype):
+        batch_dims = (1,)
+        matrix_size = 65
+        A = torch.randn(
+            *(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device
+        )
+        pd_matrix = A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
+        pd_matrix = pd_matrix.squeeze(0)
+        U = torch.linalg.cholesky(pd_matrix, upper=True)
+        self.assertEqual(U, torch.triu(U))
+        reconstructed = U.mH @ U
+        self.assertEqual(pd_matrix, reconstructed, atol=1e-4, rtol=1e-5)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
     def test_cholesky_errors_and_warnings(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -1018,7 +1034,7 @@ class TestLinalg(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, b, a))
 
     # Tests torch.det and its alias, torch.linalg.det, vs. NumPy
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
     def test_det(self, device, dtype):
@@ -1042,7 +1058,25 @@ class TestLinalg(TestCase):
         with self.assertRaises(RuntimeError):
             op(t)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_backward(self, device, dtype):
+        # Regression test for #80761.
+        input = torch.tensor([[0.]], device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
+
+        # When A has 0 elements (e.g. empty batch), backward should return a
+        # zeros tensor with the same shape as A, not an undefined tensor.
+        for shape in [(0, 3, 3), (2, 0, 0)]:
+            A = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            det = torch.linalg.det(A)
+            det.backward(torch.ones_like(det))
+            self.assertIsNotNone(A.grad)
+            self.assertEqual(A.grad.shape, A.shape)
+            self.assertEqual(A.grad, torch.zeros_like(A))
+
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
@@ -1079,7 +1113,7 @@ class TestLinalg(TestCase):
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test(shape, batch, uplo)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
@@ -1097,7 +1131,7 @@ class TestLinalg(TestCase):
         for uplo in uplos:
             run_test(3, (2, 2), uplo)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigh_errors_and_warnings(self, device, dtype):
@@ -1172,7 +1206,7 @@ class TestLinalg(TestCase):
         self.assertEqual(eigh_out.eigenvalues.sort(descending=True).values[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
         self.assertEqual(svd_out.S[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
@@ -1197,7 +1231,7 @@ class TestLinalg(TestCase):
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test(shape, batch, uplo)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigvalsh_errors_and_warnings(self, device, dtype):
@@ -1477,8 +1511,8 @@ class TestLinalg(TestCase):
                 return tensor_unbacked_size
 
         def test(
-            ord: Union[float, int],
-            dim: Optional[DimsType],
+            ord: float | int,
+            dim: DimsType | None,
             expect_numel_runtime_check: bool,
             expect_index_0_check: bool = False,
         ) -> None:
@@ -1577,7 +1611,7 @@ class TestLinalg(TestCase):
     # This test compares torch.linalg.norm, torch.linalg.matrix_norm and numpy.linalg.norm to
     # ensure that their matrix norm results match.
     @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-4})
     def test_norm_matrix(self, device, dtype):
@@ -1637,7 +1671,7 @@ class TestLinalg(TestCase):
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3})
     def test_cond(self, device, dtype):
@@ -1697,7 +1731,7 @@ class TestLinalg(TestCase):
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3})
     def test_cond_errors_and_warnings(self, device, dtype):
@@ -1803,7 +1837,7 @@ class TestLinalg(TestCase):
                     run_error_test_case(input, ord, dim, keepdim, error_type, error_regex)
 
     # Test complex number inputs for linalg.norm
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
     @precisionOverride({torch.cfloat: 5e-4})
@@ -2004,7 +2038,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(r.dtype, torch.float32)
                 self.assertEqual(r, expected)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
@@ -2032,7 +2066,7 @@ class TestLinalg(TestCase):
     # contain extreme values (inf, -inf, nan)
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
@@ -2081,7 +2115,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
@@ -2116,7 +2150,7 @@ class TestLinalg(TestCase):
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
     @skipIf(np.lib.NumpyVersion(np.__version__) < '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
@@ -2162,7 +2196,7 @@ class TestLinalg(TestCase):
     # TODO this is redundant with test_norm_matrix_degenerate_shapes above,
     # remove when old numpy versions are dropped
     @skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes_old_numpy(self, device, dtype):
@@ -2258,7 +2292,11 @@ class TestLinalg(TestCase):
         self.assertEqual(result, expected)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -2307,7 +2345,11 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_identity(self, device, dtype):
 
@@ -2321,14 +2363,6 @@ class TestLinalg(TestCase):
                 a = make_tensor(shape, dtype=dtype, device=device)
 
             actual = torch.linalg.eig(a)
-
-            complementary_device = 'cpu'
-
-            # compare eigenvalues with CPU
-            expected = torch.linalg.eig(a.to(complementary_device))
-
-            # make sure all eigenvalues are returned
-            self.assertEqual(expected[0].shape, actual[0].shape)
 
             # set tolerance for correctness check
             if dtype in [torch.float32, torch.complex64]:
@@ -2375,7 +2409,11 @@ class TestLinalg(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eigvals_out_variants(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2417,7 +2455,11 @@ class TestLinalg(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_out_variants(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2469,20 +2511,12 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @slowTest
     @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.float32)
-    def test_eig_check_magma(self, device, dtype):
-        # For CUDA inputs only matrices of size larger than 2048x2048 actually call MAGMA library
-        shape = (2049, 2049)
-        a = make_tensor(shape, dtype=dtype, device=device)
-        w, v = torch.linalg.eig(a)
-        # check correctness using eigendecomposition identity
-        self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
-
-    @onlyCUDA
-    @skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
@@ -2567,8 +2601,12 @@ class TestLinalg(TestCase):
         rhs = vals_batch.unsqueeze(-2) * vecs_batch
         self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
 
-    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
@@ -2630,7 +2668,11 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         for val in [np.inf, np.nan]:
@@ -2642,7 +2684,11 @@ class TestLinalg(TestCase):
                     torch.linalg.eig(a)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -2688,8 +2734,12 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eigvals_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
@@ -2732,7 +2782,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvals(a, out=out_w)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     def test_norm_old(self, device):
         def gen_error_message(input_size, p, keepdim, dim=None):
@@ -2829,7 +2879,7 @@ class TestLinalg(TestCase):
                 result_check = torch.linalg.norm(x, ord=ord)
                 self.assertEqual(result, result_check)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     def test_norm_complex_old(self, device):
         def gen_error_message(input_size, p, keepdim, dim=None):
@@ -2904,7 +2954,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(a_norm_fro, a_norm_2)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
         def check_single_nuclear_norm(x, axes):
@@ -2981,7 +3031,7 @@ class TestLinalg(TestCase):
                             x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m, device=device)[::7, ::5, ::11, ::2]
                             check_single_nuclear_norm(x, axes)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     def test_nuclear_norm_exceptions_old(self, device):
         for lst in [], [1], [1, 2]:
             x = torch.tensor(lst, dtype=torch.double, device=device)
@@ -3116,8 +3166,12 @@ class TestLinalg(TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(torch.complex128)
     def test_invariance_error_spectral_decompositions(self, device, dtype):
         make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
@@ -3160,41 +3214,45 @@ class TestLinalg(TestCase):
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
         L = torch.cholesky(A, upper=upper)
-        return b, A, L
 
-    @skipCUDAIfNoMagma
+        # L should be col-major
+        self.assertTrue(L.mT.is_contiguous())
+
+        yield b, A, L  # L is col-major
+        yield b, A, L.contiguous()  # L is row-major
+
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve(self, device, dtype):
         for (k, n), upper in itertools.product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
-            b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
-            x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
+            for b, A, L in self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype):
+                x = torch.cholesky_solve(b, L, upper=upper)
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve_batched(self, device, dtype):
         def cholesky_solve_batch_helper(A_dims, b_dims, upper):
-            b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
-            self.assertEqual(x_act, x_exp)  # Equality check
-            Ax = np.matmul(A.cpu(), x_act.cpu())
-            self.assertEqual(b, Ax)  # Correctness check
+            for b, A, L in self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype):
+                x_exp_list = []
+                for i in range(b_dims[0]):
+                    x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
+                x_exp = torch.stack(x_exp_list)  # Stacked output
+                x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
+                self.assertEqual(x_act, x_exp)  # Equality check
+                Ax = np.matmul(A.cpu(), x_act.cpu())
+                self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
             cholesky_solve_batch_helper((5, batchsize), (batchsize, 5, 10), upper)
 
-    @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -3202,12 +3260,12 @@ class TestLinalg(TestCase):
     def test_cholesky_solve_batched_many_batches(self, device, dtype):
         for A_dims, b_dims in zip([(5, 256, 256), (5,)], [(5, 10), (512, 512, 5, 10)]):
             for upper in [True, False]:
-                b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
-                x = torch.cholesky_solve(b, L, upper)
-                Ax = torch.matmul(A, x)
-                self.assertEqual(Ax, b.expand_as(Ax))
+                for b, A, L in self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype):
+                    x = torch.cholesky_solve(b, L, upper)
+                    Ax = torch.matmul(A, x)
+                    self.assertEqual(Ax, b.expand_as(Ax))
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -3238,7 +3296,7 @@ class TestLinalg(TestCase):
             run_test((4, 4), (2, 1, 3, 4, 2), upper)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), upper)  # broadcasting A & b
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_solve_out_errors_and_warnings(self, device, dtype):
@@ -3265,7 +3323,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_solve_backward(self, device, dtype):
@@ -3280,7 +3338,7 @@ class TestLinalg(TestCase):
             else:
                 torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
@@ -3352,7 +3410,7 @@ class TestLinalg(TestCase):
                         batches, n
                     )
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_inv_ex_info_device(self, device, dtype):
@@ -3360,7 +3418,7 @@ class TestLinalg(TestCase):
         info = torch.linalg.inv_ex(A).info
         self.assertTrue(info.device == A.device)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_inv_ex_singular(self, device, dtype):
@@ -3388,7 +3446,7 @@ class TestLinalg(TestCase):
             torch.linalg.inv_ex(A, check_errors=True)
 
     @slowTest
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
@@ -3409,7 +3467,7 @@ class TestLinalg(TestCase):
             test_inverse_many_batches_helper(torch_inverse, 5, 256)
             test_inverse_many_batches_helper(torch_inverse, 3, 512)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @dtypes(*floating_and_complex_types())
@@ -3429,8 +3487,9 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @dtypes(*floating_and_complex_types())
@@ -3443,7 +3502,7 @@ class TestLinalg(TestCase):
             torch.inverse(x)
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_pinv(self, device, dtype):
@@ -3503,7 +3562,7 @@ class TestLinalg(TestCase):
             run_test_main(A, hermitian)
             run_test_numpy(A, hermitian)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_pinv_errors_and_warnings(self, device, dtype):
@@ -3555,7 +3614,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "rtol tensor of complex type is not supported"):
             torch.linalg.pinv(a, rtol=rtol)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/129882")
@@ -3624,7 +3683,7 @@ class TestLinalg(TestCase):
         A = make_A(*A_dims)
         return b, A
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
@@ -3660,7 +3719,7 @@ class TestLinalg(TestCase):
         for n, batch, rhs in itertools.product(ns, batches, nrhs):
             run_test(n, batch, rhs)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_solve_batched_broadcasting(self, device, dtype):
@@ -3681,7 +3740,7 @@ class TestLinalg(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & B
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
@@ -3704,7 +3763,7 @@ class TestLinalg(TestCase):
         for a_shape, d in itertools.product(a_shapes, dims):
             run_test(a_shape, d)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_tensorsolve_empty(self, device, dtype):
@@ -3714,7 +3773,7 @@ class TestLinalg(TestCase):
         x = torch.linalg.tensorsolve(a, b)
         self.assertEqual(torch.tensordot(a, x, dims=len(x.shape)), b)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32)
     def test_tensorsolve_errors_and_warnings(self, device, dtype):
@@ -3747,14 +3806,17 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.tensorsolve(a, b, out=out)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
     def test_tensorinv(self, device, dtype):
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
 
         def run_test(a_shape, ind):
-            a = torch.randn(a_shape, dtype=dtype, device=device)
+            n = 1
+            for s in a_shape[:ind]:
+                n *= s
+            a = make_fullrank(n, n, dtype=dtype, device=device).reshape(a_shape)
             a_numpy = a.cpu().numpy()
             result = torch.linalg.tensorinv(a, ind=ind)
             expected = np.linalg.tensorinv(a_numpy, ind=ind)
@@ -3767,7 +3829,15 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, result)
 
         # compare to NumPy output
-        run_test((12, 3, 4), ind=1)
+        if not torch.version.hip:
+            # https://github.com/pytorch/pytorch/issues/174913
+            # Skip one config due to regression on ROCm 7.2 for hipSolver.
+            # Rather than skip entire unit test using @skipIfRocm
+            # This happened on MI355, MI300, and MI200.
+            # Mismatched elements: 1 / 144 (0.7%)
+            # Greatest absolute difference: 0.00130462646484375 at index (1, 3, 6) (up to 0.001 allowed)
+            # Greatest relative difference: 1.5133813576539978e-05 at index (1, 3, 6) (up to 1.3e-06 allowed)
+            run_test((12, 3, 4), ind=1)
         run_test((3, 8, 24), ind=2)
         run_test((18, 3, 3, 2), ind=1)
         run_test((1, 4, 2, 2), ind=2)
@@ -3778,7 +3848,7 @@ class TestLinalg(TestCase):
         run_test((3, 2, 1, 2, 12), ind=4)
 
     @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_tensorinv_empty(self, device, dtype):
@@ -3789,7 +3859,7 @@ class TestLinalg(TestCase):
             self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
 
     @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_tensorinv_errors_and_warnings(self, device, dtype):
@@ -3841,7 +3911,7 @@ class TestLinalg(TestCase):
         check_out((12, 3, 4), ind=1)
         check_out((3, 8, 24), ind=2)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_tensorinv_singular_input(self, device, dtype):
@@ -3934,7 +4004,7 @@ class TestLinalg(TestCase):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank(self, device, dtype):
@@ -3977,7 +4047,7 @@ class TestLinalg(TestCase):
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
             run_test(shape0, shape1, batch)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank_atol(self, device, dtype):
@@ -4006,7 +4076,7 @@ class TestLinalg(TestCase):
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
             run_test_atol(shape0, shape1, batch)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float64)
     def test_matrix_rank_atol_rtol(self, device, dtype):
@@ -4032,7 +4102,7 @@ class TestLinalg(TestCase):
             result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank_empty(self, device, dtype):
@@ -4069,7 +4139,7 @@ class TestLinalg(TestCase):
             run_test(0, 3, batch)
             run_test(3, 0, batch)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
@@ -4095,7 +4165,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank_basic(self, device, dtype):
@@ -5108,9 +5178,6 @@ class TestLinalg(TestCase):
         # We set the TunableOp numerical check environment variable here because it is
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
 
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently hangs on rocm mi350")
-
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # Numerical check adds significant overhead, unsure if this is needed
@@ -6080,6 +6147,7 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
+    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -6210,8 +6278,12 @@ class TestLinalg(TestCase):
             # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
-            # There must be a new tuning results
-            self.assertEqual(total_num_results, 10)
+            preferred_blas = str(torch.backends.cuda.preferred_blas_library())
+            # With hipBLASLt preferred, the two linear/addmm+bias calls are
+            # tracked as GemmAndBias tunables (+2). With rocBLAS preferred,
+            # they fall back to regular GEMM signatures and don't add entries.
+            expected_num_results = 10 if preferred_blas == "_BlasBackend.Cublaslt" else 8
+            self.assertEqual(total_num_results, expected_num_results)
 
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
@@ -6422,9 +6494,9 @@ class TestLinalg(TestCase):
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
             mm_key = 'Cijk'
-            events = prof.key_averages()
+            events = prof.events()
             for evt in events:
-                if mm_key in evt.key:
+                if mm_key in evt.name:
                     self.assertEqual(evt.count, 1)
                     kernel_count = kernel_count + 1
 
@@ -6978,7 +7050,7 @@ class TestLinalg(TestCase):
                 torch.linalg.householder_product(reflectors, tau)
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipIfTorchDynamo("Runtime error with torch._C._linalg.linalg_lu_factor")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -7086,7 +7158,7 @@ class TestLinalg(TestCase):
                     f(torch.empty(1, 2, 2), pivot=False)
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
@@ -7096,10 +7168,7 @@ class TestLinalg(TestCase):
         backends = ["default"]
 
         if torch.device(device).type == 'cuda':
-            if torch.cuda.has_magma:
-                backends.append("magma")
-            if has_cusolver():
-                backends.append("cusolver")
+            backends.append("cusolver")
 
         def gen_matrices():
             rhs = 3
@@ -7183,7 +7252,7 @@ class TestLinalg(TestCase):
             torch.lu_unpack(LU, pivots)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(torch.double)
     def test_lu_unpack_check_input(self, device, dtype):
         x = torch.rand(5, 5, 5, device=device, dtype=dtype)
@@ -7200,7 +7269,7 @@ class TestLinalg(TestCase):
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False, unpack_pivots=False)
         self.assertTrue(p.numel() == 0 and l.numel() == 0 and u.numel() == 0)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_basic(self, device, dtype):
@@ -7612,6 +7681,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
+    def test_addmv_mixed_types(self, device):
+        ten = torch.rand([2], dtype=torch.float64)
+        mat = torch.rand([2, 3], dtype=torch.complex128)
+        vec = torch.rand([3], dtype=torch.complex128)
+        self.assertRaises(RuntimeError, lambda: torch.addmv(ten, mat, vec))
+
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
@@ -7929,18 +8004,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
-    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type):
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
         # non_contig_type:
         # 0: the whole data buffer is contiguous (can be transposed)
         # 1: stride of one dimension is 1, but the whole buffer is not contiguous
         # 2: Neither stride is 1
 
-        def genf_int_float(x, y, use_transpose, non_contig_type):
+        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
             if use_transpose:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
+            dt_info = torch.iinfo(dtype)
+            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
@@ -7954,8 +8031,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         if non_contig_type != 0 and (m == 0 or k == 0):
             return
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
         c_int32 = torch._int_mm(a_int8, b_int8)
         self.assertTrue(c_int32.dtype is torch.int32)
         self.assertEqual(c_int32.device, torch.device(device))
@@ -8755,7 +8832,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self._test_addbmm_baddbmm("baddbmm", b1, b2, ref, out_tensor)
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_pinverse(self, device, dtype):
@@ -8790,7 +8867,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(torch.double, torch.cdouble)
     def test_matrix_power_non_negative(self, device, dtype):
         def check(*size):
@@ -8807,7 +8884,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         check(2, 3, 3)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @dtypes(torch.double, torch.cdouble)
     def test_matrix_power_negative(self, device, dtype):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
@@ -8827,7 +8904,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         check(2, 3, 3)
         check(2, 3, 5, 5)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.complex64)
     def test_linalg_matrix_exp_utils(self, device, dtype):
@@ -8882,7 +8959,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 tens.imag = torch.matrix_exp(tens.imag)
                 self.assertFalse(len(w))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_linalg_matrix_exp_boundary_cases(self, device, dtype):
@@ -8901,7 +8978,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         x = torch.randn(3, 3, 1, 1)
         self.assertEqual(expm(x), x.exp())
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_matrix_exp_backward_input_validation(self, device, dtype):
@@ -8916,7 +8993,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.ops.aten.matrix_exp_backward(non_square, grad_non_square)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_linalg_matrix_exp_perverse_nan_values(self, device, dtype):
@@ -8940,7 +9017,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertTrue(torch.isnan(expm(x)).any())
 
     @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_matrix_exp_analytic(self, device, dtype):
@@ -9050,7 +9127,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test(3, 3, 100, 100)
         run_test(3, 3, 200, 200)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_linalg_matrix_exp_batch(self, device, dtype):
@@ -9085,7 +9162,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_matrix_exp_compare_with_taylor(self, device, dtype):
@@ -9184,7 +9261,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -9236,7 +9313,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['hermitian', 'hermitian_pd', 'hermitian_psd'])
             run_test(matsize, batchdims, mat_chars=['singular', 'non_singular'])
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_slogdet_errors_and_warnings(self, device, dtype):
@@ -9449,7 +9526,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         s.fill_(1. / (100 * s.numel()))
         test(u.mm(s.diag()).mm(v))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet_batched(self, device, dtype):
@@ -9500,7 +9577,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse(self, device, dtype):
@@ -9548,7 +9625,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         expected = torch.inverse(A)
         self.assertEqual(expected, out)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse_errors_and_warnings(self, device, dtype):
@@ -9745,7 +9822,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         return b, A, LU_data, LU_pivots
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -9761,7 +9838,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             sub_test(False)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -9793,7 +9870,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @slowTest
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
@@ -9806,7 +9883,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((262144, 5, 5), (262144, 5, 10))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     def test_lu_solve_batched_broadcasting(self, device, dtype):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
@@ -9829,7 +9906,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     # this tests https://github.com/pytorch/pytorch/issues/36921
     def test_lu_solve_large_matrices(self, device, dtype):
@@ -9920,7 +9996,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
     @onlyNativeDeviceTypes
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64)
     def test_nuclear_norm_out(self, device, dtype):
@@ -9977,7 +10053,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for batch, (m, n) in product(batches, product(ns, ns)):
             run_test((*batch, m, n))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     def test_lapack_empty(self, device):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
@@ -10052,7 +10128,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             else:
                 a.unsqueeze_(0)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
@@ -10118,7 +10194,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for shape, batch, hermitian in itertools.product(shapes, batches, hermitians):
             run_test(shape, batch, hermitian)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
@@ -10146,6 +10222,44 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         nrhss = (1, 7)
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve_cpu_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
+        # malformed pivots used to be passed straight to Lapack SYTRS which
+        # would write past the end of the matrix and corrupt the heap; they
+        # should now surface as a clean RuntimeError.
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        hermitian = dtype.is_complex
+        n = 5
+        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
+        B = make_tensor((n, 1), dtype=dtype, device=device)
+        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+
+        # Sanity: the factorization output round-trips.
+        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
+
+        # Lapack uses 1-based pivot indices, so zero is invalid.
+        bad = pivots.clone()
+        bad[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Out-of-range positive pivot.
+        bad = pivots.clone()
+        bad[0] = n + 1
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
+        # must still be <= N.
+        bad = pivots.clone()
+        bad[0] = -(n + 1)
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
     @onlyCUDA
     @skipCUDAIfNoMagma

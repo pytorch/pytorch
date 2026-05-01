@@ -325,41 +325,88 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#if defined(USE_ROCM)
 // C10_WARP_SIZE is only allowed for device code.
-// Host code _must_ use at::cuda::warp_size()
+// Host code dynamically-sized launch configs _must_ use at::cuda::warp_size().
+// Host or device statically-sized arrays _must_ use either
+// C10_WARP_SIZE_UPPER_BOUND or C10_WARP_SIZE_LOWER_BOUND, as needed.
+//
 // HIP header used to define warpSize as a constexpr that was either 32 or 64
 // depending on the target device, and then always set it to 64 for host code.
-// Host pass of HIP compiler needs C10_WARP_SIZE defined to _something_ so we
-// set it to something unreasonable to trigger obvious host code errors.
-
+// For a time, that allowed C10_WARP_SIZE to be defined like so:
+//
+// #ifdef USE_ROCM
+// #define C10_WARP_SIZE warpSize
+// #else
+// #define C10_WARP_SIZE 32
+// #endif
+//
+// In ROCm 7, warpSize is no longer constexpr, matching CUDA behavior.
+// We can now only use warpSize for C10_WARP_SIZE in device code and this is
+// enforced by using __device__ in its definition.  In host code where
+// C10_WARP_SIZE was previously used as a compile-time constant, this will now
+// cause a compile-time error.
+//
+// If an array was previously expected to be sized at compile-time using
+// C10_WARP_SIZE, users must now use either C10_WARP_SIZE_UPPER_BOUND or
+// C10_WARP_SIZE_LOWER_BOUND depending on the situation.
+//
+// If C10_WARP_SIZE was previously used to determine kernel launch sizes, users
+// must now use at::cuda::warp_size() for the dynamic runtime query.
+//
+// Unfortunately, C10_WARP_SIZE has been public and available for both host and
+// device since approximately 2019, so forcing it to be device-only would break
+// existing code in the wild.
+#if defined(USE_ROCM)
 namespace at::cuda {
 TORCH_CUDA_CPP_API int warp_size();
 }
-#ifdef __HIPCC__
-static inline int __host__ C10_WARP_SIZE_INTERNAL() {
+#if defined(__HIPCC__)
+static __host__ inline int C10_WARP_SIZE_INTERNAL() {
   return at::cuda::warp_size();
 }
-
-static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
+// NOTE: __device__ C10_WARP_SIZE_INTERNAL
+// For __SPIRV__, we must use dynamic warpSize. When not targeting __SPIRV__,
+// we can use constexpr. This matches prior behavior. We preserve this for
+// backward compatibility instead of forcing old code to use dynamic warpSize
+// and losing constexpr. However, compiling for --offload-arch=amdgcnspirv
+// could expose where C10_WARP_SIZE was used incorrectly where the dynamic
+// warpSize is not allowed.
+#if defined(__SPIRV__)
+static __device__ inline int C10_WARP_SIZE_INTERNAL() {
+  return warpSize;
+}
+#else // __SPIRV__
+static __device__ inline constexpr int C10_WARP_SIZE_INTERNAL() {
 #if defined(__GFX9__)
   return 64;
 #else // __GFX9__
   return 32;
 #endif // __GFX9__
 }
-#else // __HIPCC__
+#endif // __SPIRV__
+#if defined(__SPIRV__)
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 64
+#elif defined(__GFX9__)
+#define C10_WARP_SIZE_LOWER_BOUND 64
+#define C10_WARP_SIZE_UPPER_BOUND 64
+#else
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 32
+#endif
+#else // !__HIPCC__
 static inline int C10_WARP_SIZE_INTERNAL() {
   return at::cuda::warp_size();
 }
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 64
 #endif // __HIPCC__
-
 #define C10_WARP_SIZE (C10_WARP_SIZE_INTERNAL())
-#define C10_WARP_SIZE_STATIC 64
-
-#else // defined(USE_ROCM)
+#else // !USE_ROCM
 #define C10_WARP_SIZE 32
-#endif
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 32
+#endif // USE_ROCM
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
@@ -629,7 +676,7 @@ __host__ __device__
 // This macro is used to find older C++ compilers
 // that don't support move optimization for return values.
 
-#if (defined(__GNUC__) && __GNUC__ < 13) || \
+#if (defined(__GNUC__) && __GNUC__ < 13 && __cplusplus < 202002L) || \
     (defined(__clang_major__) && __clang_major__ < 13)
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 1
 #else

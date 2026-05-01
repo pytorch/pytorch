@@ -3,7 +3,6 @@ import datetime
 import functools
 import unittest
 from collections import Counter
-from typing import Optional
 from unittest import mock
 from unittest.mock import patch
 
@@ -169,7 +168,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def func(x):
             y = x * x
-            y = dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            dist.all_reduce(y, op=dist.ReduceOp.SUM)
             x = torch.nn.functional.silu(x)
             return x * y
 
@@ -723,7 +722,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
         ):
             lib.define(
-                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"
             )
             lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
             lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
@@ -1549,7 +1548,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1609,7 +1608,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1658,7 +1657,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                     "runtime_estimations_mms_benchmark": True,
                 }
@@ -1678,13 +1677,55 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_not("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
         if not same(out, correct):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_all_gather_bucket_copy_cat_fusion(self):
+        """Bucketed all_gather merge uses copy_(cat(...)) which inductor fuses
+        into 1 Triton kernel instead of N kernels from _foreach_copy_."""
+
+        def func(ag_0, ag_1, ag_2, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            return (
+                torch.ops.c10d_functional.wait_tensor(ag_0_out),
+                torch.ops.c10d_functional.wait_tensor(ag_1_out),
+                torch.ops.c10d_functional.wait_tensor(ag_2_out),
+            )
+
+        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # Bucketed merge should produce 1 copy kernel (fused copy_(cat(...))),
+        # not 3 separate kernels from _foreach_copy_.
+        num_triton_kernels = code.count("def triton_")
+        self.assertEqual(
+            num_triton_kernels,
+            1,
+            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
@@ -1741,7 +1782,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1783,7 +1824,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             with torch._inductor.config.patch(
                 {
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                 }
             ):
@@ -1812,7 +1854,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all"])
+    @parametrize(
+        "bucket_mode", ["all"]
+    )  # "all" is just a placeholder, there is only one bucketmode
     def test_all_reduce_bucket(self, bucket_mode):
         def func(x, w, ar_0, ar_1, tag, ranks, group_size):
             y = torch.mm(x, w)
@@ -1868,7 +1912,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    @parametrize("bucket_mode", ["custom_ops_multidtype"])
     def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1901,7 +1945,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": bucket_mode,
+                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_bucket_mode": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1932,7 +1977,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
@@ -2021,7 +2066,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -2053,9 +2098,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_fx": "all",
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
@@ -2150,7 +2197,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -2273,6 +2320,188 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_node_order(self):
+        # Reproduces the cross-rank sync bug: when ranks have topologically
+        # identical graphs but different node creation orders (from different
+        # dict iteration orders in Dynamo tracing), the old name-based hash in
+        # has_same_nodes returns False → sync skipped → divergent min-cut.
+        #
+        # Both ranks have the same topology:
+        #   p1 → all_gather → wait → relu → output[0]
+        #   p2 → neg → output[1]
+        # But the computation nodes are created in different orders across
+        # ranks, producing different graph.nodes iteration orders.
+        import hashlib
+
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+
+        if self.rank == 0:
+            # Rank 0: deep path created first during tracing
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+        else:
+            # Rank 1: shallow path created first during tracing
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((relu_node, neg_node))
+
+        # Verify the bug condition: the old name-based hash diverges because
+        # graph.nodes iteration order differs across ranks.
+        node_str = "/".join(x.name for x in test_graph.nodes)
+        local_hash = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self._init_process_group()
+
+        all_hashes = [None, None]
+        torch.distributed.all_gather_object(all_hashes, local_hash)
+        self.assertNotEqual(all_hashes[0], all_hashes[1])
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        if self.rank == 0:
+            saved_values = [relu_node]
+        else:
+            saved_values = [neg_node]
+
+        # With the canonical naming fix, sync succeeds despite different
+        # node orderings. Both ranks agree on the same saved node.
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(len(result), 1)
+
+        # All ranks should agree on the result
+        result_targets = [None, None]
+        torch.distributed.all_gather_object(result_targets, str(result[0].target))
+        self.assertEqual(result_targets[0], result_targets[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_invalid_node_error(self):
+        # Reproduces the "Node X was invalid, but is output" assertion error.
+        #
+        # When two ranks have isomorphic graphs with matching node names and
+        # iteration order (so has_same_nodes returns True), but the same name
+        # maps to structurally different nodes across ranks, the old name-based
+        # sync communicates the wrong saved values. Using these wrong values
+        # for backward graph extraction triggers the assertion.
+        #
+        # Setup: both ranks create two relu nodes in the same order, but
+        # wire them to different placeholders:
+        #   Rank 0: relu="relu(p1)", relu_1="relu(p2)"
+        #   Rank 1: relu="relu(p2)", relu_1="relu(p1)"
+        # The backward computation needs relu(p1). On rank 0 that's "relu",
+        # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
+        # rank 1 gets relu(p2) instead → backward extraction fails.
+        from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch.partitioners import (
+            _extract_graph_with_inputs_outputs,
+            _sync_decision_cross_ranks,
+        )
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+        t1 = test_graph.placeholder("tangents_1")
+        t1.meta["val"] = torch.randn(10, 8)
+
+        # Both ranks create relu nodes in the same order → same auto-names.
+        # But the wiring to placeholders differs across ranks.
+        if self.rank == 0:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+        else:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        # Collective (required for has_collectives to return True)
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (relu_a,),
+        )
+        wt = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.wait_tensor.default,
+            (ag,),
+        )
+        wt.meta["val"] = torch.randn(10, 8)
+
+        # Backward: grad depends on relu(p1) specifically.
+        # On rank 0 that's relu_a, on rank 1 that's relu_b.
+        relu_p1 = relu_a if self.rank == 0 else relu_b
+        grad = test_graph.create_node(
+            "call_function", torch.ops.aten.mul.Tensor, (t1, relu_p1)
+        )
+        grad.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((wt, relu_b, grad))
+
+        self._init_process_group()
+
+        # Each rank correctly identifies relu(p1) as the node to save.
+        saved_values = [relu_p1]
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+
+        # Extract backward subgraph using the synced saved values.
+        # Without the fix: wrong node → "Node mul was invalid, but is output"
+        bwd_inputs = [t1] + result
+        bwd_outputs = [grad]
+        bwd_descs = [PlainAOTOutput(idx=0)]
+        _extract_graph_with_inputs_outputs(
+            test_graph, bwd_inputs, bwd_outputs, bwd_descs
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_align_runtime_estimations_across_all_distributed_ranks(self):
         from torch._inductor.ir import ExternKernel
         from torch._inductor.scheduler import (
@@ -2315,14 +2544,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             [mock_node_1, mock_node_2, mock_node_3]
         )
 
-        # only MM related nodes should be aligned
+        # all nodes should be aligned across ranks (median)
         self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
-        self.assertEqual(
-            mock_node_2.override_estimated_runtime, 0.3 if self.rank == 0 else 0.4
-        )
-        self.assertEqual(
-            mock_node_3.override_estimated_runtime, 0.5 if self.rank == 0 else 0.6
-        )
+        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
+        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):

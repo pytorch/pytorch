@@ -68,18 +68,10 @@ using ::c10::TypeKind;
 
 using ::c10::fmap;
 
-namespace prim {
-using namespace ::c10::prim;
-}
-namespace attr {
-using namespace ::c10::attr;
-}
-namespace aten {
-using namespace ::c10::aten;
-}
-namespace cuda {
-using namespace ::c10::cuda;
-} // namespace cuda
+namespace prim = ::c10::prim;
+namespace attr = ::c10::attr;
+namespace aten = ::c10::aten;
+namespace cuda = ::c10::cuda;
 
 struct Function;
 struct GraphFunction;
@@ -500,19 +492,43 @@ struct TORCH_API Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   Value* output() {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* output() const {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* input() const {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.

@@ -12,13 +12,21 @@ ignore =
     # to line this up with executable bit
     EXE001,
     # these ignores are from flake8-bugbear; please fix!
-    B007,B008,B017,B019,B023,B028,B903,B905,B906,B907,B908,B910
+    B007,B008,B017,B019,B023,B028,B903,B905,B906,B907,B908,B910,
     # these ignores are from flake8-simplify. please fix or ignore with commented reason
     SIM105,SIM108,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
     # SIM104 is already covered by pyupgrade ruff
     SIM104,
     # flake8-simplify code styles
-    SIM102,SIM103,SIM106,SIM112
+    SIM102,SIM103,SIM106,SIM112,
+    # Codes where ruff is the source of truth. Ruff handles these (sometimes
+    # differently than flake8). As ruff promotes preview codes, move them here
+    # from ruff's external list.
+    B001,B036,B902,B904,B950,
+    C406,C417,C419,C901,
+    E121,E122,E124,E128,E131,E712,E722,E723,E731,
+    F401,F722,F723,F811,F812,
+    G001,G003,G004,G010,G200,G201,G202
 per-file-ignores =
     __init__.py: F401
     test/**: F821
@@ -43,6 +51,7 @@ exclude =
     ./functorch/docs,
     ./functorch/examples,
     ./functorch/docs/source/tutorials,
+    ./torch/testing/_internal/py312_intrinsics.py
     ./scripts,
     ./test/generated_type_hints_smoketest.py,
     ./third_party,

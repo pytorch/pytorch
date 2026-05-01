@@ -11,6 +11,7 @@ from torch._dynamo.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    xfailIf,
 )
 
 
@@ -23,6 +24,7 @@ if HAS_EINOPS:
 else:
     einops_version = "none"
 einops_version_sanitized = einops_version.replace(".", "_")
+HAS_EINOPS_PACK = HAS_EINOPS and hasattr(einops, "pack")
 
 
 @unittest.skipIf(not HAS_EINOPS, "these tests require einops")
@@ -36,12 +38,13 @@ class TestEinops(TestCase):
     in PyTorch.
     """
 
-    @unittest.skipIf(
-        einops_version == "0.6.1", "https://github.com/pytorch/pytorch/issues/157417"
-    )
     @parametrize("version", [einops_version_sanitized])
     def test_functions(self, version):
-        from einops import einsum, pack, rearrange, reduce, repeat, unpack
+        from einops import einsum, rearrange, reduce, repeat
+
+        has_pack = HAS_EINOPS_PACK
+        if has_pack:
+            from einops import pack, unpack
 
         class TorchModuleWithOperations(nn.Module):
             def __init__(self) -> None:
@@ -60,11 +63,16 @@ class TestEinops(TestCase):
                 # by suf function
                 x_abcd = repeat(x_abc, suf("a b c -> a b c 4"))
                 x_abc = reduce(x_abcd, suf("a b c d -> a b c"), "min")
-                x_abdc, ps = pack([x_abc] * (2 + len(suffix)), suf("a b * c"))
-                x_array = unpack(
-                    rearrange(x_abdc, suf("a b d c -> (a b ) 1 c d")), ps, "ab one1 c *"
-                )
-                x1 = x_array[0] + len(x_array)
+                if has_pack:
+                    x_abdc, ps = pack([x_abc] * (2 + len(suffix)), suf("a b * c"))
+                    x_array = unpack(
+                        rearrange(x_abdc, suf("a b d c -> (a b ) 1 c d")),
+                        ps,
+                        "ab one1 c *",
+                    )
+                    x1 = x_array[0] + len(x_array)
+                else:
+                    x1 = rearrange(x_abc, suf("a b c -> (a b ) 1 c"))
                 x1 = rearrange(x1, suf("(a b ) 1 c -> a b c"), b=b)
                 addition = einsum(x_abc, x_abcd, suf("a b c , a b c d -> d"))[0]
                 return x1 + addition
@@ -102,7 +110,7 @@ class TestEinops(TestCase):
         for size in [16, 32, 64]:
             x = torch.rand([size, size])
             result1 = original(x)
-            result2 = compiled(x.double()).float()
+            result2 = compiled(x)
             self.assertEqual(result1, result2)
 
     @parametrize("version", [einops_version_sanitized])
@@ -112,7 +120,12 @@ class TestEinops(TestCase):
         script = """\
 import torch
 import torch.nn as nn
-from einops import einsum, pack, reduce, repeat, unpack, rearrange
+import einops
+from einops import einsum, reduce, repeat, rearrange
+
+has_pack = hasattr(einops, "pack")
+if has_pack:
+    from einops import pack, unpack
 
 class TorchModuleWithOperations(nn.Module):
     def __init__(self) -> None:
@@ -129,14 +142,17 @@ class TorchModuleWithOperations(nn.Module):
         # by suf function
         x_abcd = repeat(x_abc, suf("a b c -> a b c 4"))
         x_abc = reduce(x_abcd, suf("a b c d -> a b c"), "min")
-        x_abdc, ps = pack([x_abc] * (2 + len(suffix)), suf("a b * c"))
-        x_array = unpack(rearrange(x_abdc, suf("a b d c -> (a b ) 1 c d")), ps, "ab one1 c *")
-        x1 = x_array[0] + len(x_array)
+        if has_pack:
+            x_abdc, ps = pack([x_abc] * (2 + len(suffix)), suf("a b * c"))
+            x_array = unpack(rearrange(x_abdc, suf("a b d c -> (a b ) 1 c d")), ps, "ab one1 c *")
+            x1 = x_array[0] + len(x_array)
+        else:
+            x1 = rearrange(x_abc, suf("a b c -> (a b ) 1 c"))
         x1 = rearrange(x1, suf("(a b ) 1 c -> a b c"), b=b)
         addition = einsum(x_abc, x_abcd, suf("a b c , a b c d -> d"))[0]
         return x1 + addition
 
-compiled_fn = torch.compile(TorchModuleWithOperations(), fullgraph=True)
+compiled_fn = torch.compile(TorchModuleWithOperations(), fullgraph=True, backend="eager")
 x = torch.arange(2 * 3 * 5).view(2, 3, 5)
 y = compiled_fn(x)
 
@@ -190,6 +206,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             else:
                 self.assertIn(einops_method, output)
 
+    @xfailIf(einops_version == "0.8.2")
     @parametrize(
         "method",
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
@@ -221,6 +238,15 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         else:
             self.fail(method)
         self._run_in_subprocess(flag, method, einops_method, snippet)
+
+    def test_no_warning(self):
+        # checks that this doesn't produce any warnings
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return einops.rearrange(x, "... -> (...)")
+
+        x = torch.randn(5)
+        self.assertNotWarn(lambda: fn(x))
 
 
 instantiate_parametrized_tests(

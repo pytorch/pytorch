@@ -6,7 +6,7 @@ import operator
 import typing
 from collections import Counter
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch._guards
@@ -55,8 +55,29 @@ pass_patterns = [
 ]
 
 
+def _is_lossless_fp_widening_cast(
+    src_dtype: torch.dtype, dst_dtype: torch.dtype
+) -> bool:
+    if src_dtype == dst_dtype:
+        return True
+
+    if not (src_dtype.is_floating_point and dst_dtype.is_floating_point):
+        return False
+
+    src_info = torch.finfo(src_dtype)
+    dst_info = torch.finfo(dst_dtype)
+
+    # A floating-point cast is only pointless if the first conversion cannot
+    # discard precision or range from the source values.
+    return (
+        dst_info.eps <= src_info.eps
+        and dst_info.max >= src_info.max
+        and dst_info.tiny <= src_info.tiny
+    )
+
+
 @init_once_fakemode
-def lazy_init(input_device: Optional[torch.device] = None):
+def lazy_init(input_device: torch.device | None = None):
     from .fuse_attention import _sfdp_init
     from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
@@ -71,8 +92,8 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
+    """Remove identity arithmetic operations: (+ 0, - 0, * 1, / 1)."""
     with torch.utils._python_dispatch._disable_current_modes():
-        "Removes no-ops: (+ 0, - 0, * 1, / 1)"
         graph = gm.graph
 
         def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
@@ -83,6 +104,18 @@ def remove_no_ops(
                     return False
             return True
 
+        def is_mutated(n):
+            """Check if a node is mutated by any in-place operation."""
+            for user in n.users:
+                if user.op != "call_function" or not hasattr(user.target, "_schema"):
+                    continue
+                for i, arg in enumerate(user.args):
+                    if arg is n:
+                        schema_arg = user.target._schema.arguments[i]
+                        if schema_arg.alias_info and schema_arg.alias_info.is_write:
+                            return True
+            return False
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -90,6 +123,13 @@ def remove_no_ops(
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+                return
+
+            # https://github.com/pytorch/pytorch/issues/174187
+            # Don't replace if the replacement value is mutated in-place.
+            # The original node acts as an implicit copy; removing it would
+            # cause users to observe the post-mutation value instead.
+            if is_mutated(replacement):
                 return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
@@ -182,7 +222,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
             is_needed = True
 
             if existing_views:
-                # Replace the view with the an existing view if available.
+                # Replace the view with an existing view if available.
                 alias = existing_views.get(to_type)
                 if alias:
                     is_needed = False
@@ -343,12 +383,10 @@ class UniformValueConstantFolder(ConstantFolder):
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
             (input_tensor, output_dtype), kwargs = self.fetch_args_kwargs_from_env(node)
-            # view.dtype fails on 0-d tensors when element size changes
-            # (e.g., 0-d complex tensors can't be viewed as float)
-            if (
-                input_tensor.ndim == 0
-                and input_tensor.element_size() != output_dtype.itemsize
-            ):
+            # view.dtype with different element sizes changes element count
+            # (e.g., complex64 [1+0j] viewed as float32 becomes [1.0, 0.0]),
+            # making uniform values non-uniform. Also crashes on 0-d tensors.
+            if input_tensor.element_size() != output_dtype.itemsize:
                 return self.unknown_value
             return super(ConstantFolder, self).run_node(node)
 
@@ -505,7 +543,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
                         "device": fake_tensor.device,
-                        "pin_memory": False,
+                        "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
 
@@ -600,7 +638,8 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
 
 
 def joint_graph_passes(
-    graph: torch.fx.GraphModule, input_device: Optional[torch.device] = None
+    graph: torch.fx.GraphModule,
+    input_device: torch.device | None = None,
 ):
     """
     Run FX transformations on the joint forwards+backwards graph.
@@ -610,7 +649,7 @@ def joint_graph_passes(
         subsystem="joint_graph_passes",
     )
 
-    lazy_init(input_device)  # type: ignore[call-arg]
+    lazy_init(input_device)
     count = 0
 
     # must occur before other passes
@@ -744,7 +783,15 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     graph = match.graph
     node = match.output_node()
     allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
-    if dtype1 in allowed and dtype2 in allowed:
+    arg_val = arg.meta.get("val", None)
+    if not isinstance(arg_val, torch.Tensor):
+        return
+
+    if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
+            arg_val.dtype, dtype1
+        ):
+            return
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)
         )

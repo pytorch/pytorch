@@ -23,14 +23,16 @@ class TORCH_API ProcessGroupWrapper : public Backend {
       const c10::intrusive_ptr<Backend>& backend,
       c10::intrusive_ptr<Backend> glooBackend);
 
-  const std::string getBackendName() const override;
-
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& data,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
   c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -61,6 +63,11 @@ class TORCH_API ProcessGroupWrapper : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -74,6 +81,16 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& inputBuffer,
+      at::Tensor& outputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> alltoall_base(
@@ -118,24 +135,46 @@ class TORCH_API ProcessGroupWrapper : public Backend {
 
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+  void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const ReduceScatterOptions& opts) override;
+  void waitForPendingWorks() override;
+  void enableCollectivesTiming() override;
 
-  void startCoalescing() override;
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Options>& opts) override;
 
-  c10::intrusive_ptr<Work> endCoalescing() override;
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Options>& opts,
+      const int& rank,
+      const int& size) override;
 
   // Forward methods to wrapped backend
   bool supportsSplitting() const override;
   bool supportsCoalescing() const override;
   bool supportsTimeEstimation() const override;
+  bool supportsShrinking() const override;
+  c10::intrusive_ptr<Backend> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0,
+      const c10::intrusive_ptr<Options>& opts_override = nullptr) override;
+  void setTimeout(std::chrono::milliseconds timeout) override;
+  void startCoalescing() override;
+  c10::intrusive_ptr<Work> endCoalescing() override;
+  const std::string getBackendName() const override;
   c10::intrusive_ptr<Options> getBackendOptions() override;
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
+  void abort() override;
+  void shutdown() override;
+  void suspend() override;
+  void resume() override;
+  std::unordered_map<std::string, uint64_t> getMemoryStats() override;
+
   ErrorType getError() override;
   void eagerConnectSingleDevice(at::Device device) override;
 

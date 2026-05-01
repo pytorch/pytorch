@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf
+    TEST_WITH_ROCM, decorateIf, skipIfXpu
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -281,6 +281,38 @@ class TestTesting(TestCase):
         tests = [(a, b, expected)]
 
         self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32)
+    def test_isclose_equal_nan_broadcast(self, device, dtype):
+        # Regression test: isclose with equal_nan=True should handle broadcasting
+        # See https://github.com/pytorch/pytorch/issues/174985
+        nan = torch.nan
+
+        # One-sided broadcast: different sizes
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
+
+        # One-sided broadcast: scalar-like vs vector
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, False, True], device=device))
+
+        # Mutual broadcast
+        a = torch.tensor([[nan], [1.0]], device=device, dtype=dtype)  # [2, 1]
+        b = torch.tensor([[nan, 1.0]], device=device, dtype=dtype)    # [1, 2]
+        result = torch.isclose(a, b, equal_nan=True)
+        expected = torch.tensor([[True, False], [False, True]], device=device)
+        self.assertEqual(result, expected)
+
+        # Same shape (fast path) still works
+        a = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
 
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
@@ -542,6 +574,60 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
+
+
+class TestEnvironmentDefFlag(TestCase):
+    """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
+
+    def setUp(self):
+        import torch.testing._internal.common_utils as _cu
+        self._cu = _cu
+        self._defined: list[str] = []
+
+    def tearDown(self):
+        for name in self._defined:
+            if hasattr(self._cu, name):
+                delattr(self._cu, name)
+
+    def _def_flag(self, name, **kwargs):
+        from torch.testing._internal.common_utils import TestEnvironment
+        self._defined.append(name)
+        kwargs.setdefault("include_in_repro", False)
+        return TestEnvironment.def_flag(name, **kwargs)
+
+    def test_explicit_zero_overrides_implication(self):
+        # Regression: PYTORCH_TEST_WITH_ROCM=0 must override
+        # implied_by_fn=lambda: torch.version.hip is not None.
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_1": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_1", env_var="FOO_DF_1",
+                implied_by_fn=lambda: True))
+
+    def test_explicit_one_with_no_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_2": "1"}):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_2", env_var="FOO_DF_2",
+                implied_by_fn=lambda: False))
+
+    def test_unset_with_implication_true(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_3"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_3", env_var="FOO_DF_3",
+                implied_by_fn=lambda: True))
+
+    def test_unset_with_implication_false(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_4"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_4", env_var="FOO_DF_4",
+                implied_by_fn=lambda: False))
+
+    def test_default_true_explicit_zero_overrides_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_5": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_5", env_var="FOO_DF_5",
+                default=True, implied_by_fn=lambda: True))
 
 
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
@@ -2107,7 +2193,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
-                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'  # noqa: B950
+                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'
                     expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
@@ -2364,6 +2450,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
+    @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     def test_circular_dependencies(self) -> None:
@@ -2377,6 +2464,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
@@ -2386,7 +2474,7 @@ class TestImports(TestCase):
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
-                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
+                           "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
@@ -2401,6 +2489,10 @@ class TestImports(TestCase):
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
+
+        if sys.version_info < (3, 12):
+            # depends on Python 3.12+ syntax
+            ignored_modules.append("torch.testing._internal.py312_intrinsics")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
@@ -2438,6 +2530,10 @@ class TestImports(TestCase):
                          "  - Refactor your code to avoid depending on sympy files you may not need to depend\n"
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
+
+    def test_not_import_triton(self) -> None:
+        out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
+        self.assertEqual(out.strip(), "True")
 
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:

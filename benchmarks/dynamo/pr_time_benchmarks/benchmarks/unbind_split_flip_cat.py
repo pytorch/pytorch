@@ -4,6 +4,7 @@ from benchmark_base import BenchmarkBase
 
 import torch
 import torch.export
+from torch.fx.experimental._config import AggressiveGuardFreeMode
 
 
 class UnbindSplitFlipCatModel(torch.nn.Module):
@@ -69,6 +70,10 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         torch._dynamo.config.capture_scalar_outputs = True
+        torch.fx.experimental._config.aggressive_guard_free_semantics = (
+            AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
+        )
+        torch.fx.config.do_not_emit_stack_traces = True
         torch.manual_seed(0)
 
         self.model = UnbindSplitFlipCatModel(

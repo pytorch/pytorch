@@ -1,3 +1,5 @@
+# Owner(s): ["module: pytree"]
+
 """
 Python polyfills for torch.utils.pytree
 """
@@ -230,7 +232,6 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                # pyrefly: ignore [bad-return]
                 return treespec._unflatten_func(
                     treespec._metadata,
                     children_representations,

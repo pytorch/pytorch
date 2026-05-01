@@ -8,7 +8,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     requires_gpu,
 )
 
@@ -25,12 +25,14 @@ class TestControlDeps(InductorTestCase):
 
         def add_control_deps(graph):
             nodes = [n for n in graph.nodes if n.op == "call_function"]
-            assert len(nodes) == 3
+            if len(nodes) != 3:
+                raise AssertionError(f"Expected 3 nodes, got {len(nodes)}")
             c_node = nodes[0]
             d_node = nodes[1]
             e_node = nodes[2]
 
-            assert d_node.target == torch.ops.aten.mm.default
+            if d_node.target != torch.ops.aten.mm.default:
+                raise AssertionError(f"Expected mm.default, got {d_node.target}")
 
             from torch.utils._ordered_set import OrderedSet
 
@@ -41,14 +43,24 @@ class TestControlDeps(InductorTestCase):
             sub_g = graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.control_deps
             )
-            assert len(sub_g) == 2
+            if len(sub_g) != 2:
+                raise AssertionError(f"Expected 2 control_deps nodes, got {len(sub_g)}")
 
-            assert list(sub_g[0].meta["val"].shape) == [256, 256]
-            assert list(sub_g[1].meta["val"].shape) == [256, 256]
+            if list(sub_g[0].meta["val"].shape) != [256, 256]:
+                raise AssertionError(
+                    f"Expected shape [256, 256], got {list(sub_g[0].meta['val'].shape)}"
+                )
+            if list(sub_g[1].meta["val"].shape) != [256, 256]:
+                raise AssertionError(
+                    f"Expected shape [256, 256], got {list(sub_g[1].meta['val'].shape)}"
+                )
 
             for attr in graph.find_nodes(op="get_attr"):
                 for n in getattr(graph.owning_module, attr.target).graph.nodes:
-                    assert list(n.meta["val"].shape) == [256, 256]
+                    if list(n.meta["val"].shape) != [256, 256]:
+                        raise AssertionError(
+                            f"Expected shape [256, 256], got {list(n.meta['val'].shape)}"
+                        )
 
             return graph
 
@@ -91,7 +103,8 @@ class TestControlDeps(InductorTestCase):
             mm_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.mm.default
             )
-            assert len(mm_nodes) == 4, f"Expected 4 mm nodes, got {len(mm_nodes)}"
+            if len(mm_nodes) != 4:
+                raise AssertionError(f"Expected 4 mm nodes, got {len(mm_nodes)}")
 
             # Add control dep: mm3 depends on mm0's output
             # This should NOT extend mm0's buffer lifetime
@@ -135,13 +148,15 @@ class TestControlDeps(InductorTestCase):
             cat_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.cat.default
             )
-            assert len(cat_nodes) == 1, f"Expected 1 cat node, got {len(cat_nodes)}"
+            if len(cat_nodes) != 1:
+                raise AssertionError(f"Expected 1 cat node, got {len(cat_nodes)}")
             cat_node = cat_nodes[0]
 
             # Verify it has nested args (list of tensors)
-            assert isinstance(cat_node.args[0], (list, tuple)), (
-                f"Expected nested args, got {type(cat_node.args[0])}"
-            )
+            if not isinstance(cat_node.args[0], (list, tuple)):
+                raise AssertionError(
+                    f"Expected nested args, got {type(cat_node.args[0])}"
+                )
 
             # Find a node that comes before cat to use as dependency
             add_nodes = graph.find_nodes(
@@ -159,7 +174,10 @@ class TestControlDeps(InductorTestCase):
             control_deps_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.control_deps
             )
-            assert len(control_deps_nodes) == 1
+            if len(control_deps_nodes) != 1:
+                raise AssertionError(
+                    f"Expected 1 control_deps node, got {len(control_deps_nodes)}"
+                )
             return graph
 
         with torch._inductor.config.patch(
@@ -213,12 +231,14 @@ class TestControlDeps(InductorTestCase):
                 op="call_function",
                 target=torch.ops.higher_order.triton_kernel_wrapper_functional,
             )
-            assert triton_nodes
+            if not triton_nodes:
+                raise AssertionError("Expected triton_kernel_wrapper_functional nodes")
             # Find mul node (z = x * 2) to use as dependency
             mul_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.mul.Tensor
             )
-            assert mul_nodes
+            if not mul_nodes:
+                raise AssertionError("Expected mul.Tensor nodes")
             deps_map = {triton_nodes[0]: OrderedSet([mul_nodes[0]])}
             torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
                 graph, deps_map
@@ -237,7 +257,76 @@ class TestControlDeps(InductorTestCase):
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
 
+    @requires_gpu()
+    def test_control_deps_orders_void_op_across_nested_calls(self):
+        """record_event's void op must be named as an additional_buffer_dep
+        of the subsequent wait_event's operations after Inductor lowering.
+
+        record_event lowers to a NoneLayout (void) op and the overall
+        control_deps call around it returns a tuple/None.  When a later
+        control_deps call (around wait_event) lists the record's control_deps
+        node as an additional dep, the lowered value fails the
+        ``isinstance(dep, IRNode)`` check.  Before the fix, the void op was
+        silently dropped and never referenced in the wait's
+        additional_buffer_deps, so Inductor's cudagraph partitioning and
+        other consumers of additional_buffer_deps could reorder the wait
+        before the record.
+        """
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        def fn(x):
+            s1 = torch.Stream(device=GPU_TYPE)
+            s2 = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s1:
+                y = x + 1
+                e.record()
+            with s2:
+                a = x * 3
+                e.wait()
+                z = y * a
+            return z
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            void_names = {
+                op.get_name()
+                for op in V.graph.operations
+                if isinstance(op, ir.Buffer) and isinstance(op.layout, ir.NoneLayout)
+            }
+            referenced: set[str] = set()
+            for deps in V.graph.additional_buffer_deps.values():
+                referenced.update(deps)
+            captured.append({"void_names": void_names, "referenced": referenced})
+            return nodes
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(2, 2, device=GPU_TYPE)
+            torch.compile(fn)(x)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+
+        void_names: set[str] = set()
+        referenced: set[str] = set()
+        for state in captured:
+            void_names |= state["void_names"]
+            referenced |= state["referenced"]
+
+        self.assertGreater(
+            len(void_names),
+            0,
+            "expected record_event/wait_event to lower to NoneLayout ops",
+        )
+        self.assertTrue(
+            void_names & referenced,
+            "no record_event void op appears as an additional_buffer_dep; "
+            f"void_names={void_names}, referenced={referenced}",
+        )
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

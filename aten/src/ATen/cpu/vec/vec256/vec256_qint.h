@@ -170,6 +170,53 @@ at::vec::Vectorized<uint8_t> inline convert_float_to_int8(
 }
 
 template <typename T>
+at::vec::Vectorized<T> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src);
+
+template <>
+at::vec::Vectorized<int8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // Convert from float32 to int32 with round nearest
+  __m256i x_values_int32 = _mm256_cvtps_epi32(src);
+
+  // Convert from int32 to int16 using signed saturation
+  __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
+
+  constexpr auto min_val = std::numeric_limits<int8_t>::min();
+  constexpr auto max_val = std::numeric_limits<int8_t>::max();
+
+  // Convert from int16 to int8 using unsigned saturation
+  __m256i xyzw_clamped_v = pack_saturate_and_clamp<int8_t>(
+      xy_packed_v, xy_packed_v, min_val, max_val);
+  __m256i permute_mask_v =
+      _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+  return _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
+}
+
+template <>
+at::vec::Vectorized<uint8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // The type of *_val should be int32_t to ensure correct clamping behavior.
+  constexpr auto min_val = std::numeric_limits<int32_t>::min();
+  constexpr auto max_val = std::numeric_limits<int32_t>::max();
+  __m256 float32_min_val = _mm256_set1_ps(float(min_val));
+  __m256 float32_max_val = _mm256_set1_ps(float(max_val));
+  __m256 float32_src = _mm256_max_ps(src, float32_min_val);
+  float32_src = _mm256_min_ps(float32_src, float32_max_val);
+  __m256i round_src = _mm256_cvtps_epi32(float32_src);
+
+  __m128i r1 = _mm256_castsi256_si128(round_src);
+  __m128i mask = _mm_setr_epi8(
+      0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m128i r1_shuffled = _mm_shuffle_epi8(r1, mask);
+  __m128i r2 = _mm256_extractf128_si256(round_src, 1);
+  __m128i r2_shuffled = _mm_shuffle_epi8(r2, mask);
+  __m128i result = _mm_unpacklo_epi32(r1_shuffled, r2_shuffled);
+
+  return _mm256_castsi128_si256(result);
+}
+
+template <typename T>
 __FORCE_INLINE void QuantizeAvx2(
     const float* src,
     T* dst,
@@ -312,7 +359,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m256i vals_) {
     vals = vals_;
@@ -326,7 +373,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm256_storeu_si256((__m256i*)ptr, vals);
     }
@@ -348,7 +395,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return _mm256_loadu_si256((const __m256i*)tmp_values);
   }
 
@@ -519,7 +566,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
  public:
   using Vectorizedqi::Vectorizedqi;
 
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(__m256i vals_) {
     vals = vals_;
   }
@@ -542,7 +589,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm256_storeu_si256((__m256i*)ptr, vals);
     }
@@ -564,7 +611,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return _mm256_loadu_si256((const __m256i*)tmp_values);
   }
 
@@ -731,7 +778,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m256i vals_) {
     vals = vals_;
@@ -753,7 +800,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm256_storeu_si256((__m256i*)ptr, vals);
     }
@@ -775,7 +822,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return _mm256_loadu_si256((const __m256i*)tmp_values);
   }
 
@@ -960,7 +1007,10 @@ struct VectorizedQuantizedConverter {
   }
 
   void store(void* ptr, int count = size()) const {
-    memcpy(ptr, vals.data(), count * sizeof(value_type));
+    memcpy(
+        ptr,
+        vals.data(),
+        std::min<int64_t>(count, size()) * sizeof(value_type));
   }
 
   float_vec_return_type dequantize(
@@ -1016,7 +1066,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return Vectorized<c10::qint32>(tmp_values);
   }
 
@@ -1151,7 +1201,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return Vectorized<c10::qint8>(tmp_values);
   }
 
@@ -1275,7 +1325,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return Vectorized<c10::quint8>(tmp_values);
   }
 

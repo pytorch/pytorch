@@ -142,7 +142,6 @@ class _WeakRefInfo:
         self.size = size
         self.element_size = element_size
         self.reftype = reftype
-        # pyrefly: ignore [read-only]
         self.device = device
         self.mem_consumed = self._calculate_mem_consumed()
 
@@ -419,12 +418,14 @@ class MemTracker(TorchDispatchMode):
             dev_snap[_TOTAL_KEY] -= winfo.mem_consumed
             maybe_zero = True
         elif u_type == _UpdateType.REF:
-            assert old_reftype is not None
+            if old_reftype is None:
+                raise AssertionError
             # Adjust memory consumption between two reference types within the same device.
             dev_snap[old_reftype] -= winfo.mem_consumed
             dev_snap[winfo.reftype] += winfo.mem_consumed
         elif u_type == _UpdateType.SIZE:
-            assert old_mem_consumed is not None
+            if old_mem_consumed is None:
+                raise AssertionError
             # Adjust the memory consumed for a reference type due to a change in size.
             change = winfo.mem_consumed - old_mem_consumed
             dev_snap[winfo.reftype] += change
@@ -646,7 +647,8 @@ class MemTracker(TorchDispatchMode):
         #         used multiple times in the same iteration, which we allow and track.
         # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         mod_name = self._mod_tracker.get_known_fqn(module)
-        assert mod_name is not None
+        if mod_name is None:
+            raise AssertionError
         if module not in self.memory_tracking:
             mod_stats = _ModMemStats(mod_name)
             param_mem, buffer_mem = self._track_module_params_and_buffers(
@@ -792,7 +794,7 @@ class MemTracker(TorchDispatchMode):
         This method should be called before the ``MemTracker`` is used. Any tensors that are not module parameters, buffers,
         gradients activations, or optimizer states will be categorized as ``Other``. If you want them categorized with a
         custom name, please file a GitHub issue. Any tensors created outside the MemTracker and not supplied to this
-        method will not be be tracked by ``MemTracker``.
+        method will not be tracked by ``MemTracker``.
 
         Args:
             *external (Union[nn.Module, optim.Optimizer, torch.Tensor]): The external modules, optimizers, and
@@ -919,7 +921,7 @@ class MemTracker(TorchDispatchMode):
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
-            # pyrefly: ignore [bad-index, index-error]
+            # pyrefly: ignore [bad-index]
             res = args[0]
         else:
             res = func(*args, **kwargs or {})

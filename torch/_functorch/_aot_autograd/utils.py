@@ -16,7 +16,7 @@ from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -46,18 +46,6 @@ aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
 
 strict_zip = partial(zip, strict=True)
-
-
-def _get_symint_hints(exprs: Any) -> Any:
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_symint_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
 
 
 def partial_flatten_asdict(obj: object) -> Any:
@@ -204,7 +192,7 @@ def create_tree_flattened_fn(
         tree_out = fn(*args, **kwargs)
         flat_out, spec = pytree.tree_flatten(tree_out)
         for i in flat_out:
-            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_opaque_type(i)
+            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_opaque_value(i)
             if not is_known_type:
                 raise RuntimeError(
                     f"Found {type(i)} in output, which is not a known type. "
@@ -636,7 +624,12 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             # TODO: better to change to a specific field of custom?
             custom = fwd_node.meta.get("custom")
             if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+                # Merge rather than overwrite so bw-only keys survive
+                # fw keys win on conflict.
+                node.meta["custom"] = {
+                    **node.meta.get("custom", {}),
+                    **copy.deepcopy(custom),
+                }
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:

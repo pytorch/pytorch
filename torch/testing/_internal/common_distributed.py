@@ -24,7 +24,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -341,7 +341,7 @@ def with_nccl_blocking_wait(func):
     def wrapper(*args, **kwargs):
         # Save and unset TORCH_NCCL_ASYNC_ERROR_HANDLING
         try:
-            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+            cached_nccl_async_error_handling: str | None = os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ]
             del os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"]
@@ -351,7 +351,7 @@ def with_nccl_blocking_wait(func):
 
         # Save val of TORCH_NCCL_BLOCKING_WAIT and set it.
         try:
-            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+            cached_nccl_blocking_wait: str | None = os.environ[
                 "TORCH_NCCL_BLOCKING_WAIT"
             ]
         except KeyError:
@@ -609,7 +609,10 @@ if TEST_WITH_TSAN:
     TIMEOUT_DEFAULT = 500
 else:
     TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_DistributedDataParallel": 500,
+}
 
 
 # https://github.com/pytorch/pytorch/issues/75665
@@ -712,10 +715,10 @@ def init_multigpu_helper(world_size: int, backend: str):
     return rank_to_GPU
 
 
-tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+tmp_dir: tempfile.TemporaryDirectory | None = None
 
 
-def initialize_temp_directories(init_method: Optional[str] = None) -> None:
+def initialize_temp_directories(init_method: str | None = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
     os.environ["TEMP_DIR"] = tmp_dir.name
@@ -737,8 +740,37 @@ def cleanup_temp_dir() -> None:
         tmp_dir.cleanup()
 
 
+def retrieve_result_from_completion_queue(
+    process: torch.multiprocessing.Process,
+    completion_queue: torch.multiprocessing.Queue,
+    timeout: int | None = None,
+) -> Any:
+    """Get result from the completion_queue associated with process.
+
+    When the process finished without putting a result or the timeout expired an exception instance will be returned"""
+    queue_timeout = 120 if timeout is None else max(10, min(120, timeout // 4))
+    start_time = time.time()
+    # Periodically check the process for liveness
+    while True:
+        try:
+            return completion_queue.get(timeout=queue_timeout)
+        except queue.Empty:
+            # If the process is no longer alive we cannot get a result from the queue unless it is there right now.
+            # This can happen if the timeout occurred just before the process put its result and terminated.
+            # So do a last check for emptiness before considering it as a failure.
+            if not process.is_alive() and completion_queue.empty():
+                return RuntimeError(f"Exited with {process.exitcode}")
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return RuntimeError(f"Process timed out out after {elapsed}s")
+
+
 # Most tests operate with this worldsize
-DEFAULT_WORLD_SIZE = 4
+if TEST_WITH_ROCM:
+    DEFAULT_WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEFAULT_WORLD_SIZE = 4
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
@@ -938,11 +970,11 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
         except unittest.SkipTest as se:
-            logger.info(  # noqa: G200
+            logger.info(
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
-                str(se),
+                se,
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
@@ -1277,7 +1309,7 @@ def spawn_threads_and_init_comms(
             )
             try:
                 callback()
-            except BaseException as ex:  # noqa: B036
+            except BaseException as ex:
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
                 ProcessLocalGroup.exception_handle(
@@ -1438,7 +1470,7 @@ class MultiThreadedTestCase(TestCase):
 
         try:
             getattr(self, test_name)()
-        except BaseException as ex:  # noqa: B036
+        except BaseException as ex:
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(
                 ex
@@ -1493,7 +1525,7 @@ class MultiThreadedTestCase(TestCase):
                     "Thread %s skipping test %s for following reason: %s",
                     rank,
                     fn,
-                    str(exc),
+                    exc,
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -1692,7 +1724,7 @@ class MultiProcContinuousTest(TestCase):
     # rank of the current process
     rank: int = -2  # unset state
     # Rendezvous file
-    rdvz_file: Optional[str] = None
+    rdvz_file: str | None = None
     # timeout configured per class
     timeout: timedelta = timedelta(seconds=120)
     # Poison pill for rest of tests if one of them fails
@@ -1701,7 +1733,7 @@ class MultiProcContinuousTest(TestCase):
     _processes_spawned: bool = False
 
     @classmethod
-    def backend_str(cls) -> Optional[str]:
+    def backend_str(cls) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
@@ -1809,7 +1841,7 @@ class MultiProcContinuousTest(TestCase):
             try:
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
-            except BaseException as ex:  # noqa: B036
+            except BaseException as ex:
                 if isinstance(ex, SystemExit):
                     # Get exit code from the process
                     exit_code = getattr(ex, "code", None)
@@ -1874,7 +1906,7 @@ class MultiProcContinuousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.debug("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
+            logger.debug("Started process %s with pid %s", rank, process.pid)
 
     @classmethod
     def _get_world_size(cls, device_type: str) -> int:
@@ -1919,11 +1951,18 @@ class MultiProcContinuousTest(TestCase):
         if cls._processes_spawned:
             return
 
-        # Handle both method and string attribute for device_type
+        # Handle method, property, and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.device_type
-        if callable(device_type_attr):
+        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
+        if isinstance(device_type_attr, classmethod):
+            device_type = device_type_attr.__func__(cls)
+        elif isinstance(device_type_attr, property):
+            # Note: fget expects an instance but we pass cls since no instance
+            # exists yet. This works because DTensorTestMixin.device_type only
+            # accesses class-level attributes (world_size, module constants).
+            device_type = device_type_attr.fget(cls)
+        elif callable(device_type_attr):
             device_type = device_type_attr()
         else:
             device_type = device_type_attr
@@ -2006,21 +2045,29 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Wait for the workers to finish the test
-                for i, completion_queue in enumerate(self.completion_queues):
-                    rv = completion_queue.get()
+                # Drain all completion queues before raising any exception,
+                # so stale results don't desync subsequent tests.
+                deferred_exception = None
+                for i, (p, completion_queue) in enumerate(
+                    zip(self.processes, self.completion_queues)
+                ):
+                    rv = retrieve_result_from_completion_queue(
+                        p, completion_queue, timeout=get_timeout(self.id())
+                    )
+                    if deferred_exception is not None:
+                        # Already captured an exception; just drain
+                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        raise rv
+                        deferred_exception = rv
+                        continue
                     if isinstance(rv, BaseException):
-                        # Hit an exception, re-raise it in the main process.
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
-                            f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
+                            f"skipping rest of tests in Test class: {self.__class__.__name__}"
                         )
-                        # Poison rest of tests (because ProcessGroup may be not
-                        # reusable now)
                         self.__class__.poison_pill = True
-                        raise rv
+                        deferred_exception = rv
+                        continue
 
                     # Success
                     if rv != self.id():
@@ -2030,6 +2077,9 @@ class MultiProcContinuousTest(TestCase):
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
+
+                if deferred_exception is not None:
+                    raise deferred_exception
             else:
                 # Worker just runs the test
                 fn()

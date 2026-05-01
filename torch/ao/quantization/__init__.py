@@ -2,14 +2,13 @@
 
 import sys
 from collections.abc import Callable
-from typing import Optional, Union
 from typing_extensions import TypeAliasType
 
 import torch
 from torch import Tensor
 
 from .fake_quantize import *  # noqa: F403
-from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
+from .fuse_modules import fuse_modules, fuse_modules_qat
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403

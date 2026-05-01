@@ -2,8 +2,6 @@
 import logging
 import os
 import shutil
-from pathlib import Path
-from typing import Optional
 
 import torch
 from torch._inductor import config
@@ -68,7 +66,7 @@ def _cutlass_include_paths() -> list[str]:
     ]
 
 
-def _cuda_compiler() -> Optional[str]:
+def _cuda_compiler() -> str | None:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
@@ -129,12 +127,18 @@ def _nvcc_arch_as_compile_option() -> str:
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
-    if arch == "103":
-        return "100f"
     if arch == "100":
         return "100a"
+    if arch == "101":
+        return "101a"
+    if arch == "103":
+        return "103a"
+    if arch == "110":
+        return "110a"
     if arch == "120":
         return "120a"
+    if arch == "121":
+        return "121a"
     return arch
 
 
@@ -151,7 +155,7 @@ def _nvcc_compiler_options() -> list[str]:
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cutlass.compile_opt_level,
-        "-std=c++17",
+        "-std=c++20",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
@@ -223,46 +227,3 @@ def cuda_compile_command(
     else:
         autotuning_log.debug("CUDA command: %s", res)
     return res
-
-
-class CUDACompileSourceCapturingContext:
-    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
-
-    def __init__(self):
-        self.sources = []
-        self._compile_patch = None
-
-    def __enter__(self, *args, **kwargs):
-        import unittest.mock as mock
-
-        import torch._inductor.codecache
-
-        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
-
-        def my_compile(
-            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
-        ):
-            self.sources.append(source_code)
-            return _compile_method_orig(source_code, dst_file_ext)
-
-        # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
-        )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
-
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command

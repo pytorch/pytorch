@@ -61,6 +61,7 @@ xfail_not_implemented = {
     "aten::cummaxmin_backward",
     "aten::data",
     "aten::diagflat",
+    "aten::dim",
     "aten::divide.out_mode",
     "aten::divide_.Scalar",
     "aten::dropout_",
@@ -82,6 +83,7 @@ xfail_not_implemented = {
     "aten::floor_divide_.Scalar",
     "aten::frobenius_norm",
     "aten::fused_moving_avg_obs_fake_quant",
+    "aten::get_device",
     "aten::get_gradients",
     "aten::greater_.Scalar",
     "aten::greater_.Tensor",
@@ -145,6 +147,7 @@ xfail_not_implemented = {
     "aten::norm_except_dim",
     "aten::not_equal_.Scalar",
     "aten::not_equal_.Tensor",
+    "aten::numel",
     "aten::one_hot",
     "aten::output_nr",
     "aten::pad_sequence",
@@ -203,6 +206,7 @@ xfail_not_implemented = {
     "aten::std_mean.names_dim",
     "aten::stft",
     "aten::stft.center",
+    "aten::storage_offset",
     "aten::stride.int",
     "aten::subtract.Scalar",
     "aten::subtract_.Scalar",
@@ -289,31 +293,34 @@ class TestFunctorchDispatcher(TestCase):
     def test_register_a_batching_rule_for_composite_implicit_autograd(
         self, registration
     ):
-        assert registration not in FuncTorchBatchedRegistrations, (
-            f"You've added a batching rule for a CompositeImplicitAutograd operator {registration}. "
-            "The correct way to add vmap support for it is to put it into BatchRulesDecomposition to "
-            "reuse the CompositeImplicitAutograd decomposition"
-        )
+        if registration in FuncTorchBatchedRegistrations:
+            raise AssertionError(
+                f"You've added a batching rule for a CompositeImplicitAutograd operator {registration}. "
+                "The correct way to add vmap support for it is to put it into BatchRulesDecomposition to "
+                "reuse the CompositeImplicitAutograd decomposition"
+            )
 
     @dispatch_registrations(
         "FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition
     )
     def test_register_functorch_batched_decomposition(self, registration):
-        assert registration in CompositeImplicitAutogradRegistrations, (
-            f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
-            f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
-            "then please register it to the FuncTorchBatched key in another file."
-        )
+        if registration not in CompositeImplicitAutogradRegistrations:
+            raise AssertionError(
+                f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
+                f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
+                "then please register it to the FuncTorchBatched key in another file."
+            )
 
     @dispatch_registrations(
         "CompositeImplicitAutograd", xfail_not_implemented, filter_vmap_implementable
     )
     def test_unimplemented_batched_registrations(self, registration):
-        assert registration in FuncTorchBatchedDecompositionRegistrations, (
-            f"Please check that there is an OpInfo that covers the operator {registration} "
-            "and add a registration in BatchedDecompositions.cpp. "
-            "If your operator isn't user facing, please add it to the xfail list"
-        )
+        if registration not in FuncTorchBatchedDecompositionRegistrations:
+            raise AssertionError(
+                f"Please check that there is an OpInfo that covers the operator {registration} "
+                "and add a registration in BatchedDecompositions.cpp. "
+                "If your operator isn't user facing, please add it to the xfail list"
+            )
 
 
 instantiate_parametrized_tests(TestFunctorchDispatcher)
