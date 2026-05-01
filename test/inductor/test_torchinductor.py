@@ -7352,6 +7352,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(2, 4),))
 
+    def test_same_meta_non_tensor(self):
+        from torch._inductor.fx_passes.post_grad import same_meta
+
+        g = torch.fx.Graph()
+        n1 = g.create_node("placeholder", "x")
+        n2 = g.create_node("placeholder", "y")
+
+        n1.meta["val"] = torch.SymInt(42)
+        n2.meta["val"] = torch.SymInt(42)
+        self.assertFalse(same_meta(n1, n2))
+
+        n1.meta["val"] = None
+        n2.meta["val"] = torch.randn(4)
+        self.assertFalse(same_meta(n1, n2))
+
+        t = torch.randn(4)
+        n1.meta["val"] = t
+        n2.meta["val"] = t
+        self.assertTrue(same_meta(n1, n2))
+
     def test_remove_noop_slice(self):
         def f(x):
             x = x + 1
@@ -11813,10 +11833,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         nonlocal test_self
                         nonlocal matmul_seen
 
-                        # by matmul, inputs should be deallocated
-                        # TODO: should not be necessary, ref-cycle ?
-                        gc.collect()
                         if func is aten.mm.out:
+                            # by matmul, inputs should be deallocated
+                            # TODO: should not be necessary, ref-cycle ?
+                            gc.collect()
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
                             test_self.assertIsNone(inp_refs[0]())
