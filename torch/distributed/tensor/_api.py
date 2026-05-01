@@ -650,12 +650,16 @@ class DTensor(torch.Tensor):
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
                 asynchronously or not. Default: False
-            forward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
-                ``forward_dtype`` before redistributing the local tensor in its forward.
-                The result DTensor will be in ``forward_dtype`` Default: None.
-            backward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
-                ``backward_dtype`` before redistributing the local tensor in its backward.
-                The result DTensor gradient would be converted back to the current DTensor dtype. Default: None
+            forward_dtype (torch.dtype, optional): cast the local tensor to
+                ``forward_dtype`` before running the forward collective.
+                The result DTensor will be in ``forward_dtype``. If ``None``,
+                no conversion is performed. Default: None
+            backward_dtype (torch.dtype, optional): cast the gradient to
+                ``backward_dtype`` before running the backward collective.
+                After the collective the gradient is always cast back to the
+                input DTensor's dtype. If ``None``, the backward collective
+                runs at the input DTensor's dtype (not ``forward_dtype``).
+                Default: None
 
         Returns:
             A :class:`DTensor` object
@@ -705,9 +709,8 @@ class DTensor(torch.Tensor):
             out_dtype=forward_dtype,
             backward_options={
                 # Absent backward_dtype means the backward collective runs at
-                # the same dtype the forward ran at (which is also the dtype
-                # the grad arrives in under normal autograd).
-                "op_dtype": backward_dtype or forward_dtype,
+                # the input's storage dtype (matching pre-fix behavior).
+                "op_dtype": backward_dtype or input_dtype,
                 # Snap the gradient back to the input's storage dtype.
                 "out_dtype": input_dtype,
             },
