@@ -8431,10 +8431,59 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
-    if split_k and (backend != "TRITON" or gemm_op != torch.ops.aten.mm.default):
+    if split_k and (backend not in ("TRITON", "QUACK") or gemm_op != torch.ops.aten.mm.default):
         raise NotImplementedError(
-            "GEMM epilogue SPLIT_K currently supports only the TRITON aten.mm path"
+            "GEMM epilogue SPLIT_K currently supports only the TRITON/QUACK aten.mm path"
         )
+    if split_k:
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+        from torch._inductor.utils import get_k_splits
+
+        mat1, mat2 = args
+        m, k = mat1.get_size()
+        n = mat2.get_size()[1]
+        if backend == "QUACK":
+            from torch._inductor.kernel.quack_splitk import quack_split_k_template
+
+            k_splits = get_k_splits(m, n, k)
+            if not k_splits:
+                raise NotImplementedError("no valid split-K choices for QUACK GEMM epilogue")
+            k_split = k_splits[0]
+            layout = ir.FixedLayout(
+                mat1.get_device(), torch.float32, [k_split, m, n], [m * n, n, 1]
+            )
+            input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+            choices: list[Any] = []
+            quack_split_k_template.maybe_append_choice(
+                choices, input_nodes=input_nodes, layout=layout, k_split=k_split
+            )
+            partials, _ = autotune_select_algorithm(
+                "quack_split_k", choices, input_nodes, layout
+            )
+            acc = sum_(partials, axis=0)
+        else:
+            from torch._inductor.kernel.mm import decompose_k_fp32_subgraph_template
+
+            layout = ir.FixedLayout(mat1.get_device(), torch.float32, [m, n])
+            kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.float32)
+            with config.patch(max_autotune_gemm=True):
+                choices = V.choices.get_template_configs(
+                    kernel_inputs,
+                    [decompose_k_fp32_subgraph_template],
+                    "mm",
+                )
+                acc, _ = autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        output = process_subgraph_nodes_replacing_gemm(
+            subgraph.graph_module, list(args), gemm_op, acc
+        )
+        if isinstance(output, tuple):
+            return tuple(
+                to_dtype(item, mat1.get_dtype(), use_compute_types=False)
+                for item in output
+            )
+        return to_dtype(output, mat1.get_dtype(), use_compute_types=False)
+
     if backend == "QUACK":
         if (
             gemm_op not in GEMM_EPILOGUE_OPS
@@ -8522,32 +8571,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         )
         return (node,)
 
-    if split_k:
-        from torch._inductor.kernel.mm import decompose_k_fp32_subgraph_template
-        from torch._inductor.kernel_inputs import MMKernelInputs
-        from torch._inductor.select_algorithm import autotune_select_algorithm
-
-        mat1, mat2 = args
-        m, k = mat1.get_size()
-        n = mat2.get_size()[1]
-        layout = ir.FixedLayout(mat1.get_device(), torch.float32, [m, n])
-        kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.float32)
-        with config.patch(max_autotune_gemm=True):
-            choices = V.choices.get_template_configs(
-                kernel_inputs,
-                [decompose_k_fp32_subgraph_template],
-                "mm",
-            )
-            acc, _ = autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
-        output = process_subgraph_nodes_replacing_gemm(
-            subgraph.graph_module, list(args), gemm_op, acc
-        )
-        if isinstance(output, tuple):
-            return tuple(
-                to_dtype(item, mat1.get_dtype(), use_compute_types=False)
-                for item in output
-            )
-        return to_dtype(output, mat1.get_dtype(), use_compute_types=False)
 
     fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])
     if backend not in fusible_template_backends:

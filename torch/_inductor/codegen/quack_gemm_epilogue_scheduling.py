@@ -18,7 +18,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
     @staticmethod
     def is_quack_gemm_epilogue_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
-            node.node, ir.QuackGemmEpilogueTemplateBuffer
+            node.node,
+            (ir.QuackGemmEpilogueTemplateBuffer, ir.QuackSplitKTemplateBuffer),
         )
 
     def can_fuse_vertical(
@@ -42,10 +43,25 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         assert self.is_quack_gemm_epilogue_template(template_node)
 
         template_node = cast(SchedulerNode, template_node)
-        qtb = cast(ir.QuackGemmEpilogueTemplateBuffer, template_node.node)
         template_node.mark_run()
 
         wrapper = V.graph.wrapper_code
+        if isinstance(template_node.node, ir.QuackSplitKTemplateBuffer):
+            qtb = cast(ir.QuackSplitKTemplateBuffer, template_node.node)
+            wrapper.add_import_once("from quack.gemm_interface import gemm as quack_gemm")
+            input_args = [input.codegen_reference() for input in qtb.inputs]
+            k_split = qtb.k_split
+            wrapper.writeline(
+                f"{qtb.get_name()} = quack_gemm("
+                f"{input_args[0]}.reshape({input_args[0]}.shape[0], {k_split}, "
+                f"{input_args[0]}.shape[1] // {k_split}).permute(1, 0, 2), "
+                f"{input_args[1]}.reshape({k_split}, {input_args[0]}.shape[1] // {k_split}, "
+                f"{input_args[1]}.shape[1]), out_dtype=torch.float32, tuned=False)"
+            )
+            self.free_buffers_in_scheduler()
+            return
+
+        qtb = cast(ir.QuackGemmEpilogueTemplateBuffer, template_node.node)
         wrapper.add_import_once(
             "from quack.gemm_epilogue_interface import gemm_epilogue"
         )
