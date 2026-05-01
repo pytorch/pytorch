@@ -11833,10 +11833,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         nonlocal test_self
                         nonlocal matmul_seen
 
-                        # by matmul, inputs should be deallocated
-                        # TODO: should not be necessary, ref-cycle ?
-                        gc.collect()
                         if func is aten.mm.out:
+                            # by matmul, inputs should be deallocated
+                            # TODO: should not be necessary, ref-cycle ?
+                            gc.collect()
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
                             test_self.assertIsNone(inp_refs[0]())

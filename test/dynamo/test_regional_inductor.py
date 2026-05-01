@@ -987,11 +987,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     flex_attention = torch.ops.higher_order.flex_attention(primals_0, primals_0, primals_0, sdpa_score0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  sdpa_score0 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  flex_attention = None
-    alias = torch.ops.aten.alias.default(getitem)
-    alias_1 = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
-    alias_2 = torch.ops.aten.alias.default(alias);  alias = None
-    alias_3 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
-    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3)""",
+    return (getitem, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1)""",
                 ignore_comments=True,
                 ignore_empty_lines=True,
             )
@@ -999,11 +995,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             self.assertExpectedInline(
                 captured_gms[1].code.strip(),
                 """\
-def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3, tangents_0):
+def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, getitem, getitem_1, tangents_0):
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, alias_2, alias_3, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = alias_2 = alias_3 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, getitem, getitem_1, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = getitem = getitem_1 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
@@ -1607,6 +1603,97 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         self.assertEqual(out, ref)
         self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(w.grad, w_ref.grad)
+
+    @parametrize("serialize", [False])
+    def test_joint_graph_passes_run_on_hop_subgraph(self, serialize):
+        # Inductor's joint-graph passes (e.g. scatter_upon_const_tensor, which
+        # rewrites full+scatter into eq+where to avoid materializing a sparse
+        # buffer) must run on the HOP subgraph's joint graph, not just the
+        # outer one. nll_loss_backward decomposes to full+scatter; without the
+        # rewrite the bw subgraph keeps a (B, V) scatter destination buffer.
+        from torch._inductor.decomposition import select_decomp_table
+
+        nested_config = get_invoke_subgraph_compile_options(
+            decompositions=dict(select_decomp_table()),
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def loss_region(logits_f32, targets):
+            return torch.nn.functional.cross_entropy(
+                logits_f32, targets, reduction="none"
+            )
+
+        def fn(logits, targets):
+            return loss_region(logits.to(torch.float32), targets).sum()
+
+        logits = torch.randn(8, 64, requires_grad=True)
+        targets = torch.randint(0, 64, (8,))
+
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            opt_fn = torch.compile(
+                fn,
+                backend=aot_eager_regional_inductor(
+                    serialize=serialize, on_invoke_subgraph=True
+                ),
+                fullgraph=True,
+            )
+            opt_fn(logits, targets).backward()
+
+        # captured_gms[0] is the fw subgraph and captured_gms[1] is the bw
+        # subgraph. The bw should NOT contain aten.scatter — the joint pass
+        # rewrote full+scatter into eq+where.
+        self.assertExpectedInline(
+            captured_gms[0].code.strip(),
+            """\
+def forward(self, primals_0, primals_1):
+    amax = torch.ops.aten.amax.default(primals_0, [1], True)
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax)
+    exp = torch.ops.aten.exp.default(sub)
+    sum_1 = torch.ops.aten.sum.dim_IntList(exp, [1], True);  exp = None
+    log = torch.ops.aten.log.default(sum_1);  sum_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = None
+    ne = torch.ops.aten.ne.Scalar(primals_1, -100)
+    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where = torch.ops.aten.where.self(ne, primals_1, full_default);  full_default = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(where, 1);  where = None
+    gather = torch.ops.aten.gather.default(sub_1, 1, unsqueeze);  sub_1 = unsqueeze = None
+    squeeze = torch.ops.aten.squeeze.dim(gather, 1);  gather = None
+    neg = torch.ops.aten.neg.default(squeeze);  squeeze = None
+    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_1 = torch.ops.aten.where.self(ne, neg, full_default_1);  ne = neg = full_default_1 = None
+    return (where_1, primals_0, primals_1, amax, log)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+        self.assertExpectedInline(
+            captured_gms[1].code.strip(),
+            """\
+def forward(self, primals_0, primals_1, amax, log, tangents_0):
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
+    full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
+    ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
+    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_1);  unsqueeze_2 = full_default_1 = None
+    full_default = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default);  ne_2 = unsqueeze_1 = full_default = None
+    iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
+    view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
+    expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
+    eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
+    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None
+    mul = torch.ops.aten.mul.Tensor(where_self, where_3);  where_self = where_3 = None
+    sub = torch.ops.aten.sub.Tensor(primals_0, amax);  primals_0 = amax = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = log = None
+    exp_1 = torch.ops.aten.exp.default(sub_1);  sub_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(mul, [1], True)
+    mul_1 = torch.ops.aten.mul.Tensor(exp_1, sum_2);  exp_1 = sum_2 = None
+    sub_2 = torch.ops.aten.sub.Tensor(mul, mul_1);  mul = mul_1 = None
+    return (sub_2, None)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")

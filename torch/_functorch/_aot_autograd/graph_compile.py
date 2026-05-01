@@ -10,6 +10,7 @@ An aot_dispatch_* function:
 
 import copy
 import dataclasses
+import functools
 import itertools
 import logging
 import operator
@@ -749,25 +750,38 @@ def _get_partition_fn(
         ].partitioner
         if hop_partition_fn is not None:
             if callable(hop_partition_fn):
-                return True, hop_partition_fn  # pyrefly: ignore[bad-return]
-            if not isinstance(hop_partition_fn, str):
+                raw_partitioner = hop_partition_fn
+            elif not isinstance(hop_partition_fn, str):
                 raise AssertionError(
                     f"expected hop_partition_fn to be str, got {type(hop_partition_fn)}"
                 )
-            match hop_partition_fn:
-                case "default_partition":
-                    return True, torch._functorch.partitioners.default_partition
-                case "min_cut_rematerialization_partition":
-                    return (
-                        True,
-                        torch._functorch.partitioners.min_cut_rematerialization_partition,
-                    )
-                case _:
-                    raise ValueError(
-                        f"Unknown HOP partitioner config: {hop_partition_fn}"
-                    )
+            else:
+                match hop_partition_fn:
+                    case "default_partition":
+                        raw_partitioner = (
+                            torch._functorch.partitioners.default_partition
+                        )
+                    case "min_cut_rematerialization_partition":
+                        raw_partitioner = torch._functorch.partitioners.min_cut_rematerialization_partition
+                    case _:
+                        raise ValueError(
+                            f"Unknown HOP partitioner config: {hop_partition_fn}"
+                        )
 
-    # Fall back to the parent partitioner from aot_config
+            # Route through Inductor's `partition_fn` so joint-graph passes
+            # (e.g. scatter_upon_const_tensor) run on the HOP subgraph before
+            # the user-selected raw partitioner.
+            from torch._inductor.compile_fx import (
+                partition_fn as _inductor_partition_fn,
+            )
+
+            return True, functools.partial(
+                _inductor_partition_fn, partitioner_fn_override=raw_partitioner
+            )
+
+    # Fall back to the parent partitioner from aot_config. When the outer
+    # compile is Inductor this is already `compile_fx.partition_fn` so
+    # joint-graph passes run there too.
     if aot_config.partition_fn is None:
         raise AssertionError("aot_config.partition_fn must not be None")
     return used_hop_custom_partition, aot_config.partition_fn

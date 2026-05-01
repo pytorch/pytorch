@@ -6227,6 +6227,24 @@ class TestMPS(TestCaseMPS):
             sorted_mi, _ = torch.sort(mi, dim=-1)
             self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(-1)).expand_as(mi))
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
+    @parametrize("descending", [False, True])
+    @parametrize("stable", [True, False])
+    def test_sort_single_block_stable(self, dtype, descending, stable):
+        max_ss = 1024 if dtype == torch.int64 else 4096
+
+        def make(shape):
+            return torch.randint(0, 4, shape).to(dtype)
+        for cpu in [make((4, 4)), make((8, max_ss)), make((16, 32, 64)),
+                    make((8, 2048))[:, ::2], make((1024, 8)).t()]:
+            mps = cpu.to("mps")
+            cv, ci = torch.sort(cpu, stable=stable, dim=-1, descending=descending)
+            mv, mi = torch.sort(mps, stable=stable, dim=-1, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, -1, mi).cpu(), mv.cpu())
+            if stable:
+                self.assertEqual(ci, mi.cpu())
+
     def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
