@@ -123,6 +123,8 @@ class GraphPickler(pickle.Pickler):
         # pickle so that duplicates and views are properly handled.
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
+    _PASSTHROUGH_TYPES = frozenset({int, float, str, bytes, bool, type(None)})
+
     @override
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -145,6 +147,9 @@ class GraphPickler(pickle.Pickler):
 
         # These are the types that need special handling. See the individual
         # *PickleData classes for details on pickling that particular type.
+        if type(obj) in self._PASSTHROUGH_TYPES:
+            return NotImplemented
+
         if isinstance(obj, FakeTensor):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):

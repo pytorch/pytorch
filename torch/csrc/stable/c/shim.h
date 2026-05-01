@@ -159,7 +159,7 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
-// Shims for the a few dtypes not already in
+// Shims for a few dtypes not already in
 // torch/csrc/inductor/aoti_torch/c/shim.h
 AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
 AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
