@@ -2115,22 +2115,6 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        if not other.is_symnode_like():
-            return VariableTracker.build(tx, NotImplemented)
-        return SymNodeVariable.create(
-            tx,
-            tx.output.create_proxy(
-                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
-            ),
-            sym_num=None,
-        )
-
     def is_python_hashable(self) -> bool:
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -2281,22 +2265,6 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
-
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        if not other.is_symnode_like():
-            return VariableTracker.build(tx, NotImplemented)
-        return SymNodeVariable.create(
-            tx,
-            tx.output.create_proxy(
-                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
-            ),
-            sym_num=None,
-        )
 
     def nb_float_impl(
         self,
