@@ -489,6 +489,48 @@ class BackendConfig:
         return self.device_backend_map
 
 
+def _parse_backend_string(backend: str) -> dict[str, str]:
+    """Parse a backend string into a ``{device_type: backend_name}`` dict.
+
+    Accepts either the merged form (``"cpu:gloo,cuda:nccl"``) or a simple
+    backend name (``"nccl"``). For the simple form, the backend is mapped to
+    every device for which it is registered as the default in
+    ``Backend.default_device_backend_map``.
+
+    Unlike :class:`BackendConfig`, this does not synthesize defaults for
+    unspecified devices — callers get back exactly what was named.
+    """
+    backend = backend.lower()
+    if ":" in backend:
+        device_backends: dict[str, str] = {}
+        for part in backend.split(","):
+            pieces = part.split(":")
+            if len(pieces) != 2:
+                raise ValueError(
+                    f"Invalid device:backend pairing '{part}' in '{backend}'. "
+                    "Expected format: '<device_type1>:<backend1>,<device_type2>:<backend2>...'"
+                )
+            device, be = pieces[0].strip(), pieces[1].strip()
+            if device in device_backends:
+                raise ValueError(
+                    f"Duplicate device type '{device}' in backend string '{backend}'"
+                )
+            device_backends[device] = be
+        return device_backends
+
+    device_types = [
+        device
+        for device, be in Backend.default_device_backend_map.items()
+        if be == backend
+    ]
+    if not device_types:
+        raise ValueError(
+            f"Unknown backend '{backend}'. Specify a 'device:backend' string "
+            f"or use one of: {sorted(Backend.default_device_backend_map.values())}"
+        )
+    return dict.fromkeys(device_types, backend)
+
+
 class _reduce_op:
     r"""
     Deprecated enum-like class.
@@ -2089,7 +2131,14 @@ def _new_process_group_helper(
             _world.comms.append(comm)
             group_name = GroupName(group_name)
             backend_class = _BackendWrapper(comm)
-            backend_type = ProcessGroup.BackendType.CUSTOM
+            # Use the underlying backend's BackendType so distinct torchcomms
+            # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
+            # collide in ProcessGroup::setBackend's backendTypeToBackend_ map
+            # — that collision silently aliases the second device to the first
+            # backend and trips the bound_device_id consistency check.
+            backend_type = Backend.backend_type_map.get(
+                backend_str, ProcessGroup.BackendType.CUSTOM
+            )
         elif backend_str == Backend.MPI:
             if not is_mpi_available():
                 raise RuntimeError(
@@ -5414,6 +5463,7 @@ def split_group(
     timeout: timedelta | None = None,
     pg_options: Any | None = None,
     group_desc: str | None = None,
+    backend: str | Backend | None = None,
 ) -> ProcessGroup | None:
     """
     Create a new process group split from the given parent process group.
@@ -5439,6 +5489,15 @@ def split_group(
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
+        backend (str or Backend, optional): selects a subset of the parent process
+            group's per-device backends to retain in the child group. The string
+            follows the same format as ``init_process_group`` (e.g. ``"nccl"`` or
+            ``"cpu:gloo,cuda:nccl"``). Each device type in the requested backend
+            must be present in the parent group, and the backend name for that
+            device type must exactly match the parent's. The child's default
+            backend's device type must be in the requested set. If ``None``
+            (default), the child inherits the full backend configuration of the
+            parent.
 
     Returns:
         ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
@@ -5501,8 +5560,35 @@ def split_group(
 
     parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
-    backend = Backend(parent_backend_str)
-    backend_config = BackendConfig(backend)
+    pg_backend = Backend(parent_backend_str)
+    backend_config = BackendConfig(pg_backend)
+
+    # `backend` (extension API) lets the caller select a subset of the parent
+    # group's per-device backends to retain in the child group. The C++ split
+    # loop honors this filter so unwanted backends are never split.
+    device_types_filter: list[torch.device] | None = None
+    if backend is not None:
+        parent_device_backends = _parse_backend_string(parent_backend_str)
+        requested_device_backends = _parse_backend_string(str(backend))
+        for device_type, requested_be in requested_device_backends.items():
+            if device_type not in parent_device_backends:
+                raise ValueError(
+                    f"Requested backend for device '{device_type}' is not "
+                    f"present in the parent process group (parent backends: "
+                    f"{parent_device_backends})"
+                )
+            parent_be = parent_device_backends[device_type]
+            if parent_be != requested_be:
+                raise ValueError(
+                    f"Backend mismatch for device '{device_type}': parent has "
+                    f"'{parent_be}', requested '{requested_be}'. Backend names "
+                    f"must match exactly when filtering split_group backends."
+                )
+        device_types_filter = [
+            torch.device(device_type) for device_type in requested_device_backends
+        ]
+        pg_backend = Backend(str(backend))
+        backend_config = BackendConfig(pg_backend)
 
     # TODO: figure out pg option for torchComms
     if pg_options is None and not _use_torchcomms_enabled():
@@ -5514,7 +5600,7 @@ def split_group(
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
     if timeout is None:
-        timeout = _get_default_timeout(backend)
+        timeout = _get_default_timeout(pg_backend)
     _check_valid_timeout(timeout)
 
     # find my group of ranks and my group local rank in split_ranks
@@ -5547,6 +5633,7 @@ def split_group(
         opts=pg_options,
         group_name=group_name,
         group_desc=group_desc,
+        device_types=device_types_filter,
     )
     if split_pg is None:
         return None
@@ -5571,7 +5658,7 @@ def split_group(
         )
 
     # update global state
-    _world.pg_map[split_pg] = (backend, split_pg.get_group_store())
+    _world.pg_map[split_pg] = (pg_backend, split_pg.get_group_store())
     _world.pg_names[split_pg] = group_name
     _register_process_group(group_name, split_pg)
     _world.pg_backend_config[split_pg] = str(backend_config)
