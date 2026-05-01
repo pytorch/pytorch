@@ -2,13 +2,8 @@
 """Tests for nb_float_impl: unified __float__ / float() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-    run_tests,
-    skipIfCrossRef,
-    TestCase,
-)
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test, skipIfCrossRef
 
 
 class NbFloatTests(TestCase):
