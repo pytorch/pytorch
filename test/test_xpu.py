@@ -262,9 +262,9 @@ if __name__ == "__main__":
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_parse_visible_devices(self):
-        def _parse_visible_devices(val):
+        def _parse_visible_devices(val, strict=False):
             with patch.dict(os.environ, {"ZE_AFFINITY_MASK": val}, clear=True):
-                return torch.xpu._parse_visible_devices()
+                return torch.xpu._parse_visible_devices(strict=strict)
 
         # Tokens with trailing non-numeric characters are invalid; entire list is rejected
         self.assertEqual(_parse_visible_devices("1a, 2b"), [])
@@ -276,6 +276,37 @@ if __name__ == "__main__":
         self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
         # Purely alphabetic tokens make the entire list invalid
         self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
+
+        # Valid masks should work the same with strict=True
+        self.assertEqual(_parse_visible_devices("0, 1, 2", strict=True), [0, 1, 2])
+        # COMPOSITE-style masks raise ValueError in strict mode
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("0.0,0.1", strict=True)
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("one, two", strict=True)
+
+    def test_device_info_api_raises_import_error_without_pyzes(self):
+        with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.temperature()
+
+    def test_temperature_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            temp = torch.xpu.temperature()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU temperature requires elevated privileges")
+            raise
+
+        self.assertIsInstance(temp, float)
+        # Sanity check: GPU temperature should be in a plausible range (0–150 °C)
+        self.assertGreaterEqual(temp, 0.0)
+        self.assertLess(temp, 150.0)
 
     def test_device_count_respects_affinity_mask(self):
         try:
