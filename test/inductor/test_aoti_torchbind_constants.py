@@ -2,7 +2,8 @@
 
 import torch
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 HAS_CUDA = torch.cuda.is_available()
@@ -20,15 +21,8 @@ class TestTorchbindAOTI(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        else:
-            lib_file_path = torch.utils.cpp_extension.find_torchbind_library(
-                "torchbind_test"
-            )
-            torch.ops.load_library(str(lib_file_path))
+        # Canonical helper that handles FBCODE / Linux / macOS / Windows.
+        load_torchbind_test_lib()
         super().setUpClass()
 
     def _make_model(self):
@@ -48,8 +42,7 @@ class TestTorchbindAOTI(TestCase):
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
 
-        with torch._inductor.config.patch("aot_inductor.package", True):
-            pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
 
         loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model")
         custom_objs = loader.get_custom_objs()
@@ -78,8 +71,7 @@ class TestTorchbindAOTI(TestCase):
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
 
-        with torch._inductor.config.patch("aot_inductor.package", True):
-            pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
 
         loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model")
         self.assertEqual(loader.get_custom_objs(), {})
