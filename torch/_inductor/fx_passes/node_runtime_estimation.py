@@ -12,10 +12,7 @@ from typing import Any
 
 import torch
 import torch.fx as fx
-from torch._inductor.fx_passes.bucketing import (
-    _resolve_group_name,
-    _schedulable_wait_node,
-)
+from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
 from torch.fx.operator_schemas import normalize_function
@@ -41,10 +38,7 @@ def _get_collective_key(coll_node: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    raw_group_name = kwargs.get("group_name", None)
-    group_name = (
-        _resolve_group_name(raw_group_name) if raw_group_name is not None else None
-    )
+    group_name = kwargs.get("group_name", None)
     group_size = kwargs.get("group_size", None)
 
     tensor_bytes: int | None = None
@@ -225,7 +219,7 @@ def benchmark_collective_with_cuda_events_impl(
         normalize_to_only_use_kwargs=True,
     )
     assert opt_args_kwargs is not None
-    group_name = _resolve_group_name(opt_args_kwargs[1]["group_name"])
+    group_name = opt_args_kwargs[1]["group_name"]
     group_size = _get_group_size_by_name(group_name)
 
     if not success:
