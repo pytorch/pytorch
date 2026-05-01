@@ -3823,10 +3823,10 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 11):
             # MAKE_FUNCTION behavior actually changed in 3.11, see
             # https://github.com/python/cpython/pull/93189/
-            if not hasattr(code.value, "co_qualname"):
+            if not hasattr(code.value, "co_qualname"):  # type: ignore[attr-defined]
                 raise AssertionError(
                     'expected hasattr(code.value, "co_qualname") to be true'
-                )  # type: ignore[attr-defined]
+                )
             fn_name = VariableTracker.build(self, code.value.co_qualname)  # type: ignore[attr-defined]
         defaults = None
         closure = None

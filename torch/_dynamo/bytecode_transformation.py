@@ -1568,7 +1568,7 @@ def fix_vars(
                 raise AssertionError(
                     f"co_names length {len(code_options['co_names'])} does not "
                     f"match names dict length {len(names)}"
-                )
+                ) from None
         return idx
 
     if sys.version_info < (3, 11):

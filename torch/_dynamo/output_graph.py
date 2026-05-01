@@ -3684,6 +3684,8 @@ class SubgraphTracer(fx.Tracer):
         # This is useful for debugging and transforming the exported graph.
         if self.parent is None:
             self.source_fn_stack: list[Any] = []
+        elif source_target is None:
+            self.source_fn_stack = self.parent.source_fn_stack[:]
         else:
             self.source_fn_stack = self.parent.source_fn_stack + [
                 (self.graph._target_to_str(source_target), source_target)

@@ -581,7 +581,7 @@ class DynamoBytecodeFlatten:
             )(*args, **kwargs)
         except Yield:
             if self.gm_inputs is None:
-                raise AssertionError("gm_inputs must not be None after Yield")
+                raise AssertionError("gm_inputs must not be None after Yield") from None
             return self.gm_inputs
         raise RuntimeError
 

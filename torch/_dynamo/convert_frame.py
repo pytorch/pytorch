@@ -1710,7 +1710,7 @@ def _compile(
             if e._torch_dynamo_tracer_output is None:
                 raise AssertionError(
                     "SkipFrame exception must have _torch_dynamo_tracer_output set"
-                )
+                ) from None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
         if distributed_state is not None and distributed_state.all_states is None:  # type: ignore[has-type]
@@ -2266,7 +2266,7 @@ class ConvertFrame:
                 self._inner_convert._box.error_on_graph_break is not None
             )
             if error_on_graph_break is None:
-                raise AssertionError("error_on_graph_break must not be None")
+                raise AssertionError("error_on_graph_break must not be None") from None
             if self._inner_convert._box.error_on_graph_break:
                 # NOTE we _might_ have to wrap the current in a custom exception
                 # in order to correctly bubble up to the top-level compile wrapper in
