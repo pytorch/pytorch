@@ -3804,31 +3804,35 @@ class TestProfilerDeviceStopped(TestCase):
             schedule=torch.profiler.schedule(**schedule_kwargs),
         )
 
-    def test_enters_device_stopped_from_warmup(self):
-        p = self._make_profiler(wait=0, warmup=2, active=2)
-        with patch(self.PATCH_TARGET, return_value=True):
-            p.start()
-            # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_kineto_stopped
-            # returns True so we override to DEVICE_STOPPED.
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
-            p.stop()
-
-    def test_enters_device_stopped_from_record(self):
-        p = self._make_profiler(wait=0, warmup=1, active=3)
-        with patch(self.PATCH_TARGET, return_value=False):
-            p.start()
-            # step 0 -> 1: WARMUP -> RECORD (normal)
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.RECORD)
-
-        with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD -> RECORD per schedule, but _is_kineto_stopped
-            # -> True overrides to DEVICE_STOPPED. Transition fires stop_trace +
-            # _trace_ready to save the collected data.
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
-            p.stop()
+    @parametrize(
+        "prev_action",
+        [ProfilerAction.WARMUP, ProfilerAction.RECORD],
+    )
+    def test_enters_device_stopped_from_warmup_or_record(self, prev_action):
+        """When _is_kineto_stopped is True and prev_action is WARMUP or
+        RECORD, the entry guard overrides current_action to DEVICE_STOPPED."""
+        if prev_action == ProfilerAction.WARMUP:
+            # warmup=2 so step 0 -> 1 is WARMUP -> WARMUP; the entry guard
+            # fires on that transition with kineto_stopped=True from start.
+            p = self._make_profiler(wait=0, warmup=2, active=2)
+            with patch(self.PATCH_TARGET, return_value=True):
+                p.start()
+                p.step()
+                self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+                p.stop()
+        else:
+            # warmup=1, active=3: walk the schedule into RECORD with
+            # kineto_stopped=False, then flip True to trigger override on
+            # the next RECORD -> RECORD step.
+            p = self._make_profiler(wait=0, warmup=1, active=3)
+            with patch(self.PATCH_TARGET, return_value=False):
+                p.start()
+                p.step()
+                self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            with patch(self.PATCH_TARGET, return_value=True):
+                p.step()
+                self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+                p.stop()
 
     def test_does_not_enter_device_stopped_from_record_and_save(self):
         """When prev_action is RECORD_AND_SAVE, the natural action_map
@@ -4160,27 +4164,6 @@ class TestProfilerDeviceStopped(TestCase):
         with patch(self.PATCH_TARGET, return_value=False):
             p.step()  # step 6: prev=DS, prev_schedule=R&S -> WARMUP
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
-            p.stop()
-
-    def test_active_one_warmup_zero_never_enters_device_stopped(self):
-        """active=1, warmup=0, wait=0: every step is RECORD_AND_SAVE, so
-        prev_action is always RECORD_AND_SAVE — which the entry guard
-        excludes. The natural (R&S, R&S) transition fires every step
-        regardless of kineto_stopped, giving Kineto a chance to recover
-        on each step boundary."""
-        p = self._make_profiler(wait=0, warmup=0, active=1, repeat=3)
-
-        with patch(self.PATCH_TARGET, return_value=False):
-            p.start()  # step 0: RECORD_AND_SAVE
-            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
-
-        with patch(self.PATCH_TARGET, return_value=True):
-            # prev=R&S is excluded from the entry guard, so kineto_stopped
-            # is ignored. Natural (R&S, R&S) transition runs every step.
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
     def test_skips_device_stopped_when_prev_is_none(self):

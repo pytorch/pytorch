@@ -1017,20 +1017,6 @@ class profile(_KinetoProfile):
             self.execution_trace_observer.cleanup()
 
     def start(self) -> None:
-        # Re-derive state from the schedule rather than trusting any
-        # carryover from a previous run. step() may have overridden
-        # current_action to DEVICE_STOPPED; if a user calls stop() then
-        # start() again, that stale DS would no-op the (NONE, DS)
-        # transition and leave the profiler running with no Kineto session.
-        schedule_action = self.schedule(self.step_num)
-        if schedule_action == ProfilerAction.DEVICE_STOPPED:
-            raise ValueError(
-                "ProfilerAction.DEVICE_STOPPED is set internally by the "
-                "profiler and must not be returned by a user-provided schedule"
-            )
-
-        self.current_action = schedule_action
-        self._prev_schedule_action = schedule_action
         self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
@@ -1043,6 +1029,17 @@ class profile(_KinetoProfile):
             self.step_rec_fn.__exit__(None, None, None)
             self.step_rec_fn = None
         self._transit_action(self.current_action, None)
+        # Reset current_action to the schedule's view in case step() had
+        # overridden it to DEVICE_STOPPED. Without this, a subsequent start()
+        # would transit (NONE, DEVICE_STOPPED) — unreachable by contract —
+        # and leave the profiler running with no Kineto session.
+        # _prev_schedule_action must be a validated (non-DS) schedule output;
+        # __init__ and step() reject DEVICE_STOPPED before assigning it.
+        if self._prev_schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise AssertionError(
+                "_prev_schedule_action must never be DEVICE_STOPPED here"
+            )
+        self.current_action = self._prev_schedule_action
 
     def step(self) -> None:
         """
