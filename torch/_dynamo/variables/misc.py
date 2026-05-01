@@ -69,6 +69,7 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
+from .dicts import DunderDictVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -1347,6 +1348,16 @@ class GetAttrVariable(VariableTracker):
     ) -> VariableTracker:
         return self.obj.call_method(tx, self.name, list(args), kwargs)
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        if self.name == "__dict__":
+            dunder = DunderDictVariable.create(tx, self.obj)
+            return dunder.mp_subscript_impl(tx, key)
+        return super().mp_subscript_impl(tx, key)
+
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
@@ -1574,7 +1585,13 @@ class TypingVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # e.g., List[int] → typing.List[int]
-        # TODO(follow-up): add test for invalid subscript type
+        if not key.is_python_constant():
+            unimplemented(
+                gb_type="non-constant typing subscript",
+                context=f"TypingVariable[{key}]",
+                explanation=f"Cannot subscript typing construct {self.value} with a non-constant key.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
