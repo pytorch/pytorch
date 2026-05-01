@@ -468,7 +468,9 @@ def estimate_nccl_collective_runtime_from_fx_node(
     assert opt_args_kwargs is not None
     args, kwargs = opt_args_kwargs
 
-    group_name = kwargs["group_name"]
+    from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+    group_name = _resolve_group_name(kwargs["group_name"])
     group_size = _get_group_size_by_name(group_name)
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
