@@ -56,7 +56,11 @@ jobs:
                    | select(. != "module: performance")' \
               "$LABELS_FILE"
           )
+          mapfile -t SUB_ONCALL_LABELS < <(
+            jq -r '.labels[].name | select(startswith("oncall: "))' "$LABELS_FILE"
+          )
           echo "Loaded ${#MODULE_LABELS[@]} module labels: ${MODULE_LABELS[*]}"
+          echo "Loaded ${#SUB_ONCALL_LABELS[@]} sub-oncall labels: ${SUB_ONCALL_LABELS[*]}"
 
           # Find open issues with oncall:distributed but without ptd-bot-triaged
           ISSUES=$(gh issue list \
@@ -81,7 +85,10 @@ jobs:
               continue
             fi
 
-            # Auto-mark issues already classified by a human (has a module: label)
+            # Auto-mark only when a human has fully classified the issue: must have
+            # BOTH a distributed module label AND a sub-oncall label. A module label
+            # alone (or sub-oncall alone) means triage is incomplete — fall through
+            # to Phase 2 so the LLM finishes the classification.
             REASON=""
             for mod in "${MODULE_LABELS[@]}"; do
               if echo "$LABEL_NAMES" | grep -qxF "$mod"; then
@@ -90,7 +97,16 @@ jobs:
               fi
             done
 
-            if [ -n "$REASON" ]; then
+            HAS_SUB_ONCALL=false
+            for sub in "${SUB_ONCALL_LABELS[@]}"; do
+              if echo "$LABEL_NAMES" | grep -qxF "$sub"; then
+                HAS_SUB_ONCALL=true
+                REASON="${REASON} + ${sub}"
+                break
+              fi
+            done
+
+            if [ -n "$REASON" ] && [ "$HAS_SUB_ONCALL" = true ]; then
               PHASE1_COUNT=$((PHASE1_COUNT + 1))
               if [ "$DRY_RUN" = "true" ]; then
                 echo "[DRY RUN] Would add 'ptd-bot-triaged' to #${ISSUE_NUM} (${REASON})"

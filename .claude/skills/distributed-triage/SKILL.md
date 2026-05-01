@@ -45,11 +45,15 @@ Use these GitHub MCP tools for triage:
 
 ### 0) Already Triaged by Human?
 
-Check if the issue already has any `module:` label listed in [distributed-labels.json](distributed-labels.json).
+A human has fully classified the issue only when it has **BOTH**:
+1. Any `module:` label listed in [distributed-labels.json](distributed-labels.json), AND
+2. One of the sub-oncall labels: `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`.
 
-If the issue already has one or more of these labels:
+If both are present:
 - Add `ptd-bot-triaged` label
 - **STOP** — a human already classified this issue.
+
+If only one is present (a module label without a sub-oncall, or a sub-oncall without a module label), triage is **incomplete** — proceed to Step 1. The PT-level triage bot can apply distributed module labels alongside `oncall: distributed`, but it does not pick the sub-oncall; that is your job.
 
 *This step alone should clear a large portion of the backlog.*
 
@@ -71,7 +75,9 @@ Read the issue title, description, and comments. Determine whether the issue is 
 
 ### 2) Route to Distributed Sub-Oncall
 
-Apply exactly ONE sub-oncall label based on the routing rules in [distributed-rubric.md](distributed-rubric.md):
+Each issue carries **exactly ONE** sub-oncall label. If the issue already has one of the three sub-oncall labels (`oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`), keep it as-is — do NOT add a second sub-oncall, even if your own classification would have picked a different one. Use the existing sub-oncall to decide the next step (continue to Step 3 if it's `oncall: distributed parallelisms`; otherwise add `ptd-bot-triaged` and STOP per the rules below).
+
+If no sub-oncall is present, apply exactly one based on the routing rules in [distributed-rubric.md](distributed-rubric.md):
 
 | Sub-Oncall Label | When to Apply |
 |-----------------|---------------|
