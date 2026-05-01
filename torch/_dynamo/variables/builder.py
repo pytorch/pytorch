@@ -2667,7 +2667,7 @@ class VariableBuilder:
                 if not isinstance(value.base, np.nditer):
                     raise AssertionError(
                         f"Expected np.nditer base, got {type(value.base)}"
-                    )
+                    ) from None
         tensor_value = None
         with torch_function_mode_stack_state_mgr.temp_restore_stack():
             try:

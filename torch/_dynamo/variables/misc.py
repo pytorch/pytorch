@@ -1007,9 +1007,8 @@ class AutogradFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         fn = self.fn_cls.backward
-        # type: ignore[attr-defined]
         if (
-            type(args[0].value)
+            type(args[0].value)  # type: ignore[attr-defined]
             is not torch._dynamo.external_utils.FakeBackwardCFunction
         ):
             raise AssertionError(

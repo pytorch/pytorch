@@ -1347,7 +1347,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 if tracer.symbolic_result is None:
                     raise AssertionError(
                         "expected symbolic_result to be set after StopIteration"
-                    )
+                    ) from None
                 return tracer.symbolic_result
         elif name == "throw":
             # * Raises an exception at the point where the generator was paused, and
