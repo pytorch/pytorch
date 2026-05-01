@@ -10,7 +10,7 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
-from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+from torch.testing._internal.triton_utils import requires_accelerator_and_triton, requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.utils.checkpoint import (
