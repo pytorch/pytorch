@@ -87,6 +87,7 @@ torch.utils.mobile_optimizer <mobile_optimizer>
 torch.utils.model_zoo <model_zoo>
 torch.utils.tensorboard <tensorboard>
 torch.utils.module_tracker <module_tracker>
+torch.utils.nan_guard <nan_guard>
 type_info
 named_tensor
 name_inference
