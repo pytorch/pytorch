@@ -369,7 +369,9 @@ class BaseBuiltinVariable(VariableTracker):
                 val = self._fn[key_py]
             except TypeError as e:
                 raise_type_error(tx, str(e))
-            source = self.source and GetItemSource(self.source, key_py)
+            source = None
+            if self.source and args[0].source:
+                source = GetItemSource(self.source, args[0].source)
             return VariableTracker.build(tx, val, source)
         return super().call_method(tx, name, args, kwargs)
 

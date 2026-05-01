@@ -7,6 +7,7 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
+import collections
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -319,10 +320,13 @@ def vt_getitem(
     # Branch 3: special handling for type objects, otherwise call __class_getitem__
     if issubclass(obj_type, type):
         cls = obj.as_python_constant()
-        if cls is type:
+        # TODO get rid of the callable special case
+        if cls is type or cls is collections.abc.Callable:
             key_py = key.as_python_constant()
-            result = cls[key_py]
-            source = obj.source and GetItemSource(obj.source, key_py)
+            result = cls[key_py]  # pyrefly: ignore[bad-specialization]
+            source = None
+            if obj.source and key.source:
+                source = GetItemSource(obj.source, key.source)
             return VariableTracker.build(tx, result, source)
         try:
             return obj.call_method(

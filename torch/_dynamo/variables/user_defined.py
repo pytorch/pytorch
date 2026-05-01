@@ -1409,6 +1409,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.DispatchKey,
                 torch._C._functorch.TransformType,
                 typing._BaseGenericAlias,  # pyrefly: ignore [missing-attribute]
+                typing._SpecialForm,
                 types.GenericAlias,
             ),
         ) or is_pybind11_enum_member(self.value):

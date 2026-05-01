@@ -111,6 +111,7 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallableGenericAliasVariable,
     CellVariable,
     DeletedVariable,
     ExceptionVariable,

@@ -16,6 +16,7 @@ Key classes include:
 """
 
 import builtins
+import collections
 import dataclasses
 import enum
 import functools
@@ -1592,6 +1593,32 @@ class UnionVariable(VariableTracker):
         if name == "__args__":
             return VariableTracker.build(tx, self.value.__args__)
         return super().var_getattr(tx, name)
+
+
+class CallableGenericAliasVariable(VariableTracker):
+    """Represents collections.abc._CallableGenericAlias
+
+    This is used to implement __class_getitem__ on Callable[...] types.  Can't be traced directly because it has a
+    builtin __getattribute__
+    """
+
+    def __init__(
+        self,
+        value: collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        **kwargs: Any,
+    ):
+        assert isinstance(
+            value,
+            collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        )
+        super().__init__(**kwargs)
+        self.value = value
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(codegen.create_load_const(self.value))
+
+    def as_python_constant(self):
+        return self.value
 
 
 @functools.lru_cache(maxsize=1)

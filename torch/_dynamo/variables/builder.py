@@ -233,6 +233,7 @@ from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallableGenericAliasVariable,
     ComptimeVariable,
     ConstantLikeVariable,
     DebuggingVariable,
@@ -4396,6 +4397,11 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif istype(value, object):
             return ObjectVariable(value)
+        elif isinstance(
+            value,
+            collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        ):
+            return CallableGenericAliasVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
