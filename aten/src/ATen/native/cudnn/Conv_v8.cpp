@@ -594,8 +594,11 @@ auto get_generator_sources(
     const bool fallback) {
   // Method for engine config generator based on heuristics
   const auto heurgen_method =
-      [/*&desc,*/ &x, deterministic, allow_tf32, allow_reduced_precision_reduction, heur_mode](
-          cudnn_frontend::OperationGraph& opGraph)
+      [/*&desc,*/ &x,
+       deterministic,
+       allow_tf32,
+       allow_reduced_precision_reduction,
+       heur_mode](cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                           .setOperationGraph(opGraph)
@@ -614,8 +617,9 @@ auto get_generator_sources(
     return filtered_configs;
   };
   // Method for engine config generator based on fallback list
-  const auto fallback_method = [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
-                                   cudnn_frontend::OperationGraph& opGraph)
+  const auto fallback_method =
+      [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
+          cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
@@ -766,7 +770,14 @@ auto get_plans_from_find(
   // We don't care about getting the best ordering of algos if we're roing to
   // run all of them
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, allow_reduced_precision_reduction, CUDNN_HEUR_MODE_INSTANT, true, true);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      allow_reduced_precision_reduction,
+      CUDNN_HEUR_MODE_INSTANT,
+      true,
+      true);
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
@@ -875,7 +886,14 @@ auto get_configs_from_heuristics(
       ? CUDNN_HEUR_MODE_B
       : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(
-      desc, x, deterministic, allow_tf32, allow_reduced_precision_reduction, heuristic_mode, !fallback, fallback);
+      desc,
+      x,
+      deterministic,
+      allow_tf32,
+      allow_reduced_precision_reduction,
+      heuristic_mode,
+      !fallback,
+      fallback);
 
   cudnn_frontend::EngineConfigGenerator generator(
       sources.size(), sources.data());
