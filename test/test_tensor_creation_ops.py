@@ -1383,9 +1383,8 @@ class TestTensorCreation(TestCase):
         self.assertEqual(int(y), 3)
 
     def test_meshgrid_empty(self):
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expects a non-empty TensorList'):
-            torch.meshgrid()
+        self.assertEqual(torch.meshgrid(), ())
+        self.assertEqual(torch.meshgrid([]), ())
 
     def test_meshgrid_unsupported_indexing(self):
         with self.assertRaisesRegex(RuntimeError,
