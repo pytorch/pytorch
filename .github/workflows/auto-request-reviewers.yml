@@ -41,7 +41,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # Pin to base branch SHA to ensure we never check out PR head under pull_request_target
+          # Under pull_request_target, pin to the PR base SHA so we never check out PR head.
+          # Under workflow_dispatch, github.event.pull_request is empty and we fall back to
+          # github.sha (the SHA of the branch the dispatcher selected, defaults to main).
+          # Triggering workflow_dispatch already requires repo write access.
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           sparse-checkout: |
