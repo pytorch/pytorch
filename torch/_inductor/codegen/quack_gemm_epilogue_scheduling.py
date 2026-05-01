@@ -48,7 +48,9 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         wrapper = V.graph.wrapper_code
         if isinstance(template_node.node, ir.QuackSplitKTemplateBuffer):
             qtb = cast(ir.QuackSplitKTemplateBuffer, template_node.node)
-            wrapper.add_import_once("from quack.gemm_interface import gemm as quack_gemm")
+            wrapper.add_import_once(
+                "from quack.gemm_interface import gemm as quack_gemm"
+            )
             input_args = [input.codegen_reference() for input in qtb.inputs]
             k_split = qtb.k_split
             wrapper.writeline(

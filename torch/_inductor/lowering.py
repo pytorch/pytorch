@@ -8431,7 +8431,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
-    if split_k and (backend not in ("TRITON", "QUACK") or gemm_op != torch.ops.aten.mm.default):
+    if split_k and (
+        backend not in ("TRITON", "QUACK") or gemm_op != torch.ops.aten.mm.default
+    ):
         raise NotImplementedError(
             "GEMM epilogue SPLIT_K currently supports only the TRITON/QUACK aten.mm path"
         )
@@ -8448,12 +8450,16 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
 
             k_splits = get_k_splits(m, n, k)
             if not k_splits:
-                raise NotImplementedError("no valid split-K choices for QUACK GEMM epilogue")
+                raise NotImplementedError(
+                    "no valid split-K choices for QUACK GEMM epilogue"
+                )
             k_split = k_splits[0]
             layout = ir.FixedLayout(
                 mat1.get_device(), torch.float32, [k_split, m, n], [m * n, n, 1]
             )
-            input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in args]
+            input_nodes = [
+                ir.TemplateBuffer.realize_template_input(arg) for arg in args
+            ]
             choices: list[Any] = []
             quack_split_k_template.maybe_append_choice(
                 choices, input_nodes=input_nodes, layout=layout, k_split=k_split
@@ -8570,7 +8576,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             "quack_gemm_epilogue", choices, input_nodes, layout
         )
         return (node,)
-
 
     fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])
     if backend not in fusible_template_backends:
