@@ -54,9 +54,11 @@ static void sort_single_block(const Tensor& input,
                               int sort_size,
                               int64_t stride_sort,
                               int64_t stride_seg,
-                              int tptg) {
+                              int tptg,
+                              bool stable) {
   auto n_rows = static_cast<int>(input.numel() / sort_size);
-  const auto kernel = fmt::format("sort_block_{}_tptg{}", scalarToMetalTypeString(input), tptg);
+  const char* stable_sfx = stable ? "_stable" : "";
+  const auto kernel = fmt::format("sort_block_{}_tptg{}{}", scalarToMetalTypeString(input), tptg, stable_sfx);
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -191,8 +193,15 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
         out_vals = at::empty(self.sizes(), values.options());
         out_inds = at::empty(self.sizes(), indices.options());
       }
-      sort_single_block(
-          input, out_vals, out_inds, descending, sort_size, /*stride_sort=*/1, /*stride_seg=*/sort_size, tptg);
+      sort_single_block(input,
+                        out_vals,
+                        out_inds,
+                        descending,
+                        sort_size,
+                        /*stride_sort=*/1,
+                        /*stride_seg=*/sort_size,
+                        tptg,
+                        /*stable=*/stable.value_or(false));
       if (need_copy_back) {
         values.copy_(out_vals);
         indices.copy_(out_inds);
