@@ -21,8 +21,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.linter.adapters._stable_shim_utils import LintMessage, LintSeverity
-from tools.linter.adapters.stable_shim_version_linter import get_current_version
+from tools.linter.adapters._stable_shim_utils import (
+    get_current_version,
+    LintMessage,
+    LintSeverity,
+)
 
 
 LINTER_CODE = "GENERATED_SHIMS_VERSION"

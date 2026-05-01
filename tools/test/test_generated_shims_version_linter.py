@@ -29,7 +29,9 @@ aten_shimified_ops = {
         # Returns a map keyed by the module-level variable name.
         self.assertEqual(set(parsed), {"inductor_fallback_ops", "aten_shimified_ops"})
         # Same op key in both dicts should not interfere
-        self.assertEqual(parsed["inductor_fallback_ops"]["aten.foo.default"][1][0], None)
+        self.assertEqual(
+            parsed["inductor_fallback_ops"]["aten.foo.default"][1][0], None
+        )
         self.assertEqual(
             parsed["aten_shimified_ops"]["aten.foo.default"][1][0],
             "TORCH_VERSION_2_10_0",
@@ -68,9 +70,7 @@ aten_shimified_ops = {}
 
     def _check(self, current_src, base_src, current_version=(2, 13, 0)):
         """Helper: write current_src to a temp file, run check_file with mocks."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(current_src)
             f.flush()
             temp_file = f.name
