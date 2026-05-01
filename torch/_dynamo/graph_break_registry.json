@@ -2481,6 +2481,16 @@
       ]
     }
   ],
+  "GB7489": [
+    {
+      "Gb_type": "Unsupported argument type in tensor method call",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo could not create a proxy for an argument in the call to Tensor.{name}(). This usually means an unsupported type was passed as an argument to a tensor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3840": [
     {
       "Gb_type": "leaf_function without fake_fn",
