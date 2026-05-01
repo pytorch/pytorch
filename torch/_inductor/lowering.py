@@ -8443,11 +8443,10 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         from torch._inductor.select_algorithm import autotune_select_algorithm
         from torch._inductor.utils import get_k_splits
 
-        bias = None
-        if gemm_op == torch.ops.aten.addmm.default:
-            bias, mat1, mat2 = args
-        else:
-            mat1, mat2 = args
+        gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
+        bias = args[0] if gemm_op == torch.ops.aten.addmm.default else None
+        mat1 = args[gemm_op_info.mat1_index]
+        mat2 = args[gemm_op_info.mat2_index]
         m, k = mat1.get_size()
         n = mat2.get_size()[1]
         if backend == "QUACK":

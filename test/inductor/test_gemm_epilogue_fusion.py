@@ -431,6 +431,44 @@ class GemmEpilogueFusionTests(TestCase):
             "extern_kernels.mm"
         ).run("\n".join(codes))
 
+    def _run_split_k_epilogue_closure_read_test(self, backend, expected_kernel):
+        if backend == "QUACK":
+            try:
+                import quack  # noqa: F401
+            except ImportError:
+                self.skipTest("QuACK is not available")
+
+        def fn(a, b, row_scale):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: acc * row_scale,
+                kernel_options={"backend": backend, "SPLIT_K": True},
+            )
+
+        a = torch.randn(8, 8192, device="cuda", dtype=torch.float16)
+        b = torch.randn(8192, 8, device="cuda", dtype=torch.float16)
+        row_scale = torch.randn(8, 1, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row_scale
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, row_scale), atol=1e-1, rtol=1e-2)
+        FileCheck().check(expected_kernel).check("tl.load").run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_triton_split_k_epilogue_reads_closure_tensor(self):
+        self._run_split_k_epilogue_closure_read_test("TRITON", "decompose_k_fp32_mm")
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("triton.num_decompose_k_splits", 2)
+    @inductor_config.patch("triton.decompose_k_threshold", 0)
+    def test_cuda_inductor_quack_split_k_epilogue_reads_closure_tensor(self):
+        self._run_split_k_epilogue_closure_read_test("QUACK", "quack_gemm")
+
     @requires_cuda_and_triton
     @inductor_config.patch(max_autotune_gemm=False)
     @inductor_config.patch("triton.num_decompose_k_splits", 2)
