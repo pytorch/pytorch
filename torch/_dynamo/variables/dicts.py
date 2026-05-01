@@ -555,14 +555,17 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
-            if arg_hashable:
-                self.install_dict_keys_match_guard()
-                self.should_reconstruct_all = True
-                tx.output.side_effects.mutation(self)
-                self.items.__delitem__(Hashable(args[0]))
-                return ConstantVariable.create(None)
-            else:
-                return super().call_method(tx, name, args, kwargs)
+            if not arg_hashable:
+                raise_unhashable(args[0], tx)
+
+            self.install_dict_keys_match_guard()
+            if args[0] not in self:
+                raise_observed_exception(KeyError, tx)
+
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+            self.items.__delitem__(Hashable(args[0]))
+            return ConstantVariable.create(None)
         elif name == "get":
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
