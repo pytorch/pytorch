@@ -598,8 +598,6 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
-        # TODO(follow-up): add tests for ModuleList negative index, ModuleList/Sequential
-        # slice, ModuleDict missing key, invalid key types
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
