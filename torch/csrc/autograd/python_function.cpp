@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
@@ -103,7 +104,7 @@ static PyObject* unpack_saved_variables(
   THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
   if (!saved)
     return nullptr;
-  auto saved_for = self->cdata.lock();
+  const auto& saved_for = self->cdata;
   // This is really a true assert, because we've already tested for the
   // self->has_freed_buffers case at the beginning of this function:
   // buffers are freed when PyNode dies; if the buffers are not freed,
@@ -158,7 +159,7 @@ namespace torch::autograd {
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
-  THPFunction* py_fn = (THPFunction*)obj;
+  auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -187,12 +188,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       throw_python_error();
     PyTuple_SET_ITEM(boxedArgs.get(), 0, gradsList.release());
 
-    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply_boxed"));
+    THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply_boxed"));
     if (!apply_fn)
       throw_python_error();
     r = THPObjectPtr(PyObject_CallObject(apply_fn, boxedArgs.get()));
   } else {
-    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
+    THPObjectPtr apply_fn(PyObject_GetAttrString(pyobj(), "apply"));
     if (!apply_fn)
       throw_python_error();
     r = THPObjectPtr(PyObject_CallObject(apply_fn, pyInputs.get()));
@@ -240,7 +241,7 @@ auto PyNode::apply_with_saved_impl(
     const SwapSavedVariables& saved) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
-  THPFunction* py_fn = (THPFunction*)obj;
+  auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -316,7 +317,7 @@ auto PyNode::apply_with_saved_impl(
       fwdInputMetadatas.get(),
       saved_tensors.get(),
       bwd_idx,
-      obj,
+      pyobj(),
       backward_state_idx,
       opaque_indices_list.get()));
 
@@ -330,7 +331,7 @@ auto PyNode::apply_with_saved_impl(
 
 auto PyNode::is_traceable() -> bool {
   pybind11::gil_scoped_acquire gil;
-  THPObjectPtr forward_class{PyObject_GetAttrString(obj, "_forward_cls")};
+  THPObjectPtr forward_class{PyObject_GetAttrString(pyobj(), "_forward_cls")};
   if (!forward_class)
     throw_python_error();
   THPObjectPtr traceable_py_bool{
@@ -347,42 +348,30 @@ auto PyNode::release_variables() -> void {
   // we just leak the saved objects.
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
-    auto f = (THPFunction*)obj;
-    f->saved_variables.clear();
-    f->has_freed_buffers = 1;
-  }
-}
-
-void PyNode::release_resources() {
-  // NB: Node::release_resources calls into release_variables(), which
-  // accesses the Python object so it must be called first.
-  Node::release_resources();
-
-  // Release the Python object so that it can be freed when the C++ Node
-  // outlives all strong references (weak_intrusive_ptr may keep the
-  // allocation alive, but shouldn't prevent the PyObject from being freed).
-  if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_CLEAR(obj);
+    auto* f = reinterpret_cast<THPFunction*>(pyobj());
+    if (f) {
+      f->saved_variables.clear();
+      f->has_freed_buffers = 1;
+    }
   }
 }
 
 auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
-  auto f = (THPFunction*)obj;
+  auto* f = reinterpret_cast<THPFunction*>(pyobj());
   auto name = std::string(Py_TYPE(f)->tp_name);
   return name;
 }
 
 bool PyNode::is_aot_backward() const {
-  py::handle handle(obj);
+  py::handle handle(pyobj());
   return py::hasattr(py::getattr(handle, "_forward_cls"), "_aot_id");
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) const {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
+  THPObjectPtr pykey(PyObject_CallMethodObjArgs(pyobj(), method_name, nullptr));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
@@ -399,7 +388,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(static_cast<size_t>(size));
 
-  auto f = (THPFunction*)obj;
+  auto* f = reinterpret_cast<THPFunction*>(pyobj());
   f->compiled_autograd_symints.clear();
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
@@ -423,8 +412,8 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   args.collect(f->output_info);
   args.collect(f->input_info);
 
-  Py_INCREF(obj);
-  c10::SafePyObject backward_obj(obj, getPyInterpreter());
+  PyObject* py = pyobj();
+  c10::SafePyObject backward_obj(Py_NewRef(py), getPyInterpreter());
   std::optional<c10::SafePyObject> backward_state_obj;
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
@@ -434,7 +423,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
 
   std::vector<c10::SafePyObject> opaque_objs;
   if (THPObjectPtr opaque_objs_ptr =
-          THPObjectPtr(PyObject_GetAttrString(obj, "opaque_objects"))) {
+          THPObjectPtr(PyObject_GetAttrString(py, "opaque_objects"))) {
     Py_ssize_t size = PySequence_Size(opaque_objs_ptr.get());
     if (size > 0) {
       opaque_objs.reserve(static_cast<size_t>(size));
@@ -459,7 +448,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
-  auto f = (THPFunction*)obj;
+  auto* f = reinterpret_cast<THPFunction*>(pyobj());
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
@@ -479,7 +468,7 @@ variable_list PyNode::apply_with_saved(
 PyObject* PyNode::to_py_args(
     const variable_list& inputs,
     at::OptionalDeviceGuard* device_guard) {
-  THPFunction* py_fn = (THPFunction*)obj;
+  auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
 
   auto zeros_without_gil = [](const VariableInfo& variable,
                               at::OptionalDeviceGuard& dg) {
@@ -549,59 +538,39 @@ variable_list PyNode::to_variable_list(
 
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
-  // NB: We should not traverse PyObbject stored on PyNode, since we only hold
-  // as weak reference to the PyNode.
+  Py_VISIT(self->needs_input_grad);
   Py_VISIT(self->to_save);
   Py_VISIT(self->non_differentiable);
   Py_VISIT(self->dirty_tensors);
   Py_VISIT(self->compiled_autograd_backward_state);
   Py_VISIT(self->saved_for_forward);
-  return 0;
+  return traverse_node(self->cdata, visit, arg);
 }
 
 static int THPFunction_clear(THPFunction* self) {
-  // Note that the cdata might not be expired yet in the case where this
-  // object is part of a cycle and the GC happens to tp_clear this PyObject
-  // before the other ones that trigger the de-allocation of the cdata
-
   Py_CLEAR(self->needs_input_grad);
-
   Py_CLEAR(self->to_save);
   Py_CLEAR(self->non_differentiable);
   Py_CLEAR(self->dirty_tensors);
   Py_CLEAR(self->compiled_autograd_backward_state);
   Py_CLEAR(self->saved_for_forward);
-
-  self->output_info.clear();
-  self->input_info.clear();
-  self->saved_variables.clear();
-  self->is_variable_input.clear();
-
   return 0;
 }
 
 static void THPFunction_dealloc(THPFunction* self) {
-  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
-  // (otherwise the condition is trivially true).  Then there is a PyNode
-  // which contains an owning reference to this object.  But we are only
-  // allowed to clear if all owning references are gone!  Contradiction.
-  //
-  // However, note that THPFunction_clear is typically called in the shared_ptr
-  // destructor of PyNode; in that case, per
-  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
-  // specified in the standard that this is guaranteed.  If you see this
-  // assert triggering in the wild, feel free to comment it out.  They're
-  // likely to standardize that you ARE guaranteed to see the weak pointers
-  // as expired in the destructor in the future, so we'll keep this for now.
-  TORCH_INTERNAL_ASSERT(self->cdata.expired());
-
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
-  self->cdata.~weak_intrusive_ptr();
   self->output_info.~vector();
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
+  if (self->cdata) {
+    auto* slot = self->cdata->pyobj_slot();
+    if (slot->load_pyobj() == reinterpret_cast<PyObject*>(self)) {
+      slot->store_pyobj(nullptr);
+    }
+  }
+  self->cdata.~intrusive_ptr();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -614,10 +583,8 @@ static PyObject* THPFunction_new(
     return nullptr;
   // Python zero-initializes the object memory, so there's no need to initialize
   // most fields
-  THPFunction* self = (THPFunction*)obj;
-  // Setup the PyNode later; we can't keep it live here
-  new (&self->cdata)
-      c10::weak_intrusive_ptr<PyNode>(c10::intrusive_ptr<PyNode>());
+  auto* self = reinterpret_cast<THPFunction*>(obj);
+  new (&self->cdata) c10::intrusive_ptr<Node>(c10::make_intrusive<PyNode>());
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
@@ -627,6 +594,7 @@ static PyObject* THPFunction_new(
   self->materialize_non_diff_grads = true;
   self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
+  torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
   return obj;
 }
 
@@ -684,14 +652,13 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 // do in this case.  After this method is run, t2var is extended with
 // mappings for output tensors as well.
 static void _wrap_outputs(
-    const c10::intrusive_ptr<PyNode>& cdata,
     THPFunction* self,
     const variable_list& input_vars,
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
-  auto cdata_if_executable = is_executable ? cdata : nullptr;
+  auto cdata_if_executable = is_executable ? self->cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
     self->output_info.clear();
@@ -899,7 +866,6 @@ static void _get_tensors_to_save(
 // Save any variables that requested by to_save
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
-    const c10::intrusive_ptr<PyNode>& cdata_ptr,
     THPFunction* self,
     PyObject* outputs,
     int64_t num_outputs) {
@@ -1188,7 +1154,6 @@ void _trace_post_record(
 
 PyObject* process_outputs(
     PyObject* op_obj,
-    const c10::intrusive_ptr<PyNode>& cdata,
     THPFunction* grad_fn,
     const UnpackedInput& unpacked,
     PyObject* inputs,
@@ -1205,7 +1170,7 @@ PyObject* process_outputs(
   if (!outputs)
     throw python_error();
 
-  cdata->clear_input_metadata();
+  grad_fn->cdata->clear_input_metadata();
 
   // Record type, device, and size information about inputs
   if (is_executable) {
@@ -1227,7 +1192,6 @@ PyObject* process_outputs(
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(
-      cdata,
       grad_fn,
       unpacked.input_vars,
       raw_output,
@@ -1241,8 +1205,7 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(
-        tensors_to_save, cdata, grad_fn, outputs.get(), num_outputs);
+    _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
@@ -1263,7 +1226,7 @@ PyObject* process_outputs(
 
 PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& cdata = reinterpret_cast<THPFunction*>(self)->cdata;
   check_legacy_fn_attr_access(cdata, "name");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
@@ -1271,7 +1234,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
 
 PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& cdata = reinterpret_cast<THPFunction*>(self)->cdata;
   check_legacy_fn_attr_access(cdata, "_sequence_nr");
   return THPUtils_packUInt64(cdata->sequence_nr());
   END_HANDLE_TH_ERRORS
@@ -1279,7 +1242,7 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
 
 PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& cdata = reinterpret_cast<THPFunction*>(self)->cdata;
   check_legacy_fn_attr_access(cdata, "_set_sequence_nr");
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
@@ -1288,7 +1251,7 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
 
 PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& cdata = reinterpret_cast<THPFunction*>(self)->cdata;
   check_legacy_fn_attr_access(cdata, "_input_metadata");
   const auto num_inputs = cdata->num_inputs();
   THPObjectPtr list(PyTuple_New(num_inputs));
@@ -1311,7 +1274,7 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto& cdata = reinterpret_cast<THPFunction*>(self)->cdata;
   if (!get_current_graph_task_keep_graph()) {
     cdata->release_variables();
   }
@@ -1419,10 +1382,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
   if (!ctx_obj)
     return nullptr;
-  THPFunction* ctx = (THPFunction*)ctx_obj.get();
-
-  auto cdata = c10::make_intrusive<PyNode>(std::move(ctx_obj));
-  ctx->cdata = cdata;
+  auto* ctx = reinterpret_cast<THPFunction*>(ctx_obj.get());
+  auto& cdata = ctx->cdata;
 
   // Record input nodes if tracing
   auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
@@ -1513,7 +1474,6 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
 
   return process_outputs(
       cls,
-      cdata,
       ctx,
       unpacked_input,
       inputs,
@@ -1535,8 +1495,8 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
       new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
-  auto self = (THPFunction*)_self;
-  auto cdata = self->cdata.lock();
+  auto* self = reinterpret_cast<THPFunction*>(_self);
+  const auto& cdata = self->cdata;
   check_legacy_fn_attr_access(cdata, "_register_hook_dict");
   cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
@@ -1545,8 +1505,8 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
 
 PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
-  auto cdata = self->cdata.lock();
+  auto* self = reinterpret_cast<THPFunction*>(_self);
+  const auto& cdata = self->cdata;
   check_legacy_fn_attr_access(cdata, "register_hook");
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
@@ -1554,8 +1514,8 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
 
 PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
-  auto cdata = self->cdata.lock();
+  auto* self = reinterpret_cast<THPFunction*>(_self);
+  const auto& cdata = self->cdata;
   check_legacy_fn_attr_access(cdata, "register_prehook");
   return torch::autograd::registerFunctionPreHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
@@ -1744,7 +1704,7 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
 
 PyObject* THPFunction_next_functions(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
-  auto cdata = self->cdata.lock();
+  const auto& cdata = self->cdata;
   check_legacy_fn_attr_access(cdata, "next_functions");
   const auto num_outputs = cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
@@ -1768,7 +1728,7 @@ PyObject* THPFunction_next_functions(THPFunction* self, void* _unused) {
 
 PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
-  auto cdata = self->cdata.lock();
+  const auto& cdata = self->cdata;
   // The correct way to solve this problem is to stop exposing grad_fn
   // of PyFunctions as THPFunction; instead, we should use THPCppFunction
   // like everyone else.  But this is a BC-breaking change as it would
