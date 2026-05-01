@@ -111,7 +111,9 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
-_share_torchbind_and_process_group = contextvars.ContextVar("_share_torchbind_and_process_group", default=False)
+_share_torchbind_and_process_group = contextvars.ContextVar(
+    "_share_torchbind_and_process_group", default=False
+)
 
 
 @contextlib.contextmanager

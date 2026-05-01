@@ -461,6 +461,14 @@ def standalone_compile(
 
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
     with _standalone_context(gm, dynamic_shapes, aot):
+        # compile_fx takes ownership of gm and may mutate it on cache miss.
+        # Deepcopy first so the rewrites below land on the owned copy rather
+        # than the caller's gm. ``_unbox_process_group_torchbinds`` (later)
+        # leaves a Python ``dist.ProcessGroup`` on the gm which isn't
+        # pickleable; smuggle it through deepcopy as a shared reference.
+        if not donate_graph_module:
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm = copy.deepcopy(gm)
         # ``make_fx`` traces ``dist.*`` collectives as opaque ``c10d.{op}_``
         # calls. Inductor's collective machinery only recognizes the
         # ``_c10d_functional.{op}`` + ``wait_tensor`` form, so rewrite here
@@ -469,12 +477,6 @@ def standalone_compile(
         # op accepts them (raw torchbind is rejected).
         gm = _functionalize_inplace_collectives(gm)
         gm = _unbox_process_group_torchbinds(gm)
-        # compile_fx takes ownership of gm and may mutate it on cache miss.
-        # The unboxed Python ``dist.ProcessGroup`` is non-pickleable; smuggle
-        # it through the deepcopy as a shared reference instead of crashing.
-        if not donate_graph_module:
-            with _share_torchbind_and_process_group_on_deepcopy():
-                gm = copy.deepcopy(gm)
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
