@@ -1997,7 +1997,9 @@ def _apply_slow_file_floor(
         return times
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    raw_job_name = os.environ.get("JOB_NAME") or os.environ.get("BUILD_ENVIRONMENT") or ""
+    raw_job_name = (
+        os.environ.get("JOB_NAME") or os.environ.get("BUILD_ENVIRONMENT") or ""
+    )
     job_name = raw_job_name.split(" / test (")[0]
     job_default_times = test_times_file.get(job_name, {}).get("default") or {}
     abs_default_times = test_times_file.get("default", {}).get("default") or {}
