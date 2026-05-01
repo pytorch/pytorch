@@ -761,9 +761,11 @@ def build_code_hash(
     from concurrent.futures import ThreadPoolExecutor
 
     files = _collect_module_files(roots, prefix)
+    if not files:
+        return
     with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
         per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
-    per_file_hashes.sort(key=lambda t: t[0])
+    per_file_hashes.sort()
     for _name, digest in per_file_hashes:
         hasher.update(digest)
 
