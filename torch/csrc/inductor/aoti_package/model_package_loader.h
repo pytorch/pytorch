@@ -42,9 +42,8 @@ class TORCH_API AOTIModelPackageLoader {
   // its state will affect subsequent run() invocations. Returns empty when
   // the model has no torchbind constants.
   std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
-    return runner_
-        ? runner_->get_custom_objs()
-        : std::unordered_map<std::string, c10::IValue>{};
+    return runner_ ? runner_->get_custom_objs()
+                   : std::unordered_map<std::string, c10::IValue>{};
   }
 
   void update_constant_buffer(

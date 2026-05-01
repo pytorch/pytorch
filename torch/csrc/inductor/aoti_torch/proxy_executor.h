@@ -2,9 +2,9 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <string>
 #include <unordered_map>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 namespace torch::aot_inductor {
 
@@ -41,8 +41,7 @@ class ProxyExecutor {
   // downcasting and mutating the underlying object affects subsequent
   // run() invocations. Default returns empty for executors that do not
   // track torchbind constants. OSSProxyExecutor overrides.
-  virtual std::unordered_map<std::string, c10::IValue> get_custom_objs()
-      const {
+  virtual std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
     return {};
   }
 };
