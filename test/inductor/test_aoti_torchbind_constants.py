@@ -3,7 +3,7 @@
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 HAS_CUDA = torch.cuda.is_available()
@@ -21,8 +21,9 @@ class TestTorchbindAOTI(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Canonical helper that handles FBCODE / Linux / macOS / Windows.
-        load_torchbind_test_lib()
+        # Loads the test torchbind library AND registers fake classes for
+        # _Foo / _TensorQueue / etc. needed by torch.export tracing.
+        init_torchbind_implementations()
         super().setUpClass()
 
     def _make_model(self):
