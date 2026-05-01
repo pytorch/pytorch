@@ -546,11 +546,100 @@
   - Lint
   - pull
 
-- name: superuser
+- name: Metamates
   patterns:
   - '*'
   approved_by:
-  - pytorch/metamates
+  - 8Keep
+  - aditvenk
+  - AmesingFlank
+  - andrewor14
+  - andyanwang
+  - angelayi
+  - ankitageorge
+  - anshul-si
+  - aorenste
+  - arui-meta
+  - atalman
+  - azahed98
+  - banitag1
+  - blaine-rister
+  - bobrenjc93
+  - BoyuanFeng
+  - choijon5
+  - colesbury
+  - ColinPeppler
+  - d4l3k
+  - danielvegamyhre
+  - dcci
+  - desertfire
+  - divyanshk
+  - dolpm
+  - drisspg
+  - echen4096
+  - fduwjj
+  - fegin
+  - frgossen
+  - fxdawnn
+  - georgiaphillips
+  - henrylhtsang
+  - htyu
+  - huydhn
+  - IvanKobzarev
+  - izaitsevfb
+  - JacobSzwejbka
+  - jainapurva
+  - janeyx99
+  - jathu
+  - jbschlosser
+  - jeanschmidt
+  - jerryzh168
+  - jiannanWang
+  - jijunyan
+  - kapilsh
+  - karthickai
+  - kqfu
+  - laithsakka
+  - liangel-02
+  - Lucaskabela
+  - LucasLLC
+  - manuelcandales
+  - Microve
+  - mikaylagawarecki
+  - mlazos
+  - NikhilAPatel
+  - njriasan
+  - oulgen
+  - PaulZhang12
+  - pianpwk
+  - ryanzhang22
+  - sanketpurandare
+  - sanrise
+  - scotts
+  - seemethere
+  - SherlockNoMad
+  - shunting314
+  - sidt-meta
+  - slayton58
+  - soulitzer
+  - StellarrZ
+  - tianrengao
+  - tianyu-l
+  - tugsbayasgalan
+  - tushar00jain
+  - wconstab
+  - wdvr
+  - weifengpy
+  - williamwen42
+  - xmfan
+  - yangw-dev
+  - ydwu4
+  - yiming0416
+  - yushangdi
+  - ZainRizvi
+  - zhxchen17
+  - zoranzhao
+  - zpcore
   mandatory_checks_name:
   - EasyCLA
   - Lint
