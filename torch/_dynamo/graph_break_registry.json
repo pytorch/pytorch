@@ -4634,16 +4634,6 @@
       "Hints": []
     }
   ],
-  "GB3006": [
-    {
-      "Gb_type": "tp_as_number slot not implemented",
-      "Context": "{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
-      "Explanation": "The type {self.python_type_name()} does not implement the {tp_slot_name}",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0350": [
     {
       "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",

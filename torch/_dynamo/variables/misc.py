@@ -1599,23 +1599,6 @@ class TypingVariable(VariableTracker):
             ],
         )
 
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # GenericAlias types (e.g. Callable[[int], bool]) support __or__ for
-        # type unions (e.g. Callable[[int], bool] | None).
-        if not other.is_python_constant():
-            return VariableTracker.build(tx, NotImplemented)
-        other_val = other.as_python_constant()
-        # pyrefly: ignore[bad-argument-count]
-        result = type(self.value).__or__(self.value, other_val)
-        if result is NotImplemented:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, result)
-
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
 
