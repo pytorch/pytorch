@@ -1899,11 +1899,26 @@ class SIMDScheduling(BaseScheduling):
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
+        # When unrolled chunked-loop slices are stitched into one fused
+        # pointwise kernel, the per-chunk index has the form `c_K + V*x0 + i`
+        # where `V` is a per-chunk stride and `x0` ranges over the full
+        # output `numel`. The product `V * numel` can overflow int32 even
+        # when every individual buffer's storage fits. Conservatively check
+        # `numel * max_buf_size` against int32_max — this is the upper bound
+        # on cross-buffer indexing in such fused kernels.
+        if buf_sizes:
+            max_buf_size = sympy.Max(*buf_sizes) if len(buf_sizes) > 1 else buf_sizes[0]
+            cross_buf_index = numel * max_buf_size
+            if not expr_fits_within_32bit(cross_buf_index):
+                return False
+
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
         V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
             V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
+        if buf_sizes:
+            V.graph.sizevars.check_leq(cross_buf_index, int_max)  # type: ignore[arg-type]
         return True
 
     def process_kernel(

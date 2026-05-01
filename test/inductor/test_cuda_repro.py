@@ -2330,6 +2330,46 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not SM90OrLater, "needs at least 6 GiB of GPU memory headroom")
+    def test_chunked_unrolled_slice_gather_int32_overflow(self):
+        # Regression for an int32-indexing miscompile when an unrolled chunked
+        # loop containing a per-chunk F.linear and a gather gets fused into one
+        # pointwise kernel. Per-chunk buffer storage individually fits in int32,
+        # but the cross-buffer index `V * x0` reaches `V * total_numel` which
+        # overflows int32, and a separate kernel-level fusion synthesizes
+        # exactly that expression. Result before the fix: cudaErrorIllegalAddress.
+        torch.manual_seed(0)
+        T, D, V_, CHUNKSZ = 16384, 128, 200008, 2048
+        x = torch.randn(1, T, D, device=device_type, dtype=torch.bfloat16)
+        targets = torch.randint(0, V_, (1, T), device=device_type, dtype=torch.int64)
+        W = torch.randn(V_, D, device=device_type, dtype=torch.bfloat16) * 0.01
+        bias = torch.zeros(V_, device=device_type, dtype=torch.bfloat16)
+
+        def fwd(x, targets, W, bias):
+            seqlen = x.shape[-2]
+            out = torch.empty(x.shape[:-1], device=x.device, dtype=torch.float32)
+            for start in range(0, seqlen, CHUNKSZ):
+                end = start + CHUNKSZ
+                chunk_x = x[..., start:end, :]
+                chunk_targets = targets[..., start:end]
+                logits = torch.nn.functional.linear(chunk_x, W) + bias
+                m = logits.amax(dim=-1, keepdim=True)
+                tok = (
+                    torch.log(torch.sum(torch.exp(logits - m), dim=-1, dtype=torch.float32))
+                    + m.squeeze(-1).to(torch.float32)
+                    - torch.gather(logits, -1, chunk_targets[..., None]).squeeze(-1).to(torch.float32)
+                )
+                out[..., start:end] = tok
+            return out
+
+        eager = fwd(x, targets, W, bias)
+        opt = torch.compile(fwd, dynamic=False, fullgraph=True)
+        compiled = opt(x, targets, W, bias)
+        torch.cuda.synchronize()
+        # bf16 matmul + log_sum_exp leaves some slack; loose tol is fine here,
+        # the test is about not crashing.
+        self.assertTrue(torch.allclose(eager, compiled, atol=1e-2, rtol=1e-2))
+
     def test_int64_index_intermediate(self):
         def foo(inp):
             view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
