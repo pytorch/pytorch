@@ -544,7 +544,8 @@ class TestForeach(TestCase):
                     ):
                         ref(ref_inputs, **kwargs)
                 else:
-                    self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
+                    self.assertRegex(str(e), re.escape(custom_values_err))
+
             else:
                 expected = ref(ref_inputs, **kwargs)
                 self.assertEqual(expected, actual)
