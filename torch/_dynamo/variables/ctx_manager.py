@@ -817,6 +817,20 @@ class CUDADeviceVariable(GenericDeviceVariable):
         return torch.cuda.device
 
 
+class XPUDeviceVariable(GenericDeviceVariable):
+    """represents torch.xpu.device"""
+
+    _exchange_fn = staticmethod(torch.xpu._exchange_device)
+    _maybe_exchange_fn = staticmethod(torch.xpu._maybe_exchange_device)
+    _get_device_index_fn = staticmethod(torch.xpu._get_device_index)
+
+    def module_name(self) -> str:
+        return "torch.xpu"
+
+    def python_type(self) -> type:
+        return torch.xpu.device
+
+
 class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
     """represents torch.accelerator.device_index"""
 
