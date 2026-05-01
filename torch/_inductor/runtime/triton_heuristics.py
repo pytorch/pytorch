@@ -1614,25 +1614,6 @@ class CachingAutotuner(KernelInterface):
         )
         self.cpu_kernel_saved = True
 
-    @functools.cached_property
-    def _should_coordesc_tune(self) -> bool:
-        """Whether this autotuner is eligible for coordinate descent tuning."""
-        if self.heuristic_type in (
-            HeuristicType.TEMPLATE,
-            HeuristicType.USER_AUTOTUNE,
-            HeuristicType.FIXED,
-        ):
-            return False
-        # Deterministic mode forbids tuning RBLOCK / num_warps for reductions
-        # because those knobs shift numerics.
-        if self.deterministic_mode and self.heuristic_type in (
-            HeuristicType.REDUCTION,
-            HeuristicType.PERSISTENT_REDUCTION,
-            HeuristicType.SPLIT_SCAN,
-        ):
-            return False
-        return True
-
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
         Coordinate descent tuning can be run with or without max-autotune.
@@ -1644,7 +1625,24 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if not self._should_coordesc_tune:
+        if self.heuristic_type in (
+            HeuristicType.TEMPLATE,
+            HeuristicType.USER_AUTOTUNE,
+            HeuristicType.FIXED,
+        ):
+            # skip triton template
+            return launcher
+
+        if self.deterministic_mode and self.heuristic_type in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+            HeuristicType.SPLIT_SCAN,
+        ):
+            # Not only RBLOCK size matters for numericals of reduction.
+            # num_warps also matters since that affect how much data
+            # is handled by each thread, how many warp-reduction we do
+            # in parallel and how much data is there for block
+            # reduction.
             return launcher
 
         with dynamo_timed(
