@@ -26,7 +26,7 @@ Tensor _triu_mask(c10::SymInt n, int64_t dims, bool diagonal, TensorOptions opt)
   // or i <= j <= k <= ... (depending on diagonal)
   Tensor range = at::arange(std::move(n), opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range), "ij");
-  Tensor mask = at::full(index_grids[0].sizes(), true, opt.dtype(kBool));
+  Tensor mask = at::full(index_grids[0].sym_sizes(), true, opt.dtype(kBool));
   if(diagonal) {
     for(int64_t i = 0; i < dims - 1; i++) {
       mask *= index_grids[i] <= index_grids[i+1];
