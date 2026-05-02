@@ -27,6 +27,7 @@ from .builtin import (
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
+    AcceleratorDeviceIndexVariable,
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,
@@ -49,6 +50,7 @@ from .ctx_manager import (
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
+    XPUDeviceVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -185,6 +187,8 @@ from .user_defined import (
 
 
 __all__ = [
+    "XPUDeviceVariable",
+    "AcceleratorDeviceIndexVariable",
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",

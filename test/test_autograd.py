@@ -1727,7 +1727,7 @@ class TestAutograd(TestCase):
 
     def test_grad_empty_inputs(self):
         x = torch.tensor([1.0], requires_grad=True)
-        with self.assertRaisesRegex(ValueError, "grad requires non-empty inputs."):
+        with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
             torch.autograd.grad(2 * x, [], grad_outputs=torch.tensor([1.0]))
 
     def test_grad_fn_badcalls(self):
@@ -2564,6 +2564,138 @@ class TestAutograd(TestCase):
             "cannot be empty",
             lambda: torch.autograd.backward(fn(), gradient, inputs=[]),
         )
+
+    def test_grad_dict_inputs(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {"x", "y"})
+        self.assertEqual(result["x"], 2 * x + y)
+        self.assertEqual(result["y"], x + 2 * y)
+
+    def test_grad_dict_inputs_ordered_dict(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        inputs = OrderedDict([("x", x), ("y", y)])
+        with self.assertRaisesRegex(TypeError, "must be a dict"):
+            torch.autograd.grad(z.sum(), inputs)
+
+    def test_grad_dict_inputs_materialize_grads(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs, materialize_grads=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 2 * x)
+        self.assertEqual(result["y"], torch.zeros_like(y))
+
+    def test_grad_dict_inputs_allow_unused(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs, allow_unused=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 2 * x)
+        self.assertIsNone(result["y"])
+
+    def test_grad_dict_inputs_create_graph(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**3
+
+        inputs = {"x": x}
+        result = torch.autograd.grad(z.sum(), inputs, create_graph=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 3 * x**2)
+        self.assertTrue(result["x"].requires_grad)
+
+        # Second-order derivative
+        result2 = torch.autograd.grad(result["x"].sum(), inputs)
+        self.assertIsInstance(result2, dict)
+        self.assertEqual(result2["x"], 6 * x)
+
+    def test_grad_dict_inputs_empty(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+        inputs: dict[str, torch.Tensor] = {}
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot be empty",
+            lambda: torch.autograd.grad(z.sum(), inputs),
+        )
+
+    def test_backward_dict_inputs(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = {"x": x, "y": y}
+        torch.autograd.backward(z, gradient, inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_tensor_backward(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = (x**2 + y * x + y**2).sum()
+
+        inputs = {"x": x, "y": y}
+        z.backward(inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_empty(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot be empty",
+            lambda: torch.autograd.backward(z, gradient, inputs={}),
+        )
+
+    @skipIfTorchDynamo("compiled autograd does not support is_grads_batched with vmap")
+    def test_grad_dict_inputs_batched_grads(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = (x**2 + y * x + y**2).sum()
+
+        # Batched grad_outputs: shape (batch_size,) for scalar output
+        batch_size = 3
+        grad_outputs = torch.ones(batch_size, dtype=torch.double)
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(
+            z, inputs, grad_outputs=grad_outputs, is_grads_batched=True
+        )
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {"x", "y"})
+        # Each result tensor should have batch_size as first dim
+        self.assertEqual(result["x"].shape, (batch_size, 2, 2))
+        self.assertEqual(result["y"].shape, (batch_size, 2, 2))
+
+    def test_grad_dict_inputs_non_string_keys(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        # Non-string keys work at runtime (type annotations only enforce str)
+        inputs = {0: x, 1: y}
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {0, 1})
+        self.assertEqual(result[0], 2 * x + y)
+        self.assertEqual(result[1], x + 2 * y)
 
     def test_backward_with_scalar_input(self):
         x = torch.randn([], dtype=torch.double, requires_grad=True)
@@ -3892,43 +4024,21 @@ class TestAutograd(TestCase):
         t = Id.apply(x)
         self.assertEqual(t.grad_fn.name(), "IdBackward")
 
-        # THPFunction is the base class of both grad_fn and autograd functions,
-        # which means that a lot of accessors on them may segfault. Test that we
-        # properly error in this case.
+        # THPFunction always has a backing PyNode (cdata), so attribute
+        # accesses on a directly-instantiated Function succeed. Previously,
+        # cdata was a null weak ref (PyNode was only created during apply),
+        # so these would raise "Attribute X is invalid".
         t = torch.ones(1, requires_grad=True)
         t._backward_hooks = {}
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_register_hook_dict' is invalid"
-        ):
-            f._register_hook_dict(t)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute 'register_hook' is invalid"
-        ):
-            f.register_hook(lambda x, y: None)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute 'next_functions' is invalid"
-        ):
-            f.next_functions
-        with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
-            f.name()
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_sequence_nr' is invalid"
-        ):
-            f._sequence_nr()
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_set_sequence_nr' is invalid"
-        ):
-            f._set_sequence_nr(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_input_metadata' is invalid"
-        ):
-            f._input_metadata
-        with self.assertRaisesRegex(
-            RuntimeError, "underlying PyNode has already been deallocated"
-        ):
-            f.metadata
+        f._register_hook_dict(t)
+        f.register_hook(lambda x, y: None)
+        f.next_functions  # empty tuple
+        f.name()
+        f._sequence_nr()
+        f._set_sequence_nr(2)
+        f._input_metadata  # empty tuple
+        f.metadata
 
-    @unittest.expectedFailure
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod
@@ -3945,7 +4055,7 @@ class TestAutograd(TestCase):
         y.grad_fn.metadata
         g = y.grad_fn
         del y
-        g.metadata  # this currently fails, but shouldn't
+        self.assertIsNotNone(g.metadata)  # this used to fail
 
     def test_naughty_autograd_function_stashing_ctx(self):
         saved_ctx = []
@@ -3965,10 +4075,11 @@ class TestAutograd(TestCase):
         loss = Id.apply(p)
         loss.backward(retain_graph=True)
         del loss
-        # At this point in time, it complains that the graph has been freed
-        # (which indeed true, although a somewhat indirect way of stating the
-        # problem).
-        self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
+        # THPFunction now always has a strong reference to its backing PyNode
+        # (cdata), so the stashed ctx stays alive and saved_tensors is
+        # accessible. Previously, cdata was a weak ref that expired after the
+        # graph was freed, causing a RuntimeError here.
+        self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
