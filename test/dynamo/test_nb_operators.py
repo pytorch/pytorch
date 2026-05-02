@@ -526,16 +526,16 @@ def _isRat(x):
 class Rat:
     """Rational number implemented as a normalized pair of ints."""
 
-    __slots__ = ["_Rat__num", "_Rat__den"]
+    __slots__ = ["__num", "__den"]
 
     def __init__(self, num=0, den=1):
         """Constructor: Rat([num[, den]]).
 
         The arguments must be ints, and default to (0, 1)."""
         if not _isint(num):
-            raise TypeError("Rat numerator must be int (%r)" % num)
+            raise TypeError("Rat numerator must be int ({num})")
         if not _isint(den):
-            raise TypeError("Rat denominator must be int (%r)" % den)
+            raise TypeError("Rat denominator must be int ({den})")
         # But the zero is always on
         if den == 0:
             raise ZeroDivisionError("zero denominator")
@@ -557,7 +557,7 @@ class Rat:
 
     def __repr__(self):
         """Convert a Rat to a string resembling a Rat constructor call."""
-        return "Rat(%d, %d)" % (self.__num, self.__den)
+        return f"Rat({self.__num}, {self.__den})"
 
     def __str__(self):
         """Convert a Rat to a string resembling a decimal numeric value."""
@@ -573,8 +573,10 @@ class Rat:
             try:
                 return int(self.__num)
             except OverflowError:
-                raise OverflowError("%s too large to convert to int" % repr(self))
-        raise ValueError("can't convert %s to int" % repr(self))
+                raise OverflowError(
+                    f"{repr(self)} too large to convert to int"
+                ) from None
+        raise ValueError(f"can't convert {repr(self)} to int")
 
     def __add__(self, other):
         """Add two Rats, or a Rat and a number."""
@@ -977,7 +979,7 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         result = obj1 - obj2 - obj3
         self.assertEqual(result, UserDefinedClassWithSub(5))
 
-     # --- User-defined __sub__ ---
+    # --- User-defined __sub__ ---
 
     @make_dynamo_test
     def test_user_defined_sub_basic(self):
