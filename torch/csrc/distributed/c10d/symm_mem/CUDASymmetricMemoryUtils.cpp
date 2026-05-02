@@ -31,7 +31,7 @@ bool allow_overlapping_devices() {
       true;
 }
 
-std::vector<uint8_t> pg_all_gather_bytes(
+at::Tensor pg_all_gather_bytes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     const void* data,
     size_t nbytes,
@@ -58,12 +58,7 @@ std::vector<uint8_t> pg_all_gather_bytes(
   ag_opts.asyncOp = false;
   pg->_allgather_base(out_buf, in_buf, ag_opts);
 
-  at::Tensor result_cpu = out_buf.cpu();
-  std::vector<uint8_t> flat(total_bytes);
-  if (total_bytes > 0) {
-    std::memcpy(flat.data(), result_cpu.data_ptr(), total_bytes);
-  }
-  return flat;
+  return out_buf.cpu();
 }
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.

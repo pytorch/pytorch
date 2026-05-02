@@ -277,7 +277,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 self.rank
             )
             symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
-            torch.cuda.synchronize()
 
             self.assertEqual(symm_mem_hdl.rank, self.rank)
             self.assertEqual(symm_mem_hdl.world_size, self.world_size)
