@@ -2558,24 +2558,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(type_attr, property) and not self._is_c_defined_property(
             type_attr
         ):
-            # Python property — trace fget directly.
+            # Python property -- trace fget via tp_descr_get_impl.
             if self.source:
                 source = AttrSource(self.get_source_by_walking_mro(tx, name), "fget")
-            fget_vt = VariableTracker.build(
-                tx, type_attr.fget, source=source, realize=True
-            )
-            return fget_vt.call_function(tx, [self], {})
+            prop_vt = variables.PropertyVariable(type_attr)
+            return prop_vt.tp_descr_get_impl(tx, self, name, source=source)
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
             # User-defined data descriptor with a Python __get__.
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # C-level data descriptor (property with C fget, member/getset
-        # descriptors, Cython attrs, etc.) — resolve via
-        # object.__getattribute__ which is side-effect free.
-        # Uninitialized slots raise AttributeError which must be surfaced
-        # as ObservedAttributeError so dynamo's try/except tracing works.
+        # C-level data descriptors -- resolve via tp_descr_get_impl which
+        # eagerly reads the value (side-effect free for C descriptors).
+        # Uninitialized slots raise AttributeError which is surfaced as
+        # ObservedAttributeError so dynamo's try/except tracing works.
+        if isinstance(type_attr, types.MemberDescriptorType):
+            md_vt = variables.MemberDescriptorVariable(type_attr)
+            return md_vt.tp_descr_get_impl(tx, self, name, source=source)
+
+        if isinstance(type_attr, types.GetSetDescriptorType):
+            gs_vt = variables.GetSetDescriptorVariable(type_attr)
+            return gs_vt.tp_descr_get_impl(tx, self, name, source=source)
+
+        # Remaining C-level data descriptors (C-defined property, Cython
+        # attrs, _tuplegetter, etc.) -- resolve via __getattribute__.
         try:
             resolved = type(self.value).__getattribute__(self.value, name)
         except AttributeError:
