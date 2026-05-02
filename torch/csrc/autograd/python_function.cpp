@@ -1407,7 +1407,6 @@ static PyObject* resolve_kwargs_to_positional(
   // Number of user-visible parameters (excluding ctx)
   Py_ssize_t num_params = co_argcount - param_offset;
   Py_ssize_t num_positional = PyTuple_GET_SIZE(args);
-  Py_ssize_t num_kwargs = PyDict_Size(kwargs);
 
   // Validate kwargs and find the max positional index they map to.
   // We do this before the count check so that "multiple values for argument"
@@ -1513,8 +1512,7 @@ static PyObject* resolve_kwargs_to_positional(
 PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
 
-  THPObjectPtr resolved_args(
-      resolve_kwargs_to_positional(cls, args, kwargs));
+  THPObjectPtr resolved_args(resolve_kwargs_to_positional(cls, args, kwargs));
   if (!resolved_args)
     return nullptr;
   PyObject* inputs = resolved_args.get();

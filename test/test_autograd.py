@@ -674,13 +674,11 @@ class TestAutograd(TestCase):
             MyFn.apply(x, bad_kwarg=y)
 
         # Duplicate: positional + kwarg for same param
-        with self.assertRaisesRegex(
-            TypeError, "got multiple values for argument"
-        ):
+        with self.assertRaisesRegex(TypeError, "got multiple values for argument"):
             MyFn.apply(x, y, y=y)
 
         # kwarg collides with an earlier positional arg: f(x, y, z) called
-        # as f(2, 3, y=4) — y is already filled by position 1
+        # as f(2, 3, y=4) -- y is already filled by position 1
         class MyFn3(Function):
             @staticmethod
             def forward(ctx, x, y, z):
@@ -691,9 +689,7 @@ class TestAutograd(TestCase):
                 return grad_output, grad_output, grad_output
 
         z = torch.tensor([3.0])
-        with self.assertRaisesRegex(
-            TypeError, "got multiple values for argument"
-        ):
+        with self.assertRaisesRegex(TypeError, "got multiple values for argument"):
             MyFn3.apply(x, y, y=z)
 
     def test_invalid_gradients(self):
