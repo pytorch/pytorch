@@ -620,7 +620,6 @@ class ProcessGroup:
         already exist. If this PG is only used for symmetric memory (no regular
         collectives), consider calling ``abort()`` after rendezvous to release
         the communicator."""
-        ...
     @use_pg_for_symm_mem_rendezvous.setter
     def use_pg_for_symm_mem_rendezvous(self, value: bool) -> None: ...
     @property
