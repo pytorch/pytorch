@@ -790,9 +790,17 @@ def _detect_dependencies(
     partition_graphs: dict[int, torch.fx.graph.Graph] = {}
     partition_inputs: dict[int, dict[str, Node]] = defaultdict(dict)
     partition_outputs: dict[int, dict[str, Node]] = defaultdict(dict)
-    symbol_to_node: dict[Any, Node] = {}
+    symbol_to_node: dict[sympy.Symbol, Node] = {}
     seen_partitions: list[int] = []
     seen_partitions_set: set[int] = set()
+
+    def _record_output_dep(
+        n: Node,
+        _outputs: dict[int, dict[str, Node]] = partition_outputs,
+    ) -> Node:
+        if hasattr(n, "_fx_partition"):
+            _outputs[n._fx_partition].setdefault(n.name, n)
+        return n
 
     for node in m.graph.nodes:
         # Track SymInt symbol bindings (prefer earlier bindings).
@@ -806,16 +814,6 @@ def _detect_dependencies(
             continue
 
         if node.op == "output":
-
-            def _record_output_dep(
-                n: Node,
-                _outputs: dict[int, dict[str, Node]] = partition_outputs,
-            ) -> Node:
-                if hasattr(n, "_fx_partition"):
-                    pid = n._fx_partition
-                    _outputs[pid].setdefault(n.name, n)
-                return n
-
             torch.fx.graph.map_arg(node.args[0], _record_output_dep)
             continue
 
@@ -832,7 +830,7 @@ def _detect_dependencies(
             use_pid: int = pid,
             _inputs: dict[int, dict[str, Node]] = partition_inputs,
             _outputs: dict[int, dict[str, Node]] = partition_outputs,
-            _sym: dict[Any, Node] = symbol_to_node,
+            _sym: dict[sympy.Symbol, Node] = symbol_to_node,
         ) -> Node:
             def_pid = getattr(def_node, "_fx_partition", None)
             if def_pid != use_pid:
