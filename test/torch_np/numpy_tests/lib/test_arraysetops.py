@@ -801,6 +801,10 @@ class TestUnique(TestCase):
         assert_equal(np.unique(all_nans, return_inverse=True), (ua, ua_inv))
         assert_equal(np.unique(all_nans, return_counts=True), (ua, ua_cnt))
 
+    @skipIf(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_unique_axis_errors(self):
         assert_raises(np.AxisError, unique, np.arange(10), axis=2)
         assert_raises(np.AxisError, unique, np.arange(10), axis=-2)

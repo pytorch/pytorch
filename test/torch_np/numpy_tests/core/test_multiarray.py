@@ -3500,6 +3500,10 @@ class TestMinMax(TestCase):
         assert_equal(np.amax(1, axis=None), 1)
         assert_equal(np.amin(1, axis=None), 1)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_axis(self):
         assert_raises(np.AxisError, np.amax, [1, 2, 3], 1000)
         assert_equal(np.amax([[1, 2, 3]], axis=1), 3)

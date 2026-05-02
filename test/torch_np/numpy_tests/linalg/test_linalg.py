@@ -1601,6 +1601,10 @@ class _TestNorm2D(_TestNormBase):
         assert_almost_equal(norm(A, 2), 0.88722940323461277)
         assert_almost_equal(norm(A, -2), 0.19456584790481812)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_bad_args(self):
         # Check that bad arguments raise the appropriate exceptions.
 

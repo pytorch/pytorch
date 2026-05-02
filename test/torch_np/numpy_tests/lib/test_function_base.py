@@ -198,6 +198,10 @@ class TestRot90(TestCase):
 
 
 class TestFlip(TestCase):
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_axes(self):
         assert_raises(np.AxisError, np.flip, np.ones(4), axis=1)
         assert_raises(np.AxisError, np.flip, np.ones((4, 4)), axis=2)
@@ -776,6 +780,10 @@ class TestDiff(TestCase):
         assert_array_equal(diff(x), out)
         assert_array_equal(diff(x, n=2), out2)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_axis(self):
         x = np.zeros((10, 20, 30))
         x[:, 1::2, :] = 1
@@ -815,6 +823,10 @@ class TestDiff(TestCase):
             assert_equal(out.dtype, np.int_)
             assert_equal(len(out), max(0, len(x) - n))
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_prepend(self):
         x = np.arange(5) + 1
         assert_array_equal(diff(x, prepend=0), np.ones(5))
@@ -839,6 +851,10 @@ class TestDiff(TestCase):
 
         assert_raises(np.AxisError, diff, x, prepend=0, axis=3)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_append(self):
         x = np.arange(5)
         result = diff(x, append=0)
@@ -1106,6 +1122,10 @@ class TestGradient(TestCase):
         assert_almost_equal(res1[0], fdx_even_ord2.T)
         assert_almost_equal(res1[1], fdx_uneven_ord2)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_specific_axes(self):
         # Testing that gradient can work on a given axis only
         v = [[1, 1], [3, 4]]
@@ -3257,6 +3277,10 @@ class TestPercentile(TestCase):
             np.percentile(d[2, :, 2, :].flatten(), 25),
         )
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_extended_axis_invalid(self):
         d = np.ones((3, 5, 7, 11))
         assert_raises(np.AxisError, np.percentile, d, axis=-5, q=25)
@@ -3853,6 +3877,10 @@ class TestMedian(TestCase):
             np.median(d, axis=(1, 3))[2, 2], np.median(d[2, :, 2, :].flatten())
         )
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_extended_axis_invalid(self):
         d = np.ones((3, 5, 7, 11))
         assert_raises(np.AxisError, np.median, d, axis=-5)

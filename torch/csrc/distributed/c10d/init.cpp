@@ -1590,7 +1590,7 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Append the key-value pair into the store based on the supplied ``key`` and
-``value``. If ``key`` does not exists in the store, it will be created.
+``value``. If ``key`` does not exist in the store, it will be created.
 
 Arguments:
     key (str): The key to be appended to the store.
