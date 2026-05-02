@@ -1353,6 +1353,10 @@ static PyObject* get_base_setup_context() {
 // Given cls (a Function subclass), args, and kwargs, resolve kwargs into
 // positional arguments by inspecting the forward method's signature.
 // Returns a new reference to a tuple of positional args.
+//
+// Uses co_varnames/co_argcount directly instead of inspect.signature to
+// stay in C on this hot path. This means we don't handle *args, **kwargs,
+// defaults, or decorated/wrapped forwards correctly.
 static PyObject* resolve_kwargs_to_positional(
     PyObject* cls,
     PyObject* args,
@@ -1366,28 +1370,19 @@ static PyObject* resolve_kwargs_to_positional(
   if (!forward_fn)
     return nullptr;
 
-  // Get the function's code object to read parameter names.
-  // For staticmethod-wrapped functions, we need the underlying function.
   PyObject* func = forward_fn.get();
-  THPObjectPtr code_obj(PyObject_GetAttrString(func, "__code__"));
-  if (!code_obj) {
-    PyErr_Clear();
-    PyErr_SetString(
-        PyExc_TypeError,
-        "apply() cannot resolve keyword arguments: "
-        "could not inspect forward() signature");
+  THPObjectPtr code_py(PyObject_GetAttrString(func, "__code__"));
+  if (!code_py)
+    return nullptr;
+  if (!PyCode_Check(code_py.get())) {
+    PyErr_SetString(PyExc_TypeError, "forward().__code__ is not a code object");
     return nullptr;
   }
+  PyCodeObject* code = (PyCodeObject*)code_py.get();
 
-  THPObjectPtr varnames_obj(
-      PyObject_GetAttrString(code_obj.get(), "co_varnames"));
-  THPObjectPtr argcount_obj(
-      PyObject_GetAttrString(code_obj.get(), "co_argcount"));
-  if (!varnames_obj || !argcount_obj)
-    return nullptr;
-
-  Py_ssize_t co_argcount = PyLong_AsSsize_t(argcount_obj.get());
-  if (co_argcount < 0 && PyErr_Occurred())
+  Py_ssize_t co_argcount = code->co_argcount;
+  THPObjectPtr varnames_obj(PyCode_GetVarnames(code));
+  if (!varnames_obj)
     return nullptr;
 
   // Determine if forward takes ctx as first arg.
