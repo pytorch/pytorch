@@ -6,7 +6,9 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 
 #include <c10/macros/Macros.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Half.h>
 
 #ifdef __HIPCC__
 #define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
@@ -60,6 +62,17 @@ __MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
   TORCH_INTERNAL_ASSERT(
       false, "CUDAMathCompat copysign should not run on the CPU");
 #endif
+}
+// Use bit ops for half-precision to preserve NaN sign bits that would
+// be lost by implicit conversion to float (see pytorch/pytorch#181804)
+__MATH_FUNCTIONS_DECL__ c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x & 0x7fff) | (b.x & 0x8000), c10::Half::from_bits());
+}
+__MATH_FUNCTIONS_DECL__ c10::BFloat16 copysign(
+    c10::BFloat16 a,
+    c10::BFloat16 b) {
+  return c10::BFloat16(
+      (a.x & 0x7fff) | (b.x & 0x8000), c10::BFloat16::from_bits());
 }
 
 __MATH_FUNCTIONS_DECL__ float floor(float x) {

@@ -2535,13 +2535,10 @@ class TestBinaryUfuncs(TestCase):
             # Use double copysign to verify the correctness of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            # Special case: NaN conversions between FP32 and FP16 is not bitwise
-            # equivalent to pass this assertion.
-            if a.dtype != torch.float16 and b.dtype != torch.float16:
-                self.assertEqual(
-                    torch.copysign(torch.tensor(1.0), torch_result),
-                    torch.copysign(torch.tensor(1.0), expected),
-                )
+            self.assertEqual(
+                torch.copysign(torch.tensor(1.0), torch_result),
+                torch.copysign(torch.tensor(1.0), expected),
+            )
 
         # Compare Result with NumPy
         # Type promotion
@@ -2561,10 +2558,7 @@ class TestBinaryUfuncs(TestCase):
         # 0.0/-0.0/inf/-inf/nan
         cases = [0.0, -0.0, float("inf"), float("-inf"), float("nan")]
         # torch.bfloat16 can not hold '-nan'
-        # torch.half can not hold '-nan' on CUDA
-        types = [torch.float32, torch.float64]
-        if device == "cpu":
-            types.append(torch.float16)
+        types = [torch.float32, torch.float64, torch.float16]
         if dtypes[0] in types:
             b = make_tensor((10, 10), device=device, dtype=dtypes[1], low=-9, high=9)
             for case in cases:
