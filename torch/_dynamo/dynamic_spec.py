@@ -31,10 +31,22 @@ https://dev-discuss.pytorch.org/t/backed-to-unbacked-from-guardable-to-guardless
 
 import enum
 from collections.abc import Iterator
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
 
-__all__ = ["IntSpecType", "IntSpec", "TensorSpec"]
+__all__ = [
+    "IntSpecType",
+    "IntSpec",
+    "TensorSpec",
+    "ParamsSpec",
+    "ShapesSpec",
+    "lookup_spec_from_dynamo_source",
+]
+
+# Type alias for leaf specs (individual argument specifications)
+LeafSpec: TypeAlias = "TensorSpec | IntSpec | None"
+# Any spec — what public APIs accept. TODO: expand to LeafSpec | ObjectSpec | ListSpec | DictSpec
+IntermediateSpec: TypeAlias = LeafSpec
 
 
 class IntSpecType(enum.Enum):
@@ -59,6 +71,10 @@ class IntSpec:
         IntSpec.backed("batch", min=1, max=64, guarding_hint=32)
         IntSpec.unbacked("seq", min=1, max=2048, optimization_hint=512)
         IntSpec("x", IntSpecType.STATIC, value=10)
+
+    ``min`` and ``max`` are assumptions about the value range, translated to
+    ``torch._check`` calls on the newly created symbolic variables during
+    compilation.
 
     ``type`` is fixed at construction; all other fields are mutable via
     fluent setters that return ``self`` for chaining:
@@ -100,6 +116,9 @@ class IntSpec:
         if not isinstance(type, IntSpecType):
             raise TypeError(f"IntSpec type must be an IntSpecType, got {type!r}")
         self._type = type
+        # Auto-generate a name when the user doesn't supply one.
+        if name is None:
+            name = f"_intspec_{type.value}_{id(self):x}"
         self._name = name
         self._min = min
         self._max = max
@@ -203,9 +222,10 @@ class IntSpec:
     ) -> "IntSpec":
         """Construct a BACKED `IntSpec`.
 
-        ``guarding_hint`` is the concrete value the symbolic shape
-        environment substitutes when a hint is needed for reasoning or
-        codegen.
+        ``guarding_hint`` overrides the hint used by the shape environment
+        (assumes my first example input is ``guarding_hint``). Affects
+        branching decisions and optimization choices. Changing
+        ``guarding_hint`` will cause FxGraphCache misses.
         """
         return cls(
             name,
@@ -226,8 +246,11 @@ class IntSpec:
     ) -> "IntSpec":
         """Construct an UNBACKED `IntSpec`.
 
-        ``optimization_hint`` is used by downstream codegen (e.g. inductor
-        autotuning) only; it never participates in symbolic reasoning.
+        ``optimization_hint`` is used to guide guardless optimizations for
+        unbacked symbols, accessed by the ``optimization_hint`` API
+        (e.g. inductor autotuning, graph partitioning). It never
+        participates in guard generation or symbolic reasoning. Changing
+        ``optimization_hint`` will cause FxGraphCache misses.
         """
         return cls(
             name,
@@ -322,6 +345,7 @@ class TensorSpec:
         | tuple[IntSpec | None, ...]
         | dict[int, IntSpec | None],
     ) -> None:
+        self._sparse = False
         if isinstance(arg, int):
             self._dim = arg
             self._specs: list[IntSpec | None] = [None] * arg
@@ -329,6 +353,7 @@ class TensorSpec:
             self._dim = len(arg)
             self._specs = list(arg)
         elif isinstance(arg, dict):
+            self._sparse = True
             self._dim = max(arg.keys()) + 1
             self._specs = [None] * self._dim
             for k, v in arg.items():
@@ -345,6 +370,13 @@ class TensorSpec:
         return self
 
     def __getitem__(self, index: int) -> IntSpec | None:
+        if index >= self._dim:
+            if not self._sparse:
+                raise IndexError(
+                    f"TensorSpec has {self._dim} dims but got index {index}; "
+                    f"tensor rank doesn't match the spec"
+                )
+            return None
         return self._specs[index]
 
     def __setitem__(self, index: int, spec: IntSpec | None) -> None:
@@ -364,3 +396,122 @@ class TensorSpec:
     # are immutable compile-time inputs compared via ``repr()`` when needed.
     # Value-based equality would force cache keys to drift with object
     # identity and conflict with the AOT-snapshot invariant.
+
+
+class ParamsSpec:
+    """Specification for the arguments of a compiled function.
+
+    Describes the dynamic shape behavior for named arguments, *args, and
+    **kwargs of a ``torch.compile``-wrapped function::
+
+        def f(x, y, *args, **kwargs):
+        #    ^^^^  named_args
+        #           ^^^^^  varargs
+        #                   ^^^^^^  varkw
+
+    Construct via the constructor or build incrementally with fluent methods::
+
+        # Constructor form
+        ParamsSpec(
+            named_args={"x": TensorSpec(3), "y": IntSpec.backed("y")},
+            varargs=[TensorSpec(2), None],
+            varkw={"extra": TensorSpec(1)},
+        )
+
+        # Fluent form
+        ParamsSpec().arg("x", TensorSpec(3)).arg("y", IntSpec.backed("y"))
+        ParamsSpec().varargs([TensorSpec(2), None])
+        ParamsSpec().varkw({"extra": TensorSpec(1)})
+    """
+
+    def __init__(
+        self,
+        named_args: dict[str, IntermediateSpec] | None = None,
+        varargs: list[IntermediateSpec] | None = None,
+        varkw: dict[str, IntermediateSpec] | None = None,
+    ) -> None:
+        self._named_args: dict[str, LeafSpec] = dict(named_args) if named_args else {}
+        if varargs is not None:
+            raise NotImplementedError("varargs is not supported yet")
+        if varkw is not None:
+            raise NotImplementedError("varkw is not supported yet")
+        self._varargs: list[IntermediateSpec] | None = None
+        self._varkw: dict[str, IntermediateSpec] | None = None
+
+    def arg(self, name: str, spec: IntermediateSpec) -> "ParamsSpec":
+        """Add or update a named argument spec. Returns ``self`` for chaining."""
+        if not isinstance(name, str):
+            raise TypeError(f"arg name must be str, got {type(name).__name__}")
+        self._named_args[name] = spec
+        return self
+
+    def varargs(self, specs: list[IntermediateSpec]) -> "ParamsSpec":
+        """Set specs for positional *args. Returns ``self`` for chaining."""
+        raise NotImplementedError("varargs is not supported yet")
+
+    def varkw(self, specs: dict[str, IntermediateSpec]) -> "ParamsSpec":
+        """Set specs for **kwargs. Returns ``self`` for chaining."""
+        raise NotImplementedError("varkw is not supported yet")
+
+    def __repr__(self) -> str:
+        parts: list[str] = []
+        if self._named_args:
+            parts.append(f"named_args={self._named_args!r}")
+        if self._varargs is not None:
+            parts.append(f"varargs={self._varargs!r}")
+        if self._varkw is not None:
+            parts.append(f"varkw={self._varkw!r}")
+        return f"ParamsSpec({', '.join(parts)})"
+
+
+class ShapesSpec:
+    """Top-level shape specification for a ``torch.compile`` call.
+
+    ``params`` describes the arguments of the compiled callable — for a raw
+    function this is the function's parameters, for an ``nn.Module`` this
+    is the parameters of ``forward`` (excluding ``self``).
+
+    Currently only ``params`` is supported::
+
+        ShapesSpec(params=ParamsSpec().arg("x", TensorSpec(3)))
+
+    ``globals`` and ``assumptions`` are reserved for future use and will
+    raise ``NotImplementedError`` if set.
+    """
+
+    def __init__(
+        self,
+        params: ParamsSpec | None = None,
+        globals: Any = None,
+        assumptions: Any = None,
+    ) -> None:
+        if globals is not None:
+            raise NotImplementedError("ShapesSpec.globals is not supported yet")
+        if assumptions is not None:
+            raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
+        self._params = params
+
+    @property
+    def params(self) -> ParamsSpec | None:
+        return self._params
+
+    def __repr__(self) -> str:
+        return f"ShapesSpec(params={self._params!r})"
+
+
+def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> LeafSpec:
+    """Look up the spec for a function input arg from the shapes_spec.
+
+    Only supports LocalSource with is_input=True (direct function args).
+    Returns TensorSpec, IntSpec, or None.
+    """
+    from torch._dynamo.source import LocalSource
+
+    if shapes_spec is None or shapes_spec.params is None:
+        return None
+    # Only top-level function input args are supported for now.
+    #  Module attributes (self.x), globals, and values computed
+    #  during execution are not covered by shapes_spe yet.
+    if not isinstance(source, LocalSource) or not source.is_input:
+        return None
+    return shapes_spec.params._named_args.get(source.local_name)
