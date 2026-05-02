@@ -11,6 +11,9 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -26,6 +29,36 @@ bool device_has_multicast_support(int device_idx) {
 bool allow_overlapping_devices() {
   return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
       true;
+}
+
+at::Tensor pg_all_gather_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx) {
+  TORCH_CHECK(pg != nullptr, "pg_all_gather_bytes: null ProcessGroup");
+  const auto world_size = pg->getSize();
+  TORCH_CHECK(world_size > 0);
+  const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
+
+  c10::cuda::CUDAGuard guard(device_idx);
+  auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
+
+  at::Tensor in_buf = at::from_blob(
+                          const_cast<void*>(data),
+                          {static_cast<int64_t>(nbytes)},
+                          at::TensorOptions().dtype(at::kByte))
+                          .to(device);
+
+  at::Tensor out_buf = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      at::TensorOptions().dtype(at::kByte).device(device));
+
+  c10d::AllgatherOptions ag_opts;
+  ag_opts.asyncOp = false;
+  pg->_allgather_base(out_buf, in_buf, ag_opts);
+
+  return out_buf.cpu();
 }
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
