@@ -533,7 +533,7 @@ def gen_trace_type(
             + f"generated from {fm.template_dir_for_comments()}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
-        num_shards=10,
+        num_shards=5,
         sharded_keys={
             "ops_headers",
             "trace_method_definitions",

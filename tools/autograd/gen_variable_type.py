@@ -937,7 +937,7 @@ def gen_variable_type(
             + f"generated from {fm.template_dir_for_comments()}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
-        num_shards=10,
+        num_shards=5,
         sharded_keys=sharded_keys,
     )
 
