@@ -100,6 +100,23 @@ REGISTER_EXPONENTIAL(float);
 REGISTER_EXPONENTIAL(half);
 REGISTER_EXPONENTIAL(bfloat);
 
+// Convert a 0/1 mask bit into the output dtype. For complex types we keep
+// the mask in the real component and zero the imaginary part — matching the
+// previous MPSGraph behaviour where bool was cast to complex via "1+0j / 0+0j".
+// `static_cast<float2>(v)` would broadcast to `(v, v)`, which is wrong here.
+template <typename T>
+inline T bernoulli_to(uint v) {
+  return static_cast<T>(v);
+}
+template <>
+inline float2 bernoulli_to<float2>(uint v) {
+  return float2(static_cast<float>(v), 0.0f);
+}
+template <>
+inline half2 bernoulli_to<half2>(uint v) {
+  return half2(static_cast<half>(v), 0.0h);
+}
+
 // Bernoulli with scalar probability p. Each thread processes 4 elements,
 // amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
 // kernel becomes bandwidth-bound rather than RNG-bound.
@@ -117,7 +134,7 @@ kernel void bernoulli_scalar(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(u < p ? 1 : 0);
+    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
   }
 }
 
@@ -139,7 +156,7 @@ kernel void bernoulli_tensor(
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     float p = probs[base + i];
-    output[base + i] = static_cast<T>(u < p ? 1 : 0);
+    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
   }
 }
 
@@ -164,6 +181,8 @@ REGISTER_BERNOULLI(char);
 REGISTER_BERNOULLI(short);
 REGISTER_BERNOULLI(int);
 REGISTER_BERNOULLI(long);
+REGISTER_BERNOULLI(float2);
+REGISTER_BERNOULLI(half2);
 
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
