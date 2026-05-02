@@ -716,6 +716,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_int_impl(tx)
         elif name == "__float__" and not args and not kwargs:
             return self.nb_float_impl(tx)
+        elif name == "__get__" and len(args) in (1, 2) and not kwargs:
+            # Route to tp_descr_get_impl if the VT implements it.
+            # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
+            # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
+            if hasattr(self, "tp_descr_get_impl"):
+                descriptor = getattr(self, "descriptor", None)
+                descr_name = getattr(descriptor, "__name__", "__get__")
+                return self.tp_descr_get_impl(tx, args[0], descr_name)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561

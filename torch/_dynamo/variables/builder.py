@@ -208,6 +208,7 @@ from .functions import (
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
+    GetSetDescriptorVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -230,7 +231,6 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .descriptors import GetSetDescriptorVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
