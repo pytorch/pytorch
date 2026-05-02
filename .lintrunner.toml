@@ -1833,15 +1833,3 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
-
-[[linter]]
-code = 'GENERATED_SHIMS_VERSION'
-include_patterns = [
-    'torchgen/aoti/fallback_ops.py',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/generated_shims_version_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
-]

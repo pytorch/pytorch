@@ -4,22 +4,13 @@ Shared utilities for stable-shim linters.
 Consumed by:
     - tools/linter/adapters/stable_shim_version_linter.py
     - tools/linter/adapters/stable_shim_usage_linter.py
-    - tools/linter/adapters/generated_shims_version_linter.py
 """
 
 from __future__ import annotations
 
 import re
-import sys
 from enum import Enum
-from pathlib import Path
 from typing import NamedTuple
-
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-
-from tools.setup_helpers.gen_version_header import parse_version
 
 
 class LintSeverity(str, Enum):
@@ -168,25 +159,3 @@ class PreprocessorTracker:
     def get_version_of_block(self) -> tuple[int, int] | None:
         """Get the current version requirement, or None if not in a version block."""
         return self.version_of_block
-
-
-def get_current_version() -> tuple[int, int, int]:
-    """
-    Get the current PyTorch version from version.txt.
-    This uses the same logic as tools/setup_helpers/gen_version_header.py
-    which is used to generate torch/headeronly/version.h from version.h.in.
-
-    Returns (major, minor, patch) tuple.
-    """
-    version_file = REPO_ROOT / "version.txt"
-
-    if not version_file.exists():
-        raise RuntimeError(
-            "Could not find version.txt. This linter requires version.txt to run"
-        )
-
-    with open(version_file) as f:
-        version = f.read().strip()
-        major, minor, patch = parse_version(version)
-
-    return (major, minor, patch)
