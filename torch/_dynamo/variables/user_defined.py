@@ -1778,6 +1778,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
 
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10315-L10318
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__add__",
+            "__radd__",
+            nb_slot=PyNumberSlots.NB_ADD,
+            reverse=reverse,
+        )
+
+    def nb_inplace_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
+        return self.call_method(tx, "__iadd__", [other], {})
+
     def nb_subtract_impl(
         self,
         tx: "InstructionTranslator",

@@ -712,6 +712,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name == "__add__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_add_impl(tx, args[0])
+        elif name == "__radd__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_add_impl(tx, args[0], reverse=True)
+        elif name == "__iadd__":
+            return self.nb_inplace_add_impl(tx, args[0])
         elif name == "__sub__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
@@ -1190,6 +1199,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
         return self._nb_slot_not_implemented("nb_inplace_or", other)
+
+    def nb_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_add slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__radd__`` instead of ``__add__``).
+        """
+        return self._nb_slot_not_implemented("nb_add_impl", other, reverse=reverse)
+
+    def nb_inplace_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_add slot. Default: graph break."""
+        return self._nb_slot_not_implemented("nb_inplace_add", other)
 
     def nb_subtract_impl(
         self,

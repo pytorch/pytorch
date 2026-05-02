@@ -1114,8 +1114,286 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "_RSubReturnsMarker.__rsub__ called")
 
 
+class _AddNotImplemented:
+    """Class where __add__ returns NotImplemented"""
+
+    def __add__(self, other):
+        return NotImplemented
+
+
+class _RAddNotImplemented:
+    """Class where __add__ exists but __radd__ returns NotImplemented"""
+
+    def __add__(self, other):
+        return NotImplemented
+
+    def __radd__(self, other):
+        return NotImplemented
+
+
+class _BaseWithAdd:
+    def __add__(self, other):
+        return "_BaseWithAdd.__add__"
+
+    def __radd__(self, other):
+        return "_BaseWithAdd.__radd__"
+
+
+class _SubWithAdd(_BaseWithAdd):
+    def __add__(self, other):
+        return "_SubWithAdd.__add__"
+
+
+class _InheritedSubAdd(_BaseWithAdd):
+    pass
+
+
+class TestNbAdd(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # --- Arithmetic add ---
+
+    @make_dynamo_test
+    def test_add_integers(self):
+        self.assertEqual(10 + 3, 13)
+        self.assertEqual(0 + 5, 5)
+        self.assertEqual(5 + 5, 10)
+
+    @make_dynamo_test
+    def test_add_floats(self):
+        self.assertAlmostEqual(1.5 + 0.5, 2.0)
+        self.assertAlmostEqual(3.14 + 1.14, 4.28)
+
+    @make_dynamo_test
+    def test_add_negative(self):
+        self.assertEqual(-3 + (-5), -8)
+        self.assertEqual(-3 + 5, 2)
+
+    @make_dynamo_test
+    def test_add_chained(self):
+        self.assertEqual(10 + 3 + 2 + 1, 16)
+
+    @make_dynamo_test
+    def test_add_zero(self):
+        self.assertEqual(5 + 0, 5)
+        self.assertEqual(0 + 0, 0)
+
+    # --- Add booleans ---
+
+    @make_dynamo_test
+    def test_add_bools(self):
+        self.assertEqual(True + True, 2)
+        self.assertEqual(True + False, 1)
+        self.assertEqual(False + False, 0)
+
+    @make_dynamo_test
+    def test_add_int_and_bool(self):
+        self.assertEqual(5 + True, 6)
+        self.assertEqual(0 + True, 1)
+
+    # --- String concatenation ---
+
+    @make_dynamo_test
+    def test_add_strings(self):
+        self.assertEqual("hello" + " " + "world", "hello world")
+        self.assertEqual("a" + "b", "ab")
+        self.assertEqual("" + "test", "test")
+
+    # --- List concatenation ---
+
+    @parametrize(
+        "operand1,operand2,expected",
+        [
+            ([1, 2], [3, 4], [1, 2, 3, 4]),
+            ([], [1, 2], [1, 2]),
+            ([1, 2], [], [1, 2]),
+        ],
+    )
+    @make_dynamo_test
+    def test_add_lists(self, operand1, operand2, expected):
+        self.assertEqual(operand1 + operand2, expected)
+
+    @make_dynamo_test
+    def test_add_lists_empty(self):
+        self.assertEqual([] + [], [])
+
+    @make_dynamo_test
+    def test_add_lists_chained(self):
+        self.assertEqual([1] + [2] + [3], [1, 2, 3])
+        self.assertEqual([1, 2] + [3] + [4, 5], [1, 2, 3, 4, 5])
+
+    # --- Tuple concatenation ---
+
+    @parametrize(
+        "operand1,operand2,expected",
+        [
+            ((1, 2), (3, 4), (1, 2, 3, 4)),
+            ((), (1, 2), (1, 2)),
+            ((1, 2), (), (1, 2)),
+        ],
+    )
+    @make_dynamo_test
+    def test_add_tuples(self, operand1, operand2, expected):
+        self.assertEqual(operand1 + operand2, expected)
+
+    @make_dynamo_test
+    def test_add_tuples_empty(self):
+        self.assertEqual(() + (), ())
+
+    @make_dynamo_test
+    def test_add_tuples_chained(self):
+        self.assertEqual((1,) + (2,) + (3,), (1, 2, 3))
+
+    # --- Inplace +=  ---
+
+    @make_dynamo_test
+    def test_inplace_add_integers(self):
+        x = 5
+        x += 3
+        self.assertEqual(x, 8)
+
+    @make_dynamo_test
+    def test_inplace_add_floats(self):
+        x = 1.5
+        x += 2.5
+        self.assertAlmostEqual(x, 4.0)
+
+    @make_dynamo_test
+    def test_inplace_add_strings(self):
+        x = "hello"
+        x += " world"
+        self.assertEqual(x, "hello world")
+
+    @make_dynamo_test
+    def test_inplace_add_lists(self):
+        x = [1, 2]
+        x += [3, 4]
+        self.assertEqual(x, [1, 2, 3, 4])
+
+    # --- Reversed add (__radd__) ---
+
+    @make_dynamo_test
+    def test_reversed_add_with_integer(self):
+        obj = _BaseWithAdd()
+        result = 5 + obj
+        self.assertEqual(result, "_BaseWithAdd.__radd__")
+
+    @make_dynamo_test
+    def test_radd_priority(self):
+        # Test that __radd__ is called when left side doesn't implement __add__
+        obj = _BaseWithAdd()
+        result = 5 + obj
+        self.assertEqual(result, "_BaseWithAdd.__radd__")
+
+    # --- Subclass method resolution order ---
+
+    @make_dynamo_test
+    def test_subclass_add(self):
+        obj = _SubWithAdd()
+        result = obj + 1
+        self.assertEqual(result, "_SubWithAdd.__add__")
+
+    @make_dynamo_test
+    def test_subclass_radd(self):
+        obj = _SubWithAdd()
+        result = 1 + obj
+        self.assertEqual(result, "_BaseWithAdd.__radd__")
+
+    @make_dynamo_test
+    def test_subclass_and_base_add(self):
+        sub = _SubWithAdd()
+        base = _BaseWithAdd()
+        result = sub + base
+        self.assertEqual(result, "_SubWithAdd.__add__")
+
+    @make_dynamo_test
+    def test_subclass_priority_in_reverse(self):
+        self.assertIs(_SubWithAdd.__radd__, _BaseWithAdd.__radd__)
+        self.assertEqual(_SubWithAdd() + 1, "_SubWithAdd.__add__")
+        self.assertEqual(1 + _SubWithAdd(), "_BaseWithAdd.__radd__")
+        self.assertEqual(_SubWithAdd() + _BaseWithAdd(), "_SubWithAdd.__add__")
+        self.assertEqual(_BaseWithAdd() + _SubWithAdd(), "_BaseWithAdd.__add__")
+
+    @make_dynamo_test
+    def test_inherited_subclass_no_priority(self):
+        self.assertIs(_InheritedSubAdd.__radd__, _BaseWithAdd.__radd__)
+        self.assertEqual(_InheritedSubAdd() + 1, "_BaseWithAdd.__add__")
+        self.assertEqual(1 + _InheritedSubAdd(), "_BaseWithAdd.__radd__")
+        self.assertEqual(_InheritedSubAdd() + _BaseWithAdd(), "_BaseWithAdd.__add__")
+        self.assertEqual(_BaseWithAdd() + _InheritedSubAdd(), "_BaseWithAdd.__add__")
+
+    # --- Rat class tests from CPython test_binop.py ---
+
+    @make_dynamo_test
+    def test_rat_add(self):
+        # Tests from CPython test_binop.py RatTestCase.test_add
+        self.assertEqual(Rat(2, 3) + Rat(1, 3), 1)
+        self.assertEqual(Rat(2, 3) + 1, Rat(5, 3))
+        self.assertEqual(1 + Rat(2, 3), Rat(5, 3))
+        self.assertAlmostEqual(1.0 + Rat(1, 2), 1.5)
+        self.assertAlmostEqual(Rat(1, 2) + 1.0, 1.5)
+
+    @make_dynamo_test
+    def test_rat_add_with_rat(self):
+        # Addition of two rationals
+        self.assertEqual(Rat(7, 2) + Rat(7, 5), Rat(49, 10))
+
+    @make_dynamo_test
+    def test_rat_add_rat_and_integer(self):
+        # Addition of rational and integer
+        self.assertEqual(Rat(7, 5) + 1, Rat(12, 5))
+
+    @make_dynamo_test
+    def test_rat_add_integer_and_rat(self):
+        # Addition of integer and rational (tests __radd__)
+        self.assertEqual(1 + Rat(3, 5), Rat(8, 5))
+
+    @make_dynamo_test
+    def test_rat_add_rat_and_float(self):
+        # Addition of rational and float
+        self.assertAlmostEqual(Rat(3, 2) + 1.0, 2.5)
+
+    @make_dynamo_test
+    def test_rat_add_float_and_rat(self):
+        # Addition of float and rational (tests __radd__)
+        self.assertAlmostEqual(1.0 + Rat(3, 2), 2.5)
+
+    @make_dynamo_test
+    def test_rat_radd(self):
+        # Test reversed addition with Rat objects
+        obj = Rat(3)
+        result = 10 + obj
+        self.assertEqual(result, Rat(13))
+
+    @make_dynamo_test
+    def test_rat_add_with_different_denominators(self):
+        # More complex rational addition
+        a = Rat(5, 6)
+        b = Rat(1, 3)
+        result = a + b
+        self.assertEqual(result, Rat(7, 6))
+
+    @make_dynamo_test
+    def test_rat_add_result_simplification(self):
+        # Addition resulting in simplifiable fraction
+        a = Rat(1, 4)
+        b = Rat(1, 4)
+        result = a + b
+        self.assertEqual(result, Rat(1, 2))
+
+    # --- NotImplemented handling from test_descr.py ---
+
+
 instantiate_parametrized_tests(TestNbOr)
 instantiate_parametrized_tests(TestNbSub)
+instantiate_parametrized_tests(TestNbAdd)
 
 
 if __name__ == "__main__":
