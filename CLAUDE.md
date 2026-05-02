@@ -12,7 +12,7 @@ If any tool you're trying to use (pip, python, spin, etc) is missing, always sto
 
 # Build
 
-Always ask for build configuration environment variables before running build.
+Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
 You should NEVER run any other command to build PyTorch.
 
