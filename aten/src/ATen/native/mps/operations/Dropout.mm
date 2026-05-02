@@ -81,15 +81,16 @@ std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std
 }
 
 Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, double scale) {
-  TORCH_CHECK(isFloatingType(grad.scalar_type()),
-              "native_dropout_backward_mps: grad must be floating-point, got ",
-              grad.scalar_type());
   TORCH_CHECK(
       mask.scalar_type() == c10::kBool, "native_dropout_backward_mps: mask must be bool, got ", mask.scalar_type());
 
   using namespace mps;
 
-  Tensor grad_c = grad.contiguous();
+  // Match CPU promotion: integer grads are upcast to float32, output is
+  // float-family. The dedicated Metal kernel only has float/half/bfloat
+  // specializations, so the cast also makes lookup well-defined.
+  Tensor grad_c = isFloatingType(grad.scalar_type()) ? grad.contiguous()
+                                                     : grad.to(c10::kFloat).contiguous();
   Tensor mask_c = mask.contiguous();
   Tensor grad_input = at::empty_like(grad_c);
 
