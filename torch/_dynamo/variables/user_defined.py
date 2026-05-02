@@ -135,11 +135,27 @@ def is_standard_delattr(val: object) -> bool:
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
 
+    # pytest >= 8.4 moved RaisesContext into _pytest.raises and renamed it to RaisesExc,
+    # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
+    # in independent try blocks so that one missing symbol doesn't drop the others.
+    try:
+        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
+
+        f_ctxs.append(RaisesExc)
+        f_ctxs.append(RaisesGroup)
+    except ImportError:
+        pass
+
     try:
         from _pytest.python_api import RaisesContext  # type: ignore[attr-defined]
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
 
         f_ctxs.append(RaisesContext)
+    except ImportError:
+        pass
+
+    try:
+        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
+
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
@@ -619,6 +635,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             pass
         return super().tp_iter_impl(tx)
 
+    def nb_negative_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__neg__")
+        if m:
+            source = self.source and AttrSource(self.source, "__neg__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx, f"object of type {self.python_type_name()} has no negative"
+        )
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -763,7 +790,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
                 context=str(self.value),
-                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
@@ -855,7 +882,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unimplemented(
                     gb_type="TypedDict with optional keys",
                     context=str(self.value),
-                    explanation="Dyanmo does not support tracing TypedDict with optional keys",
+                    explanation="Dynamo does not support tracing TypedDict with optional keys",
                     hints=[
                         "Avoid using TypedDict with optional keys",
                         *graph_break_hints.SUPPORTABLE,
@@ -955,6 +982,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if not args[0].is_python_constant():
                 raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
+        elif self.value is torch.xpu.device and not kwargs and len(args) == 1:
+            if not args[0].is_python_constant():
+                raise_type_error(tx, "torch.xpu.device() requires a constant argument")
+            return variables.XPUDeviceVariable.create(tx, args[0].as_python_constant())
+        elif (
+            self.value is torch.accelerator.device_index
+            and not kwargs
+            and len(args) == 1
+        ):
+            if not args[0].is_python_constant():
+                raise_type_error(
+                    tx, "torch.accelerator.device_index() requires a constant argument"
+                )
+            return variables.AcceleratorDeviceIndexVariable.create(
+                tx, args[0].as_python_constant()
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -1553,6 +1596,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
         return result
+
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        type_attr = self.lookup_class_mro_attr("__neg__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__neg__")
+        if method is None:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+
+        return self.call_method(tx, "__neg__", [], {})
 
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (

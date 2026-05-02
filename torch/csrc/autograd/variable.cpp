@@ -81,7 +81,7 @@ ViewInfo ViewInfo::chain(
   // [View + Inplace update on view tensor] for more details how we use this
   // function in backward.
   if (view_func) {
-    // both current_view and it's parent have a view_func
+    // both current_view and its parent have a view_func
     if (view_fn_) {
       view_func = std::make_unique<ChainedViewFunc>(
           view_fn_->clone_and_set(), std::move(view_func));
@@ -93,7 +93,7 @@ ViewInfo ViewInfo::chain(
         return prev_rev_fn(temp);
       };
     } else {
-      // current_view has a view_func and but it's parent doesn't have one
+      // current_view has a view_func but its parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
         auto match_base_view_func = create_view_func_matching(base);
         view_func = std::make_unique<ChainedViewFunc>(
@@ -124,7 +124,7 @@ ViewInfo ViewInfo::chain(
       }
     }
   } else if (view_fn_) {
-    // if current_view doesn't have a view_func but it's parent has one
+    // if current_view doesn't have a view_func but its parent has one
     auto match_tensor_view_func = create_view_func_matching(tensor);
     view_func = std::make_unique<ChainedViewFunc>(
         view_fn_->clone_and_set(), std::move(match_tensor_view_func));
