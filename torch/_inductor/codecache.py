@@ -2859,17 +2859,24 @@ end
                             f"{wrapper_build_options.precompiled_header}.obj"
                         )
                     if cpp_prefix := _get_cpp_prefix_header(device_type):
-                        kernel_build_options.precompiled_header = _precompile_header(
-                            cpp_prefix,
-                            cpp_command,
-                            min_optimize=not config.aot_inductor.package_cpp_only,
-                            **compile_command,
-                        )
                         if _IS_WINDOWS:
+                            kernel_build_options.precompiled_header = _precompile_header(
+                                cpp_prefix,
+                                cpp_command,
+                                min_optimize=not config.aot_inductor.package_cpp_only,
+                                **compile_command,
+                            )
                             kernel_build_options.precompiled_header_include = cpp_prefix
                             kernel_build_options.precompiled_header_object = (
                                 f"{kernel_build_options.precompiled_header}.obj"
                             )
+                        else:
+                            kernel_build_options.precompiled_header = _precompile_header(
+                                cpp_prefix,
+                                cpp_command,
+                                **compile_command,
+                            )
+
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
