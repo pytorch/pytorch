@@ -219,7 +219,7 @@ def _get_storage_alignment() -> int:
     Defaults to 64.
 
     Returns:
-        storage_alignment: int
+        storage_alginment: int
     """
     from torch.utils.serialization import config
 
