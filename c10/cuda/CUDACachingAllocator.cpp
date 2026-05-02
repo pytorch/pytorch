@@ -3461,7 +3461,16 @@ class DeviceCachingAllocator {
       ++pool.get_free_blocks_call_count;
     }
     auto it = pool.blocks.lower_bound(&p.search_key);
-    if (it == pool.blocks.end() || (*it)->stream != p.stream())
+    // Search forward past blocks with different streams.
+    // When activation offloading uses a separate CUDA stream, freed blocks
+    // from that stream are stored with a different stream ID in the pool.
+    // Without this search, those blocks are never reused, causing ~0.2 GiB/step
+    // VRAM growth during QLoRA training on 24 GB GPUs with
+    // activation_offloading.
+    while (it != pool.blocks.end() && (*it)->stream != p.stream()) {
+      ++it;
+    }
+    if (it == pool.blocks.end())
       return false;
 
     if ((*it)->expandable_segment_) {
@@ -3491,7 +3500,11 @@ class DeviceCachingAllocator {
           it++;
         } while (it != pool.blocks.end() && (*it)->expandable_segment_ &&
                  (*it)->stream == p.stream());
-        if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
+        // Search forward past different-stream blocks for the right one
+        while (it != pool.blocks.end() && (*it)->stream != p.stream()) {
+          ++it;
+        }
+        if (it == pool.blocks.end()) {
           return false;
         }
       }
