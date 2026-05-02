@@ -102,6 +102,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             writer.writeline(f"assert_numel({name}, {numel});")
 
+    def write_assert_size_stride(
+        self, name: str, size: str, stride: str, op_name: str
+    ) -> None:
+        # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
+        # assert_size_stride would fail to compile.
+        return
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
