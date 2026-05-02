@@ -10,10 +10,7 @@ import psutil
 
 import torch
 from torch.serialization import StorageIO
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NoTest,

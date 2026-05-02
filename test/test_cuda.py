@@ -22,7 +22,6 @@ from itertools import product
 from random import randint
 from unittest.mock import patch
 
-
 import torch
 import torch.cuda
 import torch.nn as nn
