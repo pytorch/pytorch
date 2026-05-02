@@ -2808,7 +2808,12 @@ class eager_numerics:
 
     # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
     # Triton bundles its own libdevice.10.bc which may use different polynomial
-    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    # approximations than the installed CUDA toolkit, causing ~1 ULP differences
+    # in transcendental functions such as pow and erf.  The erf difference is
+    # particularly visible in explicit GELU kernels
+    # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
+    # can flip the result of a subsequent ceil(log2(...)) and produce a
+    # different uint8 encoded value (see gh-178045).
     use_pytorch_libdevice: bool = False
 
 
