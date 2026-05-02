@@ -1618,8 +1618,11 @@ class VariableBuilder:
                 # Value-type: guard on equality (will use __eq__)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
             elif is_opaque_reference_type(type(value)):
-                # Reference-type: guard only on type, and registered guard_fn
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+                # Reference-type: guard only on type, and registered guard_fn.
+                # Use FAKE_SCRIPT_TYPE_MATCH because at runtime the source may
+                # resolve to either a FakeScriptObject (during outer
+                # AOTAutograd tracing) or the underlying real opaque object.
+                self.install_guards(GuardBuilder.FAKE_SCRIPT_TYPE_MATCH)
                 self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
@@ -2238,8 +2241,12 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value: object) -> VariableTracker:
+        # NOTE: DynamicInt (subclass of int) and SymInt inputs never reach here
+        # because ConstantVariable.is_literal() rejects non-exact types.
+        # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
             assert isinstance(value, int)
+
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -2248,6 +2255,46 @@ class VariableBuilder:
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+
+            # Check for user-provided IntSpec from shapes_spec
+            from torch._dynamo.dynamic_spec import (
+                IntSpec,
+                IntSpecType,
+                lookup_spec_from_dynamo_source,
+            )
+
+            int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
+            if isinstance(int_spec, IntSpec):
+                if int_spec._type is IntSpecType.STATIC:
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif int_spec._type in (IntSpecType.BACKED, IntSpecType.UNBACKED):
+                    dynamism = (
+                        DimDynamic.DYNAMIC
+                        if int_spec._type is IntSpecType.BACKED
+                        else DimDynamic.UNBACKED
+                    )
+                    # For backed: guarding_hint replaces the example value as
+                    # the symbol's hint ("assume my first input has this size")
+                    hint = (
+                        int_spec._guarding_hint
+                        if int_spec._type is IntSpecType.BACKED
+                        else int_spec._optimization_hint
+                    )
+                    hint_value = hint if hint is not None else value
+                    result = self.wrap_symint(hint_value, dynamism=dynamism)
+                    sym_val = result.sym_num  # type: ignore[attr-defined]
+                    if int_spec._min is not None:
+                        torch._check(sym_val >= int_spec._min)
+                    if int_spec._max is not None:
+                        torch._check(sym_val <= int_spec._max)
+                    # Override hint for both backed and unbacked:
+                    # - unbacked: sets the optimization_hint for guardless optimizations
+                    # - both: changes the FX cache key (different hint = cache miss)
+                    if hint is not None:
+                        expr = sym_val.node.expr
+                        sym_val.node.shape_env.var_to_hint_override[expr] = hint
+                    return result
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3940,6 +3987,17 @@ def _automatic_dynamic(
     constraint_sizes = []
     constraint_strides = []
     specialize_on = []
+
+    # Look up user-provided TensorSpec for this tensor
+    from torch._dynamo.dynamic_spec import (
+        IntSpecType,
+        lookup_spec_from_dynamo_source,
+        TensorSpec,
+    )
+
+    spec = lookup_spec_from_dynamo_source(source, config._shapes_spec)
+    tensor_spec = spec if isinstance(spec, TensorSpec) else None
+
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
@@ -3951,6 +4009,39 @@ def _automatic_dynamic(
         marked_static = i in getattr(e, "_dynamo_static_indices", ())
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
+
+        # If user provided a TensorSpec with an IntSpec for this dim, use it
+        # and skip the existing heuristics.
+        if tensor_spec is not None and tensor_spec[i] is not None:
+            if any(
+                [
+                    marked_strict_unbacked,
+                    marked_unbacked,
+                    marked_dynamic,
+                    marked_weak_dynamic,
+                    marked_static,
+                ]
+            ):
+                raise ValueError(
+                    f"Dimension {i} has both a TensorSpec and a mark_dynamic/mark_static "
+                    f"annotation. Use one or the other, not both."
+                )
+            dim_spec = tensor_spec[i]
+            if dim_spec._type is IntSpecType.STATIC:  # type: ignore[union-attr]
+                dynamic_sizes.append(DimDynamic.STATIC)
+                constraint_sizes.append(None)
+            elif dim_spec._type is IntSpecType.BACKED:
+                dynamic_sizes.append(DimDynamic.DYNAMIC)
+                constraint_sizes.append(RelaxedUnspecConstraint(warn_only=True))
+            elif dim_spec._type is IntSpecType.UNBACKED:
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+                constraint_sizes.append(None)
+            else:
+                dynamic_sizes.append(DimDynamic.STATIC)
+                constraint_sizes.append(None)
+            dynamic_strides.append(DimDynamic.INFER_STRIDE)
+            constraint_strides.append(None)
+            continue
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -4085,9 +4176,11 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        # TODO: read names from tensor spec and pass them as shape_ids
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
         unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
         excluded_sizes=frame_state_entry.excluded_sizes,
+        tensor_spec=tensor_spec,
     )
 
 
@@ -4134,13 +4227,6 @@ def _wrap_to_fake_tensor_and_record_impl(
         if not parent_context:
             symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
         else:
-            # Parent contexts are passed in when we are recursively creating
-            # fake tensors for subclasses. A better design would be not to create a
-            # parent/child relationship, but to recursively call _automatic_dynamic
-            # as we recursively call wrap_to_fake_tensor_and_record. This runs
-            # into bugs around how meta_utils knows and works to create fake tensors
-            # with tensor subclasses. Ideally, dynamo would drive both the recursive
-            # wrap_to_fake_tensor_and_record and _automatic_dynamic policy creation.
             assert isinstance(source, AttrSource)
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
@@ -4167,6 +4253,32 @@ def _wrap_to_fake_tensor_and_record_impl(
                     symbolic_context=symbolic_context,
                 )
             )
+        # Apply min/max constraints and hint overrides from TensorSpec
+        _tensor_spec = getattr(symbolic_context, "tensor_spec", None)
+        if isinstance(fake_e, FakeTensor) and _tensor_spec is not None:
+            from torch._dynamo.dynamic_spec import IntSpecType
+
+            for dim_i in range(fake_e.dim()):
+                dim_spec = _tensor_spec[dim_i]
+                if dim_spec is None or dim_spec._type is IntSpecType.STATIC:
+                    continue
+                size_sym = fake_e.size(dim_i)
+                if not isinstance(size_sym, torch.SymInt):
+                    continue
+                if dim_spec._min is not None:
+                    torch._check(size_sym >= dim_spec._min)
+                if dim_spec._max is not None:
+                    torch._check(size_sym <= dim_spec._max)
+                # Set var_to_hint_override for both backed and unbacked
+                # (included in FX cache key)
+                hint = (
+                    dim_spec._guarding_hint
+                    if dim_spec._type is IntSpecType.BACKED
+                    else dim_spec._optimization_hint
+                )
+                if hint is not None:
+                    expr = size_sym.node.expr
+                    size_sym.node.shape_env.var_to_hint_override[expr] = hint
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
