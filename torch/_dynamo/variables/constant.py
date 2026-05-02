@@ -1,34 +1,29 @@
 """
-Constant and enum variable tracking in Dynamo.
+Constant variable tracking in Dynamo.
 
 This module is fundamental to Dynamo's ability to track and propagate constant
 values during compilation, ensuring proper handling of Python literals and
 maintaining type safety through the compilation process.
 """
 
-import enum
+from __future__ import annotations
+
 import operator
-from collections.abc import Sequence
-from typing import Any, Literal, Optional, overload, TYPE_CHECKING
-from typing_extensions import Never, override
+from typing import Any, Literal, overload, TYPE_CHECKING
+from typing_extensions import override
 
 import torch
-from torch._dynamo.source import AttrSource, GetItemSource
+from torch._dynamo.source import GetItemSource
 
-from .. import graph_break_hints, variables
+from .. import variables
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import (
-    cmp_name_to_op_mapping,
-    common_constant_types,
-    istype,
-    np,
-    raise_args_mismatch,
-    raise_on_overridden_hash,
-)
+from ..utils import common_constant_types, istype, np, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
@@ -43,23 +38,23 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
-    @overload
-    @staticmethod
-    def create(value: None) -> Never: ...
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    # PyFloat_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1880
+    # PyBool_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/boolobject.c#L171
+    # PyUnicode_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L14931
+    # PyBytes_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3017
+    # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
+    # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
+    _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
 
     @overload
     @staticmethod
-    def create(value: Literal[True]) -> Never: ...
+    def create(value: None) -> ConstantVariable: ...
 
     @overload
     @staticmethod
-    def create(value: Literal[False]) -> Never: ...
+    def create(value: bool) -> ConstantVariable: ...
 
-    @overload
-    @staticmethod
-    def create(value: bool) -> "ConstantVariable": ...
-
-    # TODO: Refactor to make these return ConstantVariable
     @overload
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker: ...
@@ -74,6 +69,17 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
+        # Return pre-allocated sentinels for None/True/False when there are
+        # no extra kwargs (source, etc.) that would differentiate the instance.
+        if not kwargs:
+            match value:
+                case None:
+                    return CONSTANT_VARIABLE_NONE
+                case True:
+                    return CONSTANT_VARIABLE_TRUE
+                case False:
+                    return CONSTANT_VARIABLE_FALSE
+
         source = kwargs.get("source")
 
         # Routing for supported collection literals.
@@ -147,11 +153,29 @@ its type to `common_constant_types`.
         return self.unpack_var_sequence(tx=None)
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: InstructionTranslator, arg: VariableTracker
     ) -> VariableTracker:
+        if isinstance(self.value, (str, bytes)):
+            from .object_protocol import validate_sequence_index
+
+            container_name = "string" if isinstance(self.value, str) else "bytes"
+            arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
+
+    def sq_item_impl(
+        self, tx: InstructionTranslator, key: VariableTracker
+    ) -> VariableTracker:
+        # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
+        # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
+        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
+        index = key.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value[index])
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
 
     @staticmethod
     def is_base_literal(obj: object) -> bool:
@@ -170,25 +194,48 @@ its type to `common_constant_types`.
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
-        self, tx: Optional["InstructionTranslator"]
+        self, tx: InstructionTranslator | None
     ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        """Generic len for any constant value (sequence or mapping)."""
+        try:
+            return ConstantVariable.create(len(self.value))
+        except TypeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def sq_length(self, tx: InstructionTranslator) -> VariableTracker:
+        """Sequence length - delegates to len_impl for constants."""
+        return self.len_impl(tx)
+
+    def mp_length(self, tx: InstructionTranslator) -> VariableTracker:
+        """Mapping length - delegates to len_impl for constants."""
+        return self.len_impl(tx)
+
+    def const_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         if not hasattr(self.value, name):
-            name_variable = variables.ConstantVariable.create(name)
-            raise_observed_exception(AttributeError, tx, args=[name_variable])
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
         return member
 
+    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        from .lists import ListIteratorVariable
+
+        if istype(self.value, str):
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
+        return super().tp_iter_impl(tx)
+
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: InstructionTranslator,
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -213,14 +260,6 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
-        elif name == "__iter__" and istype(self.value, str):
-            # this could be some generic iterator to avoid the circular import,
-            # but ListIterator does what we want
-            from .lists import ListIteratorVariable
-
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -233,6 +272,9 @@ its type to `common_constant_types`.
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
+
+        if name == "__iter__":
+            return self.tp_iter_impl(tx)
 
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
@@ -248,7 +290,7 @@ its type to `common_constant_types`.
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             if (
                 hasattr(operator, name)
@@ -269,9 +311,7 @@ its type to `common_constant_types`.
                     try:
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
-                        raise_observed_exception(
-                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                        )
+                        raise_observed_exception(type(e), tx, args=list(e.args))
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -282,20 +322,13 @@ its type to `common_constant_types`.
             except Exception as e:
                 raise_observed_exception(type(e), tx)
 
-        if name == "__len__" and not (args or kwargs):
-            try:
-                return ConstantVariable.create(len(self.value))
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+        if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
-                raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                )
+                raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -303,15 +336,13 @@ its type to `common_constant_types`.
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
-                raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                )
+                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
         self,
-        tx: "InstructionTranslator",
-        tree_map_fn: "UserFunctionVariable",
+        tx: InstructionTranslator,
+        tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -362,8 +393,8 @@ its type to `common_constant_types`.
 
     @override
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
-    ) -> "ConstantVariable":
+        self, tx: InstructionTranslator, name: str
+    ) -> ConstantVariable:
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -374,7 +405,6 @@ its type to `common_constant_types`.
         return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
-        # Could be an EnumVariable as well
         from .tensor import SymNodeVariable
 
         if isinstance(other, SymNodeVariable):
@@ -384,8 +414,78 @@ its type to `common_constant_types`.
             and self.as_python_constant() == other.as_python_constant()
         )
 
+    def get_id(self, tx: InstructionTranslator) -> int | None:
+        # Singletons have guaranteed stable identity across the process lifetime.
+        if self.value is None or self.value is True or self.value is False:
+            return id(self.value)
+        # Sourceful constants resolve via source like any other sourceful VT.
+        # Sourceless non-singleton constants (e.g. literal 42 in compiled code)
+        # get FakeIdVariable — CPython interning of small ints/strings is an
+        # implementation detail users shouldn't rely on.
+        return super().get_id(tx)
+
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+    def nb_index_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # CPython: int and bool define nb_index (returns self for int,
+        # int(self) for bool). All other constant types do not.
+        if isinstance(self.value, (int, bool)):
+            return ConstantVariable.create(operator.index(self.value))
+        return super().nb_index_impl(tx)
+
+    def nb_int_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # CPython: int defines nb_int (long_long, returns copy).
+        # bool inherits nb_int from int via slot inheritance.
+        # float defines nb_int (truncates toward zero via PyLong_FromDouble).
+        return ConstantVariable.create(int(self.value))
+
+    def nb_float_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # CPython: float defines nb_float (float_float, returns copy).
+        # int defines nb_float (long_float, converts to float).
+        # bool inherits nb_float from int via slot inheritance.
+        return ConstantVariable.create(float(self.value))
+
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_or.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5606 (long_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
+        # bool inherits int's nb_or via slot inheritance.
+        if not isinstance(self.value, (int, frozenset, type)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        result = self_.python_type().__or__(v, w)  # type: ignore[bad-argument-count]
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
+        # bool inherits nb_negative from int via slot inheritance.
+        return ConstantVariable.create(-self.value)
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
@@ -404,6 +504,9 @@ class FakeIdVariable(VariableTracker):
     (hashing and equality).  It intentionally blocks reconstruction so that a
     graph break does not silently bake a stale id into the resumed bytecode.
     """
+
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    _cpython_type = int
 
     def __init__(self, value: int, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -429,6 +532,23 @@ class FakeIdVariable(VariableTracker):
             return self.value == other.as_python_constant()
         return False
 
+    def call_method(
+        self,
+        tx: InstructionTranslator,
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from ..utils import cmp_name_to_op_mapping
+
+        if name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            other = args[0]
+            if isinstance(other, (FakeIdVariable, ConstantVariable)):
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[name](self.value, other.as_python_constant())
+                )
+        return super().call_method(tx, name, args, kwargs)
+
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
             gb_type="Reconstruction of FakeIdVariable",
@@ -440,69 +560,4 @@ class FakeIdVariable(VariableTracker):
             hints=[
                 "Avoid using id() on containers in code that may graph-break.",
             ],
-        )
-
-
-class EnumVariable(VariableTracker):
-    """VariableTracker for enum.Enum and enum.IntEnum instances
-
-    Provides specialized handling for Python enum types, supporting
-    both standard Enum and IntEnum with proper value tracking and comparison.
-    """
-
-    def __init__(self, value: enum.Enum | enum.IntEnum, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.value = value
-
-    @classmethod
-    def create(
-        cls, cls_type: Any, value_vt: VariableTracker, options: Any
-    ) -> "EnumVariable":
-        if value_vt.is_python_constant():
-            for member in list(cls_type):
-                if member.value == value_vt.as_python_constant():
-                    return cls(member, **options)
-        unimplemented(
-            gb_type="Failed to construct Enum variable",
-            context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
-            explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
-            "or is not an acceptable value for the Enum. "
-            f"Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
-            hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
-        )
-
-    def as_proxy(self) -> enum.Enum | int:
-        if isinstance(self.value, int):
-            return int(self.value)  # convert IntEnum to a normal int
-        return self.value
-
-    def __repr__(self) -> str:
-        return f"EnumVariable({type(self.value)})"
-
-    def as_python_constant(self) -> enum.Enum | enum.IntEnum:
-        return self.value
-
-    def get_real_python_backed_value(self) -> enum.Enum | enum.IntEnum:
-        return self.value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if not hasattr(self.value, name):
-            raise NotImplementedError
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
-        member = getattr(self.value, name)
-        source = self.source and AttrSource(self.source, name)
-        return VariableTracker.build(tx, member, source=source)
-
-    def is_python_hashable(self) -> Literal[True]:
-        raise_on_overridden_hash(self.value, self)
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
         )

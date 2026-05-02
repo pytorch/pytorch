@@ -379,6 +379,7 @@ class NodeInfo(NamedTuple):
 
     node_schedule: list
     tiling: dict
+    tiling_scores: dict | None
     numel: Any
     rnumel: Any
     features: SIMDKernelFeatures
@@ -802,7 +803,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
-                        raise CantSplit
+                        raise CantSplit(
+                            size,
+                            remaining[current_group] * remaining[current_group + 1],
+                        )
 
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]
@@ -856,11 +860,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    if current_group < len(remaining):
-                        return_getters.append(
-                            # pyrefly: ignore [bad-argument-type]
-                            operator.itemgetter(add_range(current_group, size))
-                        )
+                    if current_group >= len(remaining):
+                        raise CantSplit(size, 0)
+                    return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
+                        operator.itemgetter(add_range(current_group, size))
+                    )
             return_getters_groups.append(return_getters)
 
         assert all(
@@ -1647,6 +1652,7 @@ class SIMDScheduling(BaseScheduling):
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return kernel, ws_name, src_code
 
+    # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
         self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:
@@ -1771,7 +1777,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-        # a extra round of reduction
+        # an extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + split_size - 1) // split_size
@@ -1789,13 +1795,18 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
 
-            # Check if the original reduction used keepdim=True by comparing dimensions.
-            # Without keepdim, reduction produces [rnumel]; with keepdim, [1, rnumel].
+            # Restore the exact original shape via .view() to handle keepdim
+            # and multi-dimensional reductions correctly.
             buffer = V.graph.get_buffer(buffer_name)
-            keepdim = buffer is not None and len(buffer.get_layout().size) > 1
-
-            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0, keepdim={keepdim})"
+            if buffer is not None:
+                final_shape = [
+                    V.graph.wrapper_code.codegen_python_sizevar(s)
+                    for s in buffer.get_layout().size
+                ]
+                final_shape_str = f"[{', '.join(final_shape)}]"
+                final_reduce += f".view({final_shape_str})"
 
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.
@@ -2325,8 +2336,27 @@ class SIMDScheduling(BaseScheduling):
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiling = self.select_tiling(node_schedule, numel, rnumel)
-            features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+            tiling_scores = None
+            if config.combo_kernel_per_subkernel_blocks:
+                if torch._inductor.config.triton.coalesce_tiling_analysis:
+                    assert isinstance(
+                        pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
+                    )
+                    coalesce_analysis = analyze_memory_coalescing(pn)
+                else:
+                    coalesce_analysis = None
+                features = SIMDKernelFeatures(
+                    node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
+                )
+                tiling, tiling_scores = self.get_tiling_and_scores(
+                    node_schedule,
+                    numel,
+                    rnumel,
+                    features.coalesce_analysis,
+                )
+            else:
+                features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+                tiling = self.select_tiling(node_schedule, numel, rnumel)
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
@@ -2336,6 +2366,7 @@ class SIMDScheduling(BaseScheduling):
             node_schedule_map[pn] = NodeInfo(
                 node_schedule=node_schedule,
                 tiling=tiling,
+                tiling_scores=tiling_scores,
                 numel=numel,
                 rnumel=rnumel,
                 features=features,
@@ -2391,6 +2422,7 @@ class SIMDScheduling(BaseScheduling):
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
                         triton_kernel_cls=self.kernel_type,
+                        tiling_scores=node_info.tiling_scores,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -2560,10 +2592,16 @@ class SIMDScheduling(BaseScheduling):
         """
         Create a tiling dict from pointwise and reduction splits.
         """
-        pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
-        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
+        pw_prefixes = ("z", "y", "x")
+        reduction_prefixes = ("r0_", "r1_")
+        assert len(pw_tiling) <= len(pw_prefixes)
+        assert len(reduction_tiling) <= len(reduction_prefixes)
+
         return immutable_dict(
-            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
+            [
+                *zip(pw_prefixes[-len(pw_tiling) :], pw_tiling, strict=False),
+                *zip(reduction_prefixes, reduction_tiling, strict=False),
+            ]
         )
 
     @classmethod
@@ -2621,6 +2659,12 @@ class SIMDScheduling(BaseScheduling):
             if not dims:
                 return (fallback_numel,)
             max_tiles = get_max_tiles(2)
+            if V.graph.sizevars.statically_known_equals(
+                pointwise_numel, 1
+            ) and V.graph.sizevars.statically_known_gt(reduction_numel, 1):
+                # We only have at most two dimensions to tile over when emitting a
+                # reduction-only kernel.
+                max_tiles = min(max_tiles, 2)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])

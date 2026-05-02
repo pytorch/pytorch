@@ -18,7 +18,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
     SM100OrLater,
-    SM90OrLater,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -44,7 +43,7 @@ from torch.utils._triton import has_triton_tma_device
 torch.set_float32_matmul_precision("high")
 
 
-f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 
 
 def _is_cuda_device(device) -> bool:
@@ -139,7 +138,7 @@ class TestFP8Types(TestCase):
 
         x_shape = (16, 16)
         x = torch.rand(*x_shape, device=device, dtype=dtype).to(e4m3_type)
-        y_fp8 = compiled_fp8_matmul(x)  # noqa: F841
+        y_fp8 = compiled_fp8_matmul(x)
 
         x_shape = (15, 16)
         x = torch.rand(*x_shape, device=device, dtype=dtype).to(e4m3_type)
@@ -400,10 +399,8 @@ class TestFP8Types(TestCase):
             f"LN only Inductor: {ln_latency}ms."
         )
 
-    @unittest.skipIf(
-        not SM90OrLater or torch.version.hip, "PDL requires NVIDIA SM 9.0+"
-    )
-    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cuda", "xpu", "cpu"])
     def test_scaled_mm_pdl_handles_none_bias(self, device):
         dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
         M, K, N = 32, 64, 32
@@ -444,7 +441,7 @@ class TestFP8Lowering(TestCase):
     @parametrize(
         "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
     )
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     def test_tensorwise_scaling(
         self,
         dtype: torch.dtype,
@@ -469,8 +466,8 @@ class TestFP8Lowering(TestCase):
         if has_bias:
             bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
-        # if "xpu" in device and use_fast_accum:
-        self.skipTest("XPU does not support use_fast_accum=True for now")
+        if "xpu" in device and use_fast_accum:
+            self.skipTest("XPU does not support use_fast_accum=True for now")
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
@@ -521,7 +518,7 @@ class TestFP8Lowering(TestCase):
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     def test_scaled_mm_preserves_strides(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
@@ -700,7 +697,7 @@ class TestFP8Lowering(TestCase):
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
@@ -993,7 +990,7 @@ class TestFP8Lowering(TestCase):
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 32, 1024))
     @parametrize("N", (16, 2048))
@@ -1303,7 +1300,7 @@ class TestFP8Lowering(TestCase):
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 32, 1024))
     @parametrize("N", (16, 2048))
@@ -1375,7 +1372,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
@@ -1459,7 +1456,7 @@ class TestFP8Lowering(TestCase):
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     def test_unacceptable_scale_dims_rowwise_scaling(self, device):
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -1554,6 +1551,150 @@ class TestCvtE8M0Rceil(TestCase):
 
         code_str = "\n".join(code)
         self.assertIn("cvt.rp.satfinite.ue8m0x2.f32", code_str)
+
+    def test_log2_pattern_near_power_of_two(self):
+        """Values within 1 ULP above a power of 2 must ceil to the next integer.
+
+        Software log2 may round a value like 2^e + 1 ULP down to exactly e
+        (the ULP of log2's output at e is larger than the true fractional part),
+        so ceil(log2(x)) would incorrectly return e instead of e+1.
+        The PTX/bit-manipulation replacement must always return the correct value.
+        """
+        _misc_patterns_init()
+        E8M0_BIAS = 127
+
+        def fn(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        # Build values that are exactly 1 ULP above each power of 2 from 2^0..2^7.
+        # For these, ceil(log2(x)) must equal the exponent + 1.
+        powers = [float(2**e) for e in range(8)]
+        one_ulp_above = [
+            torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
+            for p in powers
+        ]
+        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+
+        expected = torch.tensor(
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+        )
+        compiled_result = torch.compile(fn)(inp)
+        self.assertEqual(compiled_result, expected)
+
+
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+@unittest.skipIf(SM100OrLater, "Pre-SM100 path: uses bit-manipulation fallback")
+class TestE8M0Log2PatternBitManip(TestCase):
+    """Tests for the e8m0_rceil_log2 pattern on pre-SM100 hardware.
+
+    On hardware without the SM100 PTX instruction, Inductor replaces the
+    software log2+ceil sequence with an equivalent IEEE 754 bit-manipulation
+    that reads the biased exponent directly.  This avoids 1 ULP errors in
+    software log2 near exact powers of 2 (gh-178045).
+    """
+
+    def test_pattern_fires_and_is_correct(self):
+        """The log2+ceil pattern should be matched and produce correct uint8."""
+        _misc_patterns_init()
+        E8M0_BIAS = 127
+
+        def fn(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        inp = torch.tensor(
+            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device="cuda", dtype=torch.float32
+        )
+        eager_result = fn(inp)
+        compiled_result = torch.compile(fn)(inp)
+        self.assertEqual(compiled_result, eager_result)
+
+    def test_correct_for_values_one_ulp_above_power_of_two(self):
+        """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
+
+        Software log2 for x = 2^e + 1 ULP may round to exactly e when e is
+        large (the ULP of the log2 output exceeds the true fractional part).
+        The bit-manipulation replacement reads the exponent field directly and
+        is always correct.
+        """
+        E8M0_BIAS = 127
+
+        def fn(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        powers = [float(2**e) for e in range(8)]
+        one_ulp_above = [
+            torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
+            for p in powers
+        ]
+        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+
+        expected = torch.tensor(
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+        )
+        compiled_result = torch.compile(fn)(inp)
+        self.assertEqual(compiled_result, expected)
+
+    def test_regression_gh178045_encoding_correctness(self):
+        """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
+
+        When a compiled kernel (e.g. fused GELU) produces a float value that is
+        just above a power of 2 (say 2^e + 1 ULP), the software log2+ceil
+        pipeline may give the WRONG result because float32 log2 rounds the
+        result down to exactly e, making ceil return e instead of the correct
+        e+1.  The bit-manipulation replacement always returns the correct value.
+
+        This test specifically validates that the bit-manipulation codepath gives
+        mathematically correct results for such boundary values (i.e. that it
+        fixes the correctness bug distinct from the GELU input discrepancy).
+        """
+        E8M0_BIAS = 127
+
+        # Craft a function that mimics what fused GELU might produce: an
+        # output that is exactly 1 ULP above a series of powers of 2.
+        def encode_fn(inp):
+            # This is the e8m0_rceil_log2 pattern that gets rewritten
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        # For each exponent e in [0..6], the value 2^e + 1 ULP has exponent e
+        # and a non-zero mantissa, so the correct e8m0 ceiling is e+1.
+        # Software log2+ceil may return e for large e (the fractional part of
+        # log2 becomes smaller than the ULP of log2's output at that magnitude).
+        powers = [float(2**e) for e in range(7)]
+        one_ulp_above = [
+            torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
+            for p in powers
+        ]
+        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+
+        # The correct e8m0 encoding for "1 ULP above 2^e" is E8M0_BIAS + (e+1)
+        expected = torch.tensor(
+            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device="cuda"
+        )
+
+        torch._dynamo.reset()
+        compiled_result = torch.compile(encode_fn)(inp)
+        self.assertEqual(
+            compiled_result,
+            expected,
+            msg="Bit-manipulation replacement must return the correct e8m0 ceiling "
+            "for values 1 ULP above a power of 2 (gh-178045 regression).",
+        )
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)

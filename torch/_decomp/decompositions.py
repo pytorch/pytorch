@@ -330,7 +330,7 @@ def rrelu_with_noise_backward(
     training: bool,
     self_is_result: bool,
 ) -> Tensor:
-    if training and upper - lower > 1e-6:
+    if training:
         return grad_output.mul(noise)
     else:
         negative_slope = (lower + upper) / 2
@@ -1446,12 +1446,10 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
-    if split_size == 0:
-        if dim_size != 0:
-            raise AssertionError(
-                f"split_size is 0 but dim_size is {dim_size}, expected 0"
-            )
+    if dim_size == 0:
         return (self.detach(),)
+    if split_size == 0:
+        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -1517,7 +1515,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
-@register_decomposition(aten.addmm)
+@register_decomposition([aten.addmm.default, aten.addmm.out])
 @out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
@@ -1535,6 +1533,22 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
     return out + beta * self
+
+
+@register_decomposition([aten.addmm.dtype, aten.addmm.dtype_out])
+@out_wrapper(exact_dtype=True)
+def addmm_dtype(
+    self: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    out_dtype: torch.dtype,
+    beta: int = 1,
+    alpha: int = 1,
+):
+    out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
+    if beta == 0:
+        return out
+    return out + beta * self.to(out_dtype)
 
 
 @register_decomposition(aten._addmm_activation)
@@ -2744,6 +2758,170 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+def _max_pool_nd_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    ceil_mode: bool,
+    n_dim: int,
+) -> tuple[Tensor, Tensor]:
+    def _expand(val: list[int] | int, default: list[int] | None = None) -> list[int]:
+        if not isinstance(val, (list, tuple)):
+            return [val] * n_dim
+        if not val:
+            torch._check(default is not None, lambda: "default must be provided")
+            return default  # type: ignore[return-value]
+        return val * n_dim if len(val) == 1 else list(val)
+
+    ks = _expand(kernel_size)
+    st = _expand(stride, default=ks)
+    pa = _expand(padding)
+    di = _expand(dilation)
+
+    torch._check(
+        self.ndim in (n_dim + 1, n_dim + 2),
+        lambda: f"Expected {n_dim + 1}D or {n_dim + 2}D input, got {self.ndim}D",
+    )
+
+    is_batched = self.ndim == n_dim + 2
+    if not is_batched:
+        self = self.unsqueeze(0)
+
+    input_sizes = list(self.shape[-n_dim:])
+    device = self.device
+
+    output_sizes = [
+        torch._meta_registrations.pooling_output_shape(
+            input_sizes[d], ks[d], pa[d], st[d], di[d], ceil_mode
+        )
+        for d in range(n_dim)
+    ]
+
+    # Pad with -inf so out-of-bounds positions never win the max. For integer
+    # types, iinfo.min is a valid data value, so padding with it causes ties
+    # in argmax that produce wrong indices. Promote to a wider type so the
+    # sentinel is strictly below any representable value in the original dtype.
+    dtype = self.dtype
+    promoted = False
+    if dtype is torch.bool:
+        fill_value = 0.0
+    elif dtype.is_floating_point:
+        fill_value = float("-inf")
+    else:
+        info = torch.iinfo(dtype)
+        if info.bits < 32:
+            self = self.to(torch.int32)
+        elif info.bits < 64:
+            self = self.to(torch.int64)
+        fill_value = float(info.min - 1) if info.bits < 64 else float(info.min)
+        promoted = True
+
+    # Compute asymmetric padding: left = pa[d], right may be larger for ceil_mode
+    pad_args: list[int] = []
+    for d in reversed(range(n_dim)):  # F.pad takes last dim first
+        left = pa[d]
+        needed = (output_sizes[d] - 1) * st[d] + (ks[d] - 1) * di[d] + 1
+        right = max(0, needed - (input_sizes[d] + 2 * pa[d])) + pa[d]
+        pad_args.extend([left, right])
+    x = F.pad(self, pad_args, value=fill_value)
+
+    # Build index tensor per spatial dim:
+    #   idx[out_pos, ker_pos] = out_pos * stride + ker_pos * dilation
+    # Reshape each for broadcasting into the Cartesian product of all dims
+    idx_tensors = []
+    for d in range(n_dim):
+        idx = (
+            torch.arange(output_sizes[d], device=device, dtype=torch.int64).unsqueeze(1)
+            * st[d]
+            + torch.arange(ks[d], device=device, dtype=torch.int64).unsqueeze(0) * di[d]
+        )
+        shape = [1] * (2 * n_dim)
+        shape[2 * d] = output_sizes[d]
+        shape[2 * d + 1] = ks[d]
+        idx_tensors.append(idx.reshape(shape))
+
+    # Advanced indexing gathers all pooling windows at once via broadcasting.
+    # Result: (N, C, out_0, k_0, out_1, k_1, ..., out_{n-1}, k_{n-1})
+    windows = x[(Ellipsis, *idx_tensors)]
+
+    # Permute to (N, C, out_0, ..., out_{n-1}, k_0, ..., k_{n-1})
+    n_batch = 2
+    perm = list(range(n_batch))
+    perm += [n_batch + 2 * d for d in range(n_dim)]
+    perm += [n_batch + 2 * d + 1 for d in range(n_dim)]
+    windows = windows.permute(perm)
+
+    # Flatten kernel dims and take the max
+    out_shape = list(windows.shape[: n_batch + n_dim])
+    windows = windows.reshape(*out_shape, -1)
+    values, local_argmax = windows.max(dim=-1)
+
+    # Convert local_argmax in [0, prod(ks)) to per-dim kernel offsets
+    kernel_pos = []
+    remaining = local_argmax
+    for d in range(n_dim):
+        divisor = 1
+        for dd in range(d + 1, n_dim):
+            divisor *= ks[dd]
+        kernel_pos.append(remaining // divisor)
+        remaining = remaining % divisor
+
+    # Compute flat index into the original (unpadded) input spatial volume
+    orig_coords = []
+    for d in range(n_dim):
+        shape = [1] * (n_batch + n_dim)
+        shape[n_batch + d] = output_sizes[d]
+        out_pos = torch.arange(
+            output_sizes[d], device=device, dtype=torch.int64
+        ).reshape(shape)
+        orig_coords.append(out_pos * st[d] + kernel_pos[d] * di[d] - pa[d])
+
+    flat_indices = orig_coords[0]
+    for d in range(1, n_dim):
+        flat_indices = flat_indices * input_sizes[d] + orig_coords[d]
+
+    if promoted:
+        values = values.to(dtype)
+
+    if not is_batched:
+        values = values.squeeze(0)
+        flat_indices = flat_indices.squeeze(0)
+
+    return values, flat_indices
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+@out_wrapper("out", "indices")
+def max_pool2d_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int] = [],  # noqa: B006
+    padding: list[int] = [0],  # noqa: B006
+    dilation: list[int] = [1],  # noqa: B006
+    ceil_mode: bool = False,
+) -> tuple[Tensor, Tensor]:
+    return _max_pool_nd_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode, n_dim=2
+    )
+
+
+@register_decomposition(aten.max_pool3d_with_indices)
+@out_wrapper("out", "indices")
+def max_pool3d_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int] = [],  # noqa: B006
+    padding: list[int] = [0],  # noqa: B006
+    dilation: list[int] = [1],  # noqa: B006
+    ceil_mode: bool = False,
+) -> tuple[Tensor, Tensor]:
+    return _max_pool_nd_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode, n_dim=3
+    )
+
+
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: list[int], dim: int
 ):
@@ -2942,8 +3120,12 @@ def _index_add(
 
 @register_decomposition(aten.pad_sequence.default)
 @aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="right"):
     torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
+    torch._check(
+        padding_side == "left" or padding_side == "right",
+        lambda: f"Expected padding_side to be one of left or right, but got {padding_side}.",
+    )
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
@@ -2957,9 +3139,15 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
         currseq = sequences[i]
-        row = aten.constant_pad_nd(
-            currseq, dim_paddings + (0, max_len - currseq.size(0)), padding_value
-        )
+        pad_amount = max_len - currseq.size(0)
+        if padding_side == "right":
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (0, pad_amount), padding_value
+            )
+        else:
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (pad_amount, 0), padding_value
+            )
         if batch_first:
             out = aten.select_scatter(out, row, dim=0, index=i)
         else:
@@ -3949,6 +4137,18 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     return torch.ops.aten._upsample_bicubic2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
+@register_decomposition(aten._upsample_lanczos2d_aa.vec)
+@aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_lanczos2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_lanczos2d_aa(
         input, osize, align_corners, scale_h, scale_w
     )
 
@@ -5387,7 +5587,9 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         else:
             return torch.eq(elements, test_elements)
 
-    if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(test_elements.numel() < 10.0 * pow(elements.numel(), 0.145)):
         return isin_default(elements, test_elements, invert=invert)
     else:
         return isin_sorting(
@@ -5589,6 +5791,100 @@ def max_pool2d_with_indices_backward(
         grad_input = grad_input.squeeze(0)
 
     return grad_input
+
+
+@register_decomposition([aten.hann_window.default, aten.hann_window.out])
+@out_wrapper()
+def hann_window(
+    window_length: int,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout | None = None,
+    device: torch.device | None = None,
+    pin_memory: bool | None = None,
+) -> Tensor:
+    """hann_window(window_length, *, dtype=None, layout=None, device=None, pin_memory=False) -> Tensor
+
+    Returns a Hann window of size :attr:`window_length` with ``periodic=True``.
+
+    Equivalent to :func:`torch.hann_window` with ``periodic=True``.
+
+    Args:
+        window_length (int): the size of returned window.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): desired dtype. Default: global default.
+        layout (:class:`torch.layout`, optional): desired layout. Default: ``torch.strided``.
+        device (:class:`torch.device`, optional): desired device. Default: current device.
+        pin_memory (bool, optional): if ``True``, pins the returned tensor. Default: ``False``.
+    """
+    return aten.hann_window.periodic(
+        window_length,
+        True,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+    )
+
+
+@register_decomposition([aten.hann_window.periodic, aten.hann_window.periodic_out])
+@out_wrapper()
+def hann_window_periodic(
+    window_length: int,
+    periodic: bool = True,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout | None = None,
+    device: torch.device | None = None,
+    pin_memory: bool | None = None,
+) -> Tensor:
+    r"""hann_window(window_length, periodic=True, *, dtype=None, layout=None, device=None, pin_memory=False) -> Tensor
+
+    Returns a Hann window of size :attr:`window_length`.
+
+    .. math::
+        w[n] = 0.5 - 0.5 \cos\!\left(\frac{2\pi n}{N-1}\right)
+
+    where :math:`N` is ``window_length + 1`` when ``periodic=True`` (for spectral analysis),
+    or ``window_length`` when ``periodic=False`` (symmetric window).
+
+    Low-precision dtypes (``bfloat16``, ``float16``) are computed in ``float32`` then cast.
+
+    Args:
+        window_length (int): the size of returned window.
+        periodic (bool, optional): if ``True``, returns a periodic window for use with STFT.
+            Default: ``True``.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): desired dtype. Default: global default.
+        layout (:class:`torch.layout`, optional): desired layout. Default: ``torch.strided``.
+        device (:class:`torch.device`, optional): desired device. Default: current device.
+        pin_memory (bool, optional): if ``True``, pins the returned tensor. Default: ``False``.
+    """
+    dtype = dtype if dtype is not None else torch.get_default_dtype()
+    if window_length == 0:
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        )
+    if window_length == 1:
+        return torch.ones(
+            (1,), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        )
+    compute_dtype = utils.get_computation_dtype(dtype)
+    n = window_length + 1 if periodic else window_length
+    t = torch.arange(
+        n,
+        dtype=compute_dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+    )
+    t = t * (2.0 * torch.pi / (n - 1))
+    t = torch.cos(t)
+    t = t * -0.5 + 0.5
+    window = t.narrow(0, 0, window_length) if periodic else t
+    return window.to(dtype)
 
 
 register_inplace(aten.addbmm_, aten.addbmm)
