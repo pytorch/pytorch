@@ -9,7 +9,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast
+from typing import cast, TypedDict
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -1831,42 +1831,18 @@ def _redistribute_backward(
     return output, spec
 
 
+class _BackwardDtypeConfig(TypedDict):
+    op_dtype: torch.dtype  # dtype the backward collective runs at
+    out_dtype: torch.dtype  # dtype the returned gradient is cast to
+
+
+class _DtypeConfig(TypedDict):
+    op_dtype: torch.dtype  # forward: dtype the collective runs at
+    out_dtype: torch.dtype  # forward: dtype of the output tensor
+    backward_options: _BackwardDtypeConfig
+
+
 class Redistribute(torch.autograd.Function):
-    # Required keys of ``backward_options``. Both control the backward pass:
-    #   op_dtype  -- dtype the backward collective runs at
-    #   out_dtype -- dtype the returned gradient is cast to
-    # Callers must pin concrete dtypes; no inference happens below this layer.
-    _BACKWARD_OPTION_KEYS = frozenset({"op_dtype", "out_dtype"})
-
-    # autograd.Function.apply cannot forward kwargs; wrap it so the call sites
-    # spell out op_dtype/out_dtype/backward_options explicitly.
-    @classmethod
-    def apply(  # type: ignore[override]
-        cls,
-        input: "dtensor.DTensor",
-        device_mesh: DeviceMesh,
-        placements: tuple[Placement, ...],
-        *,
-        async_op: bool = False,
-        op_dtype: torch.dtype,
-        out_dtype: torch.dtype,
-        backward_options: dict,
-    ) -> "dtensor.DTensor":
-        if backward_options.keys() != cls._BACKWARD_OPTION_KEYS:
-            raise TypeError(
-                f"backward_options must have exactly keys "
-                f"{sorted(cls._BACKWARD_OPTION_KEYS)}, got {sorted(backward_options)}"
-            )
-        return super().apply(  # type: ignore[no-any-return]
-            input,
-            device_mesh,
-            placements,
-            async_op,
-            op_dtype,
-            out_dtype,
-            backward_options,
-        )
-
     @staticmethod
     def forward(  # type: ignore[override]
         # pyre-fixme[2]: Parameter must be annotated.
@@ -1875,12 +1851,15 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool,
-        op_dtype: torch.dtype,
-        out_dtype: torch.dtype,
-        backward_options: dict,
+        dtype_config: _DtypeConfig,
     ):
         ctx.async_op = async_op
-        ctx.backward_options = backward_options
+        bwd = dtype_config["backward_options"]
+        ctx.bwd_op_dtype = bwd["op_dtype"]
+        ctx.bwd_out_dtype = bwd["out_dtype"]
+
+        op_dtype = dtype_config["op_dtype"]
+        out_dtype = dtype_config["out_dtype"]
 
         if op_dtype != input._local_tensor.dtype:
             local_tensor = input._local_tensor.to(dtype=op_dtype)
@@ -1941,19 +1920,15 @@ class Redistribute(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
-        previous_spec = ctx.current_spec
-        opts: dict = ctx.backward_options
         output_dtensor = NestedRedistribute.apply(
             grad_output,
-            previous_spec,
-            async_op=ctx.async_op,
-            op_dtype=opts["op_dtype"],
-            out_dtype=opts["out_dtype"],
+            ctx.current_spec,
+            ctx.async_op,
+            ctx.bwd_op_dtype,
+            ctx.bwd_out_dtype,
         )
         return (
             output_dtensor,
-            None,
-            None,
             None,
             None,
             None,
@@ -1971,22 +1946,6 @@ class NestedRedistribute(torch.autograd.Function):
     Note: `NestedRedistribute.backward` is not differentiable, and therefore triple
     backward is not yet supported.
     """
-
-    # autograd.Function.apply cannot forward kwargs; wrap it so the call sites
-    # spell out op_dtype/out_dtype explicitly.
-    @classmethod
-    def apply(  # type: ignore[override]
-        cls,
-        grad_output: "dtensor.DTensor",
-        previous_spec: DTensorSpec,
-        *,
-        async_op: bool,
-        op_dtype: torch.dtype,
-        out_dtype: torch.dtype,
-    ) -> "dtensor.DTensor":
-        return super().apply(  # type: ignore[no-any-return]
-            grad_output, previous_spec, async_op, op_dtype, out_dtype
-        )
 
     @staticmethod
     def forward(  # type: ignore[override]
@@ -2032,9 +1991,9 @@ class NestedRedistribute(torch.autograd.Function):
         output_dtensor = NestedRedistribute.apply(
             grad2_output,
             previous_spec,
-            async_op=ctx.async_op,
-            op_dtype=ctx.op_dtype,
-            out_dtype=ctx.original_dtype,
+            ctx.async_op,
+            ctx.op_dtype,
+            ctx.original_dtype,
         )
 
         return (
