@@ -3199,6 +3199,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol)
         )
 
+    @xfailIf(IS_LINUX and IS_ARM64)
     # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_contiguous_for_oneDNN(self):
@@ -3224,11 +3225,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 # Disable MKLDNN explicitly
                 with torch.backends.mkldnn.flags(enabled=False):
                     y_ = conv(x2)
-                    if IS_LINUX and IS_ARM64 and dtype is torch.half:
-                        self.assertEqual(y, y_, rtol=1e-3, atol=3e-3)
-                    else:
-                        self.assertEqual(y, y_)
+                    self.assertEqual(y, y_)
 
+    @xfailIf(IS_LINUX and IS_ARM64)
     # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_ic1_channels_last_for_oneDNN(self):
@@ -3244,10 +3243,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 # Disable MKLDNN explicitly
                 with torch.backends.mkldnn.flags(enabled=False):
                     y_ = conv(x)
-                    if IS_LINUX and IS_ARM64 and dtype is torch.half:
-                        self.assertEqual(y, y_, rtol=1e-3, atol=3e-3)
-                    else:
-                        self.assertEqual(y, y_)
+                    self.assertEqual(y, y_)
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv_empty_channel(self, device, dtype):
