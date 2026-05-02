@@ -3902,7 +3902,9 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        return BoundBuiltinMethodVariable(self.descriptor, obj, name, source=self.source)
+        return BoundBuiltinMethodVariable(
+            self.descriptor, obj, name, source=self.source
+        )
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -3936,9 +3938,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
-        return (
-            f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
-        )
+        return f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
 
     def python_type(self) -> type:
         return types.BuiltinMethodType
@@ -4171,9 +4171,7 @@ class MemberDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(obj.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
             )
         return VariableTracker.build(tx, resolved, self.source)
 
@@ -4228,9 +4226,7 @@ class GetSetDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(obj.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
             )
         return VariableTracker.build(tx, resolved, self.source)
 

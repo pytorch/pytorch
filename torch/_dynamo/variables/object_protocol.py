@@ -147,6 +147,12 @@ def type_implements_mp_subscript(obj_type: type) -> bool:
     return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
 
 
+def type_implements_nb_negative(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_negative slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
+
+
 def type_implements_tp_iter(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
@@ -476,6 +482,26 @@ def generic_iternext(
     return obj.tp_iternext_impl(tx)
 
 
+def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyNumber_Negative.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1392
+
+    Algorithm:
+    1. If type has nb_negative slot, call obj.nb_negative_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_negative(obj_type):
+        return obj.nb_negative_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for unary -: '{obj.python_type_name()}'",
+    )
+
+
 def generic_getiter(
     tx: "InstructionTranslator", obj: VariableTracker
 ) -> "VariableTracker":
@@ -510,31 +536,6 @@ def generic_getiter(
         )
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
-
-
-# ---------------------------------------------------------------------------
-# Descriptor protocol (CPython's tp_descr_get / tp_descr_set)
-# ---------------------------------------------------------------------------
-
-
-def generic_tp_descr_get(
-    tx: "InstructionTranslator",
-    descr: VariableTracker,
-    obj: VariableTracker,
-    name: str,
-) -> VariableTracker:
-    """Invoke a descriptor's tp_descr_get slot.
-
-    Mirrors the pattern in PyObject_GenericGetAttr:
-        f = Py_TYPE(descr)->tp_descr_get;
-        if (f != NULL)
-            return f(descr, obj, type(obj));
-        // otherwise return descr as-is (plain attribute)
-    https://github.com/python/cpython/blob/3.13/Objects/object.c#L1663-L1665
-    """
-    if not hasattr(descr, "tp_descr_get_impl"):
-        return descr
-    return descr.tp_descr_get_impl(tx, obj, name)
 
 
 # ---------------------------------------------------------------------------

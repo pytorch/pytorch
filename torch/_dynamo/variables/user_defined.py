@@ -99,11 +99,7 @@ from ..utils import (
 from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
-from .object_protocol import (
-    generic_tp_descr_get,
-    is_nb_not_implemented,
-    type_implements_nb_slot,
-)
+from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
 from .sets import SetVariable
 
 
@@ -425,10 +421,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
-        # Check for pending mutations from setattr on the class during tracing.
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
-
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
         if cls_attr is not NO_SUCH_SUBOBJ:
@@ -506,7 +498,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         """Handle descriptors found in cls.__mro__."""
         if isinstance(cls_attr, staticmethod):
             sm_vt = variables.StaticMethodVariable(cls_attr, source=source)
-            return generic_tp_descr_get(tx, sm_vt, self, name)
+            return sm_vt.tp_descr_get_impl(tx, self, name)
 
         if isinstance(cls_attr, classmethod):
             if isinstance(cls_attr.__func__, property):
@@ -518,7 +510,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
             cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
-            return generic_tp_descr_get(tx, cmd_vt, self, name)
+            return cmd_vt.tp_descr_get_impl(tx, self, name)
 
         # property and _tuplegetter accessed on the class return the
         # descriptor itself (descriptor.__get__(None, cls) is descriptor).
@@ -657,6 +649,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         except NotImplementedError:
             pass
         return super().tp_iter_impl(tx)
+
+    def nb_negative_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__neg__")
+        if m:
+            source = self.source and AttrSource(self.source, "__neg__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx, f"object of type {self.python_type_name()} has no negative"
+        )
 
     def _call_cross_entropy_loss(
         self,
@@ -1608,6 +1611,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
         return result
+
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        type_attr = self.lookup_class_mro_attr("__neg__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__neg__")
+        if method is None:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+
+        return self.call_method(tx, "__neg__", [], {})
 
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (
@@ -2569,7 +2594,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 source = AttrSource(self.get_source_by_walking_mro(tx, name), "fget")
             prop_vt = variables.PropertyVariable(type_attr, source=source)
-            return generic_tp_descr_get(tx, prop_vt, self, name)
+            return prop_vt.tp_descr_get_impl(tx, self, name)
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -2582,11 +2607,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # tracing works.
         if isinstance(type_attr, types.MemberDescriptorType):
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-            return generic_tp_descr_get(tx, md_vt, self, name)
+            return md_vt.tp_descr_get_impl(tx, self, name)
 
         if isinstance(type_attr, types.GetSetDescriptorType):
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-            return generic_tp_descr_get(tx, gs_vt, self, name)
+            return gs_vt.tp_descr_get_impl(tx, self, name)
 
         # Remaining C-level data descriptors (C-defined property, Cython
         # attrs, _tuplegetter, etc.) -- resolve via __getattribute__.
@@ -2628,7 +2653,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )
             sm_vt = variables.StaticMethodVariable(type_attr, source=source)
-            return generic_tp_descr_get(tx, sm_vt, self, name)
+            return sm_vt.tp_descr_get_impl(tx, self, name)
         elif isinstance(type_attr, classmethod):
             source_fn = None
             if can_use_mro_source:
@@ -2638,12 +2663,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             cm_vt = variables.ClassMethodVariable(
                 type_attr, source_fn=source_fn, source=source
             )
-            return generic_tp_descr_get(tx, cm_vt, self, name)
+            return cm_vt.tp_descr_get_impl(tx, self, name)
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(
-                type_attr, source=source
-            )
-            return generic_tp_descr_get(tx, cmd_vt, self, name)
+            cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+            return cmd_vt.tp_descr_get_impl(tx, self, name)
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
                 type_attr, "__wrapped__", self, source=source
@@ -2695,13 +2718,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return variables.UserMethodVariable(traceable_fn, self)
             if isinstance(type_attr, types.WrapperDescriptorType):
                 wd_vt = variables.WrapperDescriptorVariable(type_attr, source=source)
-                return generic_tp_descr_get(tx, wd_vt, self, name)
+                return wd_vt.tp_descr_get_impl(tx, self, name)
             # method_get with an instance calls PyCFunction_NewEx to produce
             # a bound builtin_function_or_method.
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
             if isinstance(type_attr, types.MethodDescriptorType):
                 md_vt = variables.MethodDescriptorVariable(type_attr, source=source)
-                return generic_tp_descr_get(tx, md_vt, self, name)
+                return md_vt.tp_descr_get_impl(tx, self, name)
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
