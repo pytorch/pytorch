@@ -4266,6 +4266,80 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_lifted_tensor_constants(self):
+        # When the region captured by nested_compile_region closes over an
+        # inline tensor constant and is replayed multiple times, export
+        # promotes the subgraph to ``repeated_subgraph0``. After decomposing
+        # the ExportedProgram, the inner tensor constant surfaces in the
+        # top-level graph signature as a persistent buffer named like
+        # ``repeated_subgraph0._tensor_constant0``, even though the tensor
+        # actually lives inside the subgraph submodule rather than in the
+        # top-level ``state_dict`` or ``constants``. Verify that export,
+        # decomposition, verification, and ``named_buffers`` all handle that
+        # shape.
+        @nested_compile_region
+        def block(x):
+            w = torch.tensor([1.0, 2.0, 3.0, 4.0])
+            return x * w + 1.0
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = block(x)
+                x = block(x)
+                return x
+
+        x = torch.randn(4)
+
+        ep = torch.export.export(M(), (x,), strict=self.strict)
+        ep = ep.run_decompositions({})
+
+        # The inner tensor constant should be exposed as a subgraph-scoped
+        # buffer in the top-level graph signature.
+        buffer_names = list(ep.graph_signature.buffers)
+        self.assertTrue(
+            any(
+                name.startswith("repeated_subgraph")
+                and "._tensor_constant" in name
+                for name in buffer_names
+            ),
+            f"Expected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
+        )
+        self.assertNotIn(buffer_names[0], ep.state_dict)
+        self.assertNotIn(buffer_names[0], ep.constants)
+
+        # named_buffers must resolve the constant through the subgraph's
+        # submodule state rather than raising KeyError. After decomposition
+        # the buffer is a FakeTensor, so just check the metadata.
+        resolved = dict(ep.named_buffers())
+        self.assertIn(buffer_names[0], resolved)
+        self.assertEqual(resolved[buffer_names[0]].shape, torch.Size([4]))
+        self.assertEqual(resolved[buffer_names[0]].dtype, torch.float32)
+
+        # Verification must pass despite the buffer not being in state_dict.
+        from torch._export.verifier import _verify_exported_program_signature
+
+        _verify_exported_program_signature(ep)
+
+    def test_invoke_subgraph_placeholder_forwards_kwargs(self):
+        # Under non-strict export (``torch.compiler.is_compiling()`` True but
+        # not Dynamo) the placeholder goes through a small wrapper that must
+        # forward both *args and **kwargs. Regression test for a path that
+        # silently dropped kwargs.
+        @nested_compile_region
+        def gn(x, y, *, scale=1.0):
+            return x * y * scale
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return gn(x, y, scale=2.0)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        self.assertEqual(ep.module()(x, y), M()(x, y))
+
 
 class NegativeTesting(TestCase):
     def test_graph_break(self):

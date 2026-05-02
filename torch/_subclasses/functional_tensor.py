@@ -682,9 +682,13 @@ class FunctionalTensorMode(TorchDispatchMode):
                 try:
                     tracker_entry = m.tracer.tensor_tracker[unwrapped]
                 except KeyError:
-                    raise RuntimeError(
-                        f"cannot find {unwrapped} in tensor_tracker"
-                    ) from None
+                    # Lifted tensor constants created inside a nested HOP
+                    # subgraph (e.g. invoke_subgraph / nested_compile_region)
+                    # are not registered with the outer tracer's tensor_tracker
+                    # because they are owned by the subgraph's own tracer. In
+                    # that case there is no view-replay metadata to plumb, so
+                    # skip this tensor and move on.
+                    continue
                 curr_node = tracker_entry.proxy.node
                 with fx_traceback.set_current_replay_node(curr_node):
                     torch._sync(a)

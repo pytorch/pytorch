@@ -968,6 +968,36 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         # Verify the output is correct
         onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_onnx_export_invoke_subgraph_with_lifted_tensor_constant(self):
+        # Covers the full decoder-style pipeline: a region wrapped in
+        # ``nested_compile_region`` that captures an inline tensor constant,
+        # repeated several times so the region is materialized as an
+        # invoke_subgraph HOP with a shared ``repeated_subgraph0`` submodule.
+        # Exercises the decomposition / verifier / named_buffers /
+        # FunctionalTensor / ONNX initializer paths end-to-end.
+        @torch.compiler.nested_compile_region
+        def block(x):
+            w = torch.tensor([1.0, 2.0, 3.0, 4.0])
+            return x * w + 1.0
+
+        class RepeatedBlockModel(torch.nn.Module):
+            def forward(self, x):
+                x = block(x)
+                x = block(x)
+                x = block(x)
+                return x
+
+        x = torch.randn(4)
+
+        onnx_program = self.export(RepeatedBlockModel(), (x,), optimize=False)
+
+        # The subgraph should be preserved as an ONNX function rather than
+        # inlined, and the lifted tensor constant must be materialized as an
+        # initializer so the saved model is self-contained.
+        self.assertGreaterEqual(len(onnx_program.model.functions), 1)
+        self.assertGreaterEqual(len(list(onnx_program.model.graph.initializers)), 1)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

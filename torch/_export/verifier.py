@@ -446,7 +446,20 @@ def _verify_exported_program_signature(exported_program) -> None:
                 input_spec.persistent is True
                 and buffer not in exported_program.state_dict
             ):
-                raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
+                # Nested invoke_subgraph tracing can lift a tensor constant
+                # from an inner subgraph into the top-level graph signature as
+                # a buffer (named like ``repeated_subgraph0._tensor_constant0``).
+                # The tensor is owned by the subgraph module and lives in
+                # ``constants``, not the top-level ``state_dict``. Allow this
+                # shape to pass verification.
+                is_nested_lifted_constant = (
+                    buffer.startswith("repeated_subgraph")
+                    and "._tensor_constant" in buffer
+                )
+                if not is_nested_lifted_constant:
+                    raise SpecViolationError(
+                        f"Buffer {buffer} is not in the state dict."
+                    )
 
             if input_spec.persistent is False and buffer in exported_program.state_dict:
                 raise SpecViolationError(

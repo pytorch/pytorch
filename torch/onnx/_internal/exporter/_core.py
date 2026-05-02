@@ -467,6 +467,12 @@ def _convert_fx_arg_to_onnx_arg(
                 # use SequenceAt to get the value. This is handled by torchlib
                 pass
         if isinstance(arg, torch.fx.Node) and arg.op == "get_attr":
+            # A get_attr node may refer to either a subgraph function
+            # (handled via node_name_to_local_functions) or, for lifted
+            # tensor constants materialized from nested invoke_subgraph
+            # tracing, an initializer value in node_name_to_values.
+            if arg.name in node_name_to_values:
+                return node_name_to_values[arg.name]
             return node_name_to_local_functions[arg.name]
         # If the input is a node, get the value from the mapping
         return node_name_to_values[arg.name]
@@ -822,11 +828,30 @@ def _translate_fx_graph(
                     # No lowering
                     _handle_call_function_node(graph_like, node, node_name_to_values)
             elif node.op == "get_attr":
-                _handle_get_attr_node(
-                    node,
-                    owned_graphs=owned_graphs,
-                    node_name_to_local_functions=node_name_to_local_functions,
-                )
+                if isinstance(node.target, str) and node.target not in owned_graphs:
+                    # Nested invoke_subgraph tracing can leave lifted tensor
+                    # constants (e.g. ``repeated_subgraph0._tensor_constant0``)
+                    # attached as get_attr nodes that are not registered
+                    # subgraphs. Materialize them as ONNX initializers so the
+                    # exported model has the data available at save time.
+                    tensor_value = node.meta.get("val", None)
+                    if tensor_value is None:
+                        tensor_value = node.meta.get("example_value", None)
+                    if not isinstance(tensor_value, torch.Tensor):
+                        raise KeyError(node.target)
+                    value = ir.Value(name=node.name)
+                    value.const_value = TorchTensor(tensor_value, name=node.name)
+                    _set_shape_type(
+                        value, tensor_value, complex_to_float=lower != "none"
+                    )
+                    model.graph.initializers[node.name] = value
+                    node_name_to_values[node.name] = value
+                else:
+                    _handle_get_attr_node(
+                        node,
+                        owned_graphs=owned_graphs,
+                        node_name_to_local_functions=node_name_to_local_functions,
+                    )
             elif node.op == "output":
                 _handle_output_node(
                     node,

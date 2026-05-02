@@ -1215,8 +1215,18 @@ class ExportedProgram:
         for buffer_name in self.graph_signature.buffers:
             if buffer_name in non_persistent_buffers:
                 yield buffer_name, self.constants[buffer_name]
-            else:
+            elif buffer_name in self.state_dict:
                 yield buffer_name, self.state_dict[buffer_name]
+            elif buffer_name in self.constants:
+                yield buffer_name, self.constants[buffer_name]
+            else:
+                # Nested invoke_subgraph tracing can surface lifted tensor
+                # constants owned by an inner subgraph (e.g.
+                # ``repeated_subgraph0._tensor_constant0``) as persistent
+                # buffers in the top-level graph signature. The tensor lives
+                # inside the subgraph submodule rather than in the top-level
+                # ``state_dict`` or ``constants``.
+                yield buffer_name, self.graph_module.state_dict()[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
