@@ -649,6 +649,12 @@ class TestBinaryUfuncsDevice(TestCase):
     @ops(binary_ufuncs, dtypes=OpDTypes.none)
     def test_type_promotion(self, device, op):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
+        # Some backends declare complex dtypes as unsupported. Use this flag to
+        # gate the sub-tests that cast the output to complex — those paths are
+        # not representative of the backend's real behaviour and produce
+        # false-positive failures when the backend cannot produce complex
+        # output. Non-complex promotion coverage is unaffected.
+        complex_supported = torch.complex64 in supported_dtypes
         make_lhs = partial(
             make_tensor, (5,), device=device, **op.lhs_make_tensor_kwargs
         )
@@ -734,9 +740,10 @@ class TestBinaryUfuncsDevice(TestCase):
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float32)
                 self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
-                out = torch.empty_like(lhs_i64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                if complex_supported:
+                    out = torch.empty_like(lhs_i64, dtype=torch.complex64)
+                    self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
+                    self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
         # float x float type promotion
         if _supported((torch.float32, torch.float64)):
@@ -767,9 +774,10 @@ class TestBinaryUfuncsDevice(TestCase):
                 self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.float32)
                 self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
-                out = torch.empty_like(lhs_f64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                if complex_supported:
+                    out = torch.empty_like(lhs_f64, dtype=torch.complex64)
+                    self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
+                    self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 if not op.always_returns_bool:
                     # float outs can't be cast to an integer dtype
@@ -1555,6 +1563,15 @@ class TestBinaryUfuncsDevice(TestCase):
             will_raise_error = (
                 dtype is torch.half and torch.device(device).type == "cpu"
             )
+            # Some backends declare complex dtypes as unsupported (e.g. MPS).
+            # Skip the complex-exponent branch on those backends;
+            # coverage for real exponents above is preserved.
+            from torch.testing._internal.common_dtype import (
+                get_unsupported_dtypes_for_device,
+            )
+            device_type = torch.device(device).type
+            unsupported = get_unsupported_dtypes_for_device(device_type)
+            backend_supports_complex = torch.complex64 not in unsupported
             if will_raise_error:
                 # On CPU,
                 # Half Tensor with complex exponents leads to computation dtype
@@ -1563,7 +1580,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     RuntimeError, "not implemented for 'ComplexHalf'"
                 ):
                     self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
-            else:
+            elif backend_supports_complex:
                 self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
         # base - number, exponent - tensor
