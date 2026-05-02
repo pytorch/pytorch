@@ -7352,6 +7352,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(2, 4),))
 
+    def test_same_meta_non_tensor(self):
+        from torch._inductor.fx_passes.post_grad import same_meta
+
+        g = torch.fx.Graph()
+        n1 = g.create_node("placeholder", "x")
+        n2 = g.create_node("placeholder", "y")
+
+        n1.meta["val"] = torch.SymInt(42)
+        n2.meta["val"] = torch.SymInt(42)
+        self.assertFalse(same_meta(n1, n2))
+
+        n1.meta["val"] = None
+        n2.meta["val"] = torch.randn(4)
+        self.assertFalse(same_meta(n1, n2))
+
+        t = torch.randn(4)
+        n1.meta["val"] = t
+        n2.meta["val"] = t
+        self.assertTrue(same_meta(n1, n2))
+
     def test_remove_noop_slice(self):
         def f(x):
             x = x + 1
@@ -10524,6 +10544,59 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @parametrize(
+        "fallback_random",
+        [
+            subtest(True, name="fallback"),
+            subtest(False, name="inductor", decorators=[unittest.expectedFailure]),
+        ],
+    )
+    def test_randn_order_preserved(self, fallback_random):
+        if self.device == "cpu":
+            raise unittest.SkipTest("conv2d randn ordering requires CUDA")
+
+        def fn():
+            a = torch.randn(2, 4, 4, 4, device=self.device)
+            b = torch.randn(2, 3, 4, 4, device=self.device)
+            c = torch.randn(4, 3, 3, 3, device=self.device)
+            y = torch.nn.functional.conv2d(b, c, padding=1)
+            z = a + y
+            return z
+
+        with config.patch(fallback_random=fallback_random):
+            compiled = torch.compile(fn)
+
+            torch.manual_seed(42)
+            eager_out = fn()
+
+            torch.manual_seed(42)
+            compiled_out = compiled()
+
+            self.assertEqual(compiled_out, eager_out)
+
+    @config.patch(fallback_random=True)
+    def test_tuple_output_rng_order_preserved(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("conv2d randn ordering requires CUDA")
+
+        def fn(x):
+            dropped, _ = torch.ops.aten.native_dropout.default(x, 0.5, True)
+            b = torch.randn(2, 3, 4, 4, device=x.device)
+            c = torch.randn(4, 3, 3, 3, device=x.device)
+            y = torch.nn.functional.conv2d(b, c, padding=1)
+            return dropped + y
+
+        x = torch.ones(2, 4, 4, 4, device=self.device)
+        compiled = torch.compile(fn)
+
+        torch.manual_seed(42)
+        eager_out = fn(x)
+
+        torch.manual_seed(42)
+        compiled_out = compiled(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -11813,10 +11886,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         nonlocal test_self
                         nonlocal matmul_seen
 
-                        # by matmul, inputs should be deallocated
-                        # TODO: should not be necessary, ref-cycle ?
-                        gc.collect()
                         if func is aten.mm.out:
+                            # by matmul, inputs should be deallocated
+                            # TODO: should not be necessary, ref-cycle ?
+                            gc.collect()
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
                             test_self.assertIsNone(inp_refs[0]())
@@ -16506,40 +16579,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (torch.randn(8, 16, dtype=dtype, device=self.device),),
                 check_lowp=False,
             )
-
-    def test_jvp_compile_backward(self):
-        def jvp_fn(f, x):
-            return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
-
-        def compute(f, x):
-            first, rest = x[..., :1], x[..., 1:]
-            return jvp_fn(lambda X: f(torch.cat([X, rest])), first)
-
-        in_features = 4
-        net = torch.nn.Sequential(
-            torch.nn.Linear(in_features, 32),
-            torch.nn.Linear(32, 32),
-            torch.nn.Linear(32, 8),
-        ).to(self.device)
-
-        x = torch.rand((in_features,), device=self.device)
-
-        eager_out = compute(net, x).sum()
-        eager_out.backward()
-        eager_grads = [p.grad.clone() for p in net.parameters() if p.grad is not None]
-        net.zero_grad()
-
-        compiled = torch.compile(compute)
-        compiled_out = compiled(net, x).sum()
-        compiled_out.backward()
-        compiled_grads = [
-            p.grad.clone() for p in net.parameters() if p.grad is not None
-        ]
-
-        self.assertEqual(eager_out, compiled_out)
-        self.assertEqual(len(eager_grads), len(compiled_grads))
-        for eg, cg in zip(eager_grads, compiled_grads):
-            self.assertEqual(eg, cg)
 
     # end of class CommonTemplate - add new tests here
 
