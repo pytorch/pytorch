@@ -35,6 +35,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = dist.get_default_backend_for_device(device_type)
 
 
 def create_cpu_state_dict(state_dict):
@@ -923,7 +924,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @property
     def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+        return f"cpu:gloo,{device_type}:{backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """

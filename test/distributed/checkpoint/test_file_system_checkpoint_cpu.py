@@ -2,6 +2,7 @@
 
 import sys
 import tempfile
+import unittest
 from typing import Any, IO
 
 import torch
@@ -29,6 +30,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
@@ -289,9 +291,19 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         return paths[0]
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
-        res = torch.zeros(tensor.shape, device="cpu") if dist.get_rank() == 0 else None
-        tensor.gather(out=res)
-        return res
+        backend = dist.get_backend()
+        rank = dist.get_rank()
+
+        if backend == "xccl":
+            out = torch.zeros(tensor.shape, device="xpu:0") if rank == 0 else None
+            tensor.gather(out=out)
+            if rank == 0:
+                return out.cpu()
+            return None
+        else:
+            out = torch.zeros(tensor.shape, device="cpu") if rank == 0 else None
+            tensor.gather(out=out)
+            return out
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
@@ -428,14 +440,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ],
         )
 
-        model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
+        device = f"{device_type}:{dist.get_rank()}"
+        model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec).to(device)
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
@@ -469,6 +485,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual("string", state_dict_to_load["bytes1"])
 
     @with_comms(init_rpc=False, backend="gloo")
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
         path = self.get_file_path()
