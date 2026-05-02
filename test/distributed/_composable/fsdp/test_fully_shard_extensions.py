@@ -446,7 +446,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ) -> tuple[tuple[torch.Tensor, ...], Any]:
             nonlocal tls
             tls.mesh = mesh
-            return (self,), None
+            all_gather_inputs = (self.a, self.b)
+            return all_gather_inputs, None
 
         @torch.no_grad()
         def fsdp_post_all_gather(
@@ -457,10 +458,15 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             *,
             out: torch.Tensor | None = None,
         ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
-            (tensor,) = all_gather_outputs
+            a, b = all_gather_outputs
             if out is not None:
+                if not isinstance(out, TwoTensor):
+                    raise AssertionError(f"Expected TwoTensor, got {type(out)}")
+                out.a.copy_(a)
+                out.b.copy_(b)
                 return
-            return tensor, (tensor,)
+            two_tensor = TwoTensor(a, b)
+            return two_tensor, (a, b)
 
         model = self._init_two_tensor_mlp()
         for mlp in model:

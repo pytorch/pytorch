@@ -1,5 +1,7 @@
 # Owner(s): ["module: unknown"]
 
+import unittest
+
 import torch
 from torch._C import parse_schema
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -335,6 +337,43 @@ class TestFunctionSchema(TestCase):
         self.assertEqual(schema.returns[-1].real_type.str(), "SymInt")
         # print real types in FunctionSchema
         self.assertEqual(str(schema), schema_str)
+
+    def _check_alias_annotation(self, schema, arg_name, expected_is_write):
+        """Check that a schema argument has the expected alias annotation."""
+        arg = next((a for a in schema.arguments if a.name == arg_name), None)
+        self.assertIsNotNone(arg, f"Argument '{arg_name}' not found in schema {schema}")
+        self.assertIsNotNone(
+            arg.alias_info,
+            f"Argument '{arg_name}' should have alias annotation in schema {schema}",
+        )
+        self.assertEqual(
+            arg.alias_info.is_write,
+            expected_is_write,
+            f"Argument '{arg_name}' alias_info.is_write should be {expected_is_write}",
+        )
+
+    def _check_return_alias_annotation(self, schema, return_idx):
+        """Check that a schema return has an alias annotation."""
+        self.assertGreater(len(schema.returns), return_idx)
+        ret = schema.returns[return_idx]
+        self.assertIsNotNone(
+            ret.alias_info,
+            f"Return {return_idx} should have alias annotation in schema {schema}",
+        )
+
+    def test_fsdp_all_gather_copy_in_alias_annotations(self):
+        # The all_gather_output argument is mutated and both returns alias it.
+        try:
+            schema = torch.ops.fsdp.all_gather_copy_in.default._schema
+        except AttributeError as e:
+            raise unittest.SkipTest(
+                "fsdp ops not registered (distributed not available)"
+            ) from e
+        self._check_alias_annotation(
+            schema, "all_gather_output", expected_is_write=True
+        )
+        self._check_return_alias_annotation(schema, 0)
+        self._check_return_alias_annotation(schema, 1)
 
 
 if __name__ == "__main__":
