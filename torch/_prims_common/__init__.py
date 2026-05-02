@@ -2162,6 +2162,19 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
 
 
 def clone_preserve_strides(x):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Mirror the C++ at::native::clone_preserve_strides: when the input has
+    # internal memory overlap (e.g. an expand from a scalar with stride 0),
+    # we cannot preserve strides because *_scatter ops will copy_() into the
+    # clone, and copy_ requires non-overlapping output storage. Fall back to
+    # a plain clone, which materializes a contiguous buffer.
+    if any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(x.size(), x.stride())
+    ):
+        return x.clone()
+
     needed_size = compute_required_storage_length(
         x.size(), x.stride(), x.storage_offset()
     )

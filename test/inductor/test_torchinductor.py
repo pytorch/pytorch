@@ -10661,6 +10661,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(y.grad, y_ref.grad)
 
+    def test_diagonal_scatter_overlap_input(self):
+        # The decomposition for diagonal_scatter (and the other *_scatter ops)
+        # uses clone_preserve_strides, which must materialize a contiguous
+        # buffer when the input has internal memory overlap (e.g. an expand
+        # of a scalar with stride 0). Otherwise the diagonal write aliases
+        # the entire output and corrupts non-diagonal positions. This pattern
+        # arises naturally in the backward of diagonal_scatter(x, src).sum().
+        def fn(x, src):
+            return torch.diagonal_scatter(x, src, 0).sum()
+
+        x = torch.randn(8, 8, device=self.device, requires_grad=True)
+        src = torch.randn(8, device=self.device, requires_grad=True)
+
+        x_eager = x.clone().detach().requires_grad_(True)
+        src_eager = src.clone().detach().requires_grad_(True)
+        fn(x_eager, src_eager).backward()
+
+        x_compiled = x.clone().detach().requires_grad_(True)
+        src_compiled = src.clone().detach().requires_grad_(True)
+        torch.compile(fn)(x_compiled, src_compiled).backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+        self.assertEqual(src_eager.grad, src_compiled.grad)
+
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
         def fn(x, a):
