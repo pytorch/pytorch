@@ -98,11 +98,14 @@ from .lists import (
 )
 from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
+    binary_iop,
+    binary_op,
     generic_bool,
     generic_float,
     generic_getiter,
     generic_int,
     generic_len,
+    generic_neg,
     vt_getitem,
     vt_identity_compare,
 )
@@ -115,12 +118,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import (
-    MutableMappingVariable,
-    UserDefinedDictVariable,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
@@ -992,6 +990,29 @@ class BuiltinVariable(BaseBuiltinVariable):
     def get_real_python_backed_value(self) -> Any:
         return self.fn
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # BuiltinVariable wraps built-in types like list, tuple, dict.
+        # type(self.fn).__or__(self.fn, other_val) delegates to CPython's
+        # _Py_union_type_or for type unions (e.g. list | tuple).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or = _Py_union_type_or)
+        # https://github.com/python/cpython/blob/3.13/Objects/unionobject.c#L162 (_Py_union_type_or)
+        if not isinstance(self.fn, type):
+            return VariableTracker.build(tx, NotImplemented)
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.fn).__or__(self.fn, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def as_proxy(self) -> Any:
         DTYPE = {
             bool: torch.bool,
@@ -1666,6 +1687,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
             # For builtin types called on user-defined subclasses, use the base iterator
             return generic_getiter(tx, args[0])
+
+        if name == "__neg__" and len(args) == 1 and not kwargs:
+            # type.__neg__(instance) → neg(instance)
+            # e.g., int.__neg__(4) → neg(4)
+            # For builtin types called on user-defined subclasses, use the base iterator
+            return generic_neg(tx, args[0])
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2554,7 +2581,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
                             context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dyanmo only supports mutating `.data`"
+                            explanation="Dynamo only supports mutating `.data`"
                             " of tensor created outside `torch.compile` region",
                             hints=[
                                 "Don't mutate `.data` on this tensor, or move "
@@ -2565,7 +2592,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute to different dtype",
                             context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dyanmo only supports mutating `.data`"
+                            explanation="Dynamo only supports mutating `.data`"
                             " of tensor to a new one with the same dtype",
                             hints=[
                                 "Don't mutate `.data` on this tensor, or move "
@@ -2631,7 +2658,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     unimplemented(
                         gb_type="Failed to set tensor attribute",
                         context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dyanmo doesn't support setting these tensor attributes",
+                        explanation="Dynamo doesn't support setting these tensor attributes",
                         hints=[
                             f"Don't mutate attribute '{name}' on tensors, or "
                             "move the mutation out of `torch.compile` region",
@@ -2735,25 +2762,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             return list_var
         return None
 
-    # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(
         self, tx: "InstructionTranslator", a: VariableTracker
-    ) -> VariableTracker | None:
-        if isinstance(a, SymNodeVariable):
-            return SymNodeVariable.create(
-                tx,
-                (operator.neg)(a.as_proxy()),
-                sym_num=None,
-            )
-
-        if (
-            isinstance(a, UserDefinedObjectVariable)
-            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
-        ):
-            return a.call_method(tx, "__neg__", [], {})
-
-        # None no-ops this handler and lets the driving function proceed
-        return None
+    ) -> VariableTracker:
+        return generic_neg(tx, a)
 
     def call_format(
         self,
@@ -2970,76 +2982,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_or_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
-            return None
-
-        # Constant fold or_ for class/type variables (e.g. Shard | _StridedShard
-        # producing a types.UnionType for isinstance checks). This handles cases
-        # like OpaqueObjectClassVariable where is_python_constant() returns False
-        # but as_python_constant() works.
-        try:
-            a_const = a.as_python_constant()
-            b_const = b.as_python_constant()
-            if isinstance(a_const, type) and isinstance(b_const, type):
-                return VariableTracker.build(tx, a_const | b_const)
-        except NotImplementedError:
-            pass
-
-        if a.is_symnode_like() and b.is_symnode_like():
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", operator.or_, *proxy_args_kwargs([a, b], {})
-                ),
-                sym_num=None,
-            )
-
-        # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
-        if isinstance(
-            a,
-            (
-                *_SET_LIKE_OP_SUPPORT,
-                ConstDictVariable,
-                MutableMappingVariable,
-                UserDefinedDictVariable,
-            ),
-        ):
-            # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
-            # a.__ror__(b) returns NotImplemented
-            return a.call_method(tx, "__or__", [b], {})
-
-        # None no-ops this handler and lets the driving function proceed
-        return None
+        return binary_op(tx, a, b, "nb_or", "|")
 
     def call_ior(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
-            return None
-        if a.is_symnode_like() and b.is_symnode_like():
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", operator.ior, *proxy_args_kwargs([a, b], {})
-                ),
-                sym_num=None,
-            )
-
-        # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
-        if isinstance(
-            a,
-            (
-                *_SET_LIKE_OP_SUPPORT,
-                ConstDictVariable,
-                MutableMappingVariable,
-            ),
-        ):
-            return a.call_method(tx, "__ior__", [b], {})
-
-        # None no-ops this handler and lets the driving function proceed
-        return None
+        return binary_iop(tx, a, b, "nb_inplace_or", "nb_or", "|=")
 
     def call_not_(
         self, tx: "InstructionTranslator", a: VariableTracker
