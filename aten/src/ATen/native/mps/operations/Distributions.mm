@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -241,34 +242,15 @@ static Tensor& normal_mps_impl(Tensor& self,
                                  random_op_block);
 }
 
-static Tensor& bernoulli_mps_impl(Tensor& self,
-                                  const Tensor& prob_t,
-                                  std::optional<Generator> gen,
-                                  std::string op_name) {
-  TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
-              op_name,
-              ": probability and self tensor should be of the same shape")
-
-  RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob_t);
-    return [mpsGraph lessThanWithPrimaryTensor:randomTensor
-                               secondaryTensor:castMPSTensor(mpsGraph, cachedGraph->stdTensor, [randomTensor dataType])
-                                          name:nil];
-  };
-  // Bernoulli generates binary output so we use bool type
-  return mps::random_mps_impl<bool>(self,
-                                    0.0,
-                                    1.0,
-                                    std::nullopt,
-                                    prob_t,
-                                    MPSGraphRandomDistributionUniform,
-                                    gen,
-                                    op_name + getTensorsStringKey({prob_t}),
-                                    random_op_block);
-}
-
 } // namespace mps
+
+static Tensor& distribution_kernel_mps_impl(Tensor& self,
+                                            double param1,
+                                            double param2,
+                                            const std::string& kernel_name,
+                                            int64_t randoms_per_element,
+                                            std::optional<Generator> gen,
+                                            int64_t elements_per_thread = 1);
 
 Tensor& uniform_mps_(Tensor& self, double from, double to, std::optional<Generator> gen) {
   auto scalar_type = self.scalar_type();
@@ -341,20 +323,81 @@ Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, std::optional<Gene
   return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
 }
 
-Tensor& bernoulli_out_mps(const Tensor& p_, std::optional<Generator> gen, Tensor& result) {
-  result.resize_(p_.sizes());
-  return mps::bernoulli_mps_impl(result, p_, gen, __func__);
+// Tensor-p Bernoulli: dispatches the Metal `bernoulli_tensor` kernel with a
+// flat float32 probability buffer matching `self.numel()`.
+static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
+  if (self.numel() == 0) {
+    return self;
+  }
+  TORCH_CHECK(p_.is_same_size(self) || p_.dim() == 0,
+              "bernoulli_mps_: probability and self tensor should be of the same shape");
+
+  using namespace mps;
+
+  // 0-dim p is a scalar — go through the scalar path.
+  if (p_.dim() == 0) {
+    double p_val = p_.item<double>();
+    TORCH_CHECK(0.0 <= p_val && p_val <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p_val);
+    return distribution_kernel_mps_impl(self, p_val, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+  }
+
+  auto p_float = p_.scalar_type() == kFloat ? p_ : p_.to(kFloat);
+  if (!p_float.is_contiguous()) {
+    p_float = p_float.contiguous();
+  }
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto needs_copy = !self.is_contiguous();
+  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("bernoulli_tensor_" + scalarToMetalTypeString(output));
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + output.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        auto numel = static_cast<uint32_t>(output.numel());
+        mtl_setArgs(computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset});
+        mtl_setBytes(computeEncoder, numel, 3);
+        mtl_dispatch1DJob(computeEncoder, pso, (numel + 3) / 4);
+      }
+    });
+  }
+
+  if (needs_copy) {
+    self.copy_(output);
+  }
+  return self;
 }
 
-Tensor& bernoulli_mps_(Tensor& self, double p, std::optional<Generator> gen) {
-  TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
-  Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
-  return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
+// Stub-style entry points so MPS shares the dispatch template with CPU/CUDA.
+// `const TensorBase&` mirrors the stub signature; the underlying storage is
+// still the inplace target (TensorIterator uses the same idiom).
+static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  distribution_kernel_mps_impl(self_t, p, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
 }
 
-Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
-  return mps::bernoulli_mps_impl(self, p_, gen, __func__);
+static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  const Tensor& p_t = static_cast<const Tensor&>(p_);
+  bernoulli_tensor_mps_impl(self_t, p_t, gen);
 }
+
+REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
+REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 // random_.from
 Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> gen) {
@@ -431,7 +474,7 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
                                             const std::string& kernel_name,
                                             int64_t randoms_per_element,
                                             std::optional<Generator> gen,
-                                            int64_t elements_per_thread = 1) {
+                                            int64_t elements_per_thread) {
   if (self.numel() == 0) {
     return self;
   }
