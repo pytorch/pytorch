@@ -2230,6 +2230,40 @@ class TestSDPA(NNTestCase):
             expected_shape[-1] = v_shape[-1]
             self.assertEqual(actual.shape, torch.Size(expected_shape))
 
+    def test_sdpa_export_unbacked_attn_mask(self, device):
+        """SDPA backend selection should not crash on unbacked symbolic mask shapes."""
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_heads = 4
+                self.head_dim = 8
+                self.hidden_size = self.num_heads * self.head_dim
+                # 3 * 12 * 12 = 432
+                self.proj_q = nn.Linear(432, self.hidden_size)
+                self.proj_k = nn.Linear(432, self.hidden_size)
+                self.proj_v = nn.Linear(432, self.hidden_size)
+
+            def forward(self, x):
+                keep = x.sum(dim=(-1, -2, -3)) != 0  # x: [B, 3, 12, 12]
+                x = x[keep]  # [u0, 3, 12, 12].
+                flat = x.flatten(1)  # [u0, 432]
+                q = self.proj_q(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                k = self.proj_k(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                v = self.proj_v(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                attn_mask = torch.ones(
+                    (x.shape[0], 1, 1, 1), dtype=torch.bool, device=x.device
+                )
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
+                )
+
+        model = Model().eval().to(device)
+        x = torch.randn(4, 3, 12, 12, device=device)
+        x[0].zero_()
+
+        # Should not crash during export with unbacked symbolic mask batch dim
+        torch.export.export(model, args=(x,))
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """

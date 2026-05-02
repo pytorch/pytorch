@@ -278,22 +278,41 @@ inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   auto qSize = params.query.sym_size(2);
   auto kvSize = params.key.sym_size(2);
   auto num_head = params.query.sym_size(1);
-  if (attn_mask.value().sym_size(-2) != qSize && attn_mask.value().sym_size(-2) != 1) {
+
+  // Helper to check if a mask dim is compatible with a target dim.
+  // Compatible means: symbolically equal, or the mask dim is concretely 1
+  // (broadcast). Returns false (conservatively reject) when neither can be
+  // determined without guarding on unbacked symbolic ints.
+  auto dim_compatible = [](const c10::SymInt& mask_dim,
+                           const c10::SymInt& target_dim) -> bool {
+    if (TORCH_STATICALLY_KNOWN_TRUE(mask_dim == target_dim)) {
+      return true;
+    }
+    auto mask_int = mask_dim.maybe_as_int();
+    return mask_int.has_value() && *mask_int == 1;
+  };
+
+  auto mask_qsize = attn_mask.value().sym_size(-2);
+  if (!dim_compatible(mask_qsize, qSize)) {
     return false;
   }
-  if (attn_mask.value().sym_size(-1) != kvSize && attn_mask.value().sym_size(-1) != 1) {
+  auto mask_kvsize = attn_mask.value().sym_size(-1);
+  if (!dim_compatible(mask_kvsize, kvSize)) {
     return false;
   }
   if (attn_mask.value().dim() == 2) {
     return true;
   } else if (attn_mask.value().dim() == 4) {
-    if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
-        && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
+    auto mask_b = attn_mask.value().sym_size(0);
+    auto mask_h = attn_mask.value().sym_size(1);
+    if (dim_compatible(mask_b, batchSize) &&
+        dim_compatible(mask_h, num_head)) {
       return true;
     }
   }
   if (debug) {
-    TORCH_WARN("Please use the following attn mask shapes: ",
+    TORCH_WARN(
+        "Please use the following attn mask shapes: ",
         "2d - ({Q_seq_len, 1}  x {KV_seq_len, 1}); ",
         "4d - ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})");
   }
