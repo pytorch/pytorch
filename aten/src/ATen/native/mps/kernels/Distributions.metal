@@ -100,6 +100,90 @@ REGISTER_EXPONENTIAL(float);
 REGISTER_EXPONENTIAL(half);
 REGISTER_EXPONENTIAL(bfloat);
 
+// Convert a 0/1 mask bit into the output dtype. For complex types we keep
+// the mask in the real component and zero the imaginary part — matching the
+// previous MPSGraph behaviour where bool was cast to complex via "1+0j / 0+0j".
+// `static_cast<float2>(v)` would broadcast to `(v, v)`, which is wrong here.
+template <typename T>
+inline T bernoulli_to(uint v) {
+  return static_cast<T>(v);
+}
+template <>
+inline float2 bernoulli_to<float2>(uint v) {
+  return float2(static_cast<float>(v), 0.0f);
+}
+template <>
+inline half2 bernoulli_to<half2>(uint v) {
+  return half2(static_cast<half>(v), 0.0h);
+}
+
+// Bernoulli with scalar probability p. Each thread processes 4 elements,
+// amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
+// kernel becomes bandwidth-bound rather than RNG-bound.
+template <typename T>
+kernel void bernoulli_scalar(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float p = params.x;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
+  }
+}
+
+// Bernoulli with per-element probability tensor (float). The probability
+// buffer must be flattened and have the same numel as `output`; broadcasting
+// is handled host-side so this kernel is a straight zip over two contiguous
+// buffers plus a single Philox round per thread.
+template <typename T>
+kernel void bernoulli_tensor(
+    device T* output [[buffer(0)]],
+    device const float* probs [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    float p = probs[base + i];
+    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
+  }
+}
+
+#define REGISTER_BERNOULLI(DTYPE)                                              \
+  template [[host_name("bernoulli_scalar_" #DTYPE)]] kernel void               \
+  bernoulli_scalar<DTYPE>(                                                     \
+      device DTYPE*, constant float2&, constant long2&, constant uint&, uint); \
+  template [[host_name("bernoulli_tensor_" #DTYPE)]] kernel void               \
+  bernoulli_tensor<DTYPE>(                                                     \
+      device DTYPE*,                                                           \
+      device const float*,                                                     \
+      constant long2&,                                                         \
+      constant uint&,                                                          \
+      uint)
+
+REGISTER_BERNOULLI(float);
+REGISTER_BERNOULLI(half);
+REGISTER_BERNOULLI(bfloat);
+REGISTER_BERNOULLI(bool);
+REGISTER_BERNOULLI(uchar);
+REGISTER_BERNOULLI(char);
+REGISTER_BERNOULLI(short);
+REGISTER_BERNOULLI(int);
+REGISTER_BERNOULLI(long);
+REGISTER_BERNOULLI(float2);
+REGISTER_BERNOULLI(half2);
+
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
 // which originates from NumPy's random module (Copyright 2005 Robert Kern).
