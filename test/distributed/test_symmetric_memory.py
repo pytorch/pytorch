@@ -287,10 +287,14 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            self.assertEqual(
+            # On NVLink-fabric hardware both the RendezvousRequest and handle
+            # exchange go through pg_all_gather → 2 allgathers. On hardware
+            # without NVLink fabric only the RendezvousRequest uses
+            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
+            self.assertIn(
                 len(ag_entries),
-                2,
-                f"expected exactly two NCCL _all_gather_base from rendezvous, "
+                [1, 2],
+                f"expected 1 or 2 NCCL _all_gather_base from rendezvous, "
                 f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
             )
 
