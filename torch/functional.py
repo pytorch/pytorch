@@ -33,6 +33,9 @@ __all__ = [
     "istft",
     "lu",
     "norm",
+    "cat",
+    "concat",
+    "concatenate",
     "meshgrid",
     "pca_lowrank",
     "split",
@@ -382,6 +385,57 @@ def einsum(*args: Any) -> Tensor:
         path = [*itertools.chain.from_iterable(tupled_path)]
     return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
+
+def cat(tensors, dim=0, *, out=None):
+    r"""Concatenates the given sequence of :attr:`tensors` in the given dimension.
+
+    All tensors must either have the same shape (except in the concatenating
+    dimension) or be a 1-D empty tensor with size ``(0,)``.
+
+    If :attr:`dim` is ``None``, each tensor is first flattened into a 1-D
+    tensor and then concatenated along ``dim=0``. This is consistent with the
+    `Python Array API Standard <https://data-apis.org/array-api/latest/>`_ and
+    :func:`numpy.concatenate`.
+
+    :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
+    and :func:`torch.chunk`.
+
+    Args:
+        tensors (sequence of Tensors): any python sequence of tensors of the
+            same type. Non-empty tensors provided must have the same shape,
+            except in the cat dimension.
+        dim (int or None): the dimension over which the tensors are concatenated.
+            If ``None``, tensors are flattened before concatenation. Default: ``0``.
+        out (Tensor, optional): the output tensor.
+
+    Example::
+
+        >>> x = torch.randn(2, 3)
+        >>> torch.cat((x, x, x), 0)
+        tensor([[ 0.6580, -1.0969, -0.4614],
+                [-0.1034, -0.5790,  0.1497],
+                [ 0.6580, -1.0969, -0.4614],
+                [-0.1034, -0.5790,  0.1497],
+                [ 0.6580, -1.0969, -0.4614],
+                [-0.1034, -0.5790,  0.1497]])
+        >>> torch.cat((x, x, x), 1)
+        tensor([[ 0.6580, -1.0969, -0.4614,  0.6580, -1.0969, -0.4614,  0.6580,
+                 -1.0969, -0.4614],
+                [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
+                 -0.5790,  0.1497]])
+        >>> torch.cat([torch.tensor([[1, 2], [3, 4]]), torch.tensor([[5, 6]])], dim=None)
+        tensor([1, 2, 3, 4, 5, 6])
+    """
+    if dim is None:
+        tensors = [t.flatten() for t in tensors]
+        dim = 0
+    if out is None:
+        return torch._C._VariableFunctions.cat(tensors, dim)
+    return torch._C._VariableFunctions.cat(tensors, dim, out=out)
+
+
+concat = cat
+concatenate = cat
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:

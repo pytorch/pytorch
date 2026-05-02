@@ -2882,7 +2882,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     type_promoting_args=("tensors",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
-def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+def cat(tensors: TensorSequenceType, dim: int | None = 0) -> TensorLikeType:
     def cat_compute_output_memory_format(inputs):
         format = None
         for t in inputs:
@@ -2899,6 +2899,10 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     if len(tensors) == 0:
         msg = "cat expects at least one tensor, but received zero!"
         raise ValueError(msg)
+
+    if dim is None:
+        tensors = [t.flatten() for t in tensors]
+        dim = 0
 
     for tensor in tensors:
         if not isinstance(tensor, TensorLike):

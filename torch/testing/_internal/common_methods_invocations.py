@@ -2486,7 +2486,9 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
         ((0,), (0,), {'dim': 0}),  # empty tensor
         ((0,), (S, S), {'dim': 1}),  # empty tensor with unempty and dim=1 (special case for legacy_cat_wrap_dim)
         ((0, S), (S, S), {'dim': 0}),
-        ((1,), (1,), {})  # dim not passed, fallback to default
+        ((1,), (1,), {}),  # dim not passed, fallback to default
+        ((S, S), (S, S), {'dim': None}),  # dim=None: flatten then cat
+        ((S,), (S, S), {'dim': None}),    # dim=None with different shapes
     )
 
     for input_shape1, input_shape2, kwargs in cases:
