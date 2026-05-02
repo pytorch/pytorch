@@ -230,6 +230,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .descriptors import GetSetDescriptorVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -240,7 +241,6 @@ from .misc import (
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
-    GetSetDescriptorVariable,
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
