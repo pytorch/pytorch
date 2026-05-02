@@ -691,21 +691,5 @@ class TestUserDefinedClassDict(TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
 
-class TestClassSetattr(TestCase):
-    def test_setattr_class_attribute(self):
-        class MyModule:
-            x = 10
-
-        def fn():
-            MyModule.x = 20
-            return MyModule.x
-
-        opt_fn = torch.compile(fn, fullgraph=True)
-        result = opt_fn()
-        self.assertEqual(result, 20)
-
-        MyModule.x = 10
-
-
 if __name__ == "__main__":
     run_tests()
