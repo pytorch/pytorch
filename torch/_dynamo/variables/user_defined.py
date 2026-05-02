@@ -2983,43 +2983,16 @@ class OrderedSetVariable(UserDefinedObjectVariable):
     def debug_repr(self) -> str:
         return "OrderedSet([...])"
 
-    #     if not self.items:
-    #         return "OrderedSet([])"
-    #     else:
-    #         items: list[str] = []
-    #         for k in self.items:
-    #             key_str = (
-    #                 repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-    #             )
-    #             items.append(key_str)
-    #         return "OrderedSet([" + ",".join(items) + "])"
-
-    # def as_python_constant(self) -> OrderedSet[Any]:
-    #     return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
-
     def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    # def call_method(
-    #     self,
-    #     tx: "InstructionTranslator",
-    #     name: str,
-    #     args: list[VariableTracker],
-    #     kwargs: dict[str, VariableTracker],
-    # ) -> VariableTracker:
-    #     if name == "add" and not (len(args) == 1 and not kwargs):
-    #         raise_args_mismatch(
-    #             tx, name, "1 args", f"got {len(args)} and {len(kwargs)} kwargs"
-    #         )
-    #     return super().call_method(tx, name, args, kwargs)
-
-    # def reconstruct(self, codegen: "PyCodegen") -> None:
-    #     codegen.add_push_null(
-    #         lambda: codegen.load_import_from("torch.utils._ordered_set", "OrderedSet")
-    #     )
-    #     codegen.foreach([x.vt for x in self.set_items])
-    #     codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
-    # codegen.extend_output(create_call_function(1, False))
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch.utils._ordered_set", "OrderedSet")
+        )
+        assert self._base_vt is not None
+        self._base_vt.reconstruct(codegen)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):

@@ -293,6 +293,7 @@ from .user_defined import (
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     OrderedDictVariable,
+    OrderedSetClassVariable,
     OrderedSetVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
