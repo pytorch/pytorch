@@ -10,6 +10,7 @@ subclass types, symint positions) is baked in at compile time.
 import functools
 import keyword
 import logging
+import types
 from collections.abc import Callable, Iterable
 
 import torch
@@ -345,6 +346,15 @@ def _compile_and_exec_source(
     fn = local_dict[fn_name]
     if wrapped_fn is not None:
         functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
+    # Codegen'd functions have synthetic filenames (e.g. "<backward_prologue>")
+    # that inspect.getmodule() can't resolve. Tell dynamo's eval frame hook to
+    # skip them so the packaging system never tries to find their source module.
+    # Walk co_consts to also skip nested function definitions.
+    _skip_code = torch._dynamo.eval_frame.skip_code
+    _skip_code(fn.__code__)  # type: ignore[union-attr]
+    for const in fn.__code__.co_consts:  # type: ignore[union-attr]
+        if isinstance(const, types.CodeType):
+            _skip_code(const)
     return fn  # type: ignore[return-value]
 
 
