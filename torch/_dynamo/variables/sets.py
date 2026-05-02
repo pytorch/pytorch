@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 # see steps outlined for ConstDictVariable
 
 
+def pyanyset_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), (set, frozenset))
+
+
 class SetVariable(VariableTracker):
     """Represents a Python set during symbolic execution."""
 
@@ -142,6 +146,12 @@ class SetVariable(VariableTracker):
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
+        from torch._dynamo.variables.base import AttributeMutationNew, ValueMutationNew
+
+        if isinstance(
+            kwargs.get("mutation_type"), (ValueMutationNew, AttributeMutationNew)
+        ):
+            kwargs["source"] = None
         return super().clone(**kwargs)
 
     def is_python_hashable(self) -> bool:
@@ -387,10 +397,9 @@ class SetVariable(VariableTracker):
             return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
-        elif name in ("__and__", "__or__", "__xor__", "__sub__"):
+        elif name in ("__and__", "__xor__", "__sub__"):
             m = {
                 "__and__": "intersection",
-                "__or__": "union",
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
@@ -412,10 +421,9 @@ class SetVariable(VariableTracker):
                 )
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
-        elif name in ("__rand__", "__ror__", "__rxor__", "__rsub__"):
+        elif name in ("__rand__", "__rxor__", "__rsub__"):
             m = {
                 "__rand__": "__and__",
-                "__ror__": "__or__",
                 "__rxor__": "__xor__",
                 "__rsub__": "__sub__",
             }.get(name)
@@ -563,6 +571,32 @@ class SetVariable(VariableTracker):
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
         return SetIterator(self.items)
+
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1318-L1338
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        result = self_.call_method(tx, "copy", [], {})
+        if self_ is other_:
+            return result
+        result.items.update(other_.items)  # type: ignore[missing-attribute]
+        return result
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1340-L1350
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        tx.output.side_effects.mutation(self)
+        self.items.update(other.items)  # type: ignore[missing-attribute]
+        return self
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
