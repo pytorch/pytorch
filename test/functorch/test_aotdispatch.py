@@ -7663,6 +7663,127 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(tt.grad.a, tt_ref.grad.a)
         self.assertEqual(tt.grad.b, tt_ref.grad.b)
 
+    def test_backward_prologue_includes_tokens_when_nonzero(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op = self._make_effectful_op("bw_prologue_token_bwd")
+        fwd_op = self._make_effectful_op("bw_prologue_token_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_prologue_token_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+            with self._capture_codegen_source("backward_prologue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.ops.test.bw_prologue_token_fwd(x) * 2
+
+                x = torch.randn(4, requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            source = captured[0]
+            self.assertIn("[None]", source)
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    def test_backward_prologue_create_graph_mutation_codegen(self):
+        @torch.library.custom_op("test::_bw_prologue_clone_mutate", mutates_args={})
+        def clone_op(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @clone_op.register_fake
+        def _(x, x1):
+            return torch.empty_like(x)
+
+        def backward(ctx, grad):
+            with torch.no_grad():
+                ctx.x1.zero_()
+            return grad * 2, None
+
+        def setup_context(ctx, inputs, output):
+            (x, x1) = inputs
+            ctx.x1 = x1
+
+        clone_op.register_autograd(backward, setup_context=setup_context)
+
+        with self._capture_codegen_source("backward_prologue") as captured:
+
+            def fn(x, x1):
+                return torch.ops.test._bw_prologue_clone_mutate(x, x1)
+
+            x = torch.randn(3, requires_grad=True)
+            x1 = torch.randn(3, requires_grad=True)
+            compiled_f = aot_function(fn, nop)
+            out = compiled_f(x, x1)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("create_graph=True", source)
+
+    def test_backward_prologue_create_graph_mutation_raises(self):
+        @torch.library.custom_op("test::_bw_prologue_clone_mutate2", mutates_args={})
+        def clone_op(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @clone_op.register_fake
+        def _(x, x1):
+            return torch.empty_like(x)
+
+        def backward(ctx, grad):
+            with torch.no_grad():
+                ctx.x1.zero_()
+            return grad * 2, None
+
+        def setup_context(ctx, inputs, output):
+            (x, x1) = inputs
+            ctx.x1 = x1
+
+        clone_op.register_autograd(backward, setup_context=setup_context)
+
+        def fn(x, x1):
+            return torch.ops.test._bw_prologue_clone_mutate2(x, x1)
+
+        x = torch.randn(3, requires_grad=True)
+        x1 = torch.randn(3, requires_grad=True)
+        compiled_f = aot_function(fn, nop)
+        out = compiled_f(x, x1)
+        loss = out.sum()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aot_autograd does not support input mutations with "
+            "requires_grad in backward for create_graph=True",
+        ):
+            torch.autograd.grad(loss, x, create_graph=True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_backward_prologue_rng_codegen(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with self._capture_codegen_source("backward_prologue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_get_rng_state_", source)
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
