@@ -88,7 +88,8 @@ class TestTorchbindAOTI(TestCase):
             obj
             for obj in custom_objs.values()
             if isinstance(obj, torch.ScriptObject)
-            and obj._type().qualified_name() == "__torch__.torch.classes._TorchScriptTesting._Foo"
+            and obj._type().qualified_name()
+            == "__torch__.torch.classes._TorchScriptTesting._Foo"
         )
         foo.increment(5)
 
