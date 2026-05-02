@@ -1848,6 +1848,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
+    def test_min_max_tuple_const(self):
+        # min/max on tuple constants should use ConstantVariable.create
+        # to properly handle the tuple return type
+        def fn():
+            a = min((1, 2), (3, 4))
+            b = max((1, 2), (3, 4))
+            return a, b
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, ((1, 2), (3, 4)))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -10221,6 +10233,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_deterministic_algorithms_warn_only_mutated(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        value = None
+        warn_only = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            nonlocal warn_only
+            value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            check_state()
+            res = x.scatter_add(
+                0,
+                torch.tensor([0, 1, 0]),
+                torch.tensor([1.0, 2.0, 3.0]),
+            )
+            torch.use_deterministic_algorithms(False, warn_only=True)
+            return res
+
+        def run_fn():
+            torch.use_deterministic_algorithms(False, warn_only=False)
+            result = fn(torch.zeros(2))
+            self.assertEqual(result, torch.tensor([4.0, 2.0]))
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if warn_only is not True:
+                raise AssertionError(f"Expected warn_only is True, got {warn_only}")
+            if torch.are_deterministic_algorithms_enabled() is not False:
+                raise AssertionError(
+                    "Expected deterministic algorithms disabled after fn()"
+                )
+            if torch.is_deterministic_algorithms_warn_only_enabled() is not True:
+                raise AssertionError("Expected warn_only enabled after fn()")
+
+        try:
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
+            if cnt.frame_count != 1:
+                raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
+    def test_deterministic_algorithms_warn_only_compile_time_value(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x, warn_only):
+            torch.use_deterministic_algorithms(True, warn_only=warn_only)
+            return x + 1
+
+        try:
+            for expected_warn_only in (True, False):
+                torch.use_deterministic_algorithms(False, warn_only=False)
+                result = fn(torch.ones(2), expected_warn_only)
+                self.assertEqual(result, torch.full((2,), 2.0))
+                self.assertTrue(torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(
+                    torch.is_deterministic_algorithms_warn_only_enabled(),
+                    expected_warn_only,
+                )
+
+            self.assertEqual(len(backend.graphs), 2)
+            warn_only_values = []
+            for gm in backend.graphs:
+                set_deterministic_nodes = [
+                    node
+                    for node in gm.graph.nodes
+                    if node.op == "call_function"
+                    and node.target is torch._C._set_deterministic_algorithms
+                ]
+                self.assertEqual(len(set_deterministic_nodes), 1)
+                self.assertEqual(set_deterministic_nodes[0].args, (True,))
+                warn_only_values.append(set_deterministic_nodes[0].kwargs["warn_only"])
+            self.assertEqual(warn_only_values, [True, False])
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self): ...
@@ -12554,6 +12653,76 @@ def ___make_guard_fn():
         compiled_result = torch.compile(fn, fullgraph=True)(x)
         for i in range(4):
             self.assertEqual(eager_result[i], compiled_result[i])
+
+    def test_frozen_dataclass_with_len_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __len__ inside
+        # torch.compile doesn't crash. Exercises the truthiness check in
+        # symbolic_convert.py call_function where `inner_fn and ...` would
+        # trigger __len__ on an uninitialized backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Layout:
+            shape: tuple
+            stride: tuple
+
+            def __len__(self):
+                if isinstance(self.shape, tuple):
+                    return len(self.shape)
+                return 1
+
+            def size(self):
+                result = 1
+                for s in self.shape:
+                    result *= s
+                return result
+
+            def __call__(self, idx):
+                # Map index through stride
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+            def cosize(self):
+                return self(self.size() - 1) + 1
+
+        def fn(x):
+            layout = Layout((2, 3), (3, 1))
+            return x + layout.cosize()
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_callable_with_hash_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __hash__ (auto from
+        # frozen=True) inside torch.compile doesn't crash when the object is
+        # callable. Exercises is_supported_random() which does
+        # `self.value in set(...)` triggering __hash__ on an uninitialized
+        # backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Config:
+            shape: tuple
+            stride: tuple
+
+            def __call__(self, idx):
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+        def fn(x):
+            cfg = Config((2, 3), (3, 1))
+            return x + cfg(2)
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
