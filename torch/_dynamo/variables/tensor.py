@@ -1343,11 +1343,12 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            provided_vars = (
-                inputs.items
-                if isinstance(inputs, variables.BaseListVariable)
-                else [inputs]
-            )
+            if isinstance(inputs, variables.BaseListVariable):
+                provided_vars = inputs.items
+            elif isinstance(inputs, variables.ConstDictVariable):
+                provided_vars = list(inputs.items.values())
+            else:
+                provided_vars = [inputs]
             input_vars = self._collect_backward_inputs(
                 provided_vars, error_on_non_leaf=True
             )
@@ -2115,6 +2116,22 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def is_python_hashable(self) -> bool:
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -2265,6 +2282,22 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
 
     def nb_float_impl(
         self,
