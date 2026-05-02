@@ -157,6 +157,23 @@ def type_implements_tp_iternext(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
+def type_implements_tp_descr_get(obj_type: type) -> bool:
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_DESCR_GET)
+
+
+def type_implements_tp_descr_set(obj_type: type) -> bool:
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_DESCR_SET)
+
+
+def is_data_descriptor_type(obj_type: type) -> bool:
+    """A data descriptor has both tp_descr_get and tp_descr_set."""
+    return type_implements_tp_descr_get(obj_type) and type_implements_tp_descr_set(
+        obj_type
+    )
+
+
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
@@ -493,6 +510,31 @@ def generic_getiter(
         )
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
+
+
+# ---------------------------------------------------------------------------
+# Descriptor protocol (CPython's tp_descr_get / tp_descr_set)
+# ---------------------------------------------------------------------------
+
+
+def generic_tp_descr_get(
+    tx: "InstructionTranslator",
+    descr: VariableTracker,
+    obj: VariableTracker,
+    name: str,
+) -> VariableTracker:
+    """Invoke a descriptor's tp_descr_get slot.
+
+    Mirrors the pattern in PyObject_GenericGetAttr:
+        f = Py_TYPE(descr)->tp_descr_get;
+        if (f != NULL)
+            return f(descr, obj, type(obj));
+        // otherwise return descr as-is (plain attribute)
+    https://github.com/python/cpython/blob/3.13/Objects/object.c#L1663-L1665
+    """
+    if not hasattr(descr, "tp_descr_get_impl"):
+        return descr
+    return descr.tp_descr_get_impl(tx, obj, name)
 
 
 # ---------------------------------------------------------------------------
