@@ -591,6 +591,11 @@ enable_cpp_framelocals_guard_eval = True
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False
 
+# Whether to replay repeated monomorphic leaf inline frames from a per-trace
+# cache. This is intentionally independent from graph deduplication so the
+# optimization has a narrow kill switch.
+enable_inline_frame_cache = True
+
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True
 track_nodes_for_deduplication = False
