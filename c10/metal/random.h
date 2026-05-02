@@ -16,7 +16,7 @@ constexpr float uint32_to_uniform_float(uint32_t value) {
   return static_cast<float>(value & 0x7FFFFFFF) * scale;
 }
 
-inline uint2 splitlong(ulong v) {
+constexpr uint2 splitlong(ulong v) {
   return uint2(v >> 32, v & 0xffffffff);
 }
 
@@ -24,11 +24,11 @@ inline uint2 splitlong(ulong v) {
 
 namespace philox4 {
 
-uint2 mulhilo(uint a, uint b) {
+constexpr uint2 mulhilo(uint a, uint b) {
   auto rc = static_cast<ulong>(a) * b;
   return detail::splitlong(rc);
 }
-uint4 single_round(uint4 ctr, uint2 key) {
+inline uint4 single_round(uint4 ctr, uint2 key) {
   constexpr uint kPhiloxSA = 0xD2511F53;
   constexpr uint kPhiloxSB = 0xCD9E8D57;
   auto rc0 = mulhilo(kPhiloxSA, ctr.x);
@@ -36,7 +36,7 @@ uint4 single_round(uint4 ctr, uint2 key) {
   return uint4(rc1.x ^ ctr.y ^ key.x, rc1.y, rc0.x ^ ctr.w ^ key.y, rc0.y);
 }
 
-uint4 multiple_rounds(uint4 ctr, uint2 key, uint rounds) {
+inline uint4 multiple_rounds(uint4 ctr, uint2 key, uint rounds) {
   constexpr uint2 kPhilox10 = {0x9E3779B9, 0xBB67AE85};
   for (uint round = 0; round < rounds - 1; ++round) {
     ctr = single_round(ctr, key);
@@ -45,7 +45,7 @@ uint4 multiple_rounds(uint4 ctr, uint2 key, uint rounds) {
   return ctr;
 }
 
-uint4 rand(long seed, long index) {
+inline uint4 rand(long seed, long index) {
   uint4 ctr = 0;
   ctr.zw = detail::splitlong(index);
   return multiple_rounds(ctr, detail::splitlong(seed), 10);
@@ -53,7 +53,7 @@ uint4 rand(long seed, long index) {
 
 } // namespace philox4
 
-float randn(long seed, long index) {
+inline float randn(long seed, long index) {
   auto value = philox4::rand(seed, index);
   float u1 = 1.0 - detail::uint32_to_uniform_float(value.x);
   float u2 = 1.0 - detail::uint32_to_uniform_float(value.y);
@@ -61,12 +61,12 @@ float randn(long seed, long index) {
       ::metal::cos(2.0 * M_PI_F * u2);
 }
 
-float rand(long seed, long index) {
+inline float rand(long seed, long index) {
   auto value = philox4::rand(seed, index);
   return detail::uint32_to_uniform_float(value.x);
 }
 
-long randint64(long seed, long index, long low, long high) {
+inline long randint64(long seed, long index, long low, long high) {
   auto range = high - low;
   auto value = philox4::rand(seed, index);
   // TODO: Implement better algorithm for large ranges
