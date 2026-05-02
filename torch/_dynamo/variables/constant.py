@@ -455,6 +455,26 @@ its type to `common_constant_types`.
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
 
+    def nb_number_default_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        op: str,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: if the left operand's type doesn't define the relevant nb_*
+        # method, but the right operand's type does, CPython will call the
+        # reflected method on the right operand with reversed args.  If that
+        # also fails to return a valid result, CPython raises a TypeError.
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        result = getattr(self_.python_type(), op)(v, w)
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def nb_or_impl(
         self,
         tx: Any,
@@ -468,14 +488,21 @@ its type to `common_constant_types`.
         # bool inherits int's nb_or via slot inheritance.
         if not isinstance(self.value, (int, frozenset, type)):
             return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
+        return self.nb_number_default_impl(tx, other, "__or__", reverse)
+
+    def nb_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex define nb_subtract; bool inherits int's.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3824 (long_sub_method)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L573 (float_sub)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L720 (COMPLEX_BINOP(sub, diff))
+        if not isinstance(self.value, (int, float, complex)):
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        result = self_.python_type().__or__(v, w)  # type: ignore[bad-argument-count]
-        if result is NotImplemented:
-            return ConstantVariable.create(NotImplemented)
-        return VariableTracker.build(tx, result)
+        return self.nb_number_default_impl(tx, other, "__sub__", reverse)
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
