@@ -20,14 +20,37 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
-    get_current_version,
     LintMessage,
     LintSeverity,
     PreprocessorTracker,
 )
+from tools.setup_helpers.gen_version_header import parse_version
 
 
 LINTER_CODE = "STABLE_SHIM_VERSION"
+
+
+def get_current_version() -> tuple[int, int]:
+    """
+    Get the current PyTorch version from version.txt.
+    This uses the same logic as tools/setup_helpers/gen_version_header.py
+    which is used to generate torch/headeronly/version.h from version.h.in.
+
+    Returns (major, minor) tuple or None if not found.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    version_file = repo_root / "version.txt"
+
+    if not version_file.exists():
+        raise RuntimeError(
+            "Could not find version.txt. This linter requires version.txt to run"
+        )
+
+    with open(version_file) as f:
+        version = f.read().strip()
+        major, minor, patch = parse_version(version)
+
+    return (major, minor)
 
 
 def get_added_lines(filename: str) -> set[int]:
@@ -138,8 +161,8 @@ def check_file(filename: str) -> list[LintMessage]:
 
     # Get current version
     current_version = get_current_version()
-    major, minor, patch = current_version
-    expected_version_macro = f"TORCH_VERSION_{major}_{minor}_{patch}"
+    major, minor = current_version
+    expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
 
     # Get lines that are uncommitted or added in the most recent commit
