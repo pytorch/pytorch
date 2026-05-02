@@ -2269,6 +2269,12 @@ def _new_process_group_helper(
         raise AssertionError("group_desc must not be None")
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
+    if backend_options is not None and hasattr(
+        backend_options, "use_pg_for_symm_mem_rendezvous"
+    ):
+        pg.use_pg_for_symm_mem_rendezvous = (
+            backend_options.use_pg_for_symm_mem_rendezvous
+        )
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)

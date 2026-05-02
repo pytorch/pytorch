@@ -977,6 +977,20 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
+  // When true, symmetric memory rendezvous exchanges metadata via this PG's
+  // NCCL allgather instead of TCPStore, which gets overloaded at large rank
+  // counts. This will lazily create the NCCL communicator if it doesn't
+  // already exist. If this PG is only used for symmetric memory (no regular
+  // collectives), consider calling abort() after rendezvous to release the
+  // communicator.
+  bool getUsePgForSymmMemRendezvous() const {
+    return use_pg_for_symm_mem_rendezvous_;
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    use_pg_for_symm_mem_rendezvous_ = value;
+  }
+
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
@@ -1023,6 +1037,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       backendTypeToBackend_;
 
   std::optional<at::Device> bound_device_id_;
+  bool use_pg_for_symm_mem_rendezvous_ = false;
 };
 
 // Thread local functions for managing the currently active process group.

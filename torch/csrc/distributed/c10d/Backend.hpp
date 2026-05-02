@@ -52,6 +52,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     std::string group_name;
     std::string group_desc;
     std::vector<uint64_t> global_ranks_in_group;
+
+    // When true, symmetric memory rendezvous exchanges metadata via this
+    // PG's allgather instead of TCPStore, which gets overloaded at large
+    // rank counts. This will lazily create the backend communicator if it
+    // doesn't already exist. If this PG is only used for symmetric memory
+    // (no regular collectives), consider calling abort() after rendezvous
+    // to release the communicator.
+    bool use_pg_for_symm_mem_rendezvous = false;
   };
 
   explicit Backend(int rank, int size);

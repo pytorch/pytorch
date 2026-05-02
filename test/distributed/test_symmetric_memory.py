@@ -268,14 +268,15 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         self._init_process()
 
-        symm_mem.set_pg_rendezvous(True)
+        pg = dist.group.WORLD
+        pg.use_pg_for_symm_mem_rendezvous = True
         try:
             torch._C._distributed_c10d._reset_fr_recording_nccl()
 
             t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
                 self.rank
             )
-            symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+            symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
             torch.cuda.synchronize()
 
             self.assertEqual(symm_mem_hdl.rank, self.rank)
@@ -300,7 +301,35 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 self.assertTrue(buf.eq(peer).all())
             symm_mem_hdl.barrier()
         finally:
-            symm_mem.set_pg_rendezvous(False)
+            pg.use_pg_for_symm_mem_rendezvous = False
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pg_rendezvous_abort_after(self) -> None:
+        self._init_process()
+
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.use_pg_for_symm_mem_rendezvous = True
+        pg = dist.new_group(list(range(self.world_size)), pg_options=opts)
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
+            self.rank
+        )
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+        pg.abort()
+
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
