@@ -218,8 +218,23 @@ class TestForeach(TestCase):
             _, _, func, ref = self._get_funcs(op)
         else:
             func, ref, _, _ = self._get_funcs(op)
+        # Some backends declare complex dtypes as unsupported (e.g. MPS,).
+        # When allow_higher_dtype_scalars is True, ops like
+        # _foreach_pow will promote non-complex inputs to complex output via
+        # type promotion and fail on those backends. Disable it there; other
+        # backends keep the default behaviour.
+        from torch.testing._internal.common_dtype import (
+            get_unsupported_dtypes_for_device,
+        )
+        device_type = torch.device(device).type
+        backend_supports_complex = torch.complex64 not in (
+            get_unsupported_dtypes_for_device(device_type)
+        )
         for sample in op.sample_inputs(
-            device, dtype, noncontiguous=noncontiguous, allow_higher_dtype_scalars=True
+            device,
+            dtype,
+            noncontiguous=noncontiguous,
+            allow_higher_dtype_scalars=backend_supports_complex,
         ):
             ref_kwargs = sample.kwargs
             # div promotes ints to floats, so we cannot go on the fastpath there
