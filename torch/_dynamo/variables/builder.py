@@ -1560,10 +1560,24 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            return UserDefinedClassVariable(
+            result = UserDefinedClassVariable(
                 value,
                 source=self.source,
             )
+
+            # Only track user-defined classes for mutation, not torch
+            # internals. Tracking torch classes (e.g. RemovableHandle) causes
+            # side effects like next_id increments to be replayed incorrectly,
+            # and source chains through C-level descriptors break guard
+            # evaluation.
+            mod = getattr(value, "__module__", None) or ""
+            if not mod.startswith(("torch.", "torch_")):
+                if value not in self.tx.output.side_effects:
+                    return self.tx.output.side_effects.track_object_existing(
+                        value, result
+                    )
+            return result
+
         elif type(value) is torch._C.Generator:
             # Generator is registered as an opaque reference type for make_fx
             # tracing, but in dynamo we handle it as a regular object so that
@@ -1618,8 +1632,11 @@ class VariableBuilder:
                 # Value-type: guard on equality (will use __eq__)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
             elif is_opaque_reference_type(type(value)):
-                # Reference-type: guard only on type, and registered guard_fn
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+                # Reference-type: guard only on type, and registered guard_fn.
+                # Use FAKE_SCRIPT_TYPE_MATCH because at runtime the source may
+                # resolve to either a FakeScriptObject (during outer
+                # AOTAutograd tracing) or the underlying real opaque object.
+                self.install_guards(GuardBuilder.FAKE_SCRIPT_TYPE_MATCH)
                 self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
@@ -3942,13 +3959,13 @@ def _automatic_dynamic(
     specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
-        marked_strict_unbacked = i in getattr(
-            e, "_dynamo_strict_unbacked_indices", set()
-        )
-        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
-        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-        marked_static = i in getattr(e, "_dynamo_static_indices", set())
+        marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", ())
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", ())
+        marked_weak_dynamic = i in getattr(
+            e, "_dynamo_weak_dynamic_indices", ()
+        ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
+        marked_static = i in getattr(e, "_dynamo_static_indices", ())
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
