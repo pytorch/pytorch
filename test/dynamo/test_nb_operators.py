@@ -495,6 +495,209 @@ class TestNbOr(torch._dynamo.test_case.TestCase):
 
 # --- Helper classes for sub tests ---
 
+# Rat class from CPython test_binop.py for testing tp_as_number.tp_subtract
+
+
+def _gcd(a, b):
+    """Greatest common divisor using Euclid's algorithm."""
+    while a:
+        a, b = b % a, a
+    return b
+
+
+def _isint(x):
+    """Test whether an object is an instance of int."""
+    return isinstance(x, int)
+
+
+def _isnum(x):
+    """Test whether an object is an instance of a built-in numeric type."""
+    for T in int, float, complex:
+        if isinstance(x, T):
+            return 1
+    return 0
+
+
+def _isRat(x):
+    """Test whether an object is an instance of the Rat class."""
+    return isinstance(x, Rat)
+
+
+class Rat:
+    """Rational number implemented as a normalized pair of ints."""
+
+    __slots__ = ["_Rat__num", "_Rat__den"]
+
+    def __init__(self, num=0, den=1):
+        """Constructor: Rat([num[, den]]).
+
+        The arguments must be ints, and default to (0, 1)."""
+        if not _isint(num):
+            raise TypeError("Rat numerator must be int (%r)" % num)
+        if not _isint(den):
+            raise TypeError("Rat denominator must be int (%r)" % den)
+        # But the zero is always on
+        if den == 0:
+            raise ZeroDivisionError("zero denominator")
+        g = _gcd(den, num)
+        self.__num = int(num // g)
+        self.__den = int(den // g)
+
+    def _get_num(self):
+        """Accessor function for read-only 'num' attribute of Rat."""
+        return self.__num
+
+    num = property(_get_num, None)
+
+    def _get_den(self):
+        """Accessor function for read-only 'den' attribute of Rat."""
+        return self.__den
+
+    den = property(_get_den, None)
+
+    def __repr__(self):
+        """Convert a Rat to a string resembling a Rat constructor call."""
+        return "Rat(%d, %d)" % (self.__num, self.__den)
+
+    def __str__(self):
+        """Convert a Rat to a string resembling a decimal numeric value."""
+        return str(float(self))
+
+    def __float__(self):
+        """Convert a Rat to a float."""
+        return self.__num * 1.0 / self.__den
+
+    def __int__(self):
+        """Convert a Rat to an int; self.den must be 1."""
+        if self.__den == 1:
+            try:
+                return int(self.__num)
+            except OverflowError:
+                raise OverflowError("%s too large to convert to int" % repr(self))
+        raise ValueError("can't convert %s to int" % repr(self))
+
+    def __add__(self, other):
+        """Add two Rats, or a Rat and a number."""
+        if _isint(other):
+            other = Rat(other)
+        if _isRat(other):
+            return Rat(
+                self.__num * other.__den + other.__num * self.__den,
+                self.__den * other.__den,
+            )
+        if _isnum(other):
+            return float(self) + other
+        return NotImplemented
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        """Subtract two Rats, or a Rat and a number."""
+        if _isint(other):
+            other = Rat(other)
+        if _isRat(other):
+            return Rat(
+                self.__num * other.__den - other.__num * self.__den,
+                self.__den * other.__den,
+            )
+        if _isnum(other):
+            return float(self) - other
+        return NotImplemented
+
+    def __rsub__(self, other):
+        """Subtract two Rats, or a Rat and a number (reversed args)."""
+        if _isint(other):
+            other = Rat(other)
+        if _isRat(other):
+            return Rat(
+                other.__num * self.__den - self.__num * other.__den,
+                self.__den * other.__den,
+            )
+        if _isnum(other):
+            return other - float(self)
+        return NotImplemented
+
+    def __mul__(self, other):
+        """Multiply two Rats, or a Rat and a number."""
+        if _isRat(other):
+            return Rat(self.__num * other.__num, self.__den * other.__den)
+        if _isint(other):
+            return Rat(self.__num * other, self.__den)
+        if _isnum(other):
+            return float(self) * other
+        return NotImplemented
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, other):
+        """Divide two Rats, or a Rat and a number."""
+        if _isRat(other):
+            return Rat(self.__num * other.__den, self.__den * other.__num)
+        if _isint(other):
+            return Rat(self.__num, self.__den * other)
+        if _isnum(other):
+            return float(self) / other
+        return NotImplemented
+
+    def __rtruediv__(self, other):
+        """Divide two Rats, or a Rat and a number (reversed args)."""
+        if _isRat(other):
+            return Rat(other.__num * self.__den, other.__den * self.__num)
+        if _isint(other):
+            return Rat(other * self.__den, self.__num)
+        if _isnum(other):
+            return other / float(self)
+        return NotImplemented
+
+    def __floordiv__(self, other):
+        """Divide two Rats, returning the floored result."""
+        if _isint(other):
+            other = Rat(other)
+        elif not _isRat(other):
+            return NotImplemented
+        x = self / other
+        return x.__num // x.__den
+
+    def __rfloordiv__(self, other):
+        """Divide two Rats, returning the floored result (reversed args)."""
+        x = other / self
+        return x.__num // x.__den
+
+    def __divmod__(self, other):
+        """Divide two Rats, returning quotient and remainder."""
+        if _isint(other):
+            other = Rat(other)
+        elif not _isRat(other):
+            return NotImplemented
+        x = self // other
+        return (x, self - other * x)
+
+    def __rdivmod__(self, other):
+        """Divide two Rats, returning quotient and remainder (reversed args)."""
+        if _isint(other):
+            other = Rat(other)
+        elif not _isRat(other):
+            return NotImplemented
+        return divmod(other, self)
+
+    def __mod__(self, other):
+        """Take one Rat modulo another."""
+        return divmod(self, other)[1]
+
+    def __rmod__(self, other):
+        """Take one Rat modulo another (reversed args)."""
+        return divmod(other, self)[1]
+
+    def __eq__(self, other):
+        """Compare two Rats for equality."""
+        if _isint(other):
+            return self.__den == 1 and self.__num == other
+        if _isRat(other):
+            return self.__num == other.__num and self.__den == other.__den
+        if _isnum(other):
+            return float(self) == other
+        return NotImplemented
+
 
 class UserDefinedClassWithSub:
     def __init__(self, value):
@@ -587,6 +790,40 @@ class _SubWithSub(_BaseWithSub):
 
 class _InheritedSubSub(_BaseWithSub):
     pass
+
+
+# --- Helper classes for NotImplemented tests ---
+
+
+class _SubNotImplemented:
+    """Class where __sub__ returns NotImplemented"""
+
+    def __sub__(self, other):
+        return NotImplemented
+
+
+class _RSubNotImplemented:
+    """Class where __sub__ exists but __rsub__ returns NotImplemented"""
+
+    def __sub__(self, other):
+        return NotImplemented
+
+    def __rsub__(self, other):
+        return NotImplemented
+
+
+class _SubReturnsMarker:
+    """Class where __sub__ returns a marker string"""
+
+    def __sub__(self, other):
+        return NotImplemented
+
+
+class _RSubReturnsMarker:
+    """Class where __rsub__ returns a marker string"""
+
+    def __rsub__(self, other):
+        return "_RSubReturnsMarker.__rsub__ called"
 
 
 class TestNbSub(torch._dynamo.test_case.TestCase):
@@ -699,6 +936,24 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         s -= {2, 3}
         self.assertEqual(s, {1})
 
+    @make_dynamo_test
+    def test_inplace_sub_frozenset(self):
+        f = frozenset({1, 2, 3})
+        f -= frozenset({2, 3})
+        self.assertEqual(f, frozenset({1}))
+
+    @make_dynamo_test
+    def test_inplace_sub_set_with_empty(self):
+        s = {1, 2, 3}
+        s -= set()
+        self.assertEqual(s, {1, 2, 3})
+
+    @make_dynamo_test
+    def test_inplace_sub_frozenset_with_empty(self):
+        f = frozenset({1, 2, 3})
+        f -= frozenset()
+        self.assertEqual(f, frozenset({1, 2, 3}))
+
     # --- Reversed sub (__rsub__) ---
 
     @make_dynamo_test
@@ -722,19 +977,7 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         result = obj1 - obj2 - obj3
         self.assertEqual(result, UserDefinedClassWithSub(5))
 
-    # --- Unsupported types ---
-
-    @make_dynamo_test
-    def test_str_sub_str_raises_type_error(self):
-        with self.assertRaises(TypeError):
-            "hello" - "world"
-
-    @make_dynamo_test
-    def test_list_sub_list_raises_type_error(self):
-        with self.assertRaises(TypeError):
-            [1, 2] - [1]
-
-    # --- User-defined __sub__ ---
+     # --- User-defined __sub__ ---
 
     @make_dynamo_test
     def test_user_defined_sub_basic(self):
@@ -810,6 +1053,63 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         self.assertEqual(1 - _InheritedSubSub(), "_BaseWithSub.__rsub__")
         self.assertEqual(_InheritedSubSub() - _BaseWithSub(), "_BaseWithSub.__sub__")
         self.assertEqual(_BaseWithSub() - _InheritedSubSub(), "_BaseWithSub.__sub__")
+
+    # --- Rat class tests from CPython test_binop.py ---
+
+    @make_dynamo_test
+    def test_rat_sub(self):
+        self.assertEqual(Rat(7, 2) - Rat(7, 5), Rat(21, 10))
+        self.assertEqual(Rat(7, 5) - 1, Rat(2, 5))
+        self.assertEqual(1 - Rat(3, 5), Rat(2, 5))
+        self.assertAlmostEqual(Rat(3, 2) - 1.0, 0.5)
+        self.assertAlmostEqual(1.0 - Rat(1, 2), 0.5)
+
+    @make_dynamo_test
+    def test_rat_rsub(self):
+        # Test reversed subtraction with Rat objects
+        obj = Rat(3)
+        result = 10 - obj
+        self.assertEqual(result, Rat(7))
+
+    @make_dynamo_test
+    def test_rat_sub_with_different_denominators(self):
+        # More complex rational subtraction
+        a = Rat(5, 6)
+        b = Rat(1, 3)
+        result = a - b
+        self.assertEqual(result, Rat(1, 2))
+
+    @make_dynamo_test
+    def test_rat_sub_negative_result(self):
+        # Subtraction resulting in negative
+        a = Rat(1, 4)
+        b = Rat(1, 2)
+        result = a - b
+        self.assertEqual(result, Rat(-1, 4))
+
+    # --- NotImplemented handling from test_descr.py ---
+
+    @make_dynamo_test
+    def test_sub_not_implemented_returns_type_error(self):
+        # When __sub__ returns NotImplemented, should raise TypeError
+        a = _SubNotImplemented()
+        with self.assertRaises(TypeError):
+            a - a
+
+    @make_dynamo_test
+    def test_rsub_not_implemented_returns_type_error(self):
+        # When __rsub__ returns NotImplemented, should raise TypeError
+        b = _RSubNotImplemented()
+        with self.assertRaises(TypeError):
+            b - b
+
+    @make_dynamo_test
+    def test_sub_mixed_not_implemented_fallback(self):
+        # When left __sub__ returns NotImplemented, try right __rsub__
+        a = _SubReturnsMarker()
+        b = _RSubReturnsMarker()
+        result = a - b
+        self.assertEqual(result, "_RSubReturnsMarker.__rsub__ called")
 
 
 instantiate_parametrized_tests(TestNbOr)

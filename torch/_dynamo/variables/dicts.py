@@ -983,7 +983,7 @@ class DictViewVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6135-L6152 (dictviews_sub)
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6036 (dictviews_sub)
         self_, other_ = (other, self) if reverse else (self, other)
         s = VariableTracker.build(tx, set).call_function(tx, [self_], {})
         s.call_method(tx, "difference_update", [other_], {})

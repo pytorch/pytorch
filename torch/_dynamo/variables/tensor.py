@@ -2137,7 +2137,7 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1124 (PyNumber_Subtract)
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
@@ -2322,7 +2322,7 @@ class SymNodeVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1124 (PyNumber_Subtract)
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
