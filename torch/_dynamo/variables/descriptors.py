@@ -221,15 +221,15 @@ class MethodDescriptorVariable(VariableTracker):
         obj: VariableTracker,
         name: str,
         **kwargs: Any,
-    ) -> "BuiltinMethodVariable":
+    ) -> "BoundBuiltinMethodVariable":
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        return BuiltinMethodVariable(self.descriptor, obj, name, **kwargs)
+        return BoundBuiltinMethodVariable(self.descriptor, obj, name, **kwargs)
 
 
-class BuiltinMethodVariable(VariableTracker):
+class BoundBuiltinMethodVariable(VariableTracker):
     """Bound builtin method (method_descriptor bound to an instance).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl, mirroring
@@ -261,7 +261,7 @@ class BuiltinMethodVariable(VariableTracker):
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
         return (
-            f"BuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
+            f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
         )
 
     def python_type(self) -> type:
@@ -496,9 +496,7 @@ class MemberDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(obj.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
             )
         return VariableTracker.build(tx, resolved, source)
 
@@ -556,9 +554,7 @@ class GetSetDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(obj.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
             )
         return VariableTracker.build(tx, resolved, source)
 

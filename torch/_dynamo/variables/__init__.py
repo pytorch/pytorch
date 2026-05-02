@@ -52,6 +52,18 @@ from .ctx_manager import (
     WithExitFunctionVariable,
     XPUDeviceVariable,
 )
+from .descriptors import (
+    BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
+    ClassMethodVariable,
+    GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodDescriptorVariable,
+    MethodWrapperVariable,
+    PropertyVariable,
+    StaticMethodVariable,
+    WrapperDescriptorVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -109,18 +121,6 @@ from .lists import (
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
-)
-from .descriptors import (
-    BuiltinMethodVariable,
-    ClassMethodDescriptorVariable,
-    ClassMethodVariable,
-    GetSetDescriptorVariable,
-    MemberDescriptorVariable,
-    MethodDescriptorVariable,
-    MethodWrapperVariable,
-    PropertyVariable,
-    StaticMethodVariable,
-    WrapperDescriptorVariable,
 )
 from .misc import (
     AutogradFunctionContextVariable,
