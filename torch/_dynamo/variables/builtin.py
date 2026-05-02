@@ -105,6 +105,7 @@ from .object_protocol import (
     generic_getiter,
     generic_int,
     generic_len,
+    generic_neg,
     vt_getitem,
     vt_identity_compare,
 )
@@ -1687,6 +1688,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             # For builtin types called on user-defined subclasses, use the base iterator
             return generic_getiter(tx, args[0])
 
+        if name == "__neg__" and len(args) == 1 and not kwargs:
+            # type.__neg__(instance) → neg(instance)
+            # e.g., int.__neg__(4) → neg(4)
+            # For builtin types called on user-defined subclasses, use the base iterator
+            return generic_neg(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -2755,25 +2762,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             return list_var
         return None
 
-    # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(
         self, tx: "InstructionTranslator", a: VariableTracker
-    ) -> VariableTracker | None:
-        if isinstance(a, SymNodeVariable):
-            return SymNodeVariable.create(
-                tx,
-                (operator.neg)(a.as_proxy()),
-                sym_num=None,
-            )
-
-        if (
-            isinstance(a, UserDefinedObjectVariable)
-            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
-        ):
-            return a.call_method(tx, "__neg__", [], {})
-
-        # None no-ops this handler and lets the driving function proceed
-        return None
+    ) -> VariableTracker:
+        return generic_neg(tx, a)
 
     def call_format(
         self,
