@@ -3757,6 +3757,8 @@ def check_file(filename: str | None, is_inlined_call: bool = False) -> SkipResul
         return SkipResult(
             True, "cannot determine source file (likely a C extension or builtin)"
         )
+    if filename.startswith("<") and filename.endswith(">"):
+        return SkipResult(True, "synthetic filename from compile() (not real source)")
     filename = _as_posix_path(filename)
     if filename in FORCE_SKIP_FILES:
         return SkipResult(True, f"file is force-skipped ({filename})")
