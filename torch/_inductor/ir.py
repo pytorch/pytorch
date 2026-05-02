@@ -121,6 +121,7 @@ from .virtualized import ops, OpsValue, V
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
+    from torch.types import IntLikeType
 
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
@@ -419,7 +420,7 @@ def is_triton(x: IRNode | torch.device | None | str) -> bool:
     # Special case cpu and cuda as using the method below
     # to determine if the scheduler is a triton scheduler subclass
     # requires instantiating a scheduler for them
-    if device in ["cpu", "cuda"]:
+    if device in ["cpu", "cuda", "xpu"]:
         if getattr(config, f"{device}_backend") == "triton":
             return True
         return False
@@ -554,6 +555,7 @@ class IRNode:
     """
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
+    _current_stream_idx: ClassVar[int | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -562,6 +564,8 @@ class IRNode:
     origin_node: torch.fx.Node | None = dataclasses.field(init=False)
     # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
     annotations: dict[str, Any] = dataclasses.field(init=False)
+    # User-annotated stream index from FX node metadata (set during lowering)
+    stream_idx: int | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -572,6 +576,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_origins = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_stream_idx(
+        stream_idx: int | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_stream_idx
+        IRNode._current_stream_idx = stream_idx
+        try:
+            yield
+        finally:
+            IRNode._current_stream_idx = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -604,6 +620,7 @@ class IRNode:
         self._post_init_setattr("origin_node", None)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
+        self._post_init_setattr("stream_idx", self._current_stream_idx)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -796,7 +813,7 @@ class IRNode:
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return False
 
-    def mark_reuse(self, users: int) -> None:
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
         pass
 
     def realize_hint(self) -> None:
@@ -887,6 +904,10 @@ class Operation:
     def get_origins(self) -> OrderedSet[Any]:
         assert hasattr(self, "origins")
         return self.origins
+
+    def get_stream_idx(self) -> int | None:
+        assert hasattr(self, "stream_idx")
+        return self.stream_idx
 
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
@@ -1339,10 +1360,23 @@ class Reduction(Loops):
         if not V.graph.sizevars.all_unbacked_explicitly_hinted(exprs):
             return ReductionHint.DEFAULT, 1
         reduction_numel_hint = V.graph.sizevars.optimization_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
+        numel = sympy_product(ranges)
+        numel_hint = V.graph.sizevars.optimization_hint(numel)
+
+        # The Triton backend adds REDUCE_TO_SINGLE_ELEMENT unconditionally if the
+        # cooperative_reductions feature flag is enabled, but we should still use a
+        # split scan if we don't actually do a cooperative reduction.
+        should_reduce_to_single_element = V.graph.has_feature(
+            device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT
+        ) and (
+            not is_triton(device)
+            or V.choices.should_use_cooperative_reduction(
+                device, numel, reduction_numel
+            )
+        )
 
         should_split = reduction_type == "scan" or (
-            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
+            not should_reduce_to_single_element
             and reduction_type
             not in (
                 "argmax",
@@ -2708,13 +2742,18 @@ class Sort(Loops):
         sizevars = V.graph.sizevars
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
 
-        # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        # Heuristic, smallest rblock where triton usually outperforms aten.sort.
         # It also isn't bandwidth bound so fusion is unlikely to help.
-        max_rblock = 512
-        is_persistent_kernel = (
-            config.triton.persistent_reductions
-            and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
-        )
+        # When decompose_sort_ops is enabled, skip the size limit to always
+        # attempt Triton sort (index dtype is widened to int32 in lowering).
+        if config.triton.decompose_sort_ops:
+            is_persistent_kernel = config.triton.persistent_reductions
+        else:
+            max_rblock = 512
+            is_persistent_kernel = (
+                config.triton.persistent_reductions
+                and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
+            )
         if not is_persistent_kernel:
             # We only support persistent triton kernels
             return [None] * len(dtypes)
@@ -2777,11 +2816,31 @@ def is_storage_and_layout(x: IRNode) -> bool:
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
         _buffer, layout = as_storage_and_layout(x, freeze=False)
-        # pad the stride here so we will NOT claim an tensor as contiguous
+        # pad the stride here so we will NOT claim a tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            layout.pad_strides()
+            assert isinstance(layout, FlexibleLayout), type(layout)
+            layout = FixedLayout(
+                layout.device,
+                layout.dtype,
+                layout.size,
+                layout._pad_strides(layout.stride, layout.size, layout.dtype),
+                layout.offset,
+                layout.is_pinned,
+            )
         return layout.is_contiguous()
+    except NotImplementedError:
+        return False
+
+
+def is_dense_contiguous_storage_and_layout(x: IRNode) -> bool:
+    try:
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
+        if not layout.is_contiguous():
+            return False
+        return V.graph.sizevars.statically_known_equals(
+            layout.storage_size(), layout.offset + sympy_product(layout.size)
+        )
     except NotImplementedError:
         return False
 
@@ -2922,8 +2981,8 @@ class BaseView(IRNode):
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        return self.data.mark_reuse(users, has_non_fusible_users)
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
@@ -3252,12 +3311,15 @@ class View(GenericView):
             len(free_unbacked_symbols(old_size)) > 0
             or len(free_unbacked_symbols(new_size)) > 0
         )
-        is_contiguous = is_contiguous_storage_and_layout(x)
+        is_contiguous = is_dense_contiguous_storage_and_layout(x)
 
         def create_reinterpret_view(
             inp: IRNode, new_size: Sequence[Expr], new_stride: Sequence[Expr]
         ) -> ReinterpretView:
-            storage, old_layout = as_storage_and_layout(inp, want_contiguous=True)
+            inp = ExternKernel.require_exact_strides(
+                inp, FlexibleLayout.contiguous_strides(inp.get_size())
+            )
+            storage, old_layout = as_storage_and_layout(inp)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -3639,6 +3701,11 @@ class DtypeView(BaseView):
 
 
 class SliceView(View):
+    """View that represents a slice along a single dimension.
+
+    Corresponds to tensor[..., start:end:step, ...].
+    """
+
     @classmethod
     def normalize_start_end(
         cls, x: IRNode, dim: int, start: int, end: int
@@ -3651,6 +3718,14 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+            min_func = sympy.Min
+            max_func = sympy.Max
+        elif any(
+            # Only needed when backed_size_oblivious is on.
+            x.has(sympy.Min, sympy.Max)
+            for x in (start, end, dim_size)
+            if isinstance(x, Expr)
+        ):
             min_func = sympy.Min
             max_func = sympy.Max
         else:
@@ -5204,6 +5279,16 @@ class ComputedBuffer(OperationBuffer):
         return self.data.constant_to_device(device)
 
 
+@dataclasses.dataclass(frozen=True)
+class FinalizeCodegenResult:
+    """Structured result from TemplateBuffer._finalize_codegen for external backends."""
+
+    source: str
+    imports: list[str]
+    call_preamble: list[str]
+    call_args: list[str]
+
+
 class TemplateBuffer(OperationBuffer):
     """
     Base class for template operators that support epilogue and prologue fusion.
@@ -5256,6 +5341,10 @@ class TemplateBuffer(OperationBuffer):
         self.allowed_prologue_inps: OrderedSet[str] = (
             allowed_prologue_inps or OrderedSet()
         )
+        # Per-template fusion overrides.  None means fall back to global
+        # config.epilogue_fusion / config.prologue_fusion.
+        self.allow_epilogue_fusion: bool | None = None
+        self.allow_prologue_fusion: bool | None = None
 
     @property
     def dtype(self) -> torch.dtype:
@@ -5352,6 +5441,20 @@ class TemplateBuffer(OperationBuffer):
 
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
+
+    def _finalize_codegen(
+        self, hook_outputs: dict[str, str]
+    ) -> FinalizeCodegenResult | None:
+        """Called after epilogue/prologue subgraph codegen with rendered hook outputs.
+
+        ``hook_outputs`` maps placeholder keys (e.g. ``<STORE_OUTPUT_0>``,
+        ``<LOAD_INPUT_x>``) to the Triton code generated by Inductor for
+        each fused subgraph.
+
+        Return a ``FinalizeCodegenResult`` to provide custom source code and
+        call metadata, or ``None`` to use the default codegen path.
+        """
+        return None
 
     @classmethod
     def realize_template_input(cls, tb: TensorBox) -> IRNode:
@@ -5982,18 +6085,24 @@ class ConcatKernel(NopKernel):
                     break
         any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         fx_node_args = V.graph.current_node.args[0]
-        assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
-        if any_input_is_storage_and_layout is False and any(
-            # pyrefly: ignore [missing-attribute]
-            "val" in arg.meta
-            and (
+        # Skip this check when fx_node_args is not a list (e.g., called from _pad_as_cat).
+        if (
+            any_input_is_storage_and_layout is False
+            and isinstance(fx_node_args, list)
+            and any(
                 # pyrefly: ignore [missing-attribute]
-                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
-                # pyrefly: ignore [missing-attribute]
-                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+                "val" in arg.meta
+                and (
+                    # pyrefly: ignore [missing-attribute]
+                    arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                    # pyrefly: ignore [missing-attribute]
+                    or arg.meta["val"].is_contiguous(
+                        memory_format=torch.channels_last_3d
+                    )
+                )
+                for arg in fx_node_args
             )
-            for arg in fx_node_args
         ):
             output_stride = make_channels_last_strides_for(new_size)
 
@@ -6278,6 +6387,19 @@ class ExternKernel(InputsKernel):
                     if kernel._overloadname == "default"
                     else kernel.__name__.replace(".", "_")
                 )
+                # If the op has a versioned c_shim entry, call the latest _v{N}
+                # variant so new AOTI artifacts match the current op schema. The
+                # unversioned shim is retained solely for BC with existing
+                # already-compiled artifacts.
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                version_info = inductor_fallback_ops.get(f"aten.{kernel.__name__}", {})
+                latest_version = max(
+                    (int(v[1:]) for v in version_info if v.startswith("v")),
+                    default=1,
+                )
+                if latest_version > 1:
+                    opname = f"{opname}_v{latest_version}"
                 self.cpp_kernel_name = f"at::_ops::{opname}::call"
             else:
                 self.cpp_kernel_name = kernel._schema.name
@@ -6343,24 +6465,58 @@ class ExternKernel(InputsKernel):
         Callable[[Any, Any], Any],
         dict[sympy.Symbol, pytree.KeyPath] | None,
     ]:
+        """Partition kernel args into tensor and non-tensor, realize tensor inputs,
+        re-run fake tensor propagation with the realized strides, and return
+        (example_output, tensor_args, non_tensor_args, unflatten_args, unbacked_bindings).
+
+        unflatten_args(new_tensor_args, new_non_tensor_args) reconstructs the
+        original (args, kwargs) tree from replacement lists.
+        """
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
-        is_arg_tensor = []
+        args_flat_is_tensor: list[bool] = []
         # tensor_args can be either tensor or torchbind objects
-        tensor_args = []
-        non_tensor_args: list[Any] = []
+        tensor_args: list[IRNode] = []
+        non_tensor_args: list[object] = []
+        real_non_tensor_args: list[
+            FakeScriptObject
+            | torch._C.Generator
+            | torch._C.ScriptObject
+            | torch.Tensor
+            | IntLikeType
+        ] = []
         for arg in args_flat:
-            is_arg_tensor.append(
-                isinstance(arg, IRNode) and not isinstance(arg, GeneratorState)
-            )
-            if is_arg_tensor[-1]:
-                tensor_args.append(arg)
-            else:
-                if isinstance(arg, Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
-                non_tensor_args.append(arg)
+            match arg:
+                case Expr():
+                    node = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(node)
+                    real_non_tensor_args.append(node)
+
+                case GeneratorState():
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    device_index = arg.device.index
+                    assert arg.device.type == "cuda" and device_index is not None
+                    real_non_tensor_args.append(
+                        torch.cuda.default_generators[device_index].clone_state()
+                    )
+
+                case OpaqueObjectState():
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    real_non_tensor_args.append(arg.value)
+
+                case IRNode():
+                    args_flat_is_tensor.append(True)
+                    tensor_args.append(arg)
+
+                case _:
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    real_non_tensor_args.append(arg)
 
         def unflatten_args(
             new_tensor_args: Sequence[_T], new_non_tensor_args: Sequence[_T]
@@ -6368,7 +6524,7 @@ class ExternKernel(InputsKernel):
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in is_arg_tensor:
+            for is_tensor in args_flat_is_tensor:
                 if is_tensor:
                     result.append(next(it_tensors))
                 else:
@@ -6417,7 +6573,7 @@ class ExternKernel(InputsKernel):
             else:
                 example_args.append(ir_node_to_tensor(x))
 
-        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
+        new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
@@ -6586,6 +6742,7 @@ class ExternKernel(InputsKernel):
         exact_strides: Sequence[_IntLike] | None = None,
         allow_padding: bool = False,
     ) -> IRNode:
+        """Ensure x has the requested stride order or exact strides, inserting a copy if needed."""
         assert order is not None or exact_strides is not None
         # Layout generally doesn't matter, but some consuming external ops might have requirements
         if x.get_numel() in (0, 1) and not exact_strides:
@@ -6634,7 +6791,17 @@ class ExternKernel(InputsKernel):
                         exact_strides=exact_strides,
                     )
                     return x
-            elif isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
+
+            # When padding is allowed, check if the buffer's existing strides
+            # match padded versions of the requested strides (e.g. concat graph
+            # outputs that were already padded by ConcatKernel).
+            padded_exact_strides = None
+            if allow_padding and exact_strides:
+                padded_exact_strides = list(
+                    Layout._pad_strides(exact_strides, x.get_size(), x.get_dtype())
+                )
+
+            if isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
@@ -6648,6 +6815,15 @@ class ExternKernel(InputsKernel):
                     if exact_strides is not None
                     else x
                 )
+            # Accept already-padded buffers when padding is allowed
+            elif (
+                padded_exact_strides is not None
+                and isinstance(x.get_layout(), (FixedLayout, NonOwningLayout))
+                and significant_strides_equal(
+                    padded_exact_strides, x.get_layout().stride, x.get_size()
+                )
+            ):
+                return try_match_insignificant_strides(x, padded_exact_strides)
             elif isinstance(
                 (mutation_layout := x.get_layout()), MutationLayoutSHOULDREMOVE
             ):
@@ -6943,16 +7119,23 @@ class ExternKernel(InputsKernel):
         return op_name
 
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.size_asserts and not V.graph.cpp_wrapper:
-            # comparing strides for 0 size tensor is tricky. Ignore them for now.
-            if sympy_product(self.get_size()) == 0:
-                return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            op_name = self.get_op_name()
-            wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
-            )
+        if not config.size_asserts:
+            return
+        # comparing strides for 0 size tensor is tricky. Ignore them for now.
+        if sympy_product(self.get_size()) == 0:
+            return
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+        op_name = self.get_op_name()
+        name = self.get_name()
+        if V.graph.cpp_wrapper:
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if isinstance(self.op_overload, torch._ops.OpOverload):
+                if torch.Tag.inplace_view in self.op_overload.tags:
+                    assert isinstance(self.inputs[0], IRNode)
+                    name = self.inputs[0].get_name()
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
@@ -7649,7 +7832,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # pyrefly: ignore [missing-attribute]
         self.kernel_src = kernel.src
         self.kernel_ast = ast.parse(self.kernel_src)
-        self.kernel_stores = identify_triton_stores(self.kernel_ast)
+        self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
         # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
         self.arg_accesses = identify_accessed_tensors(
@@ -7658,8 +7841,12 @@ class UserDefinedTritonKernel(ExternKernel):
             tma_descriptor_metadata,
         )
 
+        # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
+        # includes scalars, so writes may reference non-tensor args like SymInts.
         self.mutable_args = [
-            kernel_args[key.name] for key in self.arg_accesses.read_writes.writes
+            kernel_args[key.name]
+            for key in self.arg_accesses.read_writes.writes
+            if isinstance(kernel_args.get(key.name), TensorBox)
         ]
 
         self.mutation_outputs = [
@@ -8081,7 +8268,12 @@ class DynamicSelectStorageOffset(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.index, unbacked_only)
+        return (
+            get_free_symbols(self.index, unbacked_only)
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.base_offset, unbacked_only))
+            .union(get_free_symbols(self.base_dim_stride, unbacked_only))
+        )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
@@ -8132,8 +8324,11 @@ class DynamicSliceSize(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.start, unbacked_only).union(
-            get_free_symbols(self.end, unbacked_only)
+        return (
+            get_free_symbols(self.start, unbacked_only)
+            .union(get_free_symbols(self.end, unbacked_only))
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.step, unbacked_only))
         )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -8726,8 +8921,10 @@ class FallbackKernel(ExternKernelAlloc):
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         # Try to lower single output functional custom ops to their out-variant.
-        if isinstance(kernel, torch._ops.OpOverload) and isinstance(
-            example_output, torch.Tensor
+        if (
+            isinstance(kernel, torch._ops.OpOverload)
+            and not torch._library.utils.is_builtin(kernel)
+            and isinstance(example_output, torch.Tensor)
         ):
             from torch._library._out_variant import (
                 _is_functional,
@@ -8771,9 +8968,10 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
-        # Try multi-output .out() lowering for ops with out_variant tag.
+        # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
+            and not torch._library.utils.is_builtin(kernel)
             and not V.graph.cpp_wrapper
             and device
         ):
@@ -9023,6 +9221,10 @@ class OpaqueMultiOutput(MultiOutput):
         super().__init__(layout, input, indices, skip_size_stride_alignment_checks=True)
         self.opaque_example_value = opaque_value
 
+    @property  # type: ignore[override]
+    def dtype(self) -> Never:
+        raise AttributeError("OpaqueMultiOutput has no dtype")
+
     def wrap_for_lowering(self) -> OpaqueMultiOutput:
         return self
 
@@ -9201,8 +9403,8 @@ class MutableBox(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return self.data.has_large_inner_fn(threshold)
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        return self.data.mark_reuse(users, has_non_fusible_users)
 
     def realize_hint(self) -> None:
         return self.data.realize_hint()
@@ -9382,6 +9584,7 @@ class StorageBox(MutableBox):
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
+        self.data.stream_idx = self.data.data.stream_idx
         return self.data.name
 
     def realize_hint(self) -> None:
@@ -9425,7 +9628,9 @@ class StorageBox(MutableBox):
             )
         )
 
-    def should_realize_on_reuse(self, users: int) -> bool:
+    def should_realize_on_reuse(
+        self, users: int, has_non_fusible_users: bool = False
+    ) -> bool:
         """
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
@@ -9437,14 +9642,30 @@ class StorageBox(MutableBox):
                 heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-            return (
-                self.num_reads() > config.realize_reads_threshold
-                or self.has_large_inner_fn()
+            if self.has_large_inner_fn():
+                return True
+            # Size-aware cost model comparing total memory traffic:
+            #   Inline:      total_read_bytes * users
+            #   Materialize: total_read_bytes + output_bytes * (1 + users)
+            # This naturally handles broadcast reads (small buffers are
+            # cheap to re-read) and dtype promotions (fp32 outputs cost
+            # more to write than bf16 inputs cost to read).
+            total_read_bytes = sum(
+                V.graph.get_dep_size_hint(dep) for dep in self.get_reads()
             )
+            output_bytes = (
+                V.graph.sizevars.optimization_hint(self.data.get_numel(), fallback=0)
+                * self.data.dtype.itemsize
+            )
+            if total_read_bytes > 0 and output_bytes > 0:
+                if has_non_fusible_users:
+                    return total_read_bytes > output_bytes
+                return total_read_bytes * (users - 1) >= output_bytes * (1 + users)
+            return self.num_reads() > config.realize_reads_threshold
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        if self.should_realize_on_reuse(users):
+    def mark_reuse(self, users: int, has_non_fusible_users: bool = False) -> None:
+        if self.should_realize_on_reuse(users, has_non_fusible_users):
             self.realize()
 
     def num_reads(self) -> int:
@@ -9532,7 +9753,9 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
+            if isinstance(
+                operand, (ShapeAsConstantBuffer, GeneratorState, OpaqueObjectState)
+            ):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -10221,6 +10444,9 @@ class NonTensorObj(IRNode):
     ) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
+    def realize(self) -> str | None:
+        return None
+
 
 @ir_dataclass
 class TorchBindObject(NonTensorObj):
@@ -10293,6 +10519,24 @@ class GeneratorState(NonTensorObj):
         return self.name
 
 
+@ir_dataclass
+class OpaqueObjectState(NonTensorObj):
+    """
+    Represents an opaque object (e.g., ProcessGroup) that is passed through
+    as a graph input. Similar to GeneratorState, this wraps the object with
+    its placeholder name so codegen can reference it properly.
+    """
+
+    name: str
+    value: Any  # The actual opaque object (for reference, not used in codegen)
+
+    def get_name(self) -> str:
+        return self.name
+
+    def codegen_reference(self, writer: IndentedBuffer | None = None) -> str:
+        return self.name
+
+
 class _CollectiveKernel(FallbackKernel):
     def should_allocate(self) -> bool:
         return False
@@ -10320,7 +10564,7 @@ class _CollectiveKernel(FallbackKernel):
     # Between the initiation and completion of an in-place collective, the
     # input buffers are subject to both volatile reads and volatile writes.
     # They must not be read, written to or reused by another kernel. To ensure
-    # the constraints, we model collective -> wait_tensor as as two-step
+    # the constraints, we model collective -> wait_tensor as a two-step
     # mutation of the input buffers.
     @classmethod
     def create_inplace(
@@ -10339,11 +10583,18 @@ class _CollectiveKernel(FallbackKernel):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        device = None
         for tensor_arg in tensor_args:
+            if isinstance(tensor_arg, NonTensorObj):
+                continue
             tensor_arg.realize()
             V.graph.mark_buffer_mutated(tensor_arg.get_name())
-
-        device = tensor_args[0].get_device()
+            if device is None:
+                device = tensor_arg.get_device()
+        assert device is not None, (
+            f"In-place collective {kernel} requires at least one tensor "
+            f"argument; got only non-tensor IR nodes."
+        )
         packed = cls(
             NoneLayout(device=device),
             kernel,

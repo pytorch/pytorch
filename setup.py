@@ -270,8 +270,6 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import filecmp
-import glob
 import importlib
 import itertools
 import json
@@ -280,7 +278,6 @@ import subprocess
 import sysconfig
 import tempfile
 import textwrap
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -315,6 +312,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
+from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
 from tools.setup_helpers.env import (
@@ -503,162 +501,6 @@ TORCH_VERSION = get_torch_version()
 report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
-
-
-def get_submodule_folders() -> list[Path]:
-    git_modules_file = CWD / ".gitmodules"
-    default_modules_path = [
-        THIRD_PARTY_DIR / name
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "onnx",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
-    if not git_modules_file.exists():
-        return default_modules_path
-    with git_modules_file.open(encoding="utf-8") as f:
-        return [
-            CWD / line.partition("=")[-1].strip()
-            for line in f
-            if line.strip().startswith("path")
-        ]
-
-
-def check_submodules() -> None:
-    def check_for_files(folder: Path, files: list[str]) -> None:
-        if not any((folder / f).exists() for f in files):
-            report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    def not_exists_or_empty(folder: Path) -> bool:
-        return not folder.exists() or (
-            folder.is_dir() and next(folder.iterdir(), None) is None
-        )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
-    folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
-    for folder in folders:
-        check_for_files(
-            folder,
-            [
-                "CMakeLists.txt",
-                "Makefile",
-                "setup.py",
-                "LICENSE",
-                "LICENSE.md",
-                "LICENSE.txt",
-            ],
-        )
-    check_for_files(
-        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
-        ["CMakeLists.txt"],
-    )
-
-
-# Windows has very bad support for symbolic links.
-# Instead of using symlinks, we're going to copy files over
-def mirror_files_into_torchgen() -> None:
-    # (new_path, orig_path)
-    # Directories are OK and are recursively mirrored.
-    paths = [
-        (
-            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
-            CWD / "aten/src/ATen/native/native_functions.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/native/tags.yaml",
-            CWD / "aten/src/ATen/native/tags.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/templates",
-            CWD / "aten/src/ATen/templates",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd",
-            CWD / "tools/autograd",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd/templates",
-            CWD / "tools/autograd/templates",
-        ),
-    ]
-    for new_path, orig_path in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
-
-
-def mirror_inductor_external_kernels() -> None:
-    """
-    Copy external kernels into Inductor so they are importable.
-    """
-    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
-    paths = [
-        (
-            CWD
-            / "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/cutedsl_grouped_gemm.py",
-            CWD
-            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
-            True,
-        ),
-    ]
-    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
-            (new_path.parent / "__init__.py").touch(exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        if (
-            not orig_path.exists()
-            and allow_missing_if_cuda_is_disabled
-            and cuda_is_disabled
-        ):
-            continue
-        raise RuntimeError(
-            "Check the file paths in `mirror_inductor_external_kernels()`"
-        )
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -1027,7 +869,6 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -1045,28 +886,6 @@ def build_deps() -> None:
             '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
-
-    # Use copies instead of symbolic files.
-    # Windows has very poor support for them.
-    sym_files = [
-        CWD / "tools/shared/_utils_internal.py",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
-    ]
-    orig_files = [
-        CWD / "torch/_utils_internal.py",
-        CWD / "third_party/valgrind-headers/callgrind.h",
-        CWD / "third_party/valgrind-headers/valgrind.h",
-    ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
-        same = False
-        if sym_file.exists():
-            if filecmp.cmp(sym_file, orig_file):
-                same = True
-            else:
-                sym_file.unlink()
-        if not same:
-            shutil.copyfile(orig_file, sym_file)
 
 
 ################################################################################
@@ -1461,21 +1280,7 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        for wildcard in filter(None, ignores.splitlines()):
-            if wildcard.strip().startswith("#"):
-                if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                    # Marker is found and stop reading .gitignore.
-                    break
-                # Ignore lines which begin with '#'.
-            else:
-                # Don't remove absolute paths from the system
-                wildcard = wildcard.lstrip("./")
-                for filename in glob.iglob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+        _clean()
 
 
 # Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
@@ -1713,10 +1518,8 @@ def main() -> None:
         print(e, file=sys.stderr)
         sys.exit(1)
 
-    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-        mirror_inductor_external_kernels()
 
     (
         ext_modules,
@@ -1730,6 +1533,7 @@ def main() -> None:
     torch_package_data = [
         "py.typed",
         "bin/*",
+        "bin/**/*",
         "test/*",
         "*.pyi",
         "**/*.pyi",

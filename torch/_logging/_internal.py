@@ -403,7 +403,7 @@ def set_logs(
             Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
 
         kernel_code (:class:`bool`):
-            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-kernel basis. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -433,7 +433,7 @@ def set_logs(
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
         sym_node (:class:`bool`):
-            Whether to emit debug info for various SymNode opterations. Default: ``False``
+            Whether to emit debug info for various SymNode operations. Default: ``False``
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
@@ -1024,11 +1024,7 @@ class TorchLogsFormatter(logging.Formatter):
         if self._is_trace:
             if s != "":
                 raise AssertionError(f"expected empty string for trace, got {s!r}")
-            try:
-                r = f"{prefix} {json.dumps(record.metadata)}"
-            except TypeError:
-                log.warning("failing metadata: %r", record.metadata)
-                raise
+            r = f"{prefix} {json.dumps(record.metadata, default=repr)}"
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -1185,6 +1181,10 @@ def _init_logs(log_file_name=None) -> None:
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
+    # Override isEnabledFor so that logging.disable() cannot suppress trace
+    # events.  When TORCH_TRACE is set we always want output regardless of
+    # the global disable threshold.
+    trace_log.isEnabledFor = lambda level: level >= trace_log.level
     trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)

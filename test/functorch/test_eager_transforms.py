@@ -76,7 +76,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
 )
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -1325,7 +1324,7 @@ class TestAutogradFunction(TestCase):
         def fn(x):
             return A.apply(x.clone())
 
-        err_msg = "A input that has been returned as-is"
+        err_msg = "An input that has been returned as-is"
 
         a = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
         a_t = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
@@ -2515,7 +2514,6 @@ class TestJac(VmapTearDownMixin, TestCase):
         self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/127036
-    @xfailIfTorchDynamo
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited

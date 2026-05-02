@@ -474,13 +474,13 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
   // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
   // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
-  constexpr uint MAX_WARPS = 1024/32;
+  constexpr uint MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
-  const uint WARP_BITS = __builtin_ctz(warpSize);
+  const uint WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
 
   const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
-  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
+  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
+  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % C10_WARP_SIZE
 
   // Stage 1: Each warp's lane 0 stores its counts in smem.
   // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
@@ -521,7 +521,6 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   for (uint32_t i = 0; i < RadixSize; ++i) {
     counts[i] = smem[buffer_offset + i];
   }
-  __syncthreads(); // Wait for all threads to finish reading the final counts.
 }
 
 // This function counts the distribution of all input values in a
@@ -691,6 +690,15 @@ __device__ scalar_t findPatternDataSmem(
                      // element is relevant if ((val & desiredMask) == desired).
     const scalar_t* dataSmem, // input data stored in shared memory.
     index_t dataSmemSize) { // input data size stored in shared memory.
+
+  // Ensure all threads have finished reading from smem before overwriting it.
+  // countRadixAggregateCounts Stage 3 reads from smem[buffer_offset + i];
+  // when buffer_offset == 0, those locations overlap with smem[0]/smem[1]
+  // written below. Warp 0 (which writes smem[0]/smem[1]) may get ahead of
+  // lagging warps still in Stage 3. Syncing here (rather than at the end of
+  // Stage 3) is cheaper because findPatternDataSmem is called at most once per
+  // radixSelect invocation, only when a unique element is found (count == 1).
+  __syncthreads();
 
   // initialize smem to 0.
   // smem[0] is a flag to indicate if a value has been found.

@@ -49,8 +49,8 @@ at::Tensor& embedding_lookup_fallback_impl(
     bool include_last_offset,
     bool pruned) {
   auto* output_data = output.data_ptr<float>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
   int32_t* compressed_indices_mapping_data = nullptr;
   const auto weight_sizes = weight.sizes();
   const int64_t N = weight_sizes[0];
@@ -289,8 +289,8 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     const int64_t output_size,
     bool include_last_offset) {
   auto* output_data = output.data_ptr<float>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_sizes = weight.sizes();
   const int64_t weight_size = weight_sizes[1];
   const int index_size = indices.numel();
@@ -323,7 +323,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
 
     int i = 0;
     while (i + 15 < lengths_data[m]) {
-      uint8_t* wei_ptr[16];
+      const uint8_t* wei_ptr[16];
       float bias = 0.0f;
       float scale[16];
       float32x4_t scale_vec[16];
@@ -384,7 +384,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 7 < lengths_data[m]) {
-      uint8_t* wei_ptr[8];
+      const uint8_t* wei_ptr[8];
       float bias = 0.0f;
       float scale[8];
       float32x4_t scale_vec[8];
@@ -445,7 +445,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 3 < lengths_data[m]) {
-      uint8_t* wei_ptr[4];
+      const uint8_t* wei_ptr[4];
       float bias = 0.0f;
       float scale[4];
       float32x4_t scale_vec[4];
@@ -506,7 +506,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 1 < lengths_data[m]) {
-      uint8_t* wei_ptr[2];
+      const uint8_t* wei_ptr[2];
       float bias = 0.0f;
       float scale[2];
       float32x4_t scale_vec[2];
@@ -700,8 +700,8 @@ at::Tensor& embedding_bag_nbit_impl(
     at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
-  const auto indices_data = indices.data_ptr<IndexType>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
   auto* output_data = output.data_ptr<float>();
   const int64_t N = weight_sizes[0];
 
@@ -870,8 +870,8 @@ at::Tensor& embedding_bag_byte_impl(
   }
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
   auto* output_data = output.data_ptr<float>();
   const int index_size = indices.numel();
 

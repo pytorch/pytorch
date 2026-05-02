@@ -44,6 +44,7 @@ struct MPSScalar {
     float f; // MPS doesn't support 'double'
     at::Half h;
     int64_t i;
+    uint64_t u;
     bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
@@ -250,7 +251,7 @@ struct MPSKernelCache {
     __block MPSCachedKernel* cachedKernel = nil;
     MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
+      if (cache_.contains(hash)) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
@@ -386,6 +387,15 @@ struct MPSGraphCache {
   template <typename T>
   inline T* LookUpAs(const std::string& key) const {
     return static_cast<T*>(LookUp(key));
+  }
+
+  void clear() {
+    dispatch_sync(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedGraph_;
+      }
+      cache_.clear();
+    });
   }
 
  private:

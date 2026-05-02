@@ -85,6 +85,15 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
+
   // Bypass OneDNN optimization path for float64 due to lack of full double
   // precision support.
   if (mat1.scalar_type() == at::kDouble) {
@@ -325,12 +334,6 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   }
 
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
-  return result;
-}
-
-Tensor bmm(const Tensor& self, const Tensor& batch2) {
-  auto result = at::empty({0}, self.options());
-  at::native::xpu::bmm_out(self, batch2, result);
   return result;
 }
 
