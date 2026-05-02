@@ -67,7 +67,6 @@ class TestBuiltin(TestCase):
         assert_(left == right)
         assert_(hash(left) == hash(right))
 
-    @xfailIfTorchDynamo  # TypeError -> InternalTorchDynamoError
     def test_invalid_types(self):
         # Make sure invalid type strings raise an error
 
