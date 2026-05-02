@@ -79,6 +79,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return reinterpret_cast<std::intptr_t>(this);
   }
 
+  bool getUsePgForSymmMemRendezvous() const {
+    return use_pg_for_symm_mem_rendezvous_;
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    use_pg_for_symm_mem_rendezvous_ = value;
+  }
+
   virtual bool supportsSplitting() const {
     return false;
   }
@@ -557,6 +565,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 
   std::optional<at::Device> bound_device_id_;
+
+  bool use_pg_for_symm_mem_rendezvous_ = false;
 };
 
 } // namespace c10d
