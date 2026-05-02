@@ -82,22 +82,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
-    # Only register on SM100+ where the PTX instruction is available
-    if device == "cuda" and torch.cuda.get_device_capability() >= (10, 0):
-        from .. import inductor_prims
-
-        # Pattern 1: Bit manipulation approach
-        def e8m0_rceil_pattern(inp):
-            inp_bits = inp.view(torch.int32)
-            biased_exp = (inp_bits >> 23) & 0xFF
-            mantissa = inp_bits & 0x7FFFFF
-            needs_round_up = mantissa != 0
-            e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
-            e8m0_biased = torch.clamp(e8m0_biased, 0, 255)
-            return e8m0_biased.to(torch.uint8)
-
-        def e8m0_rceil_replacement(inp):
-            return inductor_prims.cvt_e8m0_rceil(inp)
+    if device.startswith("cuda"):
 
         def e8m0_extra_check(match):
             inp = match.kwargs.get("inp")
@@ -110,21 +95,53 @@ def _misc_patterns_init(input_device: torch.device | None = None):
                 and inp_val.dtype == torch.float32
             )
 
-        register_replacement(
-            # pyrefly: ignore [bad-argument-type]
-            e8m0_rceil_pattern,
-            # pyrefly: ignore [bad-argument-type]
-            e8m0_rceil_replacement,
-            [torch.randn(32, device="cuda", dtype=torch.float32)],
-            # pyrefly: ignore [bad-argument-type]
-            fwd_only,
-            # pyrefly: ignore [bad-argument-type]
-            [post_grad_patterns],
-            extra_check=e8m0_extra_check,
-        )
+        is_sm100_plus = torch.cuda.get_device_capability() >= (10, 0)
+
+        if is_sm100_plus:
+            from .. import inductor_prims
+
+            # Pattern 1: Bit manipulation approach (SM100+ only - uses PTX instruction)
+            def e8m0_rceil_pattern(inp):
+                inp_bits = inp.view(torch.int32)
+                biased_exp = (inp_bits >> 23) & 0xFF
+                mantissa = inp_bits & 0x7FFFFF
+                needs_round_up = mantissa != 0
+                e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
+                e8m0_biased = torch.clamp(e8m0_biased, 0, 255)
+                return e8m0_biased.to(torch.uint8)
+
+            def e8m0_rceil_replacement(inp):
+                return inductor_prims.cvt_e8m0_rceil(inp)
+
+            register_replacement(
+                # pyrefly: ignore [bad-argument-type]
+                e8m0_rceil_pattern,
+                # pyrefly: ignore [bad-argument-type]
+                e8m0_rceil_replacement,
+                [torch.randn(32, device="cuda", dtype=torch.float32)],
+                # pyrefly: ignore [bad-argument-type]
+                fwd_only,
+                # pyrefly: ignore [bad-argument-type]
+                [post_grad_patterns],
+                extra_check=e8m0_extra_check,
+                skip_duplicates=True,
+            )
 
         # Pattern 2: log2 + ceil approach (used by torchao MX formats)
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
+        #
+        # Registered on ALL CUDA hardware. On SM100+ uses the PTX instruction;
+        # on earlier hardware uses exact IEEE 754 bit-manipulation.
+        #
+        # The bit-manipulation replacement is preferred over the software
+        # log2+ceil because Triton's fused kernels can produce inputs that
+        # differ by ~1 ULP from eager mode (e.g. due to FMA or libdevice
+        # polynomial differences in erf-based GELU). When such an input falls
+        # exactly on a power-of-2 boundary, software log2 may round the result
+        # to the integer below, making ceil return the wrong value and the
+        # uint8 output differ by 1.  The bit-manipulation approach reads the
+        # IEEE 754 biased exponent directly, which is always correct for any
+        # representable positive normal float32 value.
         E8M0_BIAS = 127
 
         def e8m0_rceil_log2_pattern(inp):
@@ -134,11 +151,26 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             biased = clamped + E8M0_BIAS
             return biased.to(torch.uint8)
 
-        def e8m0_rceil_log2_replacement(inp):
-            # The PTX instruction expects the raw float value, not log2
-            # So we need to convert: if inp is log2(x), then 2^inp is x
-            # But actually our pattern matches on the value before log2
-            return inductor_prims.cvt_e8m0_rceil(inp)
+        if is_sm100_plus:
+
+            def e8m0_rceil_log2_replacement(inp):
+                return inductor_prims.cvt_e8m0_rceil(inp)
+
+        else:
+            # Bit-manipulation fallback: extract IEEE 754 biased exponent with
+            # ceiling rounding.  Equivalent to clamp(ceil(log2(inp)), -127, 127)
+            # + 127 for all positive normal float32 values, but avoids software
+            # log2 imprecision near exact powers of 2.
+            # Clamp to [0, 254] to match the satfinite semantics of the original
+            # pattern (clamp(ceil_val, -127, 127) + 127 gives at most 254).
+            def e8m0_rceil_log2_replacement(inp):
+                inp_bits = inp.view(torch.int32)
+                biased_exp = (inp_bits >> 23) & 0xFF
+                mantissa = inp_bits & 0x7FFFFF
+                needs_round_up = mantissa != 0
+                e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
+                e8m0_biased = torch.clamp(e8m0_biased, 0, 254)
+                return e8m0_biased.to(torch.uint8)
 
         register_replacement(
             # pyrefly: ignore [bad-argument-type]
@@ -151,6 +183,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             # pyrefly: ignore [bad-argument-type]
             [post_grad_patterns],
             extra_check=e8m0_extra_check,
+            skip_duplicates=True,
         )
 
     # TODO: Add pattern for cvt.rn.bf16x2.ue8m0x2 (e8m0 -> bf16 conversion)
