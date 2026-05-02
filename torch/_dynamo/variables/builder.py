@@ -1554,6 +1554,9 @@ class VariableBuilder:
                     source=self.source,
                 )
 
+            if sys.version_info >= (3, 14) and value is Union:
+                return BuiltinVariable.create_with_source(value, self.source)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,

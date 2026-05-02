@@ -755,12 +755,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         typing._generic_class_getitem,  # pyrefly: ignore [missing-attribute]
                         self,
                     ).call_function(tx, args, kwargs)
-                elif hasattr(self.value, "__class_getitem__"):
-                    # __class_getitem__ is implemented in python so we can trace, but it's also lru_cache'd so might as
-                    # well unwrap it to avoid the warning
-                    return variables.UserMethodVariable(
-                        self.value.__class_getitem__.__func__.__wrapped__, self
-                    ).call_function(tx, args, kwargs)
+            if hasattr(self.value, "__class_getitem__"):
+                # unwrap lru_cache'd functions
+                fn = self.value.__class_getitem__.__func__
+                if hasattr(fn, "__wrapped__"):
+                    fn = fn.__wrapped__
+                return variables.UserMethodVariable(fn, self).call_function(
+                    tx, args, kwargs
+                )
 
         # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
         # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.

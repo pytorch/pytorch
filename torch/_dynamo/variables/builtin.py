@@ -366,7 +366,8 @@ class BaseBuiltinVariable(VariableTracker):
         if name == "__class_getitem__":
             key_py = args[0].as_python_constant()
             try:
-                val = self._fn[key_py]
+                obj = self._fn or self.fn  # pyrefly: ignore[missing-attribute]
+                val = obj[key_py]
             except TypeError as e:
                 raise_type_error(tx, str(e))
             source = None
