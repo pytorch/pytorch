@@ -3157,11 +3157,6 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
-#if defined(__aarch64__) || defined(_M_ARM64)
-  // See https://github.com/pytorch/pytorch/issues/178522.
-  GTEST_SKIP()
-      << "Skipping ConstantPropagation.CustomClassesCanBePropagated on AArch64.";
-#endif
 #ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():
