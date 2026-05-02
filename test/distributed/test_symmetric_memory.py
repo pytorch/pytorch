@@ -313,9 +313,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         opts.use_pg_for_symm_mem_rendezvous = True
         pg = dist.new_group(list(range(self.world_size)), pg_options=opts)
 
-        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
-            self.rank
-        )
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
         symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
 
         symm_mem_hdl.barrier()
