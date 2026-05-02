@@ -77,11 +77,10 @@ class IntSpec:
     compilation.
 
     ``type`` is fixed at construction; all other fields are mutable via
-    fluent setters that double as getters (no arg = read, one arg = write):
+    fluent setters that return ``self`` for chaining:
 
         spec = IntSpec.backed("batch", min=1, max=64)
         spec.guarding_hint(32)   # set, returns self
-        spec.guarding_hint()     # get, returns 32
         spec.min(1).max(64)      # chain
     """
 
@@ -117,6 +116,9 @@ class IntSpec:
         if not isinstance(type, IntSpecType):
             raise TypeError(f"IntSpec type must be an IntSpecType, got {type!r}")
         self._type = type
+        # Auto-generate a name when the user doesn't supply one.
+        if name is None:
+            name = f"_intspec_{type.value}_{id(self):x}"
         self._name = name
         self._min = min
         self._max = max

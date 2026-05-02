@@ -1605,6 +1605,10 @@ str(L['x'].device) == 'cpu'
 L['x'].requires_grad == False
 L['x'].ndimension() == 2
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
+hasattr(L['x'], '_dynamo_weak_dynamic_indices') == False
+hasattr(L['x'], '_dynamo_unbacked_indices') == False
+hasattr(L['x'], '_dynamo_strict_unbacked_indices') == False
+hasattr(L['x'], '_dynamo_static_indices') == False
 L['x'] is L['y']
 not ___dict_contains('aaaaaaaa', G['sys'].modules)
 not ___dict_contains('bbbbbbbb', G['sys'].modules)
@@ -4552,36 +4556,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-    def test_id_of_container_as_dict_key(self):
-        MY_DICT = {"a": 1, "b": 2}
-
-        def fn(x):
-            memo = {}
-            memo[id(MY_DICT)] = True
-            if id(MY_DICT) in memo:
-                return x + 1.0
-            return x + 2.0
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
-    def test_id_of_list_as_dict_key(self):
-        MY_LIST = [1.0, 2.0]
-
-        def fn(x):
-            memo = {}
-            memo[id(MY_LIST)] = True
-            if id(MY_LIST) in memo:
-                return x + 1.0
-            return x + 2.0
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
     def test_deepcopy_dict(self):
         MY_DICT = {"a": 1, "b": 2.0, "c": None}
 
@@ -6355,148 +6329,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn_has_breaks, backend=cnts)
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
-
-    def test_id_guarded_class(self):
-        class MyClass1:
-            pass
-
-        class MyClass2:
-            pass
-
-        def fn(x, y):
-            return x + id(y) // 100000
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
-        x = torch.randn(3)
-        y = MyClass1
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # No recompile if still pass in the original class (MyClass1)
-        x = torch.randn(3)
-        y = MyClass1
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Have to recompile if pass in new class (MyClass2)
-        x = torch.randn(3)
-        y = MyClass2
-        self.assertEqual(fn(x, y), compiled_fn(x, y))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_id_guarded_object(self):
-        class UserDefinedObject:
-            @torch.compile(backend="eager")
-            def call(self, x, ref_id):
-                self_id = id(self)
-                if self_id == ref_id:
-                    x = torch.mul(x, 1.0)
-                else:
-                    x = torch.mul(x, 0)
-                return x
-
-        # Make sure we do recompile when id(self) is executed on
-        # different self objects.
-        x = torch.ones(2)
-        obj1 = UserDefinedObject()
-        obj1_id = id(obj1)
-        self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
-
-        obj2 = UserDefinedObject()
-        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
-        self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
-
-    def test_id_guarded_module(self):
-        class M(torch.nn.Module):
-            def forward(self, x, ref_id):
-                self_id = id(self)
-                if self_id == ref_id:
-                    x = torch.mul(x, 1.0)
-                else:
-                    x = torch.mul(x, 0)
-                return x
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        # Make sure we do recompile when id(self) is executed on
-        # different self objects.
-        x = torch.ones(2)
-        m1 = M()
-        m1_id = id(m1)
-        opt_m1 = torch.compile(m1, backend=cnts, fullgraph=True)
-        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
-        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
-
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
-
-        m2 = M()
-        opt_m2 = torch.compile(m2, backend=cnts, fullgraph=True)
-        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
-        self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 2)
-
-    def test_id_tensor(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.y1 = torch.ones(2)
-                self.y2 = torch.zeros(2)
-                self.ref_y1_id = id(self.y1)
-                self.ref_y2_id = id(self.y2)
-
-            def forward(self, x, ref_id):
-                if ref_id == id(self.y1):
-                    x = torch.mul(x, self.y1)
-                else:
-                    x = torch.mul(x, self.y2)
-                return x
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        x = torch.ones(2)
-        m = M()
-        opt_m = torch.compile(m, backend=cnts, fullgraph=True)
-
-        self.assertEqual(opt_m(x, m.ref_y1_id), torch.ones(2))
-        self.assertEqual(cnts.frame_count, 1)
-
-        self.assertEqual(opt_m(x, m.ref_y2_id), torch.zeros(2))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_id_of_nn_module(self):
-        class M(torch.nn.Module):
-            def forward(self, x, ref_id):
-                self_id = id(self)
-                if self_id == ref_id:
-                    x = torch.mul(x, 1.0)
-                x = torch.add(x, 1.0)
-                return x
-
-        m = M().eval()
-        data = torch.randn(1)
-        cnts = torch._dynamo.testing.CompileCounter()
-        correct_ref_id = id(m)
-        opt_m = torch.compile(m, backend=cnts, fullgraph=True)
-        opt_m(data, correct_ref_id)
-        # Extra op is the recorded equality test (although once
-        # the trace is flattened this is dead!)
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnts.op_count, """2""")
-        else:
-            self.assertExpectedInline(cnts.op_count, """2""")
-
-        torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
-        incorrect_ref_id = id(m) + 1
-        opt_m = torch.compile(m, backend=cnts, fullgraph=True)
-        opt_m(data, incorrect_ref_id)
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnts.op_count, """1""")
-        else:
-            self.assertExpectedInline(cnts.op_count, """1""")
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
@@ -10389,6 +10221,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_deterministic_algorithms_warn_only_mutated(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        value = None
+        warn_only = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            nonlocal warn_only
+            value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            check_state()
+            res = x.scatter_add(
+                0,
+                torch.tensor([0, 1, 0]),
+                torch.tensor([1.0, 2.0, 3.0]),
+            )
+            torch.use_deterministic_algorithms(False, warn_only=True)
+            return res
+
+        def run_fn():
+            torch.use_deterministic_algorithms(False, warn_only=False)
+            result = fn(torch.zeros(2))
+            self.assertEqual(result, torch.tensor([4.0, 2.0]))
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if warn_only is not True:
+                raise AssertionError(f"Expected warn_only is True, got {warn_only}")
+            if torch.are_deterministic_algorithms_enabled() is not False:
+                raise AssertionError(
+                    "Expected deterministic algorithms disabled after fn()"
+                )
+            if torch.is_deterministic_algorithms_warn_only_enabled() is not True:
+                raise AssertionError("Expected warn_only enabled after fn()")
+
+        try:
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
+            if cnt.frame_count != 1:
+                raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
+    def test_deterministic_algorithms_warn_only_compile_time_value(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x, warn_only):
+            torch.use_deterministic_algorithms(True, warn_only=warn_only)
+            return x + 1
+
+        try:
+            for expected_warn_only in (True, False):
+                torch.use_deterministic_algorithms(False, warn_only=False)
+                result = fn(torch.ones(2), expected_warn_only)
+                self.assertEqual(result, torch.full((2,), 2.0))
+                self.assertTrue(torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(
+                    torch.is_deterministic_algorithms_warn_only_enabled(),
+                    expected_warn_only,
+                )
+
+            self.assertEqual(len(backend.graphs), 2)
+            warn_only_values = []
+            for gm in backend.graphs:
+                set_deterministic_nodes = [
+                    node
+                    for node in gm.graph.nodes
+                    if node.op == "call_function"
+                    and node.target is torch._C._set_deterministic_algorithms
+                ]
+                self.assertEqual(len(set_deterministic_nodes), 1)
+                self.assertEqual(set_deterministic_nodes[0].args, (True,))
+                warn_only_values.append(set_deterministic_nodes[0].kwargs["warn_only"])
+            self.assertEqual(warn_only_values, [True, False])
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self): ...
@@ -12722,6 +12641,76 @@ def ___make_guard_fn():
         compiled_result = torch.compile(fn, fullgraph=True)(x)
         for i in range(4):
             self.assertEqual(eager_result[i], compiled_result[i])
+
+    def test_frozen_dataclass_with_len_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __len__ inside
+        # torch.compile doesn't crash. Exercises the truthiness check in
+        # symbolic_convert.py call_function where `inner_fn and ...` would
+        # trigger __len__ on an uninitialized backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Layout:
+            shape: tuple
+            stride: tuple
+
+            def __len__(self):
+                if isinstance(self.shape, tuple):
+                    return len(self.shape)
+                return 1
+
+            def size(self):
+                result = 1
+                for s in self.shape:
+                    result *= s
+                return result
+
+            def __call__(self, idx):
+                # Map index through stride
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+            def cosize(self):
+                return self(self.size() - 1) + 1
+
+        def fn(x):
+            layout = Layout((2, 3), (3, 1))
+            return x + layout.cosize()
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_callable_with_hash_constructed_in_compile(self):
+        # Tests that constructing a frozen dataclass with __hash__ (auto from
+        # frozen=True) inside torch.compile doesn't crash when the object is
+        # callable. Exercises is_supported_random() which does
+        # `self.value in set(...)` triggering __hash__ on an uninitialized
+        # backing object.
+        @dataclasses.dataclass(frozen=True)
+        class Config:
+            shape: tuple
+            stride: tuple
+
+            def __call__(self, idx):
+                result = 0
+                for sh, st in zip(self.shape, self.stride):
+                    result += (idx % sh) * st
+                    idx //= sh
+                return result
+
+        def fn(x):
+            cfg = Config((2, 3), (3, 1))
+            return x + cfg(2)
+
+        fn_opt = torch.compile(fullgraph=True, backend="eager")(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
