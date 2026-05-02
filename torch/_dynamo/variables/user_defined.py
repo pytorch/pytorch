@@ -525,6 +525,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
+            # wrapperdescr_get with obj=NULL returns the descriptor itself.
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+            if isinstance(cls_attr, types.WrapperDescriptorType):
+                return variables.WrapperDescriptorVariable(cls_attr, source=source)
             return variables.GetAttrVariable(
                 self, name, py_type=type(cls_attr), source=source
             )
@@ -561,6 +565,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
+            # wrapperdescr_get/method_get with obj=NULL returns the
+            # descriptor itself.
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
+            if isinstance(cls_attr, types.WrapperDescriptorType):
+                return variables.WrapperDescriptorVariable(cls_attr, source=source)
+            if isinstance(cls_attr, types.MethodDescriptorType):
+                return variables.MethodDescriptorVariable(cls_attr, source=source)
             return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
         # Everything else: FunctionType, etc.
@@ -2670,6 +2682,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
                     return variables.UserMethodVariable(traceable_fn, self)
+            if isinstance(type_attr, types.WrapperDescriptorType):
+                wd_vt = variables.WrapperDescriptorVariable(type_attr)
+                return wd_vt.tp_descr_get_impl(tx, self, name, source=source)
+            # method_get with an instance calls PyCFunction_NewEx to produce
+            # a bound builtin_function_or_method.
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
+            if isinstance(type_attr, types.MethodDescriptorType):
+                md_vt = variables.MethodDescriptorVariable(type_attr)
+                return md_vt.tp_descr_get_impl(tx, self, name, source=source)
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor

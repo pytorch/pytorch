@@ -113,11 +113,14 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    BuiltinMethodVariable,
     CellVariable,
+    ConstantMethodWrapperVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     NewGlobalVariable,
     NumpyVariable,
@@ -132,6 +135,7 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
+    WrapperDescriptorVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,

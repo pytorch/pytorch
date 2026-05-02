@@ -1348,7 +1348,262 @@ class GetAttrVariable(VariableTracker):
         return self.obj.call_method(tx, self.name, list(args), kwargs)
 
 
+class WrapperDescriptorVariable(VariableTracker):
+    """Unbound C slot wrapper (wrapper_descriptor on a type).
+
+    CPython types define behavior through C-level slots on PyTypeObject
+    (tp_richcompare, sq_length, nb_add, etc.).  When these slots are
+    accessed from Python (e.g. list.__add__), CPython exposes them as
+    wrapper_descriptor objects (PyWrapperDescr_Type).  A wrapper_descriptor
+    is an unbound descriptor living on the type -- it is not tied to any
+    instance.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L867
+
+    When a wrapper_descriptor is accessed on an instance (e.g. [1,2].__add__),
+    its tp_descr_get slot (wrapperdescr_get) is invoked, which calls
+    PyWrapper_New to produce a bound method-wrapper (_PyMethodWrapper_Type).
+    The tp_descr_get_impl method on this class mirrors that binding step.
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.WrapperDescriptorType,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, types.WrapperDescriptorType)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        cls_name = self.descriptor.__objclass__.__name__
+        return f"WrapperDescriptorVariable({cls_name}.{self.descriptor.__name__})"
+
+    def python_type(self) -> type:
+        return types.WrapperDescriptorType
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        # descr_members: __objclass__ and __name__ are PyMemberDef on all
+        # descriptor types.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
+        if name == "__objclass__":
+            return VariableTracker.build(tx, self.descriptor.__objclass__)
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().var_getattr(tx, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Unbound call: list.__add__([1,2], [3,4]) -- first arg is self.
+        # Mirrors wrapperdescr_call.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L535
+        if not args:
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+            )
+        obj, *rest = args
+        return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name: str,
+        **kwargs: Any,
+    ) -> "MethodWrapperVariable":
+        # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
+        # a bound method-wrapper.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        return MethodWrapperVariable(self.descriptor, obj, name, **kwargs)
+
+
 class MethodWrapperVariable(VariableTracker):
+    """Bound method-wrapper (wrapper_descriptor bound to an instance).
+
+    Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
+    PyWrapper_New which stores a reference to the descriptor and the instance.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1450
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.WrapperDescriptorType,
+        obj: VariableTracker,
+        name: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, types.WrapperDescriptorType)
+        assert isinstance(obj, VariableTracker)
+        self.descriptor = descriptor
+        self.obj = obj
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"MethodWrapperVariable({self.descriptor}, {self.obj}, {self.name})"
+
+    def python_type(self) -> type:
+        return types.MethodWrapperType
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.obj.call_method(tx, self.name, list(args), kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.obj)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
+
+
+class MethodDescriptorVariable(VariableTracker):
+    """Unbound C method descriptor (method_descriptor on a type).
+
+    CPython types expose their PyMethodDef-based C methods as
+    method_descriptor objects (PyMethodDescr_Type) in the type's tp_dict.
+    For example, list.append and dict.get are method_descriptors.  Like
+    wrapper_descriptors, these are unbound descriptors living on the type.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L716
+
+    When a method_descriptor is accessed on an instance (e.g. [].append),
+    its tp_descr_get slot (method_get) is invoked, which calls
+    PyCFunction_NewEx to produce a bound builtin_function_or_method
+    (PyCFunction_Type).  The tp_descr_get_impl method mirrors that step.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.MethodDescriptorType,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, types.MethodDescriptorType)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        cls_name = self.descriptor.__objclass__.__name__
+        return f"MethodDescriptorVariable({cls_name}.{self.descriptor.__name__})"
+
+    def python_type(self) -> type:
+        return types.MethodDescriptorType
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        # descr_members: __objclass__ and __name__ are PyMemberDef on all
+        # descriptor types.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
+        if name == "__objclass__":
+            return VariableTracker.build(tx, self.descriptor.__objclass__)
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().var_getattr(tx, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Unbound call: list.append([1,2,3], 4) -- first arg is self.
+        if not args:
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+            )
+        obj, *rest = args
+        return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name: str,
+        **kwargs: Any,
+    ) -> "BuiltinMethodVariable":
+        # Mirrors method_get which calls PyCFunction_NewEx to produce a
+        # bound builtin_function_or_method.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
+        return BuiltinMethodVariable(self.descriptor, obj, name, **kwargs)
+
+
+class BuiltinMethodVariable(VariableTracker):
+    """Bound builtin method (method_descriptor bound to an instance).
+
+    Produced by MethodDescriptorVariable.tp_descr_get_impl, mirroring
+    PyCFunction_NewEx which creates a PyCFunctionObject storing the
+    PyMethodDef and the bound instance.
+    https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L331
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.MethodDescriptorType,
+        obj: VariableTracker,
+        name: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, types.MethodDescriptorType)
+        assert isinstance(obj, VariableTracker)
+        self.descriptor = descriptor
+        self.obj = obj
+        self.name = name
+
+    def __repr__(self) -> str:
+        cls_name = self.descriptor.__objclass__.__name__
+        return (
+            f"BuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
+        )
+
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.obj.call_method(tx, self.name, list(args), kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.obj)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
+
+
+class ConstantMethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
