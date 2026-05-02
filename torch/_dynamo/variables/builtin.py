@@ -105,6 +105,7 @@ from .object_protocol import (
     generic_getiter,
     generic_int,
     generic_len,
+    generic_neg,
     vt_getitem,
     vt_identity_compare,
 )
@@ -1088,15 +1089,65 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyVariableTracker
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
-            return lambda tx, args, kwargs: obj.call_function(
-                tx, [v.realize() for v in args], kwargs
+        lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
+        if lazy_types:
+            if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
+                # Realize non-constant lazy args and re-dispatch.  Any
+                # LazyConstantVariable args are kept and handled on the
+                # second dispatch through the branch below.
+                return lambda tx, args, kwargs: obj.call_function(
+                    tx,
+                    [
+                        a.realize()
+                        if isinstance(a, LazyVariableTracker)
+                        and not isinstance(a, LazyConstantVariable)
+                        else a
+                        for a in args
+                    ],
+                    kwargs,
+                )
+
+            # Only LazyConstantVariable lazy types.  Install type guards
+            # and resolve the dispatch type.  If the resolved type is
+            # ConstantVariable (the common case), delegate to a handler
+            # built for ConstantVariable.  Otherwise (e.g. specialize_int=
+            # False turned the int into a SymNodeVariable), realize and
+            # re-dispatch so the correct handler is used.
+            inner_handler = BuiltinVariable._make_handler(
+                fn,
+                [
+                    ConstantVariable if issubclass(t, LazyConstantVariable) else t
+                    for t in arg_types
+                ],
+                has_kwargs,
             )
+
+            def lazy_constant_handler(
+                tx: "InstructionTranslator",
+                args: list[VariableTracker],
+                kwargs: dict[str, VariableTracker],
+            ) -> VariableTracker | None:
+                for a in args:
+                    if isinstance(a, LazyConstantVariable):
+                        if a.get_handler_type_for_dispatch() is not ConstantVariable:
+                            return obj.call_function(
+                                tx,
+                                [
+                                    v.realize()
+                                    if isinstance(v, LazyConstantVariable)
+                                    else v
+                                    for v in args
+                                ],
+                                kwargs,
+                            )
+                return inner_handler(tx, args, kwargs)
+
+            return lazy_constant_handler
 
         if inspect.isclass(fn) and (
             issubclass(fn, BaseException)
@@ -1636,6 +1687,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
             # For builtin types called on user-defined subclasses, use the base iterator
             return generic_getiter(tx, args[0])
+
+        if name == "__neg__" and len(args) == 1 and not kwargs:
+            # type.__neg__(instance) → neg(instance)
+            # e.g., int.__neg__(4) → neg(4)
+            # For builtin types called on user-defined subclasses, use the base iterator
+            return generic_neg(tx, args[0])
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2524,7 +2581,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
                             context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dyanmo only supports mutating `.data`"
+                            explanation="Dynamo only supports mutating `.data`"
                             " of tensor created outside `torch.compile` region",
                             hints=[
                                 "Don't mutate `.data` on this tensor, or move "
@@ -2535,7 +2592,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute to different dtype",
                             context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dyanmo only supports mutating `.data`"
+                            explanation="Dynamo only supports mutating `.data`"
                             " of tensor to a new one with the same dtype",
                             hints=[
                                 "Don't mutate `.data` on this tensor, or move "
@@ -2601,7 +2658,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     unimplemented(
                         gb_type="Failed to set tensor attribute",
                         context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dyanmo doesn't support setting these tensor attributes",
+                        explanation="Dynamo doesn't support setting these tensor attributes",
                         hints=[
                             f"Don't mutate attribute '{name}' on tensors, or "
                             "move the mutation out of `torch.compile` region",
@@ -2705,25 +2762,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             return list_var
         return None
 
-    # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(
         self, tx: "InstructionTranslator", a: VariableTracker
-    ) -> VariableTracker | None:
-        if isinstance(a, SymNodeVariable):
-            return SymNodeVariable.create(
-                tx,
-                (operator.neg)(a.as_proxy()),
-                sym_num=None,
-            )
-
-        if (
-            isinstance(a, UserDefinedObjectVariable)
-            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
-        ):
-            return a.call_method(tx, "__neg__", [], {})
-
-        # None no-ops this handler and lets the driving function proceed
-        return None
+    ) -> VariableTracker:
+        return generic_neg(tx, a)
 
     def call_format(
         self,

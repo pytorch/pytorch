@@ -47,6 +47,8 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
+    CachingAutotunerPlugin,
+    DEFER,
     template,
     triton_config,
 )
@@ -302,6 +304,169 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+
+_PLUGIN_FACTORY_PATH = (
+    "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
+)
+
+
+class TestCachingAutotunerPlugin(TestCase):
+    device_type = GPU_TYPE
+
+    @staticmethod
+    def _make_kernel_inputs():
+        in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        return (in_ptr, out_ptr, 16)
+
+    def _make_autotuner(self, plugins, configs=None):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        if configs is not None:
+            args["configs"] = configs
+        with patch(_PLUGIN_FACTORY_PATH, return_value=list(plugins)):
+            return CachingAutotuner(**args)
+
+    def test_pre_dispatch_runs_before_precompile_and_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with (
+            patch.object(autotuner, "precompile") as mock_precompile,
+            patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
+        ):
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_precompile.assert_not_called()
+        mock_autotune.assert_not_called()
+
+    def test_pre_autotune_runs_before_default_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_autotune(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_autotune.assert_not_called()
+
+    def test_hooks_fire_in_registration_order(self):
+        sentinel = object()
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def __init__(self, name, return_value=DEFER):
+                self.name = name
+                self.return_value = return_value
+
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append(self.name)
+                return self.return_value
+
+        autotuner = self._make_autotuner(
+            [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
+        )
+        result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(seen, ["a", "b", "c"])
+
+    def test_defer_falls_through_to_default(self):
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append("pre_dispatch")
+                return DEFER
+
+        # Single config so precompile produces one launcher and the kernel
+        # runs to completion without the autotune branch firing.
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+
+        autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertEqual(seen, ["pre_dispatch"])
+        self.assertEqual(len(autotuner.launchers), 1)
+
+    def test_pre_compile_defer_runs_default_precompile_flow(self):
+        """``DEFER`` from pre_compile lets the standard precompile flow
+        run (``_precompile_worker`` → ``_make_launchers`` →
+        ``_dynamic_scale_rblock``)."""
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_compile(self, autotuner):
+                return DEFER
+
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        with (
+            patch.object(autotuner, "_precompile_worker") as mock_pcw,
+            patch.object(autotuner, "_make_launchers") as mock_mkl,
+            patch.object(autotuner, "_dynamic_scale_rblock") as mock_dsr,
+        ):
+            autotuner.precompile()
+        mock_pcw.assert_called_once()
+        mock_mkl.assert_called_once()
+        mock_dsr.assert_called_once()
+
+    def test_pre_compile_non_defer_short_circuits_precompile(self):
+        """A non-``DEFER`` return from pre_compile means the plugin
+        owns the entire compile pipeline; ``precompile`` returns early
+        without running ``_precompile_worker`` / ``_make_launchers`` /
+        ``_dynamic_scale_rblock``."""
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_compile(self, autotuner):
+                return object()  # any non-DEFER value
+
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        with (
+            patch.object(autotuner, "_precompile_worker") as mock_pcw,
+            patch.object(autotuner, "_make_launchers") as mock_mkl,
+            patch.object(autotuner, "_dynamic_scale_rblock") as mock_dsr,
+        ):
+            autotuner.precompile()
+        mock_pcw.assert_not_called()
+        mock_mkl.assert_not_called()
+        mock_dsr.assert_not_called()
+
+    def test_getstate_clears_plugins_setstate_invokes_factory(self):
+        """``__getstate__`` drops the live plugin instances so they
+        don't pickle into workers; ``__setstate__`` re-runs
+        ``get_caching_autotuner_plugins`` so the revived autotuner
+        gets a fresh, factory-driven list (whose contents reflect the
+        unpickling process's config flags, not the pickling process's)."""
+
+        class _PluginA(CachingAutotunerPlugin):
+            pass
+
+        class _PluginB(CachingAutotunerPlugin):
+            pass
+
+        autotuner = self._make_autotuner([_PluginA(), _PluginB()])
+        self.assertEqual(len(autotuner._plugins), 2)
+
+        # State excludes the live plugin instances.
+        state = autotuner.__getstate__()
+        self.assertEqual(state["_plugins"], [])
+
+        # __setstate__ re-invokes the factory; with no patch active the
+        # default factory returns an empty list.
+        revived = CachingAutotuner.__new__(CachingAutotuner)
+        revived.__setstate__(state)
+        self.assertEqual(revived._plugins, [])
 
 
 class TestArgumentCloneAndRestore(TestCase):

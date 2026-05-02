@@ -775,7 +775,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 
   // Populate hostname field for host identification
   gethostname(local_req.hostname, sizeof(local_req.hostname));
-  auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
+  // At large rank counts, TCPStore gets overloaded during the metadata
+  // exchange. When PG rendezvous is enabled, route the metadata exchange
+  // through the process group's NCCL allgather instead.
+  bool use_pg = group->getUsePgForSymmMemRendezvous();
+  std::vector<RendezvousRequest> reqs = use_pg
+      ? pg_all_gather(group, block->device_idx, local_req)
+      : storeExchange.all_gather(store, rank, world_size, local_req);
   validate_nvlink_fabric_support(reqs, world_size);
   validate_rendezvous_requests(reqs, world_size);
 
@@ -788,8 +794,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   if constexpr (!use_fabric_handle) {
     imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
   } else {
-    imported_handles =
-        storeExchange.all_gather(store, rank, world_size, block_handle);
+    imported_handles = use_pg
+        ? pg_all_gather(group, block->device_idx, block_handle)
+        : storeExchange.all_gather(store, rank, world_size, block_handle);
   }
 
   std::vector<HandleType> handles(world_size);
