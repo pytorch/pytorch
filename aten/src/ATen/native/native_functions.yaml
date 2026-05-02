@@ -1136,16 +1136,14 @@
   variants: function
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: bernoulli_out
-    MPS: bernoulli_out_mps
+    CPU, CUDA, MPS: bernoulli_out
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: bernoulli_
-    MPS: bernoulli_mps_
+    CPU, CUDA, MPS: bernoulli_
   autogen: bernoulli.Tensor, bernoulli.Tensor_out
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
@@ -1153,8 +1151,7 @@
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: bernoulli_
-    MPS: bernoulli_mps_
+    CPU, CUDA, MPS: bernoulli_
   autogen: bernoulli.float_out
 
 # Note [bernoulli.p schema]
