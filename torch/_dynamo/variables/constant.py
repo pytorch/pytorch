@@ -470,7 +470,10 @@ its type to `common_constant_types`.
             return ConstantVariable.create(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
         v, w = self_.as_python_constant(), other_.as_python_constant()
-        result = getattr(self_.python_type(), op)(v, w)
+        try:
+            result = getattr(self_.python_type(), op)(v, w)
+        except OverflowError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
         if result is NotImplemented:
             return ConstantVariable.create(NotImplemented)
         return VariableTracker.build(tx, result)
