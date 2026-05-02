@@ -1343,12 +1343,11 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            if isinstance(inputs, variables.BaseListVariable):
-                provided_vars = inputs.items
-            elif isinstance(inputs, variables.ConstDictVariable):
-                provided_vars = list(inputs.items.values())
-            else:
-                provided_vars = [inputs]
+            provided_vars = (
+                inputs.items
+                if isinstance(inputs, variables.BaseListVariable)
+                else [inputs]
+            )
             input_vars = self._collect_backward_inputs(
                 provided_vars, error_on_non_leaf=True
             )
@@ -1545,6 +1544,25 @@ class TensorVariable(VariableTracker):
 
     def method___float__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_float_impl(tx)
+
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.neg,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___neg__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_negative_impl(tx)
 
     def method___getitem__(
         self,
@@ -2296,6 +2314,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_float_impl(tx)
+
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.neg(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___neg__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_negative_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
