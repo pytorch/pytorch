@@ -488,6 +488,11 @@ void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t siz
   return;
 }
 
+// Avoid GCC < 14 AArch64 tree-vectorization issues when adding float buffers to BFloat16/Half gradients.
+#if defined(__GNUC__) && !defined(__clang__) && defined(__aarch64__) && (__GNUC__ < 14)
+#pragma GCC push_options
+#pragma GCC optimize("no-tree-vectorize")
+#endif
 template <typename scalar_in, typename scalar_out,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
@@ -508,5 +513,8 @@ void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t siz
     buffer_ptr[d] = 0;
   }
 }
+#if defined(__GNUC__) && !defined(__clang__) && defined(__aarch64__) && (__GNUC__ < 14)
+#pragma GCC pop_options
+#endif
 
 } // namespace at::native
