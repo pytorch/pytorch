@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -2049,7 +2050,7 @@ static struct PyMethodDef THPFunction_methods[] = {
      METH_NOARGS,
      nullptr},
     {(char*)"apply",
-     (PyCFunction)(void*)THPFunction_apply,
+     castPyCFunctionWithKeywords(THPFunction_apply),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {(char*)"_register_hook_dict",
