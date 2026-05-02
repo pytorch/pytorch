@@ -2579,7 +2579,10 @@ class TestLeafFunctionRegisterHook(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         out = my_fn(x, "label")[0]
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"missing 1 required positional argument.*'tag'",
+        ):
             out.sum().backward()
 
     def test_hook_multiple_tensor_inputs(self):
