@@ -202,9 +202,15 @@ file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
-    message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
-    caffe2_update_option(USE_ROCM_CK_SDPA ON)
+  # Now building CK by default
+  if(USE_ROCM)
+    if(DEFINED ENV{USE_ROCM_CK_SDPA})
+        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
+          caffe2_update_option(USE_ROCM_CK_SDPA ON)
+        endif()
+    else()
+      caffe2_update_option(USE_ROCM_CK_SDPA ON)
+    endif()
   endif()
   if(USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})

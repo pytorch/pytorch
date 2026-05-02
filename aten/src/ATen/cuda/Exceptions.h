@@ -68,8 +68,6 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
                 " when calling `" #EXPR "`");                   \
   } while (0)
 
-const char *cusparseGetErrorString(cusparseStatus_t status);
-
 #define TORCH_CUDASPARSE_CHECK(EXPR)                            \
   do {                                                          \
     cusparseStatus_t __err = EXPR;                              \
