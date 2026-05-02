@@ -2334,6 +2334,9 @@ class StatefulSymbolicContext(StatelessSymbolicContext[..., Any]):
         default_factory=dict
     )
     excluded_sizes: tuple[int | None, ...] | None = None
+    # Per-dim shape spec from torch.compile(shapes_spec=...).
+    # Set by _automatic_dynamic, consumed for torch._check after fakification.
+    tensor_spec: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -4659,11 +4662,23 @@ class ShapeEnv:
 
         if not hint_overrides:
             hint_overrides = {}
+        # Read hint overrides from tensor_spec on symbolic_context
+        if (
+            isinstance(symbolic_context, StatefulSymbolicContext)
+            and symbolic_context.tensor_spec is not None
+        ):
+            _ts = symbolic_context.tensor_spec
+            for i in range(len(tensor_size)):
+                ds = _ts[i]
+                if ds is not None:
+                    h = ds._guarding_hint
+                    if h is not None:
+                        hint_overrides[i] = h
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
-        size = []
+        size: list[sympy.Expr] = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
                 hint_overrides.get(i, val),
@@ -4691,6 +4706,29 @@ class ShapeEnv:
             ):
                 self.size_like.add(sym)
             size.append(sym)
+
+        # Record tensor exclusion constraints for stable graph selection.
+        # The ndim check guards against stale excluded_sizes from graph
+        # breaks where the resumed tensor may have different dimensionality.
+        # Skip dims with hint overrides: the overridden hint in
+        # backed_var_to_val would mismatch the excluded value, causing the
+        # not-all check in produce_guards_verbose to emit a guard that
+        # immediately fails.
+        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
+        dim = len(tensor_size)
+        if (
+            excluded_sizes
+            and len(excluded_sizes) == dim
+            and any(v is not None for v in excluded_sizes)
+        ):
+            for i in range(dim):
+                ev = excluded_sizes[i]
+                if (
+                    ev is not None
+                    and isinstance(size[i], sympy.Symbol)
+                    and i not in (hint_overrides or {})
+                ):
+                    self._record_exclusion_constraint(size[i], ev)
         return size
 
     def create_symbolic_sizes_strides_storage_offset(
@@ -4859,27 +4897,6 @@ class ShapeEnv:
         size: list[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context, hint_overrides=hint_overrides
         )
-        # Record tensor exclusion constraints for stable graph selection.
-        # The ndim check guards against stale excluded_sizes from graph
-        # breaks where the resumed tensor may have different dimensionality.
-        # Skip dims with hint overrides: the overridden hint in
-        # backed_var_to_val would mismatch the excluded value, causing the
-        # not-all check in produce_guards_verbose to emit a guard that
-        # immediately fails.
-        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
-        if (
-            excluded_sizes
-            and len(excluded_sizes) == dim
-            and any(v is not None for v in excluded_sizes)
-        ):
-            for i in range(dim):
-                ev = excluded_sizes[i]
-                if (
-                    ev is not None
-                    and isinstance(size[i], sympy.Symbol)
-                    and i not in (hint_overrides or {})
-                ):
-                    self._record_exclusion_constraint(size[i], ev)
         stride = self._compute_symbolic_stride(
             source,
             size,

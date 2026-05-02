@@ -2067,8 +2067,17 @@ def _new_process_group_helper(
                 backend_str,
             )
             # TODO: figure out pg option conversion for torchComms.
+            # `persistent_store=true` tells torchcomms to reuse the c10d-side
+            # `backend_prefix_store` directly instead of constructing its own
+            # TCPStore via StoreManager (which would otherwise require an
+            # explicit MASTER_ADDR/MASTER_PORT and conflict with the c10d
+            # rendezvous store on rapid re-binds).
             comm = new_comm(
-                backend_str, torch_device, name=group_name, store=backend_prefix_store
+                backend_str,
+                torch_device,
+                name=group_name,
+                store=backend_prefix_store,
+                hints={"persistent_store": "true"},
             )
             buffer_size = os.environ.get(
                 "TORCH_FR_BUFFER_SIZE",
