@@ -1666,7 +1666,9 @@ class TestNormDouble(_TestNorm, _TestNormDoubleBase, TestCase):
 
 
 class TestNormSingle(_TestNorm, _TestNormSingleBase, TestCase):
-    pass
+    @skipif(TEST_WITH_TORCHDYNAMO, reason="flaky float32 precision under dynamo")
+    def test_axis(self):
+        super().test_axis()
 
 
 class TestNormInt64(_TestNorm, _TestNormInt64Base):
