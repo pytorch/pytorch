@@ -1743,6 +1743,97 @@ class ConstantMethodWrapperVariable(VariableTracker):
         )
 
 
+class StaticMethodVariable(VariableTracker):
+    """staticmethod descriptor wrapping a callable.
+
+    CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
+    whose tp_descr_get (sm_descr_get) simply returns the wrapped callable,
+    ignoring both obj and type.
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1520
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: staticmethod,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, staticmethod)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        return f"StaticMethodVariable({func_name})"
+
+    def python_type(self) -> type:
+        return staticmethod
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker | None,
+        name: str,
+        source: "Source | None" = None,
+    ) -> VariableTracker:
+        # sm_descr_get returns sm->sm_callable unconditionally.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
+        return VariableTracker.build(tx, self.descriptor.__func__, source)
+
+
+class ClassMethodVariable(VariableTracker):
+    """classmethod descriptor wrapping a callable.
+
+    CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
+    whose tp_descr_get (cm_descr_get) creates a bound method of the
+    wrapped callable bound to the class (via PyMethod_New).
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1314
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: classmethod,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, classmethod)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        return f"ClassMethodVariable({func_name})"
+
+    def python_type(self) -> type:
+        return classmethod
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name: str,
+        source: "Source | None" = None,
+        source_fn: "Source | None" = None,
+    ) -> VariableTracker:
+        # cm_descr_get calls PyMethod_New(cm->cm_callable, type) to bind
+        # the wrapped function to the class.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
+        cls_vt = obj.var_getattr(tx, "__class__")
+        return variables.UserMethodVariable(
+            self.descriptor.__func__, cls_vt, source_fn=source_fn, source=source
+        )
+
+
 class MemberDescriptorVariable(VariableTracker):
     """C struct field descriptor (member_descriptor on a type).
 

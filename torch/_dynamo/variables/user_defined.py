@@ -501,12 +501,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
         if isinstance(cls_attr, staticmethod):
-            return VariableTracker.build(tx, cls_attr.__get__(self.value), source)
+            sm_vt = variables.StaticMethodVariable(cls_attr)
+            return sm_vt.tp_descr_get_impl(tx, self, name, source=source)
 
         if isinstance(cls_attr, classmethod):
             if isinstance(cls_attr.__func__, property):
                 fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
                 return fget_vt.call_function(tx, [self], {})
+            # cm_descr_get with obj=NULL uses type directly.
+            # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1224-L1226
             return variables.UserMethodVariable(cls_attr.__func__, self, source=source)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
@@ -2614,28 +2617,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         can_use_mro_source = self.cls_source is not None and self.source is not None
 
         if isinstance(type_attr, staticmethod):
-            # type_attr is the raw staticmethod wrapper from cls.__dict__
-            # (not the unwrapped function).  We call __get__ to unwrap it,
-            # but the *source* must go through __func__ on the descriptor
-            # (not the resolved function) because the guard needs to watch
-            # the descriptor object in the class dict, not the result.
+            # Source goes through __func__ on the descriptor so the guard
+            # watches the descriptor in the class dict, not the result.
             if can_use_mro_source:
                 source = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )
-            func = type_attr.__get__(self.value)
-            return VariableTracker.build(tx, func, source)
+            sm_vt = variables.StaticMethodVariable(type_attr)
+            return sm_vt.tp_descr_get_impl(tx, self, name, source=source)
         elif isinstance(type_attr, classmethod):
             source_fn = None
             if can_use_mro_source:
                 source_fn = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )  # type: ignore[assignment]
-            return variables.UserMethodVariable(
-                type_attr.__func__,
-                self.var_getattr(tx, "__class__"),
-                source_fn=source_fn,
-                source=source,
+            cm_vt = variables.ClassMethodVariable(type_attr)
+            return cm_vt.tp_descr_get_impl(
+                tx, self, name, source=source, source_fn=source_fn
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
             func = type_attr.__get__(self.value, None)
