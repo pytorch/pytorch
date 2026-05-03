@@ -446,7 +446,7 @@ class TestOpaqueObject(TestCase):
         # raises. Any registrations before this would leak into the next test.
         super().setUp()
 
-        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(

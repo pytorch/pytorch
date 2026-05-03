@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_test_lib = torch.library.Library("_TestInplaceTag", "DEF")  # noqa: TOR901
+_test_lib = torch.library.Library("_TestInplaceTag", "DEF")  # noqa: SCOPED_LIBRARY
 
 _test_lib.define(
     "add_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
@@ -32,7 +32,7 @@ _test_lib.impl("add_", lambda self_, other: self_, "Meta")
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestInplaceTag(TestCase):
     def setUp(self):
-        self.lib = torch.library.Library("_TestInplaceTag", "FRAGMENT")  # noqa: TOR901
+        self.lib = torch.library.Library("_TestInplaceTag", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 
     def tearDown(self):
         self.lib._destroy()

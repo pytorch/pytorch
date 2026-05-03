@@ -432,5 +432,5 @@ def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
     out.copy_(x)
 
 
-mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
+mps_lib = torch.library.Library("aten", "IMPL", "MPS")
 mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

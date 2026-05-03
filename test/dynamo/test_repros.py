@@ -90,7 +90,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 _orig_module_call = torch.nn.Module.__call__
 
 # Custom operator that only supports CPU and Meta
-lib = torch.library.Library("test_sample", "DEF")  # noqa: TOR901
+lib = torch.library.Library("test_sample", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 

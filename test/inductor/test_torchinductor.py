@@ -181,7 +181,7 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
-libtest = torch.library.Library("test", "FRAGMENT")  # noqa: TOR901
+libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 ids = set()
 
 f32 = torch.float32
