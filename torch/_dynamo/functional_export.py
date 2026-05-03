@@ -605,13 +605,11 @@ def create_fx_graph_from_captured_output(
 
     graph_module = backend_input.graph_module
     if isinstance(root, torch.nn.Module):
-        graph_module._parameters = root._parameters.copy()
-        graph_module._buffers = root._buffers.copy()
+        graph_module._parameters = root._parameters
+        graph_module._buffers = root._buffers
         assert all(not hasattr(graph_module, m) for m in root._modules)
         graph_module._modules.update(root._modules)
-        graph_module._non_persistent_buffers_set = (
-            root._non_persistent_buffers_set.copy()
-        )
+        graph_module._non_persistent_buffers_set = root._non_persistent_buffers_set
         if sys.version_info >= (3, 14):
             import annotationlib  # added in 3.14
 
@@ -757,10 +755,16 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     {", ".join(without_annotation)}, = self._dynamo_bytecode_flatten(*_fn_args)"""
 
     def generate_output(
-        self, output_args: torch.fx.node.Argument, *, descs: object | None = None
+        self,
+        output_args: torch.fx.node.Argument,
+        *,
+        descs: object | None = None,
+        repr_fn: Any | None = None,
     ) -> str:
+        if repr_fn is None:
+            repr_fn = repr
         # pyrefly: ignore [not-iterable]
-        returned = f"self._dynamo_bytecode_unflatten(({', '.join([str(a) for a in output_args])},), _fn_args)"
+        returned = f"self._dynamo_bytecode_unflatten(({', '.join([repr_fn(a) for a in output_args])},), _fn_args)"
         if self.wrap_tuple:
             returned = f"({returned},)"
         return f"return {returned}"
@@ -968,9 +972,7 @@ def _dynamo_graph_capture_for_export(
             )
             transformed_graph.recompile()
 
-            clean_nn_module_stack_and_source_fn(
-                transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
-            )
+            clean_nn_module_stack_and_source_fn(transformed_graph, True)
             clean_export_root(transformed_graph)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec

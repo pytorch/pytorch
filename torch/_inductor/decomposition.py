@@ -100,6 +100,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
+        aten.hann_window,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
     ]
@@ -350,7 +351,7 @@ def bmm(
 ) -> torch.Tensor:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
-    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
         return (self * batch2).contiguous()
@@ -775,22 +776,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:

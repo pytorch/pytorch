@@ -111,6 +111,26 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
         acc_b = vmlal_s16(acc_b, vget_high_s16(b16), vget_high_s16(weights));
       }
 
+      // Block 4: handle 4 pixels that didn't fit in a block of 8
+      // We also use vld3_u8 here, which still loads 8 pixels, but we only use
+      // the lower half - so the computation is correct.
+      // On all rows except the last one, reading 8 pixels is safe (the tensors
+      // are channels-last). But on the last row, we have to be careful not to
+      // read past the buffer, hence the extra boundary check.
+      const uint8_t* block_of_4_safe_load_end = input_p + yin * xin_stride - 24;
+      for (; i + 4 <= ids_size && lineIn_min + num_channels * i <= block_of_4_safe_load_end; i += 4) {
+        uint8x8x3_t rgb = vld3_u8(lineIn_min + num_channels * i);
+        int16x4_t weights4 = vld1_s16(&k[i]);
+
+        int16x4_t r16 = vget_low_s16(vreinterpretq_s16_u16(vmovl_u8(rgb.val[0])));
+        int16x4_t g16 = vget_low_s16(vreinterpretq_s16_u16(vmovl_u8(rgb.val[1])));
+        int16x4_t b16 = vget_low_s16(vreinterpretq_s16_u16(vmovl_u8(rgb.val[2])));
+
+        acc_r = vmlal_s16(acc_r, r16, weights4);
+        acc_g = vmlal_s16(acc_g, g16, weights4);
+        acc_b = vmlal_s16(acc_b, b16, weights4);
+      }
+
       // Horizontal reduction + rounding bias
       int32_t sum_r = vaddvq_s32(acc_r) + initial_val;
       int32_t sum_g = vaddvq_s32(acc_g) + initial_val;

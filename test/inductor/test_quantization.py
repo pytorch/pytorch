@@ -47,6 +47,29 @@ class FeedforwardNN(torch.nn.Module):
         return x
 
 
+class SharedOutputAndSavedModule(torch.nn.Module):
+    """A module where a 3D intermediate is both a user output and saved for backward.
+
+    This triggers the bug in T264303372: the activation quantization pass would
+    quantize both the user output and saved-for-backward positions of the same
+    tensor, creating duplicate backward placeholders that shift the stride mapping.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.ones(8, 8))
+        self.W = torch.nn.Parameter(torch.randn(64, 32))
+
+    def forward(self, x):
+        h = x.view(x.shape[0], 8, 8)
+        attn = h * torch.sigmoid(h)
+        # attn is both returned (user output) and needed by backward (mul saves it)
+        scaled = attn * self.scale
+        flat = scaled.flatten(1)
+        result = flat @ self.W
+        return result, attn
+
+
 class LayernormNN(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -227,6 +250,37 @@ class TestQuantization(TestCase):
             counters["inductor"]["activation_quantization_bwd_aten_pass"], 1
         )
         self.assertTrue(torch.allclose(ref, res))
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "activation_quantization_aten_pass": {
+                "quant_type": "torch.float8_e5m2",
+                "use_scaling": True,
+                "size_in_mb": 0.0,
+                "exclude_primals": True,
+                "allowed_dtypes": "torch.bfloat16;torch.float32",
+            },
+        },
+    )
+    def test_activation_quantization_shared_output_and_saved(self):
+        """Test that activation quantization works when a tensor is both a user
+        output and a saved-for-backward activation (T264303372)."""
+        counters.clear()
+        module = SharedOutputAndSavedModule().to(GPU_TYPE)
+        x = torch.randn(8, 64, device=GPU_TYPE, requires_grad=True)
+        compiled = torch.compile(module)
+        result, attn = compiled(x)
+        loss = result.sum() + attn.sum()
+        loss.backward()
+        self.assertEqual(
+            counters["inductor"]["activation_quantization_fwd_aten_pass"], 1
+        )
+        self.assertEqual(
+            counters["inductor"]["activation_quantization_bwd_aten_pass"], 1
+        )
         counters.clear()
 
 

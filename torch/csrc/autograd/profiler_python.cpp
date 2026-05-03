@@ -7,6 +7,7 @@
 #include <memory>
 #include <queue>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -18,6 +19,8 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
+#include <c10/util/Semaphore.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -551,13 +554,13 @@ struct TraceKeyCacheState {
 // ============================================================================
 // == Core CPython data types =================================================
 // ============================================================================
-// PyObject that allows different threads to record events without colliding.
-// It is passed as the second argument when enabling tracing via
-// `PyEval_SetProfile`.
-struct ThreadLocalResults;
+// PyObject passed as the second argument when enabling tracing via
+// `PyEval_SetProfile`. A single shared instance is used for all threads;
+// the callback resolves per-thread state via PyThreadState_Get().
+class PythonTracer;
 struct TraceContext {
   PyObject_HEAD
-  ThreadLocalResults* thread_local_results_;
+  PythonTracer* tracer_;
 };
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
@@ -604,43 +607,39 @@ static PyTypeObject TraceContextType = {
     nullptr /* tp_free */
 };
 
-class gil_and_restore_thread {
+#if IS_PYTHON_3_14_PLUS
+extern "C" void _PyEval_StopTheWorld(PyInterpreterState*);
+extern "C" void _PyEval_StartTheWorld(PyInterpreterState*);
+
+class StopTheWorldGuard {
  public:
-  gil_and_restore_thread() : initial_thread_state_{PyThreadState_Get()} {}
-  ~gil_and_restore_thread() {
-    PyThreadState_Swap(initial_thread_state_);
-
-    // `gil_scoped_acquire` is a bit fragile in on-demand mode:
-    // https://github.com/pytorch/pytorch/pull/91684#issuecomment-1413154458
-    if (!Py_IsInitialized()) {
-      gil_.disarm();
-    }
+  explicit StopTheWorldGuard(PyInterpreterState* interp) : interp_(interp) {
+    _PyEval_StopTheWorld(interp_);
   }
-
-  PyThreadState* initial_thread_state() const {
-    return initial_thread_state_;
+  ~StopTheWorldGuard() {
+    _PyEval_StartTheWorld(interp_);
   }
+  StopTheWorldGuard(const StopTheWorldGuard&) = delete;
+  StopTheWorldGuard& operator=(const StopTheWorldGuard&) = delete;
 
  private:
-  pybind11::gil_scoped_acquire gil_;
-  PyThreadState* initial_thread_state_;
+  PyInterpreterState* interp_;
 };
+#else
+class StopTheWorldGuard {
+ public:
+  explicit StopTheWorldGuard(PyInterpreterState*) {}
+  StopTheWorldGuard(const StopTheWorldGuard&) = delete;
+  StopTheWorldGuard& operator=(const StopTheWorldGuard&) = delete;
+};
+#endif
 
 // ============================================================================
 // == Thread local cache ======================================================
 // ============================================================================
-class PythonTracer;
 struct ThreadLocalResults {
-  ThreadLocalResults(
-      PyThreadState* thread_state,
-      ValueCache* value_cache,
-      PythonTracer* active_tracer)
-      : thread_state_{thread_state},
-        ctx_{(TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0)},
-        value_cache_{value_cache},
-        active_tracer_{active_tracer} {
-    ctx_->thread_local_results_ = this;
-  }
+  ThreadLocalResults(PythonTracer* active_tracer)
+      : active_tracer_{active_tracer} {}
 
   ThreadLocalResults() = delete;
   ThreadLocalResults(const ThreadLocalResults&) = delete;
@@ -648,30 +647,18 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&) = delete;
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
-  ~ThreadLocalResults() {
-    // Currently, there is a bug in Profiler when using Python 3.12 that causes
-    // a segfault when decrementing the refcount of a TraceContext during
-    // on-demand. We are purposefully allowing for a small leak in this
-    // situation to avoid the segfault. This should be fixed in the future.
-#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
-    Py_DECREF((PyObject*)ctx_);
-#endif
-  }
-
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
   TraceKey intern(Ephemeral ephemeral, Args... args) {
     static_assert(
         Config<C>::event_type == E,
         "ThreadLocalResults.intern called from the wrong typed context.");
     auto callsite = Callsite<C>(std::forward<Args>(args)...);
-    return std::get<C>(trace_keys_).intern(callsite, ephemeral, *value_cache_);
+    return std::get<C>(trace_keys_).intern(callsite, ephemeral, value_cache_);
   }
 
   static constexpr size_t BLOCK_SIZE = 1024;
 
-  PyThreadState* thread_state_;
-  TraceContext* ctx_;
-  ValueCache* value_cache_;
+  ValueCache value_cache_;
   PythonTracer* active_tracer_;
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> exit_times_;
@@ -679,6 +666,12 @@ struct ThreadLocalResults {
 
   int active_frames_{0};
   int remaining_start_frames_{0};
+
+  // Guards against teardown racing with in-flight callbacks.
+  // pyProfileFn acquires this on entry and releases on exit.
+  // PythonTracer::stop() acquires each thread's semaphore after
+  // clearing the profiling callback to ensure all callbacks have finished.
+  c10::Semaphore profile_sem{1};
 };
 
 // ============================================================================
@@ -733,7 +726,10 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg,
       bool start_frame = false);
 
+  ThreadLocalResults* findThreadLocalResults(PyThreadState* tstate) const;
+
   const std::vector<PyThreadState*> interpreterThreads() const;
+  void setprofileAllThreads(Py_tracefunc func, PyObject* arg) const;
 
   std::atomic<bool> active_lock_{false};
   bool active_{false};
@@ -743,10 +739,12 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   PyInterpreterState* interpreter_{nullptr};
   PyCodeObject* module_call_code_;
   PyCodeObject* optimizer_hook_;
+  TraceContext* shared_ctx_{nullptr};
 
   std::vector<StartFrame> start_frames_;
   std::deque<ThreadLocalResults> thread_local_results_;
-  ValueCache value_cache_;
+  std::unordered_map<PyThreadState*, ThreadLocalResults*>
+      thread_local_results_map_;
 
 #if IS_PYTHON_3_12
   friend PyObject* c_call_callback(
@@ -833,12 +831,14 @@ static PyObject* c_call_callback(
             PyExc_SystemError, "Missing frame when calling profile function.");
         return NULL;
       }
-      Py_INCREF(frame);
-      auto& local_results =
-          *reinterpret_cast<TraceContext*>(tstate->c_profileobj)
-               ->thread_local_results_;
-      local_results.active_tracer_->recordCCall(local_results, frame, func);
-      Py_DECREF(frame);
+      auto* tracer =
+          reinterpret_cast<TraceContext*>(tstate->c_profileobj)->tracer_;
+      auto* local_results = tracer->findThreadLocalResults(tstate);
+      if (local_results) {
+        Py_INCREF(frame);
+        local_results->active_tracer_->recordCCall(*local_results, frame, func);
+        Py_DECREF(frame);
+      }
     }
   }
   Py_RETURN_NONE;
@@ -965,6 +965,12 @@ static void unregisterMonitoringCallback() {
 }
 #endif
 
+ThreadLocalResults* PythonTracer::findThreadLocalResults(
+    PyThreadState* tstate) const {
+  auto it = thread_local_results_map_.find(tstate);
+  return it != thread_local_results_map_.end() ? it->second : nullptr;
+}
+
 const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
   pybind11::gil_scoped_acquire gil;
   std::vector<PyThreadState*> out;
@@ -976,6 +982,19 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
     }
   }
   return out;
+}
+
+void PythonTracer::setprofileAllThreads(Py_tracefunc func, PyObject* arg)
+    const {
+#if IS_PYTHON_3_13_PLUS
+  PyEval_SetProfileAllThreads(func, arg);
+#else
+  for (const auto thread_state : interpreterThreads()) {
+    if (_PyEval_SetProfile(thread_state, func, arg) < 0) {
+      PyErr_WriteUnraisable(nullptr);
+    }
+  }
+#endif
 }
 
 // we are only registering on main thread while holding GIL so this should be
@@ -1015,56 +1034,65 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-  gil_and_restore_thread gil;
+#if defined(Py_GIL_DISABLED) && !defined(IS_PYTHON_3_14_PLUS)
+  TORCH_WARN(
+      "The PyTorch profiler is not thread-safe on Python 3.13t. "
+      "Please use Python 3.14t or later.");
+#endif
+
+  pybind11::gil_scoped_acquire gil;
   interpreter_ = PyInterpreterState_Get();
 
-  if (!gil.initial_thread_state()) {
-    TORCH_WARN("PyThreadState_Get returned NULL");
-    return;
-  }
+  // Shared context passed as the profile arg to all threads.
+  shared_ctx_ = (TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0);
+  shared_ctx_->tracer_ = this;
 
-  // Register the tracer in each thread.
-  for (const auto thread_state : interpreterThreads()) {
-    PyThreadState_Swap(thread_state);
+  // Enable profiling on all threads. setprofileAllThreads handles its own
+  // synchronization (stop-the-world on free-threaded builds). The callback
+  // returns early because findThreadLocalResults returns nullptr for threads
+  // we haven't set up yet.
+  // Note: This profile will not compose with other CPython profilers, and
+  // cannot be round tripped via `sys.settrace(sys.gettrace())`
+  setprofileAllThreads(PythonTracer::pyProfileFn, (PyObject*)shared_ctx_);
 
-    thread_local_results_.emplace_back(thread_state, &value_cache_, this);
-    auto& tls = thread_local_results_.back();
-    auto* ctx = tls.ctx_;
+  // Capture existing frames on each thread's stack.
+  {
+    StopTheWorldGuard stw(interpreter_);
+    for (const auto thread_state : interpreterThreads()) {
+      thread_local_results_.emplace_back(this);
+      auto& tls = thread_local_results_.back();
+      thread_local_results_map_[thread_state] = &tls;
 
-    // When we begin profiling there are already frames on the Python
-    // interpreter stack. To ensure a complete trace, we must push calls
-    // to all the prior frames onto our event stack. (We stop at depth=128)
+      // When we begin profiling there are already frames on the Python
+      // interpreter stack. To ensure a complete trace, we must push calls
+      // to all the prior frames onto our event stack. (We stop at depth=128)
 
-    std::vector<THPFrameObjectPtr> current_stack;
-    auto frame = PyEval_GetFrame();
-    Py_XINCREF(frame);
+      // NB: `PyThreadState_GetFrame` returns a strong reference.
+      std::vector<THPFrameObjectPtr> current_stack;
+      auto frame = PyThreadState_GetFrame(thread_state);
 
-    size_t depth = 0; // Make sure we can't infinite loop.
-    while (frame != nullptr) {
-      current_stack.emplace_back(frame);
-      if (++depth == 128) {
-        break;
+      size_t depth = 0; // Make sure we can't infinite loop.
+      while (frame != nullptr) {
+        current_stack.emplace_back(frame);
+        if (++depth == 128) {
+          break;
+        }
+
+        // NB: `PyFrame_GetBack` returns a strong reference.
+        frame = PyFrame_GetBack(frame);
       }
 
-      // NB: `PyFrame_GetBack` returns a strong reference.
-      frame = PyFrame_GetBack(frame);
+      for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
+        recordPyCall(tls, it->get(), true);
+        auto frame_refcount = Py_REFCNT(it->get());
+
+        // We hold one reference in `current_stack`, and the interpreter holds
+        // another.
+        TORCH_INTERNAL_ASSERT(frame_refcount >= 2, frame_refcount);
+      }
+
+      tls.remaining_start_frames_ = tls.active_frames_;
     }
-
-    for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
-      recordPyCall(tls, it->get(), true);
-      auto frame_refcount = Py_REFCNT(it->get());
-
-      // We hold one reference in `current_stack`, and the interpreter holds
-      // another.
-      TORCH_INTERNAL_ASSERT(frame_refcount >= 2, frame_refcount);
-    }
-
-    tls.remaining_start_frames_ = tls.active_frames_;
-
-    // Note:
-    //   This profile will not compose with other CPython profilers, and
-    //   cannot be round tripped via `sys.settrace(sys.gettrace())`
-    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
 #if IS_PYTHON_3_12
   registerMonitoringCallback();
@@ -1092,6 +1120,7 @@ void unregister_gc_callback() {
     PySequence_DelItem(callbacks, idx);
   } else {
     // Not found, maybe already removed
+    PyErr_Clear();
   }
   Py_DECREF(callbacks);
   Py_DECREF(gc_module);
@@ -1134,16 +1163,23 @@ void PythonTracer::register_gc_callback() {
 }
 
 void PythonTracer::stop() {
-  gil_and_restore_thread gil;
+  pybind11::gil_scoped_acquire gil;
   if (gc_callback_registered_) {
     unregister_gc_callback();
     gc_callback_registered_ = false;
   }
   if (active_) {
-    for (const auto thread_state : interpreterThreads()) {
-      if (thread_state->c_profilefunc == &PythonTracer::pyProfileFn) {
-        PyThreadState_Swap(thread_state);
-        PyEval_SetProfile(nullptr, nullptr);
+    setprofileAllThreads(nullptr, nullptr);
+
+    // Wait for any in-flight pyProfileFn callbacks to finish. Threads inside
+    // pyProfileFn hold their thread's profile_sem. They may have temporarily
+    // released the GIL or parked mid-callback due to a stop-the-world event.
+    // Acquiring each semaphore here blocks until those callbacks complete.
+    {
+      pybind11::gil_scoped_release release;
+      for (auto& tls : thread_local_results_) {
+        tls.profile_sem.acquire();
+        tls.profile_sem.release();
       }
     }
 
@@ -1158,7 +1194,7 @@ void PythonTracer::stop() {
 }
 
 void PythonTracer::restart() {
-  gil_and_restore_thread gil;
+  pybind11::gil_scoped_acquire gil;
   active_ = active_lock_.compare_exchange_strong(active_, true);
   if (!active_) {
     TORCH_WARN(
@@ -1166,14 +1202,7 @@ void PythonTracer::restart() {
         "Refusing to register profile functions.");
     return;
   }
-  int cur_thread = 0;
-  for (const auto thread_state : interpreterThreads()) {
-    if (thread_state->c_profilefunc == nullptr) {
-      auto* ctx = thread_local_results_[cur_thread].ctx_;
-      PyThreadState_Swap(thread_state);
-      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
-    }
-  }
+  setprofileAllThreads(PythonTracer::pyProfileFn, (PyObject*)shared_ctx_);
 #if IS_PYTHON_3_12
   registerMonitoringCallback();
 #endif
@@ -1184,6 +1213,10 @@ PythonTracer::~PythonTracer() {
   if (active_) {
     TORCH_WARN("`PythonTracer::stop()` was not called.");
     stop();
+  }
+  if (Py_IsInitialized() && !Py_IsFinalizing()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_XDECREF((PyObject*)shared_ctx_);
   }
 }
 
@@ -1207,13 +1240,13 @@ void PythonTracer::recordPyCall(
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
 
 #if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
-      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      auto self =
+          THPObjectPtr(Py_XNewRef(PyDict_GetItemString(locals, "self")));
 #else
       // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
       // PyFrameLocalsProxy_Type See PEP 667 for more info
       auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
 #endif
-      Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
       return tls.intern<CallType::PyModuleCall, E>(
@@ -1221,11 +1254,11 @@ void PythonTracer::recordPyCall(
     } else if (code.get() == optimizer_hook_) {
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
 #if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
-      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      auto self =
+          THPObjectPtr(Py_XNewRef(PyDict_GetItemString(locals, "self")));
 #else
       auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
 #endif
-      Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
       return tls.intern<CallType::PyOptimizerCall, E>(
@@ -1279,12 +1312,14 @@ class PostProcess {
   PostProcess(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
-      const ValueCache& value_cache,
       c10::time_t end_time_ns)
       : end_time_{end_time_ns}, time_converter_{std::move(time_converter)} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
-          tls[python_tid].trace_keys_, *this, value_cache, python_tid);
+          tls[python_tid].trace_keys_,
+          *this,
+          tls[python_tid].value_cache_,
+          python_tid);
 
       addExits<EventType::PyCall>(tls[python_tid].exit_times_, python_tid);
       addExits<EventType::PyCCall>(tls[python_tid].c_exit_times_, python_tid);
@@ -1445,12 +1480,11 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     std::function<c10::time_t(c10::approx_time_t)> time_converter,
     std::vector<python_tracer::CompressedEvent>& enters,
     c10::time_t end_time_ns) {
-  value_cache_.trimPrefixes();
+  for (auto& tls : thread_local_results_) {
+    tls.value_cache_.trimPrefixes();
+  }
   PostProcess post_process(
-      std::move(time_converter),
-      thread_local_results_,
-      value_cache_,
-      end_time_ns);
+      std::move(time_converter), thread_local_results_, end_time_ns);
   post_process.set_start_frames(start_frames_, enters);
   auto out = post_process.run(enters);
 
@@ -1493,17 +1527,15 @@ static void toggle_memory_tracing(bool enable) {
   }
   // Call the function with arguments
   PyObject* args = PyTuple_New(6);
-  PyTuple_SetItem(args, 0, enable ? PyUnicode_FromString("all") : Py_None);
+  PyTuple_SetItem(
+      args, 0, enable ? PyUnicode_FromString("all") : Py_NewRef(Py_None));
   PyTuple_SetItem(args, 1, PyUnicode_FromString("all")); // context
   PyTuple_SetItem(args, 2, PyUnicode_FromString("all")); // stacks
   PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
-  PyTuple_SetItem(args, 4, Py_None); // device (None)
+  PyTuple_SetItem(args, 4, Py_NewRef(Py_None)); // device (None)
   PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  THPObjectPtr result(PyObject_Call(snapshot_func.get(), args, nullptr));
   Py_DECREF(args);
-  if (result == nullptr) {
-    return;
-  }
 }
 
 void PythonMemoryTracer::start() {
@@ -1522,14 +1554,9 @@ void PythonMemoryTracer::export_memory_history(const std::string& path) {
   if (!snapshot_func) {
     return;
   }
-  PyObject* py_filename = PyUnicode_FromString(path.c_str());
-  // Call the function with arguments (e.g., a file path)
-  PyObject* args = PyTuple_Pack(1, py_filename);
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
-  Py_DECREF(args);
-  if (result == nullptr) {
-    return;
-  }
+  THPObjectPtr py_filename(PyUnicode_FromString(path.c_str()));
+  THPObjectPtr result(
+      PyObject_CallOneArg(snapshot_func.get(), py_filename.get()));
 }
 
 void PythonMemoryTracer::stop() {
@@ -1544,36 +1571,47 @@ int PythonTracer::pyProfileFn(
     PyFrameObject* frame,
     int what,
     PyObject* arg) {
-  auto& local_results =
-      *reinterpret_cast<TraceContext*>(obj)->thread_local_results_;
+  HANDLE_TH_ERRORS
+  auto* tracer = reinterpret_cast<TraceContext*>(obj)->tracer_;
+  auto* local_results = tracer->findThreadLocalResults(PyThreadState_Get());
+  if (C10_UNLIKELY(!local_results)) {
+    return 0;
+  }
+  bool acquired = local_results->profile_sem.tryAcquire();
+  TORCH_INTERNAL_ASSERT(acquired, "pyProfileFn: profile_sem unexpectedly held");
+  // RAII release: ensures the semaphore is released on both normal
+  // return and C++ exception paths (e.g. from pybind11 in ValueCache::store).
+  auto release_sem =
+      c10::make_scope_exit([&]() { local_results->profile_sem.release(); });
   switch (what) {
     case PyTrace_CALL:
-      local_results.active_tracer_->recordPyCall(local_results, frame, false);
+      local_results->active_tracer_->recordPyCall(*local_results, frame, false);
       break;
 
     case PyTrace_C_CALL:
-      local_results.active_tracer_->recordCCall(local_results, frame, arg);
+      local_results->active_tracer_->recordCCall(*local_results, frame, arg);
       break;
 
     case PyTrace_RETURN:
-      local_results.exit_times_.emplace_back(c10::getApproximateTime());
-      local_results.active_frames_--;
-      if (local_results.active_frames_ <
-          local_results.remaining_start_frames_) {
-        local_results.remaining_start_frames_ = local_results.active_frames_;
+      local_results->exit_times_.emplace_back(c10::getApproximateTime());
+      local_results->active_frames_--;
+      if (local_results->active_frames_ <
+          local_results->remaining_start_frames_) {
+        local_results->remaining_start_frames_ = local_results->active_frames_;
       }
       break;
 
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
-      if (local_results.active_frames_ >
-          local_results.remaining_start_frames_) {
-        local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
-        local_results.active_frames_--;
+      if (local_results->active_frames_ >
+          local_results->remaining_start_frames_) {
+        local_results->c_exit_times_.emplace_back(c10::getApproximateTime());
+        local_results->active_frames_--;
       }
       break;
   }
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 std::unique_ptr<python_tracer::PythonTracerBase> getTracer(

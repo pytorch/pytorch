@@ -8,6 +8,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 from ... import ir
 from ...ir import FixedLayout, FlexibleLayout
@@ -69,7 +70,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
 
     Hq = query.get_size()[1]
     Hkv = value.get_size()[1]
-    ratio = Hq // Hkv
+    ratio = FloorDiv(Hq, Hkv)
 
     pw_of_two = V.graph.sizevars.guard_or_false(
         sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
@@ -86,7 +87,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and pw_of_two
     )
     log.debug(
-        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",
         out,
         force_flex,
         short_query_length,
@@ -181,10 +182,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     }
 
     seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(seq_len_q % 128, 0)
+        sympy.Eq(Mod(seq_len_q, 128), 0)
     )
     seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(seq_len_kv % 128, 0)
+        sympy.Eq(Mod(seq_len_kv, 128), 0)
     )
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
@@ -192,7 +193,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
     # Calculate GQA head sharing
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = FloorDiv(Hq, Hkv)
     if not is_power_of_2(gqa_shared_heads):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
@@ -302,7 +303,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options.setdefault(
         "SAFE_M_BOUNDARY",
-        ((seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]) == 0,
+        Mod(seq_len_q * gqa_shared_heads, kernel_options["BLOCK_M"]) == 0,
     )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)

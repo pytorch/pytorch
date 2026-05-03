@@ -75,7 +75,7 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # needed because the find_package call to this module uses the Module mode search
 # https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
 if(UNIX)
-  set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
+  set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip;${ROCM_PATH}/lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/hip ${CMAKE_MODULE_PATH})
 else() # Win32
   set(CMAKE_MODULE_PATH ${ROCM_PATH}/cmake/ ${CMAKE_MODULE_PATH})
 endif()
@@ -100,6 +100,9 @@ endmacro()
 # MODULE argument is added for clarity that CMake is searching
 # for FindHIP.cmake in Module mode
 find_package_and_print_version(HIP 1.0 MODULE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  enable_language(HIP)
+endif()
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -205,6 +208,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(rocsolver REQUIRED)
+  find_package_and_print_version(rocshmem)
   # workaround cmake 4 build issue
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Work around hiprtc cmake failure for cmake >= 4")
@@ -219,6 +223,7 @@ if(HIP_FOUND)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+    find_package_and_print_version(rocm_smi REQUIRED)
   endif()
 
   # Optional components.

@@ -1054,7 +1054,9 @@ class TestFullyShardPrefetch(FSDPTest):
         n_layers = 3
         reshard_after_forward = True
         # use checkpoint wrapper instead of torch.utils
-        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=False)
+        model_args = ModelArgs(
+            n_layers=n_layers, checkpoint_activations=False, weight_tying=False
+        )
         model = Transformer(model_args)
         apply_activation_checkpointing(
             model, check_fn=lambda m: isinstance(m, TransformerBlock)
@@ -1276,7 +1278,9 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_multi_module_backward_prefetch(self):
         n_layers = 5
-        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=True)
+        model_args = ModelArgs(
+            n_layers=n_layers, checkpoint_activations=True, weight_tying=False
+        )
         model = Transformer(model_args)
         for i in range(n_layers):
             if i == 0:
@@ -1395,23 +1399,30 @@ class TestFullyShardPrefetch(FSDPTest):
                 self.assertEqual(events, expected_events)
                 events.clear()
                 loss.sum().backward()
+                # `_force_complete_incomplete_states` completes post-forward
+                # for the incomplete groups (both `model[0]` and `model[1]`
+                # have `unused_lin` that never ran forward), reshards, and
+                # registers pre-backward hooks on the root output; those
+                # hooks fire at backward start (unshard events). Only
+                # group1's post_backward fires via autograd (model[1]'s
+                # input requires grad); root and group0's post_backwards
+                # fire in the final callback in all-states pre-order.
                 expected_events = [
-                    # Since both `model[0]` and `model[1]` have unused modules
-                    # that never ran forward, they do not reshard after forward
-                    # despite setting it to `True`. Check that there are no
-                    # unshards in backward.
+                    ("unshard", "1.unused_lin, 1.lin", TrainingState.PRE_BACKWARD),
+                    ("unshard", "0.unused_lin, 0.lin", TrainingState.PRE_BACKWARD),
                     (
                         "post_backward",
                         "1.unused_lin, 1.lin",
                         TrainingState.POST_BACKWARD,
                     ),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
                     (
                         "post_backward",
                         "0.unused_lin, 0.lin",
                         TrainingState.POST_BACKWARD,
                     ),
-                    ("post_backward", "", TrainingState.POST_BACKWARD),
                 ]
+                self.assertEqual(events, expected_events)
                 events.clear()
                 optim.step()
                 optim.zero_grad()

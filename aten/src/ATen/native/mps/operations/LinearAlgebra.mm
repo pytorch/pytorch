@@ -310,6 +310,20 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
     return true;
   }
+  // Detect conditions that would trigger LORADOWN GEMV kernel with potential padding overflow
+  // See https://github.com/pytorch/pytorch/issues/178056
+  if (self.scalar_type() == at::ScalarType::Half && (self.size(0) <= 16 || other.size(1) <= 16) &&
+      self.stride(1) == 1 && other.stride(0) == 1) {
+    int64_t self_padding = self.stride(0) - self.size(1);
+    int64_t other_padding = other.stride(1) - other.size(0);
+
+    if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
+      TORCH_WARN_ONCE(
+          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
+      return true;
+    }
+  }
+
   return !is_macos_14_4_or_newer &&
       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
@@ -698,13 +712,21 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     });
     // MPS TODO:
     // Strided API doesn't play nice with complex data types (at least not in case of matmul).
+    // MPSGraph's matrixMultiplication produces incorrect results with stride-0 NDArray
+    // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
+    // by disabling the strided API so they go through the gather/clone path first.
+    // See https://github.com/pytorch/pytorch/issues/180201
+    static const bool is_macOS_26_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
+    auto hasZeroStride = [](const Tensor& t) {
+      return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
+    };
+    auto useStridedSelf = !isComplexType(self.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(self));
+    auto useStridedOther = !isComplexType(other.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(other));
     auto selfPlaceholder = self.numel() != 0
-        ? Placeholder(
-              cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, !isComplexType(self.scalar_type()))
+        ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, useStridedSelf)
         : Placeholder();
     auto otherPlaceholder = other.numel() != 0
-        ? Placeholder(
-              cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, !isComplexType(other.scalar_type()))
+        ? Placeholder(cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, useStridedOther)
         : Placeholder();
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
@@ -899,7 +921,8 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     std::string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+      auto biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+      auto biasTensor_ = bias_->is_conj() ? [mpsGraph conjugateWithTensor:biasTensor name:nil] : biasTensor;
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
       auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
@@ -912,11 +935,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
                                                             secondaryTensor:alphaTensor
                                                                        name:@"MM/alpha*(mat1@mat2)"];
       }
-      auto biasTimesBetaTensor = biasTensor;
+      auto biasTimesBetaTensor = biasTensor_;
       if (is_beta_non_zero && beta.toDouble() != 1.0) {
         auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
                                               dataType:getMPSScalarType((*bias_).scalar_type())];
-        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor
+        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor_
                                                         secondaryTensor:betaTensor
                                                                    name:@"MM/beta*input"];
       }
@@ -1128,7 +1151,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
-    result = tiled_bmm_out_mps_impl(batch1, batch2, result);
+    // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
+    result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
     return result;
   }
 
@@ -1146,16 +1170,18 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
         std::to_string(doTranspose);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
-      MPSGraphTensor* batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
-      MPSGraphTensor* batch2TensorTranspose = batch2Tensor;
+      auto batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
+      auto batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
+
+      auto batch1TensorOp = batch1.is_conj() ? [mpsGraph conjugateWithTensor:batch1Tensor name:nil] : batch1Tensor;
+      auto batch2TensorOp = batch2.is_conj() ? [mpsGraph conjugateWithTensor:batch2Tensor name:nil] : batch2Tensor;
 
       if (doTranspose) {
-        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor dimension:-1 withDimension:-2 name:nil];
+        batch2TensorOp = [mpsGraph transposeTensor:batch2TensorOp dimension:-1 withDimension:-2 name:nil];
       }
 
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
-                                                                      secondaryTensor:batch2TensorTranspose
+      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1TensorOp
+                                                                      secondaryTensor:batch2TensorOp
                                                                                  name:@"MM/(batch1@batch2)"];
 
       newCachedGraph->batch1Tensor_ = batch1Tensor;
