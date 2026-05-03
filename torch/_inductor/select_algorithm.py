@@ -27,7 +27,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
@@ -365,6 +365,11 @@ class SubgraphInfo:
     range_tree_nodes: dict[sympy.Symbol, "IterationRangesEntry"] | None = None
     numels: dict[str, sympy.Expr] | None = None
 
+    # Mapping from original range-tree root variable names (e.g. "xindex")
+    # to renamed prologue variables (e.g. "_prologue_x_xindex").  Used by
+    # prologue hooks to apply text-level renames in a structured way.
+    root_var_renames: dict[str, str] = dataclasses.field(default_factory=dict)
+
     def __post_init__(self):
         self.only_copy_if_non_none_fields = (
             "range_trees",
@@ -507,6 +512,7 @@ class TritonTemplateKernel(TritonKernel):
         hint_override: int | None = None,
         triton_meta: dict[str, object] | None = None,
         always_freeze_layout: bool = False,
+        index_dtype_override: str | None = None,
     ) -> None:
         if tma_store:
             pass
@@ -577,6 +583,7 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: dict[str, object] | None = triton_meta
+        self._index_dtype_override = index_dtype_override
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: list[ir.ComputedBuffer] | None = subgraphs
 
@@ -611,6 +618,7 @@ class TritonTemplateKernel(TritonKernel):
         self.template_mask: str | None = None
         self.template_out_shape: str | tuple[str] | None = None
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
+        self.root_var_renames: dict[str, str] = {}
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -639,6 +647,12 @@ class TritonTemplateKernel(TritonKernel):
 
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
+
+    @property
+    def index_dtype(self) -> str:
+        if self._index_dtype_override is not None:
+            return self._index_dtype_override
+        return super().index_dtype
 
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
@@ -718,6 +732,28 @@ class TritonTemplateKernel(TritonKernel):
         )
         with self.set_subgraph_body(body_name):
             yield
+
+    def _make_independent_subgraph(self, subgraph_name, numel, **extra_fields):
+        """Create a subgraph with fresh independent range trees.
+
+        Used by external template backends for epilogue/prologue hooks
+        that need their own range tree state.
+        """
+        groups = {"x": V.graph.sizevars.simplify(numel), "r0_": sympy.S.One}
+        self.subgraph_bodies[subgraph_name] = SubgraphInfo(
+            body=IndentedBuffer(),
+            cse=self.cse.clone(),
+            range_trees=self.construct_range_trees(
+                pid_cache=None,
+                inside_reduction=False,
+                is_reduction=False,
+                numels=groups,
+                no_x_dim=False,
+            ),
+            range_tree_nodes={},
+            numels=groups,
+            **extra_fields,
+        )
 
     def _setup_contiguous_index_state(
         self,
@@ -963,6 +999,8 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
+        Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
+        int64 indexing is needed to prevent overflow in size arithmetic.
         """
         assert isinstance(index, int)
         if name is None:
@@ -970,7 +1008,10 @@ class TritonTemplateKernel(TritonKernel):
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_size()[index]
-        return texpr(self.rename_indexing(val))
+        result = texpr(self.rename_indexing(val))
+        if self.index_dtype == "tl.int64":
+            return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
+        return result
 
     def stride(self, name, index=None):
         """
@@ -1154,7 +1195,7 @@ class TritonTemplateKernel(TritonKernel):
                     V.kernel.cse.store_cache[name] = value
                     if name in V.kernel.prologue_fused_inputs:
                         # We load masked out values with 0, then apply a prologue.
-                        # The masked out values may not necessariliy be 0 any more
+                        # The masked out values may not necessarily be 0 any more
                         # so we need to reapply the mask.
                         value_dtype = value.dtype
                         value_str = str(value)
@@ -1331,9 +1372,8 @@ class TritonTemplateKernel(TritonKernel):
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
         """
-        subgraph_name = self._get_store_output_subgraph_name(
-            next(self.store_output_ctr)
-        )
+        subgraph_idx = next(self.store_output_ctr)
+        subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
         with self.create_subgraph_body(subgraph_name, clear_cse=True):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
@@ -1464,9 +1504,19 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
+            output_dtype = self.output_node.get_dtype()
+
             epilogue_args = [
                 V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
             ]
+            epilogue_nodes_by_subgraph = getattr(
+                self, "_epilogue_nodes_by_subgraph", None
+            )
+            has_epilogue_fusion = bool(
+                epilogue_nodes_by_subgraph[subgraph_idx]
+                if epilogue_nodes_by_subgraph is not None
+                else False
+            )
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1482,10 +1532,27 @@ class TritonTemplateKernel(TritonKernel):
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
+            # Apply the template's manual epilogue (e.g., bias add for addmm)
+            epilogue_result = self.epilogue_fn(*epilogue_args)
+
+            # When acc_dtype differs from output_dtype and there are fused
+            # epilogue ops, emulate unfused numerics by truncating AFTER the
+            # manual epilogue (so bias add happens in full precision)
+            if acc_dtype != output_dtype and has_epilogue_fusion:
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result,
+                    output_dtype,
+                    src_dtype=acc_dtype,
+                    use_compute_types=False,
+                )
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result, acc_dtype, src_dtype=output_dtype
+                )
+
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
-                self.epilogue_fn(*epilogue_args),
+                epilogue_result,
                 mode="tma" if self.tma_store else None,
             )
             self.codegen_body()
@@ -1590,6 +1657,7 @@ class TritonTemplateKernel(TritonKernel):
         override_mask=None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
+        mask_constant_index=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1604,6 +1672,7 @@ class TritonTemplateKernel(TritonKernel):
             override_mask=self.template_mask,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
+            mask_constant_index=mask_constant_index,
         )
 
     def codegen_range_tree(self):
@@ -1656,8 +1725,13 @@ class TritonTemplateKernel(TritonKernel):
             inductor_meta=inductor_meta,
             triton=True,
         )
+        self._emit_post_kernel_code(wrapper, name)
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
+
+    def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
+        """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
+        pass  # noqa: PIE790
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -1679,12 +1753,19 @@ class TritonTemplateKernel(TritonKernel):
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.
         """
+
         # realizing for safety
         ir.ExternKernel.realize_input(node)
         layout = node.data.layout
         node_name = node.get_name()
 
-        if isinstance(layout, ir.FlexibleLayout):
+        # For ReinterpretView, the view's strides are already determined by its layout.
+        # We skip constraint tracking because node.get_name() returns the underlying
+        # buffer name, not the view's identity, so constraints would be incorrectly
+        # associated with the underlying buffer rather than the view.
+        if isinstance(layout, ir.FlexibleLayout) and not isinstance(
+            node, ir.ReinterpretView
+        ):
             if not use_aten_gemm_kernels() or self.always_freeze_layout:
                 # No ExternKernel fallback available, or always_freeze_layout is set
                 # (e.g., for FlexAttention templates), freeze immediately
@@ -1753,6 +1834,8 @@ class TritonTemplateKernel(TritonKernel):
                 buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
             )
 
+        partial_code = self._finalize_partial_render(partial_code)
+
         # Template hooks must be finalised after kernel.remove_kernel_local_buffers
         # is called (this is called when the kernel context is exited above), and when
         # the kernel handler is set (as below). This is because the hooks may add
@@ -1761,28 +1844,25 @@ class TritonTemplateKernel(TritonKernel):
 
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(self):
-            if not isinstance(partial_code, str):
+            if isinstance(partial_code, str):
+                src_code = partial_code
+            else:
                 # This is used to calculate flops in TritonTemplateKernels
                 with ir.IRNode.current_origins(template_node.node.origins):
                     partial_code.finalize_hook("<DEF_KERNEL>")
                 partial_code.finalize_hook("<ARGDEFS>", strict=False)
 
-            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
+                # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in self.named_input_nodes:
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                for input_name in self.named_input_nodes:
+                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                    partial_code.finalize_hook(subgraph_name, strict=False)
 
-                partial_code.finalize_hook(subgraph_name, strict=False)
+                num_store_subgraphs = self.get_store_output_count()
+                for i in range(num_store_subgraphs):
+                    subgraph_name = self._get_store_output_subgraph_name(i)
+                    partial_code.finalize_hook(subgraph_name)
 
-            num_store_subgraphs = self.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = self._get_store_output_subgraph_name(i)
-
-                partial_code.finalize_hook(subgraph_name)
-
-            if isinstance(partial_code, str):
-                src_code = partial_code
-            else:
                 # Ensure all hooks are finalized before the kernel is defined.
                 # Note: some of these hooks may have been registered by a kernel subclass
                 src_code = partial_code.finalize_remaining()
@@ -1818,6 +1898,447 @@ class TritonTemplateKernel(TritonKernel):
                             self.split_and_set_ranges(prologue_node.get_ranges())
                         )
                     self.cse.invalidate(OrderedSet())
+
+    def _finalize_partial_render(
+        self, partial_code: str | PartialRender
+    ) -> str | PartialRender:
+        """Hook to intercept or replace the PartialRender before hook finalization.
+
+        Called after Inductor has populated subgraph buffers (epilogue stores,
+        prologue loads) but before ``finalize_hook`` resolves placeholders.
+        Subclasses may return a replacement ``PartialRender`` — e.g. to capture
+        the rendered hook outputs and supply entirely new source code (as
+        ``ExternalTritonTemplateKernel`` does for fusion-aware autotuning).
+        """
+        return partial_code
+
+
+class ExternalTritonTemplateKernel(TritonTemplateKernel):
+    """TritonTemplateKernel variant for external template backends (e.g. Helion).
+
+    Orchestrates prologue/epilogue fusion by running Inductor's codegen ops
+    (store, load, indexing) on fused scheduler nodes, capturing the generated
+    code into subgraph buffers.  The backend's ``render()`` callable handles
+    hook setup and AST generation, while the standard ``codegen_template_body``
+    handles hook finalization and subgraph codegen.
+
+    Also implements ``call_kernel`` and ``emit_kernel_override`` for
+    post-codegen emission of the fused kernel.
+
+    Subclasses TritonTemplateKernel for subgraph body management and
+    template indexing support.
+    """
+
+    def __init__(self, template_buffer: "ir.TemplateBuffer") -> None:
+        class _RealOutputNode:
+            def get_size(self) -> list:
+                return list(template_buffer.get_size())
+
+            def get_layout(self):
+                return template_buffer.get_layout()
+
+            def get_name(self) -> str:
+                return template_buffer.get_name()
+
+        # Pass dummy values for TritonTemplateKernel params that are only
+        # relevant for standalone Triton kernel codegen (grid, warps, etc.).
+        super().__init__(
+            kernel_name="",
+            input_nodes=(),
+            output_node=_RealOutputNode(),
+            defines={},
+            num_stages=0,
+            num_warps=1,
+            grid_fn=None,
+            meta={},
+            call_sizes=[],
+            hint_override=None,
+        )
+        self._template_buffer = template_buffer
+        # Extra inputs needed by fused ops beyond the template's own I/O
+        self._extra_inputs: dict[str, str] = {}
+        # Prologue primary source buffers, populated by load_input
+        self._prologue_source_buffers: dict[str, str | None] = {}
+        # Simplified epilogue interface: {output_param: epilogue_idx}
+        self._epilogue_idx_by_param: dict[str, int] = {}
+        # Output params that must keep their original tl.store
+        self._epilogue_keep_store: OrderedSet[str] = OrderedSet()
+        # Store target buffers: {buf_name: param_name}
+        self._extra_store_targets: dict[str, str] = {}
+        # Prologue variable names per input param
+        self._prologue_vars: dict[str, dict[str, str]] = {}
+        # Import lines for emit_kernel_override, populated by external render
+        self._kernel_imports: list[str] = []
+        # Call emission state, populated by _setup_fusion_hooks / external render
+        self._call_preamble: list[str] = []
+        self._call_args: list[str] = []
+        # Epilogues that could not be fused into the kernel
+        self._unfused_epilogues: list[Any] = []
+        # Reference to the scheduler, set by _compute_fusion_metadata;
+        # used in call_kernel() to codegen unfused epilogue nodes
+        self._scheduling_ref: Any = None
+
+    def _finalize_partial_render(
+        self, partial_code: str | PartialRender
+    ) -> str | PartialRender:
+        # Capture hook outputs.
+        hook_outputs: dict[str, str] = {}
+        with V.set_kernel_handler(self):
+            for key, hook in self.render_hooks.items():
+                hook_outputs[key] = hook()
+
+        # Delegate to template buffer.
+        result = self._template_buffer._finalize_codegen(hook_outputs)
+        if result is None:
+            return partial_code
+
+        # Apply structured result to kernel state.
+        self._kernel_imports = result.imports
+        self._call_preamble = result.call_preamble
+        self._call_args = result.call_args
+
+        # Freeze hooks and clear subgraph buffers.
+        if hook_outputs:
+            self.render_hooks = {
+                k: (lambda captured=v: captured) for k, v in hook_outputs.items()
+            }
+            for info in self.subgraph_bodies.values():
+                info.loads = IndentedBuffer()
+                info.compute = IndentedBuffer()
+                info.stores = IndentedBuffer()
+                info.indexing_code = IndentedBuffer()
+
+        return PartialRender(result.source, self.render_hooks)
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        return self._unfused_epilogues
+
+    def _compute_fusion_metadata(
+        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+    ):
+        """Compute fusion metadata for external backends.
+
+        Determines eligible epilogues/prologues, builds epilogue specs,
+        and computes prologue sources — all before render().
+
+        Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
+        happen here because it requires V.kernel context, which is only
+        active during codegen_template_body → render().
+        """
+        self._scheduling_ref = scheduling
+        from torch._inductor.dependencies import MemoryDep
+
+        tb = self._template_buffer
+        self._eligible_epilogues = self._find_eligible_epilogues(
+            epilogue_nodes, tb.epilogue_fusable_outputs
+        )
+        self._epilogue_nodes_by_subgraph = defaultdict(
+            list,
+            {i: [sn] for i, (sn, _, _, _) in enumerate(self._eligible_epilogues)},
+        )
+        fused_ids = OrderedSet(id(sn) for sn, _, _, _ in self._eligible_epilogues)
+        self._unfused_epilogues = [
+            n
+            for n in epilogue_nodes
+            if id(n) not in fused_ids and not isinstance(n.node, ir.MultiOutput)
+        ]
+        self._prologue_sources = {
+            buf_name: frozenset(
+                d.name for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)
+            )
+            for buf_name, pro_nodes in buf_name_to_prologue_group.items()
+            for pro_node in pro_nodes
+        }
+
+        # Build simplified epilogue interface: _epilogue_idx_by_param,
+        # _epilogue_keep_store, and _extra_store_targets.
+        from torch._inductor.codegen.common import RemovedArg
+
+        scheduler = V.graph.scheduler
+        epilogues = self._eligible_epilogues
+
+        # Compute fused node names for buffer removability
+        fused_node_names = None
+        if scheduler is not None:
+            all_store_names = OrderedSet([tb.get_name()])
+            all_store_names.update(tb._multi_output_children)
+            all_store_names.update(st for _, _, _, st in epilogues if st)
+            fused_node_names = OrderedSet(
+                scheduler.name_to_buf[n].defining_op_name()
+                for n in all_store_names
+                if n in scheduler.name_to_buf
+            )
+
+        # Pre-register store_target buffers so we know their param names
+        for _, _, _, store_target in epilogues:
+            if (
+                store_target is not None
+                and store_target not in self.args.output_buffers
+            ):
+                self.args.output(store_target)
+
+        # Build per-epilogue metadata
+        for i, (_, output_buf, output_param, store_target) in enumerate(epilogues):
+            self._epilogue_idx_by_param[output_param] = i
+
+            can_remove = (
+                store_target is not None
+                and fused_node_names is not None
+                and scheduler.can_buffer_be_removed_through_fusion(
+                    output_buf, fused_node_names
+                )
+            )
+
+            store_target_param_raw = (
+                self.args.output_buffers.get(store_target)
+                if store_target is not None
+                else None
+            )
+            store_target_param = (
+                None
+                if isinstance(store_target_param_raw, RemovedArg)
+                else store_target_param_raw
+            )
+
+            if store_target_param is not None:
+                self._extra_store_targets[store_target] = store_target_param
+                if can_remove:
+                    self.removed_buffers.add(output_buf)
+                else:
+                    self._epilogue_keep_store.add(output_param)
+
+    def _setup_fusion_hooks(self):
+        """Set up epilogue/prologue render hooks and mark prologue buffers.
+
+        Must be called during render() (inside V.kernel context), after
+        _compute_fusion_metadata has run.
+        """
+        tb = self._template_buffer
+
+        # Mark prologue buffers on the kernel.
+        for pro_buf, source_bufs in self._prologue_sources.items():
+            self.store_buffer_names.add(pro_buf)
+            if not source_bufs:
+                self.removed_buffers.add(pro_buf)
+
+        # Set up epilogue hooks.
+        epilogues = self._eligible_epilogues
+        for epilogue_idx in range(len(tb.epilogue_fusable_outputs)):
+            epi = epilogues[epilogue_idx] if epilogue_idx < len(epilogues) else None
+            self._setup_epilogue_hook(
+                output_buf=epi[1] if epi else None,
+                output_param=epi[2] if epi else None,
+            )
+
+        # Set up prologue hooks.
+        for param_name in tb._named_inputs:
+            self._setup_prologue_hook(
+                param_name, prologue_sources=self._prologue_sources
+            )
+
+        # Register no-op <DEF_KERNEL> hook (standard path requires it).
+        self.render_hooks["<DEF_KERNEL>"] = lambda: ""
+
+    def _find_eligible_epilogues(self, epilogue_nodes, output_param_mapping):
+        """Compute fusion eligibility and register extra inputs.
+
+        Returns list of eligible epilogue tuples:
+            [(snode, output_buf, output_param, store_target), ...]
+        """
+        from torch._inductor.dependencies import MemoryDep
+
+        # Filter eligible epilogues
+        epilogues = []
+        for epilogue_node in epilogue_nodes:
+            if isinstance(epilogue_node.node, ir.MultiOutput):
+                continue
+            dep_names = OrderedSet(
+                d.name
+                for d in epilogue_node.read_writes.reads
+                if isinstance(d, MemoryDep) and d.name in output_param_mapping
+            )
+            if len(dep_names) != 1:
+                continue
+            output_buf = next(iter(dep_names))
+            epilogue_writes = epilogue_node.read_writes.writes
+            raw_st = next(iter(epilogue_writes)).name if epilogue_writes else None
+            epilogues.append(
+                (
+                    epilogue_node,
+                    output_buf,
+                    output_param_mapping[output_buf],
+                    raw_st if raw_st != output_buf else None,
+                )
+            )
+
+        # Register extra inputs needed by fused epilogues
+        for snode, _, _, _ in epilogues:
+            for dep in snode.read_writes.reads:
+                if isinstance(dep, MemoryDep) and dep.name not in output_param_mapping:
+                    if dep.name not in self._extra_inputs:
+                        param = f"_extra_input_{len(self._extra_inputs)}"
+                        self._extra_inputs[dep.name] = param
+                        self.args.input_buffers[dep.name] = param
+
+        return epilogues
+
+    def _setup_epilogue_hook(self, output_buf=None, output_param=None):
+        store_idx = next(self.store_output_ctr)
+        subgraph_name = self._get_store_output_subgraph_name(store_idx)
+        if output_buf is None:
+            self.subgraph_bodies[subgraph_name] = SubgraphInfo(body=IndentedBuffer())
+            self.render_hooks[subgraph_name] = lambda: ""
+            return
+
+        n_dims = len(self._template_buffer.get_size())
+        indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
+        val = f"_kernel_val_{store_idx}"
+        mask = f"_tile_mask_{store_idx}"
+
+        buf = output_buf
+        node = V.graph.get_buffer(buf) if buf else None
+        output_size = (
+            list(node.get_size())
+            if node is not None
+            else list(self.output_node.get_size())
+        )
+        self._make_independent_subgraph(subgraph_name, sympy_product(output_size))
+        with self.set_subgraph_body(subgraph_name):
+            indices = list(map(OpOverrides.paren, indices))
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            lengths = [V.graph.sizevars.simplify(s) for s in output_size]
+            assert len(indices) == len(lengths)
+            self.template_out = val
+            self._setup_contiguous_index_state(
+                indices,
+                index_symbols,
+                lengths,
+                mask,
+                xindex_name=f"x_epilogue{store_idx}_index",
+            )
+            self.template_out_shape = val
+
+            # Set up CSE state for epilogue codegen
+            block_shape = tuple(
+                f"{rt.prefix.upper()}BLOCK"
+                for rt in self.range_trees
+                if not rt.is_reduction
+            )
+            if not block_shape:
+                block_shape = ("XBLOCK",)
+            self.cse.store_cache[buf] = self.cse.namedvar(
+                val, dtype=torch.float32, shape=block_shape
+            )
+            assert output_param is not None
+            self.args.output_buffers[buf] = output_param
+
+        self.render_hooks[subgraph_name] = self._make_codegen_hook(subgraph_name)
+
+    def _setup_prologue_hook(self, input_name, prologue_sources=None):
+        ir_node = self._template_buffer._named_inputs.get(input_name)
+        if ir_node is None:
+            return
+        self.named_input_nodes[input_name] = ir_node
+        input_buf = ir_node.get_name()
+        source_bufs = (
+            prologue_sources.get(input_buf) if prologue_sources is not None else None
+        )
+        if source_bufs is None:
+            return
+        source_buffer = next(iter(source_bufs)) if source_bufs else None
+        self._prologue_source_buffers[input_name] = source_buffer
+        if source_buffer is not None:
+            self.args.input_buffers[source_buffer] = input_name
+        for src in source_bufs:
+            if src != source_buffer:
+                if src not in self._extra_inputs:
+                    self._extra_inputs[src] = f"_extra_input_{len(self._extra_inputs)}"
+                self.args.input_buffers[src] = self._extra_inputs[src]
+
+        subgraph_name = f"<LOAD_INPUT_{input_name}>"
+        result_var = f"_prologue_{input_name}_result"
+
+        # Compute prologue variable names once and store them.
+        renames = {
+            "xindex": f"_prologue_{input_name}_xindex",
+            "xmask": f"_prologue_{input_name}_xmask",
+        }
+        self._prologue_vars[input_name] = {
+            "xindex": renames["xindex"],
+            "xmask": renames["xmask"],
+            "result": result_var,
+        }
+
+        class _CaptureStoreHandler(V.WrapperHandler):  # type: ignore[name-defined]
+            def store(self, name, index, value, mode=None):
+                V.kernel.store_buffer_names.add(name)
+                V.kernel.cse.store_cache[name] = value
+                V.kernel.compute.writeline(f"{result_var} = {value}")
+
+        self._make_independent_subgraph(
+            subgraph_name,
+            sympy_product(ir_node.get_size()),
+            ops_handler=_CaptureStoreHandler,
+            root_var_renames=renames,
+        )
+
+        def hook(_name=subgraph_name, _input=input_name, _self=self):
+            with _self.set_subgraph_body(_name):
+                _self.codegen_body()
+                _self.cse.invalidate(OrderedSet())
+                body = _self.body.getvalue()
+            # Rename range-tree root variables (xindex/xmask) to avoid collisions
+            # across prologue subgraphs.  tmp/x0 names are already unique (shared
+            # kernel-level counters).  Read renames from the subgraph info.
+            subgraph = _self.subgraph_bodies[_name]
+            for orig, renamed in subgraph.root_var_renames.items():
+                body = re.sub(rf"\b{orig}\b", renamed, body)
+            return body.rstrip()
+
+        self.render_hooks[f"<LOAD_INPUT_{input_name}>"] = hook
+
+    def call_kernel(self, name, node=None, deallocate_ws=True):
+        """Emit the kernel call, multi-output unpacking, and unfused epilogues."""
+        tb = self._template_buffer
+        wrapper = V.graph.wrapper_code
+        for line in self._call_preamble:
+            wrapper.writeline(line)
+        output_name = tb.get_name()
+        wrapper.writeline(f"{output_name} = {name}({', '.join(self._call_args)})")
+        # Unpack multi-output children from the kernel result
+        for mo_name, mo in sorted(tb._multi_output_children.items()):
+            if mo_name not in self.removed_buffers:
+                idx_str = output_name
+                for _, idx in mo.indices:
+                    idx_str = f"{idx_str}[{idx}]"
+                wrapper.writeline(f"{mo_name} = {idx_str}")
+        # Unfused epilogues are codegen'd separately after the kernel call
+        for epi_node in self._unfused_epilogues:
+            self._scheduling_ref.codegen_node(epi_node)
+
+    def emit_kernel_override(
+        self,
+        wrapper,
+        src_code,
+        kernel_name,
+        node_schedule,
+        kernel_path,
+        get_kernel_metadata,
+    ):
+        origins, detailed = get_kernel_metadata(node_schedule, wrapper)
+        wrapper.header.writeline(f"# kernel path: {kernel_path}\n{origins}\n{detailed}")
+        for imp in self._kernel_imports:
+            wrapper.add_import_once(imp)
+        # Hooks may reference standard Inductor runtime modules
+        wrapper.add_import_once(
+            "from torch._inductor.runtime import triton_helpers, triton_heuristics"
+        )
+        wrapper.add_import_once(
+            "from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math"
+        )
+        wrapper.header.splice(src_code, strip=True)
+        wrapper.header.writeline("")
+        return True
 
 
 @functools.cache
@@ -2031,7 +2552,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2126,6 +2647,7 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
             "always_freeze_layout": self.always_freeze_layout,
+            "index_dtype_override": index_dtype,
         }
 
         if HAS_WARP_SPEC:
@@ -2360,7 +2882,8 @@ class TritonTemplate(KernelTemplate):
         workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            workspace_size_bytes = workspace_arg.count
+            ws_count = V.graph.sizevars.optimization_hint(workspace_arg.count)
+            workspace_size_bytes = ws_count * get_dtype_size(workspace_arg.dtype)
             workspace_zero_fill = (
                 workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
@@ -2472,6 +2995,7 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                "epilogue_subtile": kwargs.get("EPILOGUE_SUBTILE", 0),
                 **{
                     k: kwargs[k]
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
@@ -2992,11 +3516,7 @@ def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
 
-    cpu_count = (
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count()
-    )
+    cpu_count = torch._utils.cpu_count()
     assert cpu_count
 
     # Divide the number of CPUs by the number of GPUs for distributed workloads
@@ -3267,7 +3787,6 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
     ):
         from .codegen.cutlass.kernel import CUTLASSTemplateCaller
-        from .codegen.subgraph import SubgraphChoiceCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3290,7 +3809,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if len(choices) == 0:
             raise self.create_no_valid_choices(name, "No choices exist for backend.")
-        log.debug("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", len(choices))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
@@ -3321,9 +3840,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
-                )
-                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
-                    "Pipelined autotuning not compatible yet with subgraph choices"
                 )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
@@ -3514,6 +4030,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         min_speedup_threshold,
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        best_choice = V.choices.override_best_choice(best_choice, timings)
 
         # Test-only: force choosing decomposition (non-fallback) if available
         if config.test_configs.force_custom_op_decomposition:
@@ -3979,7 +4497,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.exception(  # noqa: G202
+                        log.exception(
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
@@ -4409,7 +4927,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)  # noqa: G200
+                        log.warning(e)
                         timing = float("inf")
                     else:
                         raise e
@@ -5020,6 +5538,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(node, ir.Layout):
             node = ir.Buffer(name="fake", layout=node)
         # triton templates want the base tensor.
+        # Preserve the original dtype before unwrapping, since dtype views
+        # (e.g. uint8 -> float4_e2m1fn_x2) would be lost by unwrap_view.
+        original_dtype = node.get_dtype()
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
 
@@ -5027,7 +5548,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # stride is large enough. The V.graph.get_allocation_size takes this into account.
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
-        return AlgorithmSelectorCache.generate_example_value(
+        result = AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.optimization_hints_with_override(
                 node.get_size(),
                 hint_override=hint_override,
@@ -5047,6 +5568,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 hint_override=hint_override,
             ),
         )
+        # Restore dtype if it was lost by unwrapping a dtype view
+        if result.dtype != original_dtype:
+            result = result.view(original_dtype)
+        return result
 
     @staticmethod
     def generate_example_value(

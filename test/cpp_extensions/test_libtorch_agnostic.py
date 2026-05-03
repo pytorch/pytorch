@@ -1366,7 +1366,10 @@ except RuntimeError as e:
         )
 
         if show_cpp_stacktraces:
-            self.assertIn("C++ CapturedTraceback:", error_message)
+            self.assertRegex(
+                error_message,
+                r"C\+\+ CapturedTraceback:|Exception raised from[\s\S]*frame #",
+            )
             self.assertRegex(
                 error_message,
                 r"Exception raised from test_std_.*_check_error at .*test_std_.*check\..*:\d+",
@@ -1535,7 +1538,10 @@ except RuntimeError as e:
         )
 
         if show_cpp_stacktraces:
-            self.assertIn("C++ CapturedTraceback:", error_message)
+            self.assertRegex(
+                error_message,
+                r"C\+\+ CapturedTraceback:|Exception raised from[\s\S]*frame #",
+            )
             self.assertRegex(
                 error_message,
                 r"Exception raised from test_std_.*_kernel_launch_check_error at .*test_std_.*_check\..*:\d+",
@@ -1894,6 +1900,16 @@ except RuntimeError as e:
 
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
+
+    @skipIfTorchVersionLessThan(2, 12)
+    @onlyCPU
+    def test_tagged_op(self, device):
+        import libtorch_agn_2_12  # noqa: F401
+
+        op = torch.ops.libtorch_agn_2_12.tagged_identity.default
+        self.assertIn(torch.Tag.pointwise, op.tags)
+        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+        self.assertIn(torch.Tag.core, op.tags)
 
     @onlyCPU
     def test_my_layout(self, device):

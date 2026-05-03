@@ -107,13 +107,18 @@ if(INTERN_BUILD_ATEN_OPS)
             list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
           endif()
         endif()
-        # We will need to gate against CUDA version, because sm_103a is available on CUDA 12.9+
+        # We need to gate against CUDA version, because sm_103a and sm_103f are available on CUDA 12.9+
         if("${_arch}" STREQUAL "103a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
           if(_existing_arch_flags MATCHES ".*compute_100.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_103a,code=sm_103a")
           endif()
         endif()
-        # We will need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
+        if("${_arch}" STREQUAL "103f" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_103f,code=sm_103f")
+          endif()
+        endif()
+        # We need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
         if("${_arch}" STREQUAL "110a" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
           if(_existing_arch_flags MATCHES ".*compute_110.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_110a,code=sm_110a")
@@ -138,13 +143,13 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a;103a;110a;120a;121a")
+      "89;90a;100a;103f;110a;120a;121a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a;100a;103a;110a")
+      "90a;100a;103f;110a")
 
   endif()
 
@@ -161,6 +166,11 @@ if(INTERN_BUILD_ATEN_OPS)
   set(GEN_XPU_FLAG)
   if(USE_XPU)
     set(GEN_XPU_FLAG --xpu)
+  endif()
+
+  set(GEN_MTIA_FLAG)
+  if(USE_MTIA)
+    set(GEN_MTIA_FLAG --mtia)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
@@ -245,10 +255,12 @@ if(INTERN_BUILD_ATEN_OPS)
       "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --headeronly-install-dir ${CMAKE_BINARY_DIR}/torch/headeronly/core
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}
       ${GEN_XPU_FLAG}
+      ${GEN_MTIA_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -302,6 +314,10 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
       ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+    if(gen_type STREQUAL "headers")
+      list(APPEND OUTPUT_LIST
+        "${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h")
+    endif()
     if(USE_XPU)
       list(APPEND OUTPUT_LIST
         ${xpu_generated_${gen_type}}
@@ -426,6 +442,11 @@ if(INTERN_BUILD_ATEN_OPS)
     function(process_vec NAME)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
+      # IMPL is absolute here; make it relative to NEW_IMPL's directory so the
+      # generated #include is worktree-independent (ccache/re-cc friendly).
+      if(USE_RELATIVE_PATHS)
+        file(RELATIVE_PATH IMPL "${CMAKE_BINARY_DIR}/aten/src/ATen" "${IMPL}")
+      endif()
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)

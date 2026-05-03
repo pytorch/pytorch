@@ -473,6 +473,12 @@ struct ConvParams {
                            (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
+        auto depthwise_kernel = at::globalContext().cudnnDepthwiseKernel();
+        if (depthwise_kernel == at::CuDNNDepthwiseKernel::NATIVE) {
+          return false;
+        } else if (depthwise_kernel == at::CuDNNDepthwiseKernel::CUDNN) {
+          return true;
+        }
         return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
       return false;
@@ -1774,10 +1780,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
    TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
-          at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
-          at::empty({}));
 }
 
 static Tensor subvariable(const Tensor& var, int64_t dim, int64_t groups, int64_t g) {

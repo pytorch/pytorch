@@ -25,7 +25,9 @@ from torch._inductor.ir import FixedLayout
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
+    ExternalTritonTemplateKernel,
     ExternKernelChoice,
+    PartialRender,
     TritonTemplate,
     TritonTemplateKernel,
 )
@@ -226,6 +228,23 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_bmm_small_m(self):
+        # Verify BMM works when M < BLOCK_M. The triton_bmm template's
+        # tl.max_contiguous/tl.multiple_of hints must be guarded by
+        # M >= BLOCK_M to avoid out-of-bounds vectorized loads (see #179267).
+        @torch.compile
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        # M=2 is smaller than any BLOCK_M autotuning config (typically >= 16)
+        foo(
+            torch.randn(4, 2, 64, device=GPU_TYPE),
+            torch.randn(4, 64, 32, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
@@ -801,6 +820,73 @@ def patch_lowering(lowering_overrides) -> Callable[[], None]:
         yield
 
 
+class TestDtypeViewAutotuning(TestCase):
+    @requires_gpu()
+    @unittest.skipIf(
+        not hasattr(torch, "float4_e2m1fn_x2"),
+        "float4_e2m1fn_x2 dtype not available",
+    )
+    @patches
+    def test_benchmark_example_value_preserves_dtype_view(self):
+        """
+        Verify that benchmark_example_value preserves the dtype when the IR
+        node is a dtype view (e.g. uint8 storage viewed as float4_e2m1fn_x2).
+        """
+        from torch._inductor import ir
+
+        m, k = 256, 2048
+        device = torch.device(GPU_TYPE)
+
+        # We need a V.graph context for benchmark_example_value.
+        # Compile a trivial function to set up V.graph, then call the
+        # function under test within the compilation callback.
+        captured_results = {}
+
+        orig_lowering = torch._inductor.lowering.lowerings[aten.add.Tensor]
+
+        def patched_lowering(*args, **kwargs):
+            # We're inside compilation — V.graph is valid.
+            # Construct a dtype-viewed IR node and test benchmark_example_value.
+            base_layout = ir.FixedLayout(
+                device=device, dtype=torch.uint8, size=[m, k], stride=[k, 1]
+            )
+            base_buf = ir.Buffer(name="test_buf", layout=base_layout)
+
+            fp4_layout = ir.FixedLayout(
+                device=device,
+                dtype=torch.float4_e2m1fn_x2,
+                size=[m, k],
+                stride=[k, 1],
+            )
+            fp4_view = ir.ReinterpretView(data=base_buf, layout=fp4_layout)
+
+            example = select_algorithm.AlgorithmSelectorCache.benchmark_example_value(
+                fp4_view
+            )
+            captured_results["ir_dtype"] = fp4_view.get_dtype()
+            captured_results["example_dtype"] = example.dtype
+            captured_results["example_shape"] = tuple(example.shape)
+
+            return orig_lowering(*args, **kwargs)
+
+        torch._dynamo.reset()
+        with patch.dict(
+            torch._inductor.lowering.lowerings,
+            {aten.add.Tensor: patched_lowering},
+        ):
+            compiled_fn = torch.compile(lambda x: x + 1)
+            compiled_fn(torch.randn(4, device=device))
+
+        self.assertIn("ir_dtype", captured_results, "Patched lowering was not called")
+        self.assertEqual(
+            captured_results["example_dtype"],
+            torch.float4_e2m1fn_x2,
+            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            f"after unwrapping the view, but got {captured_results['example_dtype']}",
+        )
+        self.assertEqual(captured_results["example_shape"], (m, k))
+
+
 class TestTemplateRender(TestCase):
     @requires_gpu()
     @requires_triton()
@@ -898,6 +984,171 @@ class TestTemplateRender(TestCase):
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
             )
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    def test_external_template_prologue_epilogue_fusion(self):
+        """
+        Tests prologue fusion, epilogue fusion, and extra inputs through the
+        ExternalTritonTemplateKernel render()-based path.
+
+        Compiled function: relu(template_add(a, sigmoid(b))) * bias
+          - Prologue: sigmoid(b) fused into template as <LOAD_INPUT_B>
+          - Epilogue: relu(...) * bias fused into template as <STORE_OUTPUT_0>
+          - Extra inputs: bias is read by the epilogue but is not among the
+            template's original inputs, exercising kernel._extra_inputs
+        """
+        import torch._inductor.ir as ir
+        from torch._inductor.ir import OrderedSet
+        from torch._inductor.utils import Placeholder, run_and_get_code
+
+        XBLOCK = 128
+        render_called = [False]
+
+        # Template source with placeholders filled in by _render()
+        _MOCK_ADD_KERNEL_TEMPLATE = (
+            "import triton\n"
+            "import triton.language as tl\n"
+            "import torch\n"
+            "from torch._inductor.runtime import triton_helpers\n"
+            "\n"
+            "@triton.jit\n"
+            "def _mock_inner_add(A, B, {out_param}{extra_sig},"
+            " numel, XBLOCK: tl.constexpr):\n"
+            "    xoffset = tl.program_id(0) * XBLOCK\n"
+            "    xindex = xoffset + tl.arange(0, XBLOCK)\n"
+            "    xmask = xindex < numel\n"
+            "    a = tl.load(A + xindex, mask=xmask)\n"
+            "{prologue_load_b}"
+            "    _kernel_val_0 = a + b\n"
+            "    x_epilogue0_0 = xindex\n"
+            "    _tile_mask_0 = xmask\n"
+            "    <STORE_OUTPUT_0>\n"
+            "\n"
+            "def {kernel_name}(A, B, {out_param}{extra_sig}, numel):\n"
+            "    grid = ((numel + {xblock} - 1) // {xblock},)\n"
+            "    _mock_inner_add[grid]("
+            "A, B, {out_param}{extra_sig}, numel, XBLOCK={xblock})\n"
+            "    return {out_param}\n"
+        )
+
+        class _MockExternalTemplateBuffer(ir.TemplateBuffer):
+            def __init__(self, layout, inputs):
+                tb_self = self
+
+                def _make_kernel_render(out_node, hint_override=None):
+                    kernel = ExternalTritonTemplateKernel(tb_self)
+
+                    def render():
+                        return tb_self._render(kernel)
+
+                    return kernel, render
+
+                super().__init__(
+                    layout,
+                    inputs,
+                    _make_kernel_render,
+                    named_inputs={"A": inputs[0], "B": inputs[1]},
+                )
+                # Allow prologue fusion on input B (sigmoid(b) can be
+                # absorbed so the template reads b directly)
+                self.allowed_prologue_inps = OrderedSet([inputs[1].get_name()])
+                self.epilogue_fusable_outputs = {self.name: "result"}
+
+            def _render(self, kernel):
+                render_called[0] = True
+
+                # Set up all fusion hooks in one call
+                kernel._setup_fusion_hooks()
+
+                # --- Prologue handling for B ---
+                b_arg = self.inputs[1].get_name()
+                prologue_load_b = "    b = tl.load(B + xindex, mask=xmask)\n"
+                if kernel._prologue_source_buffers.get("B") is not None:
+                    b_arg = kernel._prologue_source_buffers["B"]
+                    prologue_load_b = (
+                        "    _prologue_B_xindex = xindex\n"
+                        "    _prologue_B_xmask = xmask\n"
+                        "    <LOAD_INPUT_B>\n"
+                        "    b = _prologue_B_result\n"
+                    )
+
+                call_args = [self.inputs[0].get_name(), b_arg]
+
+                # --- Epilogue handling ---
+                out_param = "result"
+                out_arg = self.name
+                for buf, param in kernel._extra_store_targets.items():
+                    out_param = param
+                    out_arg = buf
+                    break
+
+                call_args.append(out_arg)
+
+                # --- Extra inputs ---
+                extra_params = []
+                for buf_name, param_name in kernel._extra_inputs.items():
+                    extra_params.append(param_name)
+                    call_args.append(buf_name)
+
+                numel = self.get_size()[0]
+                call_args.append(str(numel))
+
+                extra_sig = ", " + ", ".join(extra_params) if extra_params else ""
+
+                source = _MOCK_ADD_KERNEL_TEMPLATE.format(
+                    out_param=out_param,
+                    extra_sig=extra_sig,
+                    prologue_load_b=prologue_load_b,
+                    kernel_name=str(Placeholder.KERNEL_NAME),
+                    xblock=XBLOCK,
+                )
+
+                kernel._call_preamble = []
+                kernel._call_args = call_args
+
+                return PartialRender(source, kernel.render_hooks)
+
+        def add_override(a, b, alpha=None):
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            a = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(b))
+            return ir.TensorBox.create(_MockExternalTemplateBuffer(layout, [a, b]))
+
+        # (override_fn, decompose, type_promotion, convert_input_to_bool)
+        with patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        ):
+
+            @torch.compile
+            def f(a, b, bias):
+                # Use * for bias so it doesn't trigger add_override again
+                return torch.relu(a + torch.sigmoid(b)) * bias
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            bias = torch.randn(32, device=GPU_TYPE)
+
+            result, (code,) = run_and_get_code(f, a, b, bias)
+            expected = torch.relu(a + torch.sigmoid(b)) * bias
+            torch.testing.assert_close(result, expected)
+
+            # Verify render() was called (new protocol)
+            self.assertTrue(render_called[0])
+            # Verify template kernel was used
+            self.assertIn("_mock_inner_add", code)
+            # Verify epilogue fusion: relu fused via hook
+            self.assertIn("triton_helpers.maximum", code)
+            # Verify prologue fusion: sigmoid fused via hook
+            self.assertIn("tl.sigmoid", code)
 
 
 if __name__ == "__main__":

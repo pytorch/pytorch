@@ -10,7 +10,7 @@ import unittest
 from subprocess import CalledProcessError
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch._inductor.config as config
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.common import (
@@ -181,14 +181,19 @@ requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires t
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 
-def requires_cuda_with_enough_memory(min_mem_required):
+def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
+        total_memory = sys.maxsize
+        if torch.xpu.is_available():
+            total_memory = torch.xpu.get_device_properties().total_memory
+        elif torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties().total_memory
         if (
-            not torch.cuda.is_available()
-            or torch.cuda.get_device_properties().total_memory < min_mem_required
+            not (torch.cuda.is_available() or torch.xpu.is_available())
+            or total_memory < min_mem_required
         ):
             return unittest.skip(
-                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+                f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
             )(fn)
         else:
             return fn
@@ -388,7 +393,7 @@ class MockGraphHandler(GraphLowering):
         self.constants = {}
         self.scheduler = None
 
-    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+    def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
 

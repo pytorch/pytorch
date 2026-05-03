@@ -3,6 +3,7 @@
 import gc
 import sys
 import unittest
+from contextlib import nullcontext
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -11,13 +12,14 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
 
 if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
 
@@ -95,6 +97,18 @@ class TestAccelerator(TestCase):
         with torch.accelerator.device_index(0):
             self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    def test_device_index_fullgraph(self):
+        def fn(x):
+            with torch.accelerator.device_index(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device=0)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_multi_device_context_manager(self):
@@ -259,6 +273,40 @@ class TestAccelerator(TestCase):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    @unittest.skipIf(
+        TEST_XPU,
+        "bare-bones/opaque bit-field dtypes cause undefined behavior on XPU, see https://github.com/pytorch/pytorch/issues/179888",
+    )
+    def test_device_capability_supported_dtypes(self):
+        try:
+            caps = torch.accelerator.get_device_capability()
+        except RuntimeError:
+            self.skipTest("Backend doesn't support get_device_capability")
+
+        supported_dtypes = caps["supported_dtypes"]
+        self.assertIsInstance(supported_dtypes, set)
+        self.assertGreater(len(supported_dtypes), 0)
+
+        acc = torch.accelerator.current_accelerator()
+        reference_dtype = next(iter(supported_dtypes))
+
+        all_dtypes = [
+            getattr(torch, name)
+            for name in dir(torch)
+            if isinstance(getattr(torch, name), torch.dtype)
+        ]
+        for dtype in all_dtypes:
+            with self.subTest(dtype=dtype):
+                ctx = (
+                    nullcontext()
+                    if dtype in supported_dtypes
+                    else self.assertRaises((RuntimeError, TypeError))
+                )
+                with ctx:
+                    t = torch.empty(16, dtype=dtype, device=acc)
+                    t = t.to(reference_dtype)
+                    t = t.to(dtype)
 
 
 if __name__ == "__main__":

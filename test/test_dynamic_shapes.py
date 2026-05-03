@@ -23,20 +23,23 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _iterate_exprs,
     DimConstraints,
     DimDynamic,
     expect_true,
+    free_symbols,
     guard_bool,
     guard_float,
     guard_int,
+    guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
     ShapeEnv,
-    size_hint,
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
+    SYMPY_INTERP,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -918,6 +921,46 @@ def forward(self, x_1):
             )
         )
 
+    def test_sympy_interp_is_non_overlapping_and_dense_flat_args(self):
+        # SYMPY_INTERP is used as the eval() namespace for guard code strings.
+        # Guard code prints IsNonOverlappingAndDenseIndicator(s0, s1, ..., st0, st1, ...)
+        # with flat args, so the SYMPY_INTERP function must accept flat args.
+        interp_fn = SYMPY_INTERP["IsNonOverlappingAndDenseIndicator"]
+
+        # 1D contiguous: sizes=(5,), strides=(1,)
+        self.assertEqual(interp_fn(5, 1), 1)
+        # 1D non-contiguous: sizes=(5,), strides=(2,)
+        self.assertEqual(interp_fn(5, 2), 0)
+        # 1D single element: sizes=(1,), strides=(42,)
+        self.assertEqual(interp_fn(1, 42), 1)
+
+        # 2D contiguous: sizes=(3, 4), strides=(4, 1)
+        self.assertEqual(interp_fn(3, 4, 4, 1), 1)
+        # 2D non-contiguous: sizes=(3, 4), strides=(5, 1) -- gap in memory
+        self.assertEqual(interp_fn(3, 4, 5, 1), 0)
+        # 2D transposed but still dense: sizes=(4, 3), strides=(1, 4)
+        self.assertEqual(interp_fn(4, 3, 1, 4), 1)
+
+        # 4D contiguous (the exact scenario from the MAST job failure):
+        # sizes=(2, 3, 4, 5), strides=(60, 20, 5, 1)
+        self.assertEqual(interp_fn(2, 3, 4, 5, 60, 20, 5, 1), 1)
+        # 4D non-contiguous:
+        self.assertEqual(interp_fn(2, 3, 4, 5, 100, 20, 5, 1), 0)
+
+    def test_sympy_interp_guard_eval_simulation(self):
+        # Simulate the actual guard eval() path: guard code strings use
+        # IsNonOverlappingAndDenseIndicator as a function name, and SYMPY_INTERP
+        # provides the binding in the eval namespace.
+        guard_code = "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 60, 20, 5, 1) == 1"
+        result = eval(guard_code, SYMPY_INTERP)  # noqa: P204
+        self.assertTrue(result)
+
+        guard_code_false = (
+            "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 100, 20, 5, 1) == 1"
+        )
+        result_false = eval(guard_code_false, SYMPY_INTERP)  # noqa: P204
+        self.assertFalse(result_false)
+
     def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
         cf = torch._prims_common.is_non_overlapping_and_dense_or_false
@@ -1350,7 +1393,7 @@ class f(torch.nn.Module):
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: "f32[s57 + s75, 2*s96]" = native_dropout[0]
         getitem_1: "b8[s57 + s75, 2*s96]" = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""",  # noqa: B950
+        return (getitem, getitem_1)""",
         )
 
     def test_statically_known_true(self):
@@ -2004,6 +2047,13 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(z > -2)
         with self.assertRaises(ZeroDivisionError):
             y % x
+
+        # test pow operations preserve DynamicInt type
+        check(w**2, 1)  # DynamicInt ** int
+        check(2**z, 4)  # int ** DynamicInt
+        check(y**x, 1)  # DynamicInt ** DynamicInt
+        check(pow(z, 2), 4)  # pow(DynamicInt, int)
+        self.assertTrue(isinstance(pow(y, 3, 5), DynamicInt))  # pow with modulo
 
         # math, numpy
         self.assertEqual(math.cos(x), y)
@@ -3161,16 +3211,24 @@ class TestGuardsExpressions(TestCase):
 
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s2)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
+        )
 
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3314,8 +3372,12 @@ class TestGuardsExpressions(TestCase):
 
         self.assertIn("math.trunc(", guards)
         self.assertIn("float(", guards)
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
 
     @unittest.skipIf(
         TEST_XPU, "Skipped on XPU"
@@ -3510,6 +3572,28 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a")))
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
+
+    def test_iterate_exprs_dict(self):
+        """Test that _iterate_exprs handles dict values (e.g. from triton_kernel_wrapper_functional)."""
+        a, b = sympy.symbols("a b")
+
+        # dict with tensor values and string keys — should not crash
+        t = torch.randn(3, 4)
+        result = list(_iterate_exprs({"Out": t}))
+        # concrete tensor has no symbolic exprs
+        self.assertEqual(len(result), 0)
+
+        # dict with sympy keys — should iterate over both keys and values
+        result = list(_iterate_exprs({a: 1, b: 2}))
+        self.assertEqual(len(result), 2)
+        self.assertIn(a, result)
+        self.assertIn(b, result)
+
+        # free_symbols works on dicts with sympy keys
+        self.assertEqual(free_symbols({a + b: 1}), {a, b})
+
+        # empty dict
+        self.assertEqual(list(_iterate_exprs({})), [])
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3713,6 +3797,39 @@ class TestUnbacked(TestCase):
 
             meta_copy_(self_tensor, src_tensor)
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symbool_propagate_real_tensors(self):
+        """
+        Test that propagate_real_tensors properly handles SymBool from boolean .item() calls.
+
+        When tracing with propagate_real_tensors=True, if a boolean .item() returns False
+        during tracing, a runtime assertion should be generated that throws when the
+        boolean becomes True at runtime.
+
+        This is a regression test for a bug where int(real_t) was used instead of real_t,
+        causing boolean values to be incorrectly converted to integers and losing the
+        proper runtime assertion.
+        """
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if x.eq(0.1).any().item():
+                return x
+            return x + 1
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # First call with 0.2 - item() returns False, traces the x + 1 branch
+            result1 = f(torch.ones(2) * 0.2)
+            torch.testing.assert_close(result1, torch.ones(2) * 1.2)
+
+            # Second call with 0.1 - item() returns True, should throw runtime assertion
+            # because the traced graph assumed False
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Runtime assertion failed for expression Ne\(u0, 1\)",
+            ):
+                f(torch.ones(2) * 0.1)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
@@ -3773,7 +3890,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
         mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_11, mul_14, clone)""",  # noqa: B950
+        return (mul_11, mul_14, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3814,7 +3931,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
         mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_6, mul_9, clone)""",  # noqa: B950
+        return (mul_6, mul_9, clone)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3884,7 +4001,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
         mul_21: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_21,)""",  # noqa: B950
+        return (mul_21,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3915,7 +4032,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """""",  # noqa: B950
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4018,7 +4135,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
         ge_2: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_2 = None
-        return (slice_1,)""",  # noqa: B950
+        return (slice_1,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4046,6 +4163,31 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_unbacked_slice_with_step_cpp_wrapper(self):
         self.test_unbacked_slice_with_step()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice_noop_with_unbacked_bindings(self):
+        # Regression test: the no-op early return in slice_ lowering
+        # (start==0, size<=end, step==1) must register DynamicSliceSize
+        # for unbacked bindings created at trace time.
+        # torch._check after the slice adds facts to ShapeEnv that make
+        # statically_known_leq(size, end) True at lowering time.
+        def f(x, n):
+            u0 = n.item()
+            result = x[:u0]
+            torch._check(u0 >= 0)
+            torch._check(u0 >= x.size(0))
+            return result
+
+        x = torch.randn(10, 16)
+        n = torch.tensor([10])
+
+        eager_result = f(x, n)
+
+        compiled_fn = torch.compile(f, fullgraph=True, backend="inductor")
+        compiled_result = compiled_fn(x, n)
+
+        self.assertEqual(eager_result, compiled_result)
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4237,7 +4379,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         cnt = CompileCounterWithBackend("inductor")
 
         # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
-        # hints to to compute strides.
+        # hints to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
             result2 = x.view(u0, u1) * 10
@@ -4308,7 +4450,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg2_1, memory_format = torch.contiguous_format);  arg2_1 = None
         add_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
         mul_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_3, 100);  add_3 = None
-        return (mul_6,)""",  # noqa: B950
+        return (mul_6,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4336,7 +4478,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
         mul_5: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
-        return (mul_5,)""",  # noqa: B950
+        return (mul_5,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4374,7 +4516,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
         select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
         select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
-        return (select, select_1, select_2)""",  # noqa: B950
+        return (select, select_1, select_2)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4525,7 +4667,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4561,7 +4703,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",  # noqa: B950
+        return (_reshape_copy,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4838,15 +4980,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_hint_override_consistent_stride1(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
-            a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[2])
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[1])
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[1]
+            )
             torch._check(a == b)
             torch._check(a == 6)
 
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 120)
 
@@ -4864,10 +5012,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
             # only one of the sizes has hint overridden.
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 24)
 
@@ -4880,20 +5030,20 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.mark_dynamic(x, 2, hint_override=6)
         func(x)
 
-    def test_size_hint(self):
+    def test_optimization_hint(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     a.size()[0], fallback=300
                 )
                 == 300
             )
             b = torch.ones([x.item() * 2])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     b.size()[0], fallback=300
                 )
                 == 600
@@ -4903,13 +5053,16 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         func(torch.tensor([33]))
 
-    def test_size_hint_no_fallback(self):
+    def test_guarding_hint_or_throw(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(a.size()[0]) == 300
+                torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                    a.size()[0]
+                )
+                == 300
             )
 
             return a * 10
@@ -5162,6 +5315,82 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_indices triggers recompilation.
+        Uses subset match semantics: runtime indices must be a subset of compiled indices,
+        unless the runtime tensor has no attribute (unspecified = don't care).
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with unbacked indices [0, 1]
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, [0, 1])
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same unbacked indices - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, [0, 1])
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with subset [0] - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with no unbacked indices (plain tensor) - should NOT recompile
+        # (no attribute = unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with superset [0, 1, 2] - should recompile (not a subset of {0, 1})
+        x5 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x5, [0, 1, 2])
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Sixth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x6 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x6, [])
+        self.assertFalse(hasattr(x6, "_dynamo_unbacked_indices"))
+        compiled_func(x6)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_no_recompile_to_unbacked(self):
+        """
+        Test that compiling without _dynamo_unbacked_indices and then passing
+        a tensor with _dynamo_unbacked_indices DOES trigger recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call without unbacked indices
+        x1 = torch.rand(4, 3)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with unbacked indices - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_no_shape_id_then_shape_id(self):
         """
         Test that compiling without shape_id then calling with shape_id
@@ -5192,6 +5421,267 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x3, 0, shape_id="batch")
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_empty_list_is_noop(self):
+        """
+        Test that mark_unbacked(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_unbacked(x, 0), calling mark_unbacked(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_unbacked_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+        torch._dynamo.decorators.mark_unbacked(x, [])
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_empty_list_is_noop(self):
+        """
+        Test that mark_dynamic(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_dynamic(x, 0), calling mark_dynamic(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_dynamic_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x, 0)
+        self.assertIn(0, x._dynamo_dynamic_indices)
+        torch._dynamo.decorators.mark_dynamic(x, [])
+        self.assertIn(0, x._dynamo_dynamic_indices)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_unbacked and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_mark_static_to_mark_unbacked_recompilation(self):
+        """
+        Test that compiling with mark_static and then calling with mark_unbacked
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_unbacked - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_dynamic and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that dynamic indices use subset match semantics.
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [0]) → no recompile (subset)
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [2]) → recompile (not subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        torch._dynamo.mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x2, 0)
+        torch._dynamo.mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("maybe_mark_dynamic is not traceable")
+    def test_weak_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that weak dynamic indices (from maybe_mark_dynamic) use subset match semantics.
+        - Compile with maybe_mark_dynamic(x, [0, 1]) then call with maybe_mark_dynamic(x, [0]) → no recompile (subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with maybe_mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x1, 0)
+        torch._dynamo.maybe_mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same weak dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x2, 0)
+        torch._dynamo.maybe_mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 weak dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_static_indices_exact_match_recompilation(self):
+        """
+        Test that static indices use subset match semantics.
+        - Compile with mark_static(x, [0, 1]) then call with mark_static(x, [0]) → no recompile (subset)
+        - If you want dim 1 NOT static, explicitly mark it dynamic.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        torch._dynamo.mark_static(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same static indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        torch._dynamo.mark_static(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 static - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_static_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_static_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_exec_fft_reshape_no_dde(self):
@@ -5433,6 +5923,56 @@ class TestMaybeFastEvalComparison(TestCase):
         expr = sympy.GreaterThan(u0.node.expr, 0)
         result = shape_env._maybe_fast_eval_comparison(expr)
         self.assertIsNone(result)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_slice_assignment_same_bounds(self):
+        # Repro from sequential_experts_gemm (MoE pattern in HuggingFace Aria).
+        # output[start:end] = out should not fail with a data-dependent guard
+        # because `out` was produced from token_states[start:end], so both
+        # slices share the same (start, end) and thus the same size.
+        def sequential_experts_gemm(token_states, expert_weights, tokens_per_expert):
+            num_tokens = token_states.shape[0]
+            out_features = expert_weights.shape[-1]
+            output = torch.zeros(
+                num_tokens,
+                out_features,
+                dtype=token_states.dtype,
+                device=token_states.device,
+            )
+
+            cumsum_num_tokens = torch.cumsum(tokens_per_expert, dim=0)
+            zero_tensor = torch.zeros(
+                1, dtype=torch.long, device=cumsum_num_tokens.device
+            )
+            cumsum_num_tokens = torch.cat((zero_tensor, cumsum_num_tokens))
+
+            for expert_num in range(expert_weights.shape[0]):
+                start = cumsum_num_tokens[expert_num]
+                end = cumsum_num_tokens[expert_num + 1]
+                tokens = token_states[start:end]
+                out = torch.matmul(tokens, expert_weights[expert_num])
+                output[start:end] = out
+            return output
+
+        num_tokens = 10
+        in_features = 16
+        out_features = 32
+        num_experts = 3
+
+        token_states = torch.randn(num_tokens, in_features)
+        expert_weights = torch.randn(num_experts, in_features, out_features)
+        tokens_per_expert = torch.tensor([3, 2, 5])
+
+        eager_result = sequential_experts_gemm(
+            token_states, expert_weights, tokens_per_expert
+        )
+
+        compiled_fn = torch.compile(
+            sequential_experts_gemm, fullgraph=True, backend="eager"
+        )
+        compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
+
+        self.assertEqual(eager_result, compiled_result)
 
 
 if __name__ == "__main__":

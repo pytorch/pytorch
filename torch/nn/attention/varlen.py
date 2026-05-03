@@ -54,6 +54,7 @@ def _varlen_attn(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -70,6 +71,9 @@ def _varlen_attn(
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
 
+        if enable_gqa:
+            # TODO: check this
+            raise RuntimeError("GQA is not supported with the cuDNN backend.")
         if num_splits is not None:
             # TODO: check this
             raise RuntimeError("num_splits is not supported with the cuDNN backend.")
@@ -140,6 +144,7 @@ def _varlen_attn_fake(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -159,16 +164,18 @@ def _varlen_attn_fake(
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
     num_heads = query.size(1)
+    logsumexp = torch.empty(
+        (num_heads, total_q), dtype=torch.float, device=query.device
+    )
+
     if torch.version.hip:
-        # ROCm uses batched format: [batch_size, num_heads, max_q]
-        batch_size = cu_seq_q.size(0) - 1
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-        )
-    else:
-        logsumexp = torch.empty(
-            (num_heads, total_q), dtype=torch.float, device=query.device
-        )
+        preferred = torch._C._get_rocm_fa_preferred_backend()
+        if preferred == torch._C._ROCmFABackend.AOTriton:
+            # AOTriton ROCm path uses batched 3D
+            batch_size = cu_seq_q.size(0) - 1
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+            )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
@@ -187,6 +194,7 @@ def varlen_attn(
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -197,11 +205,11 @@ def varlen_attn(
     variable-length sequences using cumulative sequence position tensors.
 
     Args:
-        query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
-        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`, or
-            :math:`(\text{total\_pages}, \text{page\_size}, H, D)` when ``block_table`` is provided.
-        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`, or
-            :math:`(\text{total\_pages}, \text{page\_size}, H, D)` when ``block_table`` is provided.
+        query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H_{kv}, D)`, or
+            :math:`(\text{total\_pages}, \text{page\_size}, H_{kv}, D)` when ``block_table`` is provided.
+        value (Tensor): Value tensor; shape :math:`(T_k, H_{kv}, D)`, or
+            :math:`(\text{total\_pages}, \text{page\_size}, H_{kv}, D)` when ``block_table`` is provided.
         cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
         cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
         max_q (int): Maximum query sequence length in the batch.
@@ -211,6 +219,11 @@ def varlen_attn(
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
+        enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA)
+            and allows key/value to have fewer heads than query.
+            Each KV head is shared by a group of :math:`H_q / H_{kv}` query heads,
+            so :math:`H_q` must be divisible by :math:`H_{kv}`.
+            Default is False.
         seqused_k (Tensor, optional): Number of valid KV tokens per batch element; shape :math:`(N,)`.
             When set, only the first ``seqused_k[i]`` tokens in the key/value sequence for batch
             element *i* participate in attention. Useful for KV-cache decoding where the cache slot
@@ -239,16 +252,17 @@ def varlen_attn(
             ``None`` (default), the kernel chooses automatically.
 
     Returns:
-        output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
+        output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H_q, D)`.
 
         If ``return_aux`` is not None and ``return_aux.lse`` is True:
-            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H)`.
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H_q)`.
 
     Shape legend:
         - :math:`N`: Batch size
         - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
         - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
-        - :math:`H`: Number of attention heads
+        - :math:`H_q`: Number of query attention heads
+        - :math:`H_{kv}`: Number of key/value attention heads (equal to :math:`H_q` unless GQA is enabled)
         - :math:`D`: Head dimension
 
     Example::
@@ -285,6 +299,20 @@ def varlen_attn(
         ... )
     """
 
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(2) if block_table is not None else key.size(1)
+    if not enable_gqa and num_heads_q != num_heads_k:
+        raise ValueError(
+            f"Expect query and key/value to have the same number of heads "
+            f"but got Hq={num_heads_q} and Hkv={num_heads_k}. "
+            f"Try setting enable_gqa=True for GQA."
+        )
+    if enable_gqa and num_heads_q % num_heads_k != 0:
+        raise ValueError(
+            f"Expect number of query heads to be a multiple of kv heads for GQA "
+            f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
+        )
+
     is_causal = window_size == (-1, 0)
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
@@ -297,6 +325,7 @@ def varlen_attn(
         is_causal,
         scale,
         list(window_size),
+        enable_gqa,
         seqused_k,
         block_table,
         num_splits,
@@ -319,6 +348,7 @@ def _varlen_attn_out(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -372,6 +402,7 @@ def _varlen_attn_out_fake(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -409,6 +440,7 @@ def varlen_attn_out(
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    enable_gqa: bool = False,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
@@ -419,6 +451,20 @@ def varlen_attn_out(
     instead of allocating a new one.
 
     """
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(2) if block_table is not None else key.size(1)
+    if not enable_gqa and num_heads_q != num_heads_k:
+        raise ValueError(
+            f"Expect query and key/value to have the same number of heads "
+            f"but got Hq={num_heads_q} and Hkv={num_heads_k}. "
+            f"Try setting enable_gqa=True for GQA."
+        )
+    if enable_gqa and num_heads_q % num_heads_k != 0:
+        raise ValueError(
+            f"Expect number of query heads to be a multiple of kv heads for GQA "
+            f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
+        )
+
     is_causal = window_size == (-1, 0)
     lse = torch.ops.torch_attn._varlen_attn_out(
         out,
@@ -432,6 +478,7 @@ def varlen_attn_out(
         is_causal,
         scale,
         list(window_size),
+        enable_gqa,
         seqused_k,
         block_table,
         num_splits,
@@ -453,6 +500,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         is_causal,
         scale,
         window_size,
+        enable_gqa,
         seqused_k,
         block_table,
         num_splits,
@@ -598,7 +646,9 @@ def _backward(
         scale,
         window_size,
     )
-    num_params = 10  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k, block_table, num_splits
+    # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
+    # enable_gqa, seqused_k, block_table, num_splits
+    num_params = 11
     return (dq, dk, dv, *((None,) * num_params))
 
 
@@ -607,3 +657,15 @@ _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
 torch._dynamo.disallow_in_graph(
     torch.ops.aten._flash_attention_forward_no_dropout_inplace
 )
+
+from torch.utils.flop_counter import (
+    _varlen_attn_backward_flop,
+    _varlen_attn_forward_flop,
+    _varlen_attn_out_flop,
+    flop_registry,
+)
+
+
+flop_registry[torch.ops.torch_attn._varlen_attn] = _varlen_attn_forward_flop
+flop_registry[torch.ops.torch_attn._varlen_attn_out] = _varlen_attn_out_flop
+flop_registry[torch.ops.torch_attn._varlen_attn_backward] = _varlen_attn_backward_flop
