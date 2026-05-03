@@ -320,6 +320,37 @@ class TestCuda(TestCase):
 
         expected = empty_stats()
 
+    def test_host_memory_stats_free(self):
+        # Ensure a clean state
+        gc.collect()
+        torch._C._host_emptyCache()
+
+        # Allocate a pinned tensor
+        alloc_size = 10  # in 1024-element units
+        t = torch.ones(alloc_size * 1024, pin_memory=True)
+        self.assertTrue(t.is_pinned())
+
+        stats = torch.cuda.host_memory_stats()
+        allocated_size = stats["allocated_bytes.allocated"]
+
+        # active_bytes should be positive and freed should be 0
+        self.assertGreater(stats["active_bytes.current"], 0)
+        self.assertGreater(stats["active_requests.current"], 0)
+        self.assertEqual(stats["active_bytes.freed"], 0)
+        self.assertEqual(stats["active_requests.freed"], 0)
+
+        # Delete the tensor to trigger free()
+        del t
+        gc.collect()
+
+        stats = torch.cuda.host_memory_stats()
+
+        # After free, active_bytes.current should be 0 and freed should be updated
+        self.assertEqual(stats["active_bytes.current"], 0)
+        self.assertEqual(stats["active_requests.current"], 0)
+        self.assertEqual(stats["active_bytes.freed"], allocated_size)
+        self.assertEqual(stats["active_requests.freed"], 1)
+
     def test_pinned_memory_empty_cache(self):
         try:
             for alloc_settings in (True, False):
