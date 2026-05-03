@@ -1287,7 +1287,7 @@ class GraphModuleSerializer(metaclass=Final):
                     )
                 elif type(attr).__name__ == "LoweredBackendModule":
                     # Special handling for executorch_call_delegate HOP
-                    # It's first argument is a LoweredBackendModule, for which we
+                    # Its first argument is a LoweredBackendModule, for which we
                     # serialize name and backend id of the lowered module
                     module_name = getattr(attr, "module_name", None)
                     backend_id = getattr(attr, "backend_id", None)
