@@ -3742,6 +3742,9 @@ class WrapperDescriptorVariable(VariableTracker):
     def python_type(self) -> type:
         return types.WrapperDescriptorType
 
+    def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
+        return self.descriptor
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # descr_members: __objclass__ and __name__ are PyMemberDef on all
         # descriptor types.
@@ -3867,6 +3870,9 @@ class MethodDescriptorVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MethodDescriptorType
 
+    def get_real_python_backed_value(self) -> types.MethodDescriptorType:
+        return self.descriptor
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # descr_members: __objclass__ and __name__ are PyMemberDef on all
         # descriptor types.
@@ -3991,6 +3997,9 @@ class ClassMethodDescriptorVariable(VariableTracker):
     def python_type(self) -> type:
         return types.ClassMethodDescriptorType
 
+    def get_real_python_backed_value(self) -> types.ClassMethodDescriptorType:
+        return self.descriptor
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # descr_members: __objclass__ and __name__ are PyMemberDef on all
         # descriptor types.
@@ -4035,7 +4044,7 @@ class StaticMethodVariable(VariableTracker):
 
     def __init__(
         self,
-        descriptor: staticmethod,
+        descriptor: staticmethod,  # type: ignore[type-arg]
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -4078,7 +4087,7 @@ class ClassMethodVariable(VariableTracker):
 
     def __init__(
         self,
-        descriptor: classmethod,
+        descriptor: classmethod,  # type: ignore[type-arg]
         source_fn: "Source | None" = None,
         **kwargs: Any,
     ) -> None:
@@ -4166,12 +4175,12 @@ class MemberDescriptorVariable(VariableTracker):
         # C struct field value.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
         try:
-            resolved = self.descriptor.__get__(obj.value)
+            resolved = self.descriptor.__get__(obj.value)  # type: ignore[attr-defined]
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
             )
         return VariableTracker.build(tx, resolved, self.source)
 
@@ -4221,12 +4230,12 @@ class GetSetDescriptorVariable(VariableTracker):
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
         try:
-            resolved = self.desc.__get__(obj.value)
+            resolved = self.desc.__get__(obj.value)  # type: ignore[attr-defined]
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
             )
         return VariableTracker.build(tx, resolved, self.source)
 
