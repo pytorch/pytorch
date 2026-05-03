@@ -116,18 +116,14 @@ class StoreExchange {
       store->set(peer_keys[rank], payload);
     }
 
+    auto payloads = store->multiGet(peer_keys);
+
     std::vector<T> peer_vals;
     peer_vals.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
-      if (r == rank) {
-        peer_vals.push_back(val);
-        continue;
-      }
-      store->wait({peer_keys[r]});
-      auto payload = store->get(peer_keys[r]);
-      TORCH_CHECK(payload.size() == sizeof(T));
+      TORCH_CHECK(payloads[r].size() == sizeof(T));
       T peer_val{};
-      std::memcpy(&peer_val, payload.data(), sizeof(T));
+      std::memcpy(&peer_val, payloads[r].data(), sizeof(T));
       peer_vals.push_back(peer_val);
     }
     return peer_vals;
@@ -137,8 +133,11 @@ class StoreExchange {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int world_size) {
-    // TODO: implement an efficient one?
-    all_gather(store, rank, world_size, 0);
+    (void)rank;
+    std::ostringstream oss;
+    oss << store_prefix_ << '/' << seq_id_;
+    ++seq_id_;
+    store->barrier(oss.str(), world_size);
   }
 
  private:
