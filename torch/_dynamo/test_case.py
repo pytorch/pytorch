@@ -107,6 +107,10 @@ class TestCase(TorchTestCase):
             torch.set_grad_enabled(self._prior_is_grad_enabled)
         config.nested_graph_breaks = self._prior_nested_graph_breaks
 
+    def before_cuda_memory_leak_check(self) -> None:
+        reset()
+        utils.counters.clear()
+
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if (
             config.debug_disable_compile_counter
@@ -230,6 +234,12 @@ class CPythonTestCase(TestCase):
                 enable_trace_load_build_class=True,
             ),
         )
+
+    @contextlib.contextmanager
+    def subTest(self, *args, **kwargs):
+        # pytest 9.x addSubTest uses typing._GenericAlias calls that
+        # Dynamo cannot trace. Use a no-op subTest instead.
+        yield
 
     # pyrefly: ignore [implicit-any]
     def wrap_with_policy(self, method_name: str, policy: Callable) -> None:

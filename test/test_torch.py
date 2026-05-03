@@ -1485,6 +1485,31 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_max_pool3d(self, device):
+        test_cases = [
+            # size, kernel_size, stride, padding, dilation, ceil_mode
+            [(2, 3, 8, 8, 8), 3, 1, 1, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, False],
+            [(2, 3, 8, 8, 8), 2, 2, 0, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, True],
+            [(3, 8, 8, 8), 3, 1, 1, 1, False],  # unbatched
+        ]
+
+        for size, ks, st, pa, di, cm in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res, _ = torch.nn.functional.max_pool3d(
+                        input, ks, st, pa, di, cm, return_indices=True)
+                    res.backward(torch.ones_like(res))
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding
@@ -9188,6 +9213,57 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.quint8.is_signed)
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint8.is_signed)
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint32.is_signed)
+
+    def test_dtype_abbr(self):
+        expected = {
+            torch.float64: "f64",
+            torch.float32: "f32",
+            torch.float16: "f16",
+            torch.bfloat16: "bf16",
+            torch.float8_e4m3fn: "f8e4m3fn",
+            torch.float8_e5m2: "f8e5m2",
+            torch.float8_e4m3fnuz: "f8e4m3fnuz",
+            torch.float8_e5m2fnuz: "f8e5m2fnuz",
+            torch.float8_e8m0fnu: "f8e8m0fnu",
+            torch.float4_e2m1fn_x2: "f4e2m1fnx2",
+            torch.complex32: "c32",
+            torch.complex64: "c64",
+            torch.complex128: "c128",
+            torch.int8: "i8",
+            torch.int16: "i16",
+            torch.int32: "i32",
+            torch.int64: "i64",
+            torch.bool: "b8",
+            torch.uint8: "u8",
+            torch.uint16: "u16",
+            torch.uint32: "u32",
+            torch.uint64: "u64",
+            torch.bits16: "b16x1",
+            torch.bits1x8: "b1x8",
+            torch.bits2x4: "b2x4",
+            torch.bits4x2: "b4x2",
+            torch.bits8: "b8x1",
+        }
+        for dtype, abbr in expected.items():
+            self.assertEqual(dtype.abbr, abbr)
+        self.assertEqual(set(torch._C._get_all_dtypes()), set(expected.keys()))
+
+    def test_get_all_dtypes(self):
+        # The C++ implementation iterates AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS
+        # and filters out quantized and sub-byte placeholder dtypes; pin the
+        # result against a manually computed list so regressions are caught.
+        expected = {
+            torch.uint8, torch.uint16, torch.uint32, torch.uint64,
+            torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64, torch.bfloat16,
+            torch.complex32, torch.complex64, torch.complex128,
+            torch.bool,
+            torch.float8_e5m2, torch.float8_e4m3fn,
+            torch.float8_e5m2fnuz, torch.float8_e4m3fnuz,
+            torch.float8_e8m0fnu, torch.float4_e2m1fn_x2,
+            torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8, torch.bits16,
+        }
+        self.assertEqual(set(torch._C._get_all_dtypes()), expected)
 
     # FIXME: Put the following random tests into their own test class or test suite
     @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")

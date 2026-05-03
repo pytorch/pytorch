@@ -21,7 +21,7 @@ class FakeScriptObject:
 
         from torch._library.opaque_object import is_opaque_type
 
-        # We dont want to deepcopy when tracing with opaque objects because
+        # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)
         # then we want it to be recorded on the real object
         real_obj = x

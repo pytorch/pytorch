@@ -683,8 +683,9 @@ class InputReader:
     def unsupported(self, name: str) -> None:
         self.args.append(None)
 
-    def generator(self, device_type: str, device_index: int) -> torch._C.Generator:
-        gen = torch.cuda.default_generators[device_index].clone_state()
+    def generator(self, device_type: str, device_index: int) -> Any:
+        device = torch.device(device_type, device_index)
+        gen = torch.Generator(device=device)
         self.args.append(gen)
         return gen
 

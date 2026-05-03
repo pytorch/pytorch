@@ -72,6 +72,11 @@ if TYPE_CHECKING:
 # - Implement get_python_hash() and is_python_equal() methods for hashable types
 
 
+def pydict_check(obj: VariableTracker) -> bool:
+    # This is a simplified version of the CPython's PyDict_Check function:
+    return issubclass(obj.python_type(), dict)
+
+
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
@@ -453,6 +458,14 @@ class ConstDictVariable(VariableTracker):
         # Unhashable key check happens inside _HashableTracker (raise_unhashable → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import DictIterator
+
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            tx.output.guard_on_key_order.add(self.source)
+        return DictIterator(self.items.keys())
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -709,91 +722,35 @@ class ConstDictVariable(VariableTracker):
                 tx,
                 not self.call_method(tx, "__eq__", args, kwargs).value,  # type: ignore[attr-defined]
             )
-        elif name == "__or__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            other = args[0]
-
-            # Method resolution for binops works as follow (using __or__ as example):
-            # (1) dict.__or__(dict) => dict
-            # (2) dict.__or__(subclass): return NotImplemented
-            # (3) Check if subclass implements __ror__ => forward the call
-            # to subclass.__ror__(dict)
-
-            # Let's not forward the call to __ror__ yet because __ror__ can be
-            # implemented in C (i.e. OrderedDict subclass) which Dynamo cannot
-            # trace
-            # if istype(other, variables.UserDefinedDictVariable):
-            #     if other.call_obj_hasattr(tx, "__ror__").value:
-            #         return other.call_method(tx, "__ror__", [self], kwargs)
-
-            # The three dict types Dynamo can handle are dict, OrderedDict and
-            # defaultdict.
-
-            # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if isinstance(
-                other,
-                (
-                    ConstDictVariable,
-                    variables.UserDefinedDictVariable,
-                ),
-            ):
-                # Unwrap UserDefinedDictVariable to its underlying ConstDictVariable
-                if isinstance(other, variables.UserDefinedDictVariable):
-                    assert other._base_vt is not None
-                    assert isinstance(other._base_vt, ConstDictVariable)
-                    other = other._base_vt
-
-                # Always return the specialized dictionary, and in the case
-                # both are specialized, take the first to be the type of the
-                # new dictionary
-                if self.user_cls is not dict:
-                    user_cls = self.user_cls
-                    to_cpy = self
-                else:
-                    user_cls = other.user_cls
-                    to_cpy = other
-
-                to_cpy.install_dict_keys_match_guard()
-                new_dict_vt = to_cpy.clone(
-                    items=self.items.copy(),
-                    mutation_type=ValueMutationNew(),
-                    source=None,
-                    user_cls=user_cls,
-                )
-
-                # NB - Guard on all the keys of the other dict to ensure
-                # correctness. Use `other` (already unwrapped from
-                # UserDefinedDictVariable to ConstDictVariable above).
-                other.install_dict_keys_match_guard()  # type: ignore[union-attr]
-                new_dict_vt.items.update(other.items)  # type: ignore[union-attr]
-                return new_dict_vt
-            else:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                        f"and '{other.python_type().__name__}'"
-                    ],
-                )
-        elif name == "__ior__":
-            self.call_method(tx, "update", args, kwargs)
-            return self
-        elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            if self.source and not is_constant_source(self.source):
-                tx.output.guard_on_key_order.add(self.source)
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items]
+
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
+        self_, other_ = (other, self) if reverse else (self, other)
+        if pydict_check(self_) and pydict_check(other_):
+            new = self_.call_method(tx, "copy", [], {})
+            new.call_method(tx, "update", [other_], {})
+            return new
+        return ConstantVariable.create(NotImplemented)
+
+    def nb_inplace_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
+        self.call_method(tx, "update", [other], {})
+        return self
 
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Mapping length for dict objects."""
@@ -926,6 +883,9 @@ class MappingProxyVariable(VariableTracker):
         self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.dv_dict.tp_iter_impl(tx)
+
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.dv_dict.mp_length(tx)
 
@@ -998,19 +958,24 @@ class DictViewVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            return ListIteratorVariable(
-                self.view_items_vt, mutation_type=ValueMutationNew()
-            )
-        elif name == "__repr__":
+        if name == "__repr__":
             return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for dict view objects."""
         return VariableTracker.build(tx, len(self.view_items))
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6142-L6155 (dictviews_or)
+        s = VariableTracker.build(tx, set).call_function(tx, [self], {})
+        s.call_method(tx, "update", [other], {})
+        return s
 
 
 class DictKeysVariable(DictViewVariable):
@@ -1030,6 +995,13 @@ class DictKeysVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_keys
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import DictKeysIterator
+
+        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+            tx.output.guard_on_key_order.add(self.dv_dict.source)
+        return DictKeysIterator(self.dv_dict.items)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -1055,8 +1027,6 @@ class DictKeysVariable(DictViewVariable):
         elif name in (
             "__and__",
             "__iand__",
-            "__or__",
-            "__ior__",
             "__sub__",
             "__isub__",
             "__xor__",
@@ -1091,12 +1061,23 @@ class DictValuesVariable(DictViewVariable):
     # DictValuesVariable is an iterable but cannot be compared.
     kv = "values"
 
+    # dict.values() do not implement nb_or and nb_inplace_or
+    nb_or_impl = None  # type: ignore[bad-override]
+    nb_inplace_or = None  # type: ignore[bad-override]
+
     @property
     def view_items_vt(self) -> list[VariableTracker]:
         return list(self.view_items)
 
     def python_type(self) -> type:
         return dict_values
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import DictValuesIterator
+
+        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+            tx.output.guard_on_key_order.add(self.dv_dict.source)
+        return DictValuesIterator(self.dv_dict.items)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -1143,6 +1124,13 @@ class DictItemsVariable(DictViewVariable):
                 items.append(f"({key_str}, {val_str})")
             return "dict_items([" + ",".join(items) + "])"
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import DictItemsIterator
+
+        if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+            tx.output.guard_on_key_order.add(self.dv_dict.source)
+        return DictItemsIterator(self.dv_dict.items)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1171,17 +1159,9 @@ class DictItemsVariable(DictViewVariable):
                     len(self.set_items ^ args[0].set_items) == 0,
                 )
             return ConstantVariable.create(False)
-        elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            return ListIteratorVariable(
-                self.view_items_vt, mutation_type=ValueMutationNew()
-            )
         elif name in (
             "__and__",
             "__iand__",
-            "__or__",
-            "__ior__",
             "__sub__",
             "__isub__",
             "__xor__",

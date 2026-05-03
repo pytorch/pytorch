@@ -310,7 +310,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const at_bfloat16_t*>(ptr),
-        count * sizeof(at_bfloat16_t));
+        std::min<int64_t>(count, size()) * sizeof(at_bfloat16_t));
     return at_vld1q_bf16(reinterpret_cast<const at_bfloat16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
@@ -320,7 +320,10 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
     } else {
       at_bfloat16_t tmp_values[size()];
       at_vst1q_bf16(reinterpret_cast<at_bfloat16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(at_bfloat16_t));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(at_bfloat16_t));
     }
   }
   Vectorized<c10::BFloat16> isnan() const {

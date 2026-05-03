@@ -3669,7 +3669,7 @@ Keyword args:
         than the total number of non-zero elements. Default is `-1` to represent
         invalid index.
 
-Example:
+Example::
 
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
@@ -6944,7 +6944,7 @@ add_docstr_all(
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor.
 
 Example::
 
