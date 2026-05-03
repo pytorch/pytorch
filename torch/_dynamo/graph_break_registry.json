@@ -4871,16 +4871,6 @@
       ]
     }
   ],
-  "GB9137": [
-    {
-      "Gb_type": "non-constant typing subscript",
-      "Context": "TypingVariable[{key}]",
-      "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0363": [
     {
       "Gb_type": "An opaque object was created in the middle of the program.",

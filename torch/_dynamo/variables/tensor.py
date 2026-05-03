@@ -745,6 +745,7 @@ class TensorVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # Tensor.__getitem__ is a custom C slot, not CPython's mp_subscript.
+        # TODO(follow-up): add tests for negative index, bool index, invalid key type
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
