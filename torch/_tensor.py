@@ -1613,7 +1613,7 @@ class Tensor(torch._C.TensorBase):
 
             The tensor is considered to have multiple legal dim orders if either of the following conditions is met:
 
-            * Singleton Dimensions: There's at least one singleteon dimension in the tensor.
+            * Singleton Dimensions: There's at least one singleton dimension in the tensor.
               Since their size is 1, they don't affect the memory offset (stride * index
               is zero because index is always zero). Therefore, they can be placed anywhere
               in the dimension order without changing how data is accessed.
