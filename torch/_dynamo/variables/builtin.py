@@ -54,7 +54,6 @@ from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import (
     AttrSource,
-    EphemeralSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
@@ -1862,7 +1861,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 fn,  # type: ignore[possibly-undefined]
                 *[a.as_python_constant() for a in args[1:]],
             )
-            return VariableTracker.build(tx, r, source=EphemeralSource())
+            return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
 
