@@ -2150,6 +2150,28 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(cpu_result.shape, meta_result.shape)
         self.assertEqual(cpu_result.dtype, meta_result.dtype)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_out_of_place_tensor_dim_check(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            torch.fill(x_cpu, value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.randn(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            torch.fill(x_meta, value_meta)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_out_of_place_tensor_scalar_ok(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.tensor(1.0)
+        cpu_result = torch.fill(x_cpu, value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.tensor(1.0, device="meta")
+        meta_result = torch.fill(x_meta, value_meta)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
 instantiate_device_type_tests(TestMeta, globals())
 
 
