@@ -142,7 +142,6 @@ external = [
     "P201",
     "P204",
     "T484",
-    "TOR901",
     # Codes that are preview-only in ruff, so flake8 is still the enforcer.
     # As ruff promotes these out of preview, move them to flake8's ignore list.
     "B901",

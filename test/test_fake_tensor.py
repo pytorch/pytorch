@@ -121,10 +121,9 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(z, FakeTensor))
 
     def test_custom_op_fallback(self):
-        from torch.library import impl, Library
+        from torch.library import _scoped_library, impl
 
-        try:
-            test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
+        with _scoped_library("my_test_op", "DEF") as test_lib:
             test_lib.define("foo(Tensor self) -> Tensor")
 
             @impl(test_lib, "foo", "CPU")
@@ -138,9 +137,6 @@ class FakeTensorTest(TestCase):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
-
-        finally:
-            test_lib._destroy()
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():

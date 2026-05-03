@@ -108,7 +108,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.libraries.append(result)
         return result
 

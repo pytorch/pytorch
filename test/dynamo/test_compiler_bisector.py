@@ -30,14 +30,13 @@ class TestCompilerBisector(TestCase):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
         if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.lib = lib
         return lib
 

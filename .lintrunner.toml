@@ -1588,6 +1588,26 @@ command = [
 ]
 is_formatter = true
 
+[[linter]]
+code = 'SCOPED_LIBRARY'
+include_patterns = [
+    'test/**/*.py',
+]
+exclude_patterns = [
+    'test/dynamo/cpython/**',
+    'test/test_torchfuzz_repros.py',
+    'test/torch_np/numpy_test/**',
+    'third_party/**',
+    'fb/**',
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/scoped_library_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
 # This linter prevents merge conflicts in csv files in pytorch by enforcing
 # three lines of whitespace between entries such that unless people are modifying
 # the same line, merge conflicts should not arise in git or hg

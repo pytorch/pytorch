@@ -8147,7 +8147,7 @@ metadata incorrectly.
 
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
-        # flake8: noqa: TOR901
+        # noqa: SCOPED_LIBRARY
         self.lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
         self.d = {
             torch.channels_last: 0,
@@ -9210,122 +9210,125 @@ Expected a .* tangent but got a plain Tensor.""",
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_params(self):
-        lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
-        logged_shapes = []
-        logged_dtypes = []
-        lib.define("log(Tensor x) -> Tensor")
+        with torch.library._scoped_library("_test_aotdispatch_lib", "FRAGMENT") as lib:
+            logged_shapes = []
+            logged_dtypes = []
+            lib.define("log(Tensor x) -> Tensor")
 
-        def log_impl(x):
-            logged_shapes.append(list(x.shape))
-            logged_dtypes.append(x.dtype)
-            return x.clone()
+            def log_impl(x):
+                logged_shapes.append(list(x.shape))
+                logged_dtypes.append(x.dtype)
+                return x.clone()
 
-        def log_meta(x):
-            return x.clone()
+            def log_meta(x):
+                return x.clone()
 
-        for backend in ["CPU", "CUDA"]:
-            lib.impl(
-                "log",
-                log_impl,
-                backend,
-            )
-        lib.impl("log", log_meta, "Meta")
+            for backend in ["CPU", "CUDA"]:
+                lib.impl(
+                    "log",
+                    log_impl,
+                    backend,
+                )
+            lib.impl("log", log_meta, "Meta")
 
-        def pack_fp8_with_scale_and_log(x):
-            torch.ops._test_aotdispatch_lib.log(x)
-            return _pack_fp8_with_scale_wrap(x)
+            def pack_fp8_with_scale_and_log(x):
+                torch.ops._test_aotdispatch_lib.log(x)
+                return _pack_fp8_with_scale_wrap(x)
 
-        def unpack_fp8_with_scale_and_log(packed):
-            return _unpack_fp8_with_scale_wrap(packed)
+            def unpack_fp8_with_scale_and_log(packed):
+                return _unpack_fp8_with_scale_wrap(packed)
 
-        def m_inp_fn():
-            x = torch.ones(
-                2, 2, 2, device=device, dtype=torch.float64, requires_grad=True
-            )
-            torch._dynamo.mark_dynamic(x, 0)
-            torch._dynamo.mark_dynamic(x, 1)
-            return (x,)
+            def m_inp_fn():
+                x = torch.ones(
+                    2, 2, 2, device=device, dtype=torch.float64, requires_grad=True
+                )
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                return (x,)
 
-        class SAF0(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
+            class SAF0(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
 
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    return gx + saved_x
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(2, 2)
-                self.relu = nn.ReLU()
-                self.fc2 = nn.Linear(2, 2)
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(2, 2)
+                    self.relu = nn.ReLU()
+                    self.fc2 = nn.Linear(2, 2)
 
-            def forward(self, x):
-                x = SAF0.apply(x)
-                x = x.to(dtype=torch.float32)
-                x = self.fc1(x)
-                x = self.relu(x)
-                x = self.fc2(x)
-                return x
+                def forward(self, x):
+                    x = SAF0.apply(x)
+                    x = x.to(dtype=torch.float32)
+                    x = self.fc1(x)
+                    x = self.relu(x)
+                    x = self.fc2(x)
+                    return x
 
-        def _reset_logged():
-            logged_shapes.clear()
-            logged_dtypes.clear()
+            def _reset_logged():
+                logged_shapes.clear()
+                logged_dtypes.clear()
 
-        device = torch.device("cuda:0")
-        m = M().to(device=device)
+            device = torch.device("cuda:0")
+            m = M().to(device=device)
 
-        def _test_m():
-            self._test_pack_hooks(
-                m,
-                m_inp_fn,
-                [
-                    (
+            def _test_m():
+                self._test_pack_hooks(
+                    m,
+                    m_inp_fn,
+                    [
                         (
-                            pack_fp8_with_scale_and_log,
-                            unpack_fp8_with_scale_and_log,
-                        ),
-                        True,
-                    )
-                ],
-                pre_compile_fn=_reset_logged,
-                backend="aot_eager",
-            )
+                            (
+                                pack_fp8_with_scale_and_log,
+                                unpack_fp8_with_scale_and_log,
+                            ),
+                            True,
+                        )
+                    ],
+                    pre_compile_fn=_reset_logged,
+                    backend="aot_eager",
+                )
 
-        with patch(
-            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "donated"
-        ):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were not applied to Parameters
-            # parameters excluded
-            self.assertFalse([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            # input excluded
-            self.assertFalse(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode", "donated"
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were not applied to Parameters
+                # parameters excluded
+                self.assertFalse([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                # input excluded
+                self.assertFalse(torch.float64 in logged_dtypes)
 
-        with patch(
-            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "no_static"
-        ):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were not applied to Parameters
-            # parameters excluded
-            self.assertFalse([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            self.assertTrue(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode",
+                "no_static",
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were not applied to Parameters
+                # parameters excluded
+                self.assertFalse([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                self.assertTrue(torch.float64 in logged_dtypes)
 
-        with patch("torch._functorch.config.saved_tensors_hooks_filtering_mode", "all"):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were applied to all saved tensors
-            self.assertTrue([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            self.assertTrue(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode", "all"
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were applied to all saved tensors
+                self.assertTrue([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                self.assertTrue(torch.float64 in logged_dtypes)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
