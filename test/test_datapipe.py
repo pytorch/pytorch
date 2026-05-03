@@ -118,7 +118,7 @@ def create_temp_dir_and_files():
 
 
 def reset_after_n_next_calls(
-    datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_co]], n: int
+    datapipe: IterDataPipe[T_co] | MapDataPipe[T_co], n: int
 ) -> tuple[list[T_co], list[T_co]]:
     """
     Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
@@ -945,9 +945,12 @@ class TestFunctionalIterDataPipe(TestCase):
                 thing=getattr(input_dp, dp_funcname), forceload=True
             )
 
-            assert f"(functional name: ``{dp_funcname}``)" in docstring
-            assert "Args:" in docstring
-            assert "Example:" in docstring or "Examples:" in docstring
+            if f"(functional name: ``{dp_funcname}``)" not in docstring:
+                raise AssertionError(f"expected functional name in docstring for {dp_funcname}")
+            if "Args:" not in docstring:
+                raise AssertionError(f"expected 'Args:' in docstring for {dp_funcname}")
+            if "Example:" not in docstring and "Examples:" not in docstring:
+                raise AssertionError(f"expected 'Example:' or 'Examples:' in docstring for {dp_funcname}")
 
     def test_iterable_wrapper_datapipe(self):
         input_ls = list(range(10))
@@ -2182,9 +2185,12 @@ class TestFunctionalMapDataPipe(TestCase):
             docstring = pydoc.render_doc(
                 thing=getattr(input_dp, dp_funcname), forceload=True
             )
-            assert f"(functional name: ``{dp_funcname}``)" in docstring
-            assert "Args:" in docstring
-            assert "Example:" in docstring or "Examples:" in docstring
+            if f"(functional name: ``{dp_funcname}``)" not in docstring:
+                raise AssertionError(f"expected functional name in docstring for {dp_funcname}")
+            if "Args:" not in docstring:
+                raise AssertionError(f"expected 'Args:' in docstring for {dp_funcname}")
+            if "Example:" not in docstring and "Examples:" not in docstring:
+                raise AssertionError(f"expected 'Example:' or 'Examples:' in docstring for {dp_funcname}")
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))
@@ -2433,15 +2439,15 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar("T", int, str)
-        S = TypeVar("S", bool, Union[str, int], tuple[int, T])  # type: ignore[valid-type]
+        S = TypeVar("S", bool, str | int, tuple[int, T])  # type: ignore[valid-type]
         types = (
-            (int, Optional[int]),
-            (list, Union[int, list]),
+            (int, Optional[int]),  # noqa: UP045
+            (list, Union[int, list]),  # noqa: UP007
             (tuple[int, str], S),
             (tuple[int, str], tuple),
             (T, S),
             (S, T_co),
-            (T, Union[S, set]),
+            (T, Union[S, set]),  # noqa: UP007
         )
         for sub, par in types:
             self.assertTrue(issubtype(sub, par))
@@ -2469,7 +2475,7 @@ class TestTyping(TestCase):
 
         basic_data = (1, "1", True, 1.0, complex(1.0, 0.0))
         basic_type = (int, str, bool, float, complex)
-        S = TypeVar("S", bool, Union[str, int])
+        S = TypeVar("S", bool, str | int)
         for d in basic_data:
             self.assertTrue(issubinstance(d, Any))
             self.assertTrue(issubinstance(d, T_co))

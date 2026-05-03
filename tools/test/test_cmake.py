@@ -7,7 +7,7 @@ import unittest
 import unittest.mock
 
 import tools.setup_helpers.cmake
-import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
+import tools.setup_helpers.env
 
 
 if typing.TYPE_CHECKING:
@@ -76,7 +76,10 @@ class TestCMake(unittest.TestCase):
         # window matches.
         for i in range(len(sequence) - len(subsequence) + 1):
             candidate = sequence[i : i + len(subsequence)]
-            assert len(candidate) == len(subsequence)  # sanity check
+            if len(candidate) != len(subsequence):  # sanity check
+                raise AssertionError(
+                    f"candidate length mismatch: {len(candidate)} != {len(subsequence)}"
+                )
             if candidate == subsequence:
                 return  # found it
         raise AssertionError(f"{subsequence} not found in {sequence}")

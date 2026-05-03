@@ -1,12 +1,12 @@
-# mypy: allow-untyped-defs
 import inspect
 import logging
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx._lazy_graph_module import _make_graph_module
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -18,7 +18,7 @@ log = _LOGGER = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=True)
 class Partition:
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name: str = name
         self.submod_name = f"submod_{name}"
         self.node_names: list[str] = []
@@ -56,13 +56,14 @@ def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
     split_callback: Callable[[Node], int],
-    qualname_map: Optional[dict[str, str]] = None,
-    keep_original_order: Optional[bool] = False,
-    keep_original_node_name: Optional[bool] = False,
+    qualname_map: dict[str, str] | None = None,
+    keep_original_order: bool | None = False,
+    keep_original_node_name: bool | None = False,
     keep_original_input_name: bool = True,
     *,
-    partition_affix: Optional[str] = None,
-):
+    partition_affix: str | None = None,
+    tuple_return: bool = False,
+) -> GraphModule:
     """
     Creates subgraphs out of main graph
 
@@ -86,6 +87,9 @@ def split_module(
             have the same input names as the original graph.
         partition_affix: Optional[str]: If specified, the submodules' names will contain
             the affix, e.g. "submod_<affix>_<idx>".
+        tuple_return: bool: If True, submodule outputs are always wrapped in a tuple,
+            even when there is only a single output value.  This makes all subgraphs
+            conform to the convention expected by ``torch._inductor.compile_fx``.
 
     Returns:
         GraphModule: the module after split.
@@ -172,7 +176,7 @@ def split_module(
         node: Node,
         base_mod_env: dict[str, Node],
         base_mod_attrs: dict[str, torch.fx.graph_module.GraphModule],
-    ):
+    ) -> tuple[dict[str, Node], dict[str, torch.fx.graph_module.GraphModule]]:
         if node.op == "placeholder":
             default_value = (
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
@@ -197,7 +201,8 @@ def split_module(
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
             base_mod_env[node.name].meta = node.meta.copy()
-            assert isinstance(node.target, str)
+            if not isinstance(node.target, str):
+                raise AssertionError(f"Expected str target, got {type(node.target)}")
             attr_val = _get_attr_from_qualname(m, node.target)
             base_mod_attrs[node.target] = attr_val  # type: ignore[index]
         return base_mod_env, base_mod_attrs
@@ -208,7 +213,7 @@ def split_module(
     orig_nodes: dict[str, Node] = {}
     symbol_to_node: dict[sympy.Symbol, Node] = {}
 
-    def record_cross_partition_use(def_node: Node, use_node: Optional[Node]):
+    def record_cross_partition_use(def_node: Node, use_node: Node | None) -> None:
         from torch.fx.experimental.symbolic_shapes import free_symbols
 
         defined = getattr(def_node, "_fx_partition", None)
@@ -257,7 +262,7 @@ def split_module(
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
-    def instantiate_node_partition_mapping(node):
+    def instantiate_node_partition_mapping(node: Node) -> None:
         partition_idx = split_callback(node)
         partition_name = str(partition_idx)
         if partition_affix is not None:
@@ -299,7 +304,7 @@ def split_module(
     # 3. last region: we will only insert _enter at the beginning
     # We will do so in the order in which the autocasts were instantiated.
     autocast_regions: OrderedDict[Node, set[int]] = OrderedDict()
-    autocast_exits: dict[Node, Optional[Node]] = {}
+    autocast_exits: dict[Node, Node | None] = {}
 
     active_grad = None
     active_autocasts = set()
@@ -327,18 +332,28 @@ def split_module(
 
         if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
             if node.target is torch._C._set_grad_enabled:
-                assert len(node.args) == 1
-                assert isinstance(node.args[0], bool)
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"Expected 1 arg for _set_grad_enabled, got {len(node.args)}"
+                    )
+                if not isinstance(node.args[0], bool):
+                    raise AssertionError(f"Expected bool arg, got {type(node.args[0])}")
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
             elif node.target is torch.amp._enter_autocast:
                 # Should all be python constants
-                assert all(not isinstance(arg, Node) for arg in node.args)
+                if not all(not isinstance(arg, Node) for arg in node.args):
+                    raise AssertionError(
+                        "Expected all args to be python constants, not Nodes"
+                    )
                 active_autocasts.add(node)
                 autocast_regions[node] = set({split_callback(node)})
                 autocast_exits[node] = None
             elif node.target is torch.amp._exit_autocast:
-                assert len(node.args) == 1
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"Expected 1 arg for _exit_autocast, got {len(node.args)}"
+                    )
                 autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])
                 autocast_exits[node.args[0]] = node
@@ -349,7 +364,8 @@ def split_module(
         for a in active_autocasts:
             autocast_regions[a].add(split_callback(node))
 
-    assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
+    if not all(v is not None for v in autocast_exits.values()):
+        raise AssertionError("autocast must exit")
 
     # pyrefly: ignore [bad-assignment]
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
@@ -379,10 +395,11 @@ def split_module(
 
         if assert_monotonically_increasing:
             pid = split_callback(node)
-            assert highest_partition <= pid, (
-                "autocast or set_grad_enabled require monotonically increasing partitions:"
-                f"highest: {highest_partition}, this node's: {pid}"
-            )
+            if highest_partition > pid:
+                raise AssertionError(
+                    "autocast or set_grad_enabled require monotonically increasing "
+                    f"partitions: highest: {highest_partition}, this node's: {pid}"
+                )
             highest_partition = pid
 
         # do not capture cross-partition dependencies for global state nodes as they will be
@@ -393,7 +410,7 @@ def split_module(
             )
             torch.fx.graph.map_arg(
                 node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
-            )  # noqa: B950
+            )
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
@@ -417,7 +434,8 @@ def split_module(
     # Enter prelude
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
-            assert len(regions) > 0
+            if len(regions) == 0:
+                raise AssertionError("Expected at least one region for node")
             # pyrefly: ignore [bad-index]
             partitions[str(regions[0])].environment[node] = node
             # pyrefly: ignore [bad-index, index-error]
@@ -443,12 +461,30 @@ def split_module(
 
         counter = 0
 
+        # Process inputs that become placeholders before inputs that become
+        # get_attr nodes, so that all placeholders precede get_attr in the
+        # submodule graph.
+        placeholder_inputs: list[str] = []
+        get_attr_inputs: list[str] = []
         for inp in partition.inputs:
+            orig_node = orig_nodes[inp]
+            if (
+                orig_node.op == "get_attr"
+                and isinstance(orig_node.target, str)
+                and isinstance(
+                    _get_attr_from_qualname(m, orig_node.target), torch.nn.Module
+                )
+            ):
+                get_attr_inputs.append(inp)
+            else:
+                placeholder_inputs.append(inp)
+
+        for inp in placeholder_inputs + get_attr_inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
 
-            def add_placeholder():
+            def add_placeholder() -> Node:
                 if keep_original_input_name:
                     name = inp
                 else:
@@ -463,7 +499,10 @@ def split_module(
                 return placeholder
 
             if orig_node.op == "get_attr":
-                assert isinstance(orig_node.target, str)
+                if not isinstance(orig_node.target, str):
+                    raise AssertionError(
+                        f"Expected str target, got {type(orig_node.target)}"
+                    )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
                 if isinstance(orig_attr, torch.nn.Module):
@@ -502,8 +541,14 @@ def split_module(
                     qualname = f"{partition.submod_name}.{target}"
                     qualname_map[qualname] = node.target
 
-            assert isinstance(gathered_args, tuple)
-            assert isinstance(gathered_kwargs, dict)
+            if not isinstance(gathered_args, tuple):
+                raise AssertionError(
+                    f"Expected tuple for gathered_args, got {type(gathered_args)}"
+                )
+            if not isinstance(gathered_kwargs, dict):
+                raise AssertionError(
+                    f"Expected dict for gathered_kwargs, got {type(gathered_kwargs)}"
+                )
             name = node.name if keep_original_node_name else None
             new_node = partition.graph.create_node(
                 op=node.op,
@@ -520,12 +565,14 @@ def split_module(
     for regions_mapping in [autocast_regions]:
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
-            assert len(regions) > 0
+            if len(regions) == 0:
+                raise AssertionError("Expected at least one region")
             # pyrefly: ignore [bad-index, index-error]
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]
-                assert exit_node is not None, "Missing exit node"
+                if exit_node is None:
+                    raise AssertionError("Missing exit node")
                 new_node = partition.graph.create_node(
                     op=exit_node.op,
                     target=exit_node.target,
@@ -578,15 +625,10 @@ def split_module(
             partition.environment[orig_nodes[name]] for name in partition.outputs
         )
 
-        # skip output node generation if there are no output values
-        num_output_vals = len(output_vals)
-        if num_output_vals == 1:
+        if len(output_vals) == 1 and not tuple_return:
             partition.graph.output(output_vals[0])
-        elif num_output_vals > 1:
-            partition.graph.output(output_vals)
         else:
-            # Invariant - Graph should always have an output node.
-            partition.graph.output(())
+            partition.graph.output(output_vals)
 
         if keep_original_order:
             # first get the attr nodes required by this partition
@@ -613,9 +655,9 @@ def split_module(
                 )
                 already_constructed_attr_nodes.add(node)
 
-        base_mod_attrs[partition.submod_name] = torch.fx.graph_module.GraphModule(
+        base_mod_attrs[partition.submod_name] = _make_graph_module(
             partition.targets, partition.graph
-        )  # noqa: B950
+        )
 
         # Emit call in base graph to this submodule
         output_val = base_mod_graph.call_module(
@@ -624,8 +666,8 @@ def split_module(
         )
 
         num_outputs = len(partition.outputs)
-        if num_outputs > 1:
-            # Unpack multiple return values from submodule
+        if num_outputs > 1 or (num_outputs == 1 and tuple_return):
+            # Unpack return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
@@ -647,9 +689,9 @@ def split_module(
         if node.op == "output":
             base_mod_graph.output(
                 torch.fx.graph.map_arg(node.args[0], lambda n: base_mod_env[n.name])
-            )  # noqa: B950
+            )
 
-    ret = torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
+    ret = _make_graph_module(base_mod_attrs, base_mod_graph)
     log.debug(
         "%s",
         lazy_format_graph_code("post split_module", ret, colored=True),

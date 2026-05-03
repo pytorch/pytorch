@@ -8,6 +8,12 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/from_blob.h>
+#endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -149,6 +155,10 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(
           ivalue.toStringRef(), extension_build_version);
     }
+    case c10::TypeKind::SymIntType: {
+      // Treat SymInt as Int for StableIValue <-> IValue conversion
+      return from_ivalue(c10::IntType::get(), ivalue, extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -259,6 +269,11 @@ static c10::IValue to_ivalue(
       return c10::IValue(torch::stable::detail::_to<std::string>(
           stable_ivalue, extension_build_version));
     }
+    case c10::TypeKind::SymIntType: {
+      // Treat SymInt as Int for StableIValue <-> IValue conversion
+      return to_ivalue(
+          c10::IntType::get(), stable_ivalue, extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -288,7 +303,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
-      const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
+      const c10::TypePtr& arg_type =
+          schema.arguments()[ministack_idx].real_type();
       ministack[ministack_idx] = from_ivalue(
           arg_type, torch::jit::pop(stack), extension_build_version_);
     }
@@ -300,7 +316,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       torch::jit::push(
           stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
     }
@@ -370,7 +386,7 @@ AOTITorchError aoti_torch_call_dispatcher(
     // convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
-      auto arg_type = schema.arguments()[idx].type();
+      auto arg_type = schema.arguments()[idx].real_type();
       torch::jit::push(
           ivalue_stack, to_ivalue(arg_type, stable_ivalue, TORCH_ABI_VERSION));
     }
@@ -381,7 +397,7 @@ AOTITorchError aoti_torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), TORCH_ABI_VERSION);
     }
@@ -523,7 +539,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
       ivalue_stack.reserve(std::max(num_arguments, num_returns));
       for (const auto idx : c10::irange(num_arguments)) {
         auto stable_ivalue = stack[idx];
-        auto arg_type = schema.arguments()[idx].type();
+        auto arg_type = schema.arguments()[idx].real_type();
         torch::jit::push(
             ivalue_stack,
             to_ivalue(arg_type, stable_ivalue, extension_build_version));
@@ -536,7 +552,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
@@ -624,5 +640,105 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
     at::Tensor* t =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     t->set_requires_grad(requires_grad);
+  });
+}
+
+// Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
+#define TORCH_DTYPE_IMPL(dtype, stype)                    \
+  AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \
+    return (int32_t)torch::headeronly::ScalarType::stype; \
+  }
+
+TORCH_DTYPE_IMPL(float8_e8m0fnu, Float8_e8m0fnu)
+TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
+
+#undef TORCH_DTYPE_IMPL
+
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter_callback)(void* data, void* ctx),
+    void* deleter_ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
+    at::Tensor tensor;
+    if (data != nullptr) {
+      if (deleter_callback != nullptr) {
+        auto wrapped_deleter = [deleter_callback, deleter_ctx](void* data) {
+          deleter_callback(data, deleter_ctx);
+        };
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .deleter(wrapped_deleter)
+                     .options(options)
+                     .make_tensor();
+      } else {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .options(options)
+                     .make_tensor();
+      }
+    } else {
+      tensor = at::empty_strided(sizes, strides, options);
+    }
+    *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
+  });
+}
+
+// Tag getter shims — see torch/csrc/stable/c/shim.h
+#define TORCH_TAG_IMPL(name, enum_val) \
+  int32_t torch_tag_##name() {         \
+    return (int32_t)at::Tag::enum_val; \
+  }
+
+TORCH_TAG_IMPL(core, core)
+TORCH_TAG_IMPL(cudagraph_unsafe, cudagraph_unsafe)
+TORCH_TAG_IMPL(data_dependent_output, data_dependent_output)
+TORCH_TAG_IMPL(dynamic_output_shape, dynamic_output_shape)
+TORCH_TAG_IMPL(flexible_layout, flexible_layout)
+TORCH_TAG_IMPL(generated, generated)
+TORCH_TAG_IMPL(inplace_view, inplace_view)
+TORCH_TAG_IMPL(maybe_aliasing_or_mutating, maybe_aliasing_or_mutating)
+TORCH_TAG_IMPL(needs_contiguous_strides, needs_contiguous_strides)
+TORCH_TAG_IMPL(needs_exact_strides, needs_exact_strides)
+TORCH_TAG_IMPL(needs_fixed_stride_order, needs_fixed_stride_order)
+TORCH_TAG_IMPL(nondeterministic_bitwise, nondeterministic_bitwise)
+TORCH_TAG_IMPL(nondeterministic_seeded, nondeterministic_seeded)
+TORCH_TAG_IMPL(out_variant, out_variant)
+TORCH_TAG_IMPL(pointwise, pointwise)
+TORCH_TAG_IMPL(pt2_compliant_tag, pt2_compliant_tag)
+TORCH_TAG_IMPL(reduction, reduction)
+TORCH_TAG_IMPL(view_copy, view_copy)
+#undef TORCH_TAG_IMPL
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
+    TorchLibraryHandle self,
+    const char* schema,
+    const int32_t* tags,
+    int32_t num_tags) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<at::Tag> tag_vec;
+    tag_vec.reserve(num_tags);
+    for (int32_t i = 0; i < num_tags; i++) {
+      tag_vec.push_back(static_cast<at::Tag>(tags[i]));
+    }
+    reinterpret_cast<torch::Library*>(self)->def(
+        torch::schema(schema), tag_vec, torch::_RegisterOrVerify::REGISTER);
   });
 }

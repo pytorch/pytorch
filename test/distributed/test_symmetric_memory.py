@@ -3,15 +3,21 @@
 import itertools
 import os
 import random
+import re
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch._C import FileCheck
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
-from torch._inductor.utils import fresh_cache, run_and_get_triton_code
+from torch._inductor.utils import (
+    fresh_cache,
+    fresh_inductor_cache,
+    run_and_get_triton_code,
+)
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -72,6 +78,24 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # validate that has_multicast_support() returns "false" instead of throwing
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
+
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_is_symm_mem_tensor(self) -> None:
+        # CPU tensor -> False (no allocator registered for CPU)
+        t_cpu = torch.empty(1024)
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cpu))
+
+        # Regular CUDA tensor -> False
+        t_cuda = torch.empty(1024, device="cuda")
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cuda))
+
+        # symm-mem tensor
+        t_symm = symm_mem.empty(1024, device="cuda")
+        self.assertTrue(symm_mem.is_symm_mem_tensor(t_symm))
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -239,6 +263,79 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_rendezvous_via_pg_allgather(self) -> None:
+        import pickle
+
+        self._init_process()
+
+        pg = dist.group.WORLD
+        pg.use_pg_for_symm_mem_rendezvous = True
+        try:
+            torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+            t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
+                self.rank
+            )
+            symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+            self.assertEqual(symm_mem_hdl.rank, self.rank)
+            self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+            entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
+                "entries"
+            ]
+            ag_entries = [
+                e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+            ]
+            # On NVLink-fabric hardware both the RendezvousRequest and handle
+            # exchange go through pg_all_gather → 2 allgathers. On hardware
+            # without NVLink fabric only the RendezvousRequest uses
+            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
+            self.assertIn(
+                len(ag_entries),
+                [1, 2],
+                f"expected 1 or 2 NCCL _all_gather_base from rendezvous, "
+                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            )
+
+            symm_mem_hdl.barrier()
+            for peer in range(self.world_size):
+                buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+                self.assertTrue(buf.eq(peer).all())
+            symm_mem_hdl.barrier()
+        finally:
+            pg.use_pg_for_symm_mem_rendezvous = False
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pg_rendezvous_abort_after(self) -> None:
+        self._init_process()
+
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.use_pg_for_symm_mem_rendezvous = True
+        pg = dist.new_group(list(range(self.world_size)), pg_options=opts)
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+        pg.abort()
+
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
         self._init_process()
@@ -339,6 +436,25 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_dispatcher_torchbind_symmetric_memory(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+
+        # Exercise dispatcher schema that returns a TorchBind
+        # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
+        sm = torch.ops.symm_mem._rendezvous(t, group_name)
+        # Exercise dispatcher schema that accepts a TorchBind
+        # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
+        torch.ops.symm_mem._barrier(sm)
+
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
@@ -389,11 +505,19 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
         )
 
-        assert torch.allclose(ag_output_0, ag_output_1)
-        assert ag_output_0.stride() == ag_output_1.stride()
+        if not torch.allclose(ag_output_0, ag_output_1):
+            raise AssertionError("Expected ag_output_0 to be close to ag_output_1")
+        if not (ag_output_0.stride() == ag_output_1.stride()):
+            raise AssertionError(
+                f"Expected strides to match: {ag_output_0.stride()} vs {ag_output_1.stride()}"
+            )
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
-            assert torch.allclose(mm_output_0, mm_output_1)
-            assert mm_output_0.stride(), mm_output_1.stride()
+            if not torch.allclose(mm_output_0, mm_output_1):
+                raise AssertionError("Expected mm_output_0 to be close to mm_output_1")
+            if not mm_output_0.stride():
+                raise AssertionError(
+                    f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
+                )
 
     @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
@@ -611,8 +735,12 @@ class AsyncTPTest(MultiProcContinuousTest):
             A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
         )
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        if not torch.allclose(output_0, output_1):
+            raise AssertionError("Expected output_0 to be close to output_1")
+        if not (output_0.stride() == output_1.stride()):
+            raise AssertionError(
+                f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
+            )
 
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
@@ -666,7 +794,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                     )
                 )
 
-        assert outputs[0].stride() == outputs[1].stride()
+        if not (outputs[0].stride() == outputs[1].stride()):
+            raise AssertionError(
+                f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
+            )
         self.assertEqual(outputs[0], outputs[1])
 
     @skipIf(
@@ -1276,6 +1407,278 @@ class LoweringTest(MultiProcContinuousTest):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_reuse(self):
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        def func_no_reuse(x, w1, w2):
+            a = torch.mm(x, w1)
+            b = torch.mm(a, w2)
+            # Both `a` and `b` need comm buffers that are live simultaneously
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
+            b = torch.ops.symm_mem.one_shot_all_reduce(b, "sum", "0")
+            return a + b
+
+        def func_no_reuse_eager(x, w1, w2):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+            mm2_out = symm_mem.empty(N, N, device=self.device)
+
+            mm1_out = torch.mm(x, w1, out=mm1_out)
+            mm2_out = torch.mm(mm1_out, w2, out=mm2_out)
+            # Both `a` and `b` need comm buffers that are live simultaneously
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            mm2_out = torch.ops.symm_mem.one_shot_all_reduce(mm2_out, "sum", "0")
+            return mm1_out + mm2_out
+
+        compiled_no_reuse = torch.compile(func_no_reuse, fullgraph=True)
+        code_no_reuse = run_and_get_triton_code(compiled_no_reuse, x, w1, w2)
+
+        p2p_matches = re.findall(r"buf\d+ = empty_strided_p2p", code_no_reuse)
+        self.assertEqual(
+            len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
+        )
+
+        # Check numerical result for no_reuse path
+        eager_no_reuse = func_no_reuse_eager(x, w1, w2)
+        compiled_output_no_reuse = compiled_no_reuse(x, w1, w2)
+        torch.testing.assert_close(
+            eager_no_reuse,
+            compiled_output_no_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (no reuse) outputs do not match",
+        )
+
+        def func_reuse(x, w1, w2, w3):
+            a = torch.mm(x, w1)
+            # First all_reduce uses a comm buffer
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
+            b = torch.mm(a, w2)  # `b` is a regular cuda allocation
+            # `a` can be freed here, `c` can reuse the freed `a`
+            c = torch.mm(b, w3)
+            c = torch.ops.symm_mem.one_shot_all_reduce(c, "sum", "0")
+            return c
+
+        def func_reuse_eager(x, w1, w2, w3):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+
+            torch.mm(x, w1, out=mm1_out)
+            a = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            b = torch.mm(a, w2)
+            torch.mm(b, w3, out=mm1_out)
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            return mm1_out
+
+        compiled_reuse = torch.compile(func_reuse, fullgraph=True)
+        code_reuse = run_and_get_triton_code(compiled_reuse, x, w1, w2, w3)
+
+        p2p_matches_reuse = re.findall(r"buf\d+ = empty_strided_p2p", code_reuse)
+        self.assertEqual(
+            len(p2p_matches_reuse),
+            1,
+            f"Expected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
+        )
+
+        cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
+        self.assertGreaterEqual(
+            len(cuda_matches), 1, "Expected at least 1 regular cuda allocation"
+        )
+
+        # Check numerical result for reuse path
+        eager_reuse = func_reuse_eager(x, w1, w2, w3)
+        compiled_output_reuse = compiled_reuse(x, w1, w2, w3)
+        torch.testing.assert_close(
+            eager_reuse,
+            compiled_output_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (reuse) outputs do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_output_buffer_reuse(self):
+        """
+        Verify that symm_mem ops are lowered via ExternKernelOut
+        (should_allocate()=True) so output buffers are visible to Inductor.
+        This is the foundation for subsequent PRs' P2P memory planning.
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        # Multi-layer TP pattern: mm -> allreduce, repeated 3 times.
+        def func(x, w1, w2, w3):
+            x = torch.mm(x, w1)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w2)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w3)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            return x
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w1, w2, w3)
+
+        # Verify one_shot_all_reduce is converted to one_shot_all_reduce_out
+        # with out= parameter (ExternKernelOut, not FallbackKernel).
+        # Each mm + allreduce pair should produce an out= call for the allreduce.
+        FileCheck().check_count("one_shot_all_reduce_out", 3, exactly=True).run(code)
+
+        # Verify the out= parameter is present on allreduce calls.
+        out_calls = code.count(", out=")
+        self.assertGreaterEqual(
+            out_calls,
+            6,
+            f"Expected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
+        )
+
+        # Output buffers should be reused across layers (ping-pong).
+        reuse_count = code.count("# reuse")
+        self.assertGreaterEqual(
+            reuse_count,
+            2,
+            f"Expected at least 2 buffer reuses, got {reuse_count}.",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_output_buffer_reuse_copy_variant(self):
+        """
+        Verify that one_shot_all_reduce_copy is also lowered via
+        ExternKernelOut through the manual out variant registry.
+        """
+        self._init_process()
+
+        N = 8
+        group_name = dist.group.WORLD.group_name
+        symm_buffer = symm_mem.empty(
+            N * N, device=self.device, dtype=torch.float32
+        ).view(N, N)
+        symm_mem.rendezvous(symm_buffer, group=group_name)
+
+        local_input = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        def func(symm_buffer, local_input, w):
+            x = torch.mm(local_input, w)
+            return torch.ops.symm_mem.one_shot_all_reduce_copy(
+                symm_buffer, x, "sum", "0"
+            )
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, symm_buffer, local_input, w)
+
+        # Verify one_shot_all_reduce_copy is converted to
+        # one_shot_all_reduce_copy_out with out= parameter.
+        FileCheck().check("one_shot_all_reduce_copy_out").run(code)
+
+        # Verify the out= parameter is present.
+        self.assertIn(
+            ", out=",
+            code,
+            "one_shot_all_reduce_copy_out should have out= parameter.",
+        )
+
+    @skip_if_rocm_multiprocess  # test requires support for registered buffers
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_external_allocation_fallback(self):
+        """
+        When the input is not pre-allocated in symmetric memory, Inductor
+        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        """
+        self._init_process()
+
+        N = 8
+
+        def func_input_direct(x):
+            return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+
+        x_input = torch.rand(N, N, device=self.device)
+        compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+        code = run_and_get_triton_code(compiled_input_direct, x_input)
+
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation for auto-inserted copy",
+        )
+
+        compiled_result = compiled_input_direct(x_input)
+        eager_result = x_input.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Auto-copy to P2P does not match eager",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_inplace_prevention(self):
+        """Verify scheduler correctly handles inplace for CommBufferLayout buffers."""
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        # mm (ExternKernelOut, regular CUDA) -> pointwise (CommBufferLayout) -> allreduce
+        # Should not in-places pointwise mul(P2P) into mm's buffer(regular).
+        def func(x, w):
+            y = torch.mm(x, w)
+            z = y * 2
+            return torch.ops.symm_mem.one_shot_all_reduce(z, "sum", "0")
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w)
+
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation in generated code",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
+        )
+
+        result = compiled(x, w)
+        eager_y = torch.mm(x, w)
+        eager_z = eager_y * 2
+        eager_result = eager_z.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager do not match",
+        )
 
 
 class SymmMemSingleProcTest(TestCase):

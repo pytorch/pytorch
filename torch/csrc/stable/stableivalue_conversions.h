@@ -8,6 +8,7 @@
 #include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/core/enum_tag.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Deprecated.h>
 #include <torch/headeronly/util/Exception.h>
@@ -150,10 +151,18 @@ struct FromImpl<ScalarType> {
         return torch::stable::detail::from(aoti_torch_dtype_uint32());
       case ScalarType::UInt64:
         return torch::stable::detail::from(aoti_torch_dtype_uint64());
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+      case ScalarType::Float8_e8m0fnu:
+        return torch::stable::detail::from(torch_dtype_float8_e8m0fnu());
+      case ScalarType::Float4_e2m1fn_x2:
+        return torch::stable::detail::from(torch_dtype_float4_e2m1fn_x2());
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
       default:
         STD_TORCH_CHECK(
             false,
-            "Not yet supported ScalarType, please file an issue describing your use case.");
+            "Not yet supported ScalarType ",
+            toString(val),
+            ", please file an issue describing your use case.");
     }
   }
 };
@@ -526,6 +535,12 @@ struct ToImpl<ScalarType> {
       return ScalarType::UInt32;
     } else if (shim_scalartype == aoti_torch_dtype_uint64()) {
       return ScalarType::UInt64;
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+    } else if (shim_scalartype == torch_dtype_float8_e8m0fnu()) {
+      return ScalarType::Float8_e8m0fnu;
+    } else if (shim_scalartype == torch_dtype_float4_e2m1fn_x2()) {
+      return ScalarType::Float4_e2m1fn_x2;
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
     } else {
       STD_TORCH_CHECK(
           false,
@@ -758,6 +773,126 @@ struct ToImpl<std::string> {
 };
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+// =============================================================================
+// FROM/TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Specialization for torch::headeronly::Tag => StableIValue
+// Uses shim getter functions so the integer representation is resolved at
+// runtime from libtorch, not baked in at extension compile time.
+using torch::headeronly::Tag;
+template <>
+struct FromImpl<Tag> {
+  static StableIValue call(
+      Tag val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case Tag::core:
+        return torch::stable::detail::from(torch_tag_core());
+      case Tag::cudagraph_unsafe:
+        return torch::stable::detail::from(torch_tag_cudagraph_unsafe());
+      case Tag::data_dependent_output:
+        return torch::stable::detail::from(torch_tag_data_dependent_output());
+      case Tag::dynamic_output_shape:
+        return torch::stable::detail::from(torch_tag_dynamic_output_shape());
+      case Tag::flexible_layout:
+        return torch::stable::detail::from(torch_tag_flexible_layout());
+      case Tag::generated:
+        return torch::stable::detail::from(torch_tag_generated());
+      case Tag::inplace_view:
+        return torch::stable::detail::from(torch_tag_inplace_view());
+      case Tag::maybe_aliasing_or_mutating:
+        return torch::stable::detail::from(
+            torch_tag_maybe_aliasing_or_mutating());
+      case Tag::needs_contiguous_strides:
+        return torch::stable::detail::from(
+            torch_tag_needs_contiguous_strides());
+      case Tag::needs_exact_strides:
+        return torch::stable::detail::from(torch_tag_needs_exact_strides());
+      case Tag::needs_fixed_stride_order:
+        return torch::stable::detail::from(
+            torch_tag_needs_fixed_stride_order());
+      case Tag::nondeterministic_bitwise:
+        return torch::stable::detail::from(
+            torch_tag_nondeterministic_bitwise());
+      case Tag::nondeterministic_seeded:
+        return torch::stable::detail::from(torch_tag_nondeterministic_seeded());
+      case Tag::out_variant:
+        return torch::stable::detail::from(torch_tag_out_variant());
+      case Tag::pointwise:
+        return torch::stable::detail::from(torch_tag_pointwise());
+      case Tag::pt2_compliant_tag:
+        return torch::stable::detail::from(torch_tag_pt2_compliant_tag());
+      case Tag::reduction:
+        return torch::stable::detail::from(torch_tag_reduction());
+      case Tag::view_copy:
+        return torch::stable::detail::from(torch_tag_view_copy());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported Tag, please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for StableIValue => torch::headeronly::Tag
+template <>
+struct ToImpl<Tag> {
+  static Tag call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_tag = torch::stable::detail::to<int32_t>(val);
+    if (shim_tag == torch_tag_core()) {
+      return Tag::core;
+    } else if (shim_tag == torch_tag_cudagraph_unsafe()) {
+      return Tag::cudagraph_unsafe;
+    } else if (shim_tag == torch_tag_data_dependent_output()) {
+      return Tag::data_dependent_output;
+    } else if (shim_tag == torch_tag_dynamic_output_shape()) {
+      return Tag::dynamic_output_shape;
+    } else if (shim_tag == torch_tag_flexible_layout()) {
+      return Tag::flexible_layout;
+    } else if (shim_tag == torch_tag_generated()) {
+      return Tag::generated;
+    } else if (shim_tag == torch_tag_inplace_view()) {
+      return Tag::inplace_view;
+    } else if (shim_tag == torch_tag_maybe_aliasing_or_mutating()) {
+      return Tag::maybe_aliasing_or_mutating;
+    } else if (shim_tag == torch_tag_needs_contiguous_strides()) {
+      return Tag::needs_contiguous_strides;
+    } else if (shim_tag == torch_tag_needs_exact_strides()) {
+      return Tag::needs_exact_strides;
+    } else if (shim_tag == torch_tag_needs_fixed_stride_order()) {
+      return Tag::needs_fixed_stride_order;
+    } else if (shim_tag == torch_tag_nondeterministic_bitwise()) {
+      return Tag::nondeterministic_bitwise;
+    } else if (shim_tag == torch_tag_nondeterministic_seeded()) {
+      return Tag::nondeterministic_seeded;
+    } else if (shim_tag == torch_tag_out_variant()) {
+      return Tag::out_variant;
+    } else if (shim_tag == torch_tag_pointwise()) {
+      return Tag::pointwise;
+    } else if (shim_tag == torch_tag_pt2_compliant_tag()) {
+      return Tag::pt2_compliant_tag;
+    } else if (shim_tag == torch_tag_reduction()) {
+      return Tag::reduction;
+    } else if (shim_tag == torch_tag_view_copy()) {
+      return Tag::view_copy;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported Tag ",
+          std::to_string(shim_tag),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T

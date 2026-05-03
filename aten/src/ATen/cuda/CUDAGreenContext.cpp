@@ -11,10 +11,27 @@
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-private-field")
 #endif
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13010 && HAS_CUDA_GREEN_CONTEXT()
+#define HAS_CUDA_WORKQUEUE_SUPPORT() 1
+#else
+#define HAS_CUDA_WORKQUEUE_SUPPORT() 0
+#endif
+
 namespace at::cuda {
 
-GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
+GreenContext::GreenContext(
+    uint32_t device_id,
+    std::optional<uint32_t> num_sms,
+    std::optional<int32_t> workqueue_scope,
+    std::optional<uint32_t> workqueue_concurrency_limit) {
 #if HAS_CUDA_GREEN_CONTEXT()
+  TORCH_CHECK(
+      num_sms.has_value() || workqueue_scope.has_value(),
+      "At least one of num_sms or workqueue_scope must be specified");
+  TORCH_CHECK(
+      !workqueue_concurrency_limit.has_value() || workqueue_scope.has_value(),
+      "workqueue_concurrency_limit requires workqueue_scope to be set");
+
   int driver_version;
   C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
   TORCH_CHECK(
@@ -29,38 +46,73 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
     cudaFree(nullptr);
   }
 
-   CUdevice device;
+  CUdevice device;
   device_id_ = device_id;
   C10_CUDA_DRIVER_CHECK(
       c10::cuda::DriverAPI::get()->cuDeviceGet_(&device, device_id));
 
-  // Get device resources
-  CUdevResource device_resource;
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(
-      device, &device_resource, CU_DEV_RESOURCE_TYPE_SM));
+  std::vector<CUdevResource> resources;
 
-  // Split resources
-  std::vector<CUdevResource> result(1);
-  auto result_data = result.data();
-  unsigned int nb_groups = 1;
-  CUdevResource remaining;
+  // --- SM resource ---
+  if (num_sms.has_value()) {
+    CUdevResource sm_resource;
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(
+        device, &sm_resource, CU_DEV_RESOURCE_TYPE_SM));
 
-  C10_CUDA_DRIVER_CHECK(
-      c10::cuda::DriverAPI::get()->cuDevSmResourceSplitByCount_(
-          result_data,
-          &nb_groups,
-          &device_resource,
-          &remaining,
-          0, // default flags
-          num_sms));
+    TORCH_CHECK(
+        *num_sms > 0 && *num_sms <= sm_resource.sm.smCount,
+        "Invalid number of SMs requested for green context: ",
+        *num_sms,
+        " (device has ",
+        sm_resource.sm.smCount,
+        " SMs)");
 
-  TORCH_CHECK(nb_groups == 1, "Failed to create single resource group");
+    // Split resources
+    std::vector<CUdevResource> split_result(1);
+    unsigned int nb_groups = 1;
+    CUdevResource remaining;
+
+    C10_CUDA_DRIVER_CHECK(
+        c10::cuda::DriverAPI::get()->cuDevSmResourceSplitByCount_(
+            split_result.data(),
+            &nb_groups,
+            &sm_resource,
+            &remaining,
+            0, // default flags
+            *num_sms));
+    TORCH_CHECK(nb_groups == 1, "Failed to create single SM resource group");
+    resources.push_back(split_result[0]);
+  }
+
+  // --- Workqueue config resource ---
+  if (workqueue_scope.has_value()) {
+#if HAS_CUDA_WORKQUEUE_SUPPORT()
+    TORCH_CHECK(
+        driver_version >= 13010, "cuda driver too old to use workqueue configuration!");
+    CUdevResource wq_resource{};
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(
+        device, &wq_resource, CU_DEV_RESOURCE_TYPE_WORKQUEUE_CONFIG));
+
+    wq_resource.wqConfig.sharingScope =
+        static_cast<CUdevWorkqueueConfigScope>(*workqueue_scope);
+    if (workqueue_concurrency_limit.has_value()) {
+      wq_resource.wqConfig.wqConcurrencyLimit = *workqueue_concurrency_limit;
+    }
+    resources.push_back(wq_resource);
+#else
+    TORCH_CHECK(
+        false,
+        "Workqueue configuration for green contexts requires CUDA 13.1+!");
+#endif
+  }
 
   // Generate resource descriptor
   CUdevResourceDesc desc;
   C10_CUDA_DRIVER_CHECK(
       c10::cuda::DriverAPI::get()->cuDevResourceGenerateDesc_(
-          &desc, result_data, 1));
+          &desc,
+          resources.data(),
+          static_cast<unsigned int>(resources.size())));
 
   // Create green context
   // CU_GREEN_CTX_DEFAULT_STREAM is required per docs:
@@ -75,20 +127,45 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
 #else
   TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
-  }
+}
 
-  std::unique_ptr<GreenContext> GreenContext::create(
-      uint32_t num_sms,
-      std::optional<uint32_t> device_id) {
+std::unique_ptr<GreenContext> GreenContext::create(
+    std::optional<uint32_t> device_id,
+    std::optional<uint32_t> num_sms,
+    std::optional<int32_t> workqueue_scope,
+    std::optional<uint32_t> workqueue_concurrency_limit) {
 #if HAS_CUDA_GREEN_CONTEXT()
-    if (!device_id.has_value()) {
-      device_id = at::cuda::current_device();
-    }
-    return std::unique_ptr<GreenContext>(new GreenContext(device_id.value(), num_sms));
-#else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
-#endif
+  if (!device_id.has_value()) {
+    device_id = at::cuda::current_device();
   }
+  return std::unique_ptr<GreenContext>(new GreenContext(
+      device_id.value(), num_sms, workqueue_scope, workqueue_concurrency_limit));
+#else
+  TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+#endif
+}
+
+uint32_t GreenContext::max_workqueue_concurrency(
+    std::optional<uint32_t> device_id) {
+#if HAS_CUDA_WORKQUEUE_SUPPORT()
+  int driver_version;
+  C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
+  TORCH_CHECK(
+      driver_version >= 13010, "cuda driver too old to use workqueue configuration!");
+  if (!device_id.has_value()) {
+    device_id = at::cuda::current_device();
+  }
+  CUdevice device;
+  C10_CUDA_DRIVER_CHECK(
+      c10::cuda::DriverAPI::get()->cuDeviceGet_(&device, device_id.value()));
+  CUdevResource wq_resource;
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(
+      device, &wq_resource, CU_DEV_RESOURCE_TYPE_WORKQUEUE_CONFIG));
+  return wq_resource.wqConfig.wqConcurrencyLimit;
+#else
+  TORCH_CHECK(false, "Workqueue configuration requires CUDA 13.1+!");
+#endif
+}
 
   // Implement move operations
 #if HAS_CUDA_GREEN_CONTEXT()

@@ -30,7 +30,7 @@ __all__ = [
     "Module",
 ]
 
-_grad_t = Union[tuple[Tensor, ...], Tensor]
+_grad_t = tuple[Tensor, ...] | Tensor
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -44,7 +44,6 @@ class _IncompatibleKeys(
     __slots__ = ()
 
     def __repr__(self) -> str:
-        # pyrefly: ignore [missing-attribute]
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -58,7 +57,8 @@ def _addindent(s_, numSpaces):
     if len(s) == 1:
         return s_
     first = s.pop(0)
-    s = [(numSpaces * " ") + line for line in s]
+    # Only add indentation to non-blank lines; blank lines stay empty
+    s = [(numSpaces * " ") + line if line.strip() else "" for line in s]
     s = "\n".join(s)
     s = first + "\n" + s
     return s
@@ -93,7 +93,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key]
             result["module"] = self.module()
 
         return result
@@ -817,7 +817,7 @@ class Module:
                 raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
         setattr(parent, atoms[-1], module)
 
-    def get_parameter(self, target: str) -> "Parameter":
+    def get_parameter(self, target: str) -> Parameter:
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -853,7 +853,7 @@ class Module:
 
         return param
 
-    def get_buffer(self, target: str) -> "Tensor":
+    def get_buffer(self, target: str) -> Tensor:
         """Return the buffer given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -2802,14 +2802,18 @@ class Module:
                 memo.add(module)
                 yield name, module
 
-    def modules(self) -> Iterator["Module"]:
+    def modules(self, remove_duplicate: bool = True) -> Iterator["Module"]:
         r"""Return an iterator over all modules in the network.
+
+        Args:
+            remove_duplicate: whether to remove the duplicated module instances in the result
+                or not.
 
         Yields:
             Module: a module in the network
 
         Note:
-            Duplicate modules are returned only once. In the following
+            Duplicate modules are returned only once by default. In the following
             example, ``l`` will be returned only once.
 
         Example::
@@ -2826,7 +2830,7 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for _, module in self.named_modules():
+        for _, module in self.named_modules(remove_duplicate=remove_duplicate):
             yield module
 
     def named_modules(

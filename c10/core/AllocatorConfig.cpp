@@ -1,5 +1,8 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <array>
+#include <limits>
 
 namespace c10::CachingAllocator {
 
@@ -10,14 +13,32 @@ constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
 constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 } // anonymous namespace
 
+std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
+  static std::unordered_set<std::string> keys{
+      "large_segment_size_mb",
+      "max_split_size_mb",
+      "max_non_split_rounding_mb",
+      "garbage_collection_threshold",
+      "roundup_power2_divisions",
+      "expandable_segments",
+      "pinned_use_background_threads",
+      "pinned_max_round_threshold_mb",
+      "pinned_max_cached_size_mb"};
+  return keys;
+}
+
+const std::unordered_set<std::string>& AcceleratorAllocatorConfig::getKeys() {
+  return getMutableKeys();
+}
+
+std::function<void(const std::string&)>& AcceleratorAllocatorConfig::
+    getConfigParserHook() {
+  static std::function<void(const std::string&)> hook{nullptr};
+  return hook;
+}
+
 AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
   static AcceleratorAllocatorConfig instance;
-#define C10_ALLOCATOR_CONFIG_PARSE_ENV(env)    \
-  auto env##_name = c10::utils::get_env(#env); \
-  if (env##_name.has_value()) {                \
-    instance.parseArgs(env##_name.value());    \
-    return true;                               \
-  }
   static bool env_flag [[maybe_unused]] = []() {
     // Parse allocator configuration from environment variables.
     // The first two entries are kept for backward compatibility with legacy
@@ -25,16 +46,23 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
     // (PYTORCH_ALLOC_CONF) should be used going forward.
     // Note: keep the parsing order and logic stable to avoid potential
     // performance regressions in internal tests.
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF)
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF)
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF)
+    constexpr std::array<const char*, 3> vars{
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "PYTORCH_HIP_ALLOC_CONF",
+        "PYTORCH_ALLOC_CONF"};
+    for (const char* var : vars) {
+      if (std::optional<std::string> name = c10::utils::get_env(var)) {
+        instance.parseArgs(*name);
+        return true;
+      }
+    }
     return false;
   }();
-#undef C10_ALLOCATOR_CONFIG_PARSE_ENV
   return instance;
 }
 
 AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
+  max_non_split_rounding_size_ = large_segment_size_.load();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -56,11 +84,32 @@ size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
   return instance().roundup_power2_divisions_[index];
 }
 
+size_t AcceleratorAllocatorConfig::parseLargeSegmentSize(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+
+  constexpr size_t min_allowed_segment_size_mb = kMinLargeAlloc / kMB;
+  constexpr size_t max_allowed_segment_size_mb =
+      std::numeric_limits<size_t>::max() / kMB;
+
+  size_t val_env = tokenizer.toSizeT(++i);
+  TORCH_CHECK_VALUE(
+      val_env > min_allowed_segment_size_mb,
+      "CachingAllocator option large_segment_size_mb must be > ",
+      min_allowed_segment_size_mb,
+      " MB");
+  val_env = std::min(val_env, max_allowed_segment_size_mb);
+  large_segment_size_ = val_env * kMB;
+
+  return i;
+}
+
 size_t AcceleratorAllocatorConfig::parseMaxSplitSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
-  constexpr size_t min_allowed_split_size_mb = kLargeBuffer / kMB;
+  size_t min_allowed_split_size_mb = large_segment_size_ / kMB;
   constexpr size_t max_allowed_split_size_mb =
       std::numeric_limits<size_t>::max() / kMB;
 
@@ -79,7 +128,7 @@ size_t AcceleratorAllocatorConfig::parseMaxNonSplitRoundingSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
-  constexpr size_t min_allowed_split_size_mb = kLargeBuffer / kMB;
+  size_t min_allowed_split_size_mb = large_segment_size_ / kMB;
   constexpr size_t max_allowed_split_size_mb =
       std::numeric_limits<size_t>::max() / kMB;
 
@@ -193,6 +242,26 @@ size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
+size_t AcceleratorAllocatorConfig::parsePinnedMaxRoundThreshold(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  constexpr size_t max_allowed_mb = std::numeric_limits<size_t>::max() / kMB;
+  size_t val = std::min(tokenizer.toSizeT(++i), max_allowed_mb);
+  pinned_max_round_threshold_ = val * kMB;
+  return i;
+}
+
+size_t AcceleratorAllocatorConfig::parsePinnedMaxCachedSize(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  constexpr size_t max_allowed_mb = std::numeric_limits<size_t>::max() / kMB;
+  size_t val = std::min(tokenizer.toSizeT(++i), max_allowed_mb);
+  pinned_max_cached_size_ = val * kMB;
+  return i;
+}
+
 void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
@@ -206,9 +275,23 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
 
   ConfigTokenizer tokenizer(env);
+
+  // large_segment_size_mb should be read first because
+  // max_non_split_rounding_size_ must be >= large_segment_size_.
+  for (size_t i = 0; i < tokenizer.size(); ++i) {
+    const auto& key = tokenizer[i];
+    if (key == "large_segment_size_mb") {
+      i = parseLargeSegmentSize(tokenizer, i);
+    }
+  }
+  max_non_split_rounding_size_ = large_segment_size_.load();
+
+  bool max_round_threshold_set{false}, max_cached_size_set{false};
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
-    if (key == "max_split_size_mb") {
+    if (key == "large_segment_size_mb") {
+      i = tokenizer.skipKey(i); // handled previously
+    } else if (key == "max_split_size_mb") {
       i = parseMaxSplitSize(tokenizer, i);
     } else if (key == "max_non_split_rounding_mb") {
       i = parseMaxNonSplitRoundingSize(tokenizer, i);
@@ -220,10 +303,16 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       i = parseExpandableSegments(tokenizer, i);
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
+    } else if (key == "pinned_max_round_threshold_mb") {
+      i = parsePinnedMaxRoundThreshold(tokenizer, i);
+      max_round_threshold_set = true;
+    } else if (key == "pinned_max_cached_size_mb") {
+      i = parsePinnedMaxCachedSize(tokenizer, i);
+      max_cached_size_set = true;
     } else {
       // If a device-specific configuration parser hook is registered, it will
       // check if the key is unrecognized.
-      if (device_config_parser_hook_) {
+      if (getConfigParserHook()) {
         TORCH_CHECK_VALUE(
             getKeys().find(key) != getKeys().end(),
             "Unrecognized key '",
@@ -236,6 +325,16 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     if (i + 1 < tokenizer.size()) {
       tokenizer.checkToken(++i, ",");
     }
+  }
+
+  if (max_round_threshold_set && max_cached_size_set &&
+      pinned_max_round_threshold_ > pinned_max_cached_size_) {
+    TORCH_WARN_ONCE(
+        "pinned_max_round_threshold_mb (",
+        pinned_max_round_threshold_ >> 20,
+        ") > pinned_max_cached_size_mb (",
+        pinned_max_cached_size_ >> 20,
+        "). The cache size limit takes precedence: allocations above pinned_max_cached_size_mb are never rounded up.");
   }
 }
 

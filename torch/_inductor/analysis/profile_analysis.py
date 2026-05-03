@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
@@ -44,7 +44,7 @@ def parse_list(lst: str) -> list[int]:
 
 
 def register_adapter(
-    aten: Union[str, list[str]],
+    aten: str | list[str],
 ) -> Callable[
     [AdapterType],
     AdapterType,
@@ -144,7 +144,7 @@ def mm_adapter(
     return shapes, {}
 
 
-def _parse_kernel_name(name: str) -> Optional[str]:
+def _parse_kernel_name(name: str) -> str | None:
     """
     parse the name of the kernel from the event name.
     """
@@ -354,18 +354,26 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-_dtype_map = {
+_dtype_map: dict[str, torch.dtype] = {
     "float": torch.float,
     "float32": torch.float,
+    "double": torch.double,
+    "float64": torch.double,
     "int": torch.int,
     "int8": torch.int8,
     "int16": torch.int16,
     "int32": torch.int,
     "long": torch.long,
     "long int": torch.long,
+    "signed char": torch.int8,
+    "unsigned char": torch.uint8,
+    "bool": torch.bool,
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
-    "float64": torch.double,
+    "c10::BFloat16": torch.bfloat16,
+    "c10::Half": torch.float16,
+    "c10::complex<float>": torch.complex64,
+    "c10::complex<double>": torch.complex128,
 }
 
 
@@ -385,7 +393,7 @@ KernelNameMap = defaultdict[str, OrderedSet[KernelStats]]
 class Device:
     name: str
     index: int
-    info: Optional[DeviceInfo]
+    info: DeviceInfo | None
     stats: KernelNameMap
 
     def __repr__(self) -> str:
@@ -402,8 +410,8 @@ class JsonProfile:
     def __init__(
         self,
         path: str,
-        benchmark_name: Optional[str] = None,
-        dtype: Optional[Union[torch.dtype, str]] = None,
+        benchmark_name: str | None = None,
+        dtype: torch.dtype | str | None = None,
     ):
         """
         Convenience class for running common operations on chrome/perfetto json traces.
@@ -423,7 +431,7 @@ class JsonProfile:
             self.dtype = _dtype_map.get(dtype)
         self._create_devices()
 
-    def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:
+    def convert_dtype(self, event: dict[str, Any]) -> torch.dtype | None:
         """
         Each op has a list of dtypes for each input arg. We need to convert these into a single dtype for flop estimation.
         Issues:

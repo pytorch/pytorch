@@ -6,6 +6,7 @@ import unittest
 import sympy
 
 import torch
+from torch._dynamo.source import ConstantSource
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -115,10 +117,62 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
+        # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
+        # ModularIndexing(b, d1*d2, m//d2) when d2 | m
+        expected = ModularIndexing(i2, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+    def test_floordiv_modularindexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+
+        # FloorDiv(ModularIndexing(b, d1, m), d2) -> ModularIndexing(b, d1*d2, m//d2)
+        # when d2 divides m
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                FloorDiv(ModularIndexing(i0, 1, 8192), 128), {}
+            ),
+            ModularIndexing(i0, 128, 64),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 2, 120), 6), {}),
+            ModularIndexing(i0, 12, 20),
+        )
+        # Does NOT simplify when d2 does not divide m
+        expr = FloorDiv(ModularIndexing(i0, 1, 28), 5)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+
+        # FloorDiv(base, divisor) -> 0 when 0 <= base < divisor
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
+            sympy.S.Zero,
+        )
+
+    def test_remove_zero_terms_generalized(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+
+        # FloorDiv(v + 128*i1, 8192): gcd(128*i1, 8192) = 128
+        # Old rule fails (128 != 8192), new rule: v < 128 => drop v
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128}),
+            FloorDiv(128 * i1, 8192),
+        )
+        # v range equals gcd exactly — still safe since v < gcd (strict)
+        # v=127 max, 127 < 128
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 6 * i1, 18), {i0: 6}),
+            FloorDiv(6 * i1, 18),
+        )
+        # v range exceeds gcd — cannot simplify
+        expr = FloorDiv(i0 + 128 * i1, 8192)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, {i0: 129}),
+            expr,
+        )
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
@@ -367,6 +421,29 @@ class ExprPrinterTests(InductorTestCase):
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
+    def test_print_nan(self):
+        expr = sympy.nan
+        self.assertExpectedInline(pexpr(expr), """math.nan""")
+        self.assertExpectedInline(
+            cexpr(expr), """std::numeric_limits<double>::quiet_NaN()"""
+        )
+
+    def test_print_infinity(self):
+        expr = sympy.oo
+        self.assertExpectedInline(pexpr(expr), """math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """std::numeric_limits<double>::infinity()""",
+        )
+
+    def test_print_negative_infinity(self):
+        expr = -sympy.oo
+        self.assertExpectedInline(pexpr(expr), """-math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """-std::numeric_limits<double>::infinity()""",
+        )
+
     def test_print_integer(self):
         expr = sympy.S((-1) << 63)
         self.assertExpectedInline(cexpr(expr), f"""(-1{LONG_SUFFIX} << 63)""")
@@ -481,7 +558,7 @@ class ExprPrinterTests(InductorTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",
             )
             self.assertEqual(
                 cexpr(expr),
@@ -492,6 +569,185 @@ class ExprPrinterTests(InductorTestCase):
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
+
+
+class TestEvaluateMinMax(InductorTestCase):
+    def test_evaluate_min_multiple(self):
+        """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
+        UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
+        self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
+        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
+
+    def test_evaluate_max_concrete(self):
+        """works with concrete values even when negative.  Sound."""
+        sizevars = SizeVarAllocator()
+        self.assertEqual(sizevars.evaluate_max(-5, 3), 3)
+        self.assertEqual(sizevars.evaluate_min(-5, 3), -5)
+
+    def test_evaluate_min_product_gcd(self):
+        """evaluate_min(u0, u0*u1) resolves via GCD fallback: gcd(u0, u0*u1)=u0.
+        UNSOUND: when u1=0 the true min is 0, not u0; when u0<0 ordering inverts."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_evaluate_min_product_with_both_gt_gcd(self):
+        """evaluate_min(u0, u0*u1) with u0>0, u1>0 resolves via GCD.
+        Sound: u1>=1 guarantees u0*u1 >= u0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Gt(u0, 0))
+        sizevars.check(sympy.Gt(u1, 0))
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_guard_or_false_le_unbacked_symint_with_check(self):
+        """guard_or_false(Le(u0, k*u0)) resolves after constraining u0 >= 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        # Le(u0, 10*u0) => 9*u0 >= 0, provable with u0 >= 0
+        self.assertTrue(sizevars.guard_or_false(sympy.Le(u0, 10 * u0)))
+        # Le(10*u0, u0) => -9*u0 >= 0 => u0 <= 0, not provable with u0 >= 0
+        self.assertFalse(sizevars.guard_or_false(sympy.Le(10 * u0, u0)))
+        # Lt(u0, 10*u0) => 9*u0 > 0 => u0 > 0, not provable (u0 could be 0)
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
+
+
+class TestPrecomputedSizeHinting(InductorTestCase):
+    """Tests for optimization_hint and guarding_hint_or_throw with PRECOMPUTED_SIZE symbols."""
+
+    def test_optimization_hint_with_precomputed_size(self):
+        """Test that optimization_hint correctly resolves PRECOMPUTED_SIZE symbols.
+
+        When a complex expression is replaced with a precomputed size symbol (ps0, ps1, etc.),
+        optimization_hint must use inv_precomputed_replacements to resolve the symbol
+        back to its original expression before computing the hint.
+        """
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol with a concrete hint value
+        s0 = sizevars.shape_env.create_symbol(168, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(168)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(168)
+
+        # Create a complex expression that would be precomputed
+        complex_expr = s0 * 8  # Should evaluate to 168 * 8 = 1344
+
+        # Register the expression as a precomputed size (simulating what Inductor does)
+        ps_symbol = sizevars.lookup_precomputed_size(complex_expr)
+
+        # Verify the precomputed symbol was created
+        self.assertIn(complex_expr, sizevars.precomputed_replacements)
+        self.assertIn(ps_symbol, sizevars.inv_precomputed_replacements)
+
+        # Test optimization_hint resolves the ps symbol correctly
+        hint = sizevars.optimization_hint(ps_symbol)
+        expected = 168 * 8  # The concrete value of s0 * 8
+        self.assertEqual(hint, expected)
+
+    def test_guarding_hint_or_throw_with_precomputed_size(self):
+        """Test that guarding_hint_or_throw correctly resolves PRECOMPUTED_SIZE symbols."""
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol with a concrete hint value
+        s0 = sizevars.shape_env.create_symbol(42, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(42)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(42)
+
+        # Create a complex expression
+        complex_expr = s0 * 2
+
+        # Register as precomputed size
+        ps_symbol = sizevars.lookup_precomputed_size(complex_expr)
+
+        # Test guarding_hint_or_throw resolves correctly
+        hint = sizevars.guarding_hint_or_throw(ps_symbol)
+        expected = 42 * 2
+        self.assertEqual(hint, expected)
+
+    def test_optimization_hint_with_expression_containing_precomputed_size(self):
+        """Test optimization_hint with an expression that contains a PRECOMPUTED_SIZE symbol."""
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(10)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # Register s0 * 5 as precomputed (ps0 = 50)
+        ps_symbol = sizevars.lookup_precomputed_size(s0 * 5)
+
+        # Create an expression using the precomputed symbol: ps0 + 3
+        expr = ps_symbol + 3
+
+        # optimization_hint should resolve ps0 -> s0*5 -> 50, then add 3 -> 53
+        hint = sizevars.optimization_hint(expr)
+        self.assertEqual(hint, 53)
+
+
+class TestOptimizationHintZeroDivision(InductorTestCase):
+    """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
+
+    def test_modular_indexing_with_zero_divisor(self):
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # u0 + 1 ensures base != 0 after substitution; u1 is the divisor.
+        # With fallback=0: u0->0, u1->0, so (0+1) // 0 -> ZeroDivisionError.
+        # optimization_hint catches ZeroDivisionError and returns fallback.
+        expr = ModularIndexing(u0 + 1, u1, 4)
+        hint = sizevars.optimization_hint(expr, fallback=0)
+        self.assertEqual(hint, 0)
+
+    def test_floor_div_with_zero_divisor(self):
+        """optimization_hint should not crash when FloorDiv has an unbacked
+        symbol as divisor that gets substituted with 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # With fallback=0: u0->0, u1->0, FloorDiv(0+1, 0) -> ZeroDivisionError.
+        # optimization_hint catches ZeroDivisionError and returns fallback.
+        expr = FloorDiv(u0 + 1, u1)
+        hint = sizevars.optimization_hint(expr, fallback=0)
+        self.assertEqual(hint, 0)
+
+    def test_modular_indexing_zero_divisor_nonzero_fallback(self):
+        """When fallback is nonzero, the hint should still not crash."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # With fallback=8192: u0->8192, u1->8192
+        # (8192+1) // 8192 = 1, 1 % 4 = 1
+        expr = ModularIndexing(u0 + 1, u1, 4)
+        hint = sizevars.optimization_hint(expr, fallback=8192)
+        self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintIdentityExpansion(InductorTestCase):
+    """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
+
+    def test_identity_wrapped_expr_resolves_to_int(self):
+        """An expression containing Identity-wrapped constants and an unbacked
+        symbol should resolve to a concrete int after substitution."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
+        # simplifies to -u0 * (0 - 1) = u0.
+        # Without expand(identity=True) after _sub_unbacked_exprs,
+        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
+        # causing RuntimeError("Failed to realize expression to int").
+        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        hint = sizevars.optimization_hint(expr, fallback=42)
+        self.assertEqual(hint, 42)
 
 
 if __name__ == "__main__":

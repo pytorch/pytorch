@@ -365,11 +365,17 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",  # noqa: B950
+    output = output.add(torch.ones(10, 10))""",
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -412,7 +418,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))""",
+  ))AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+Found from :
+   File "test_logging.py", line N, in inductor_error_fn
+    output = torch.round(a)""",
         )
 
         exitstack.close()
@@ -803,6 +816,48 @@ Mutating object of type dict (source name: L['mod']._buffers)
         fn(torch.ones(1), my_list)
 
         self.assertEqual(len(records), 0)
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_logs_fullgraph_graph_break(self, records):
+        """Test that side effects are logged even when fullgraph=True causes an error."""
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            # Force a graph break after the side effect
+            torch._dynamo.graph_break()
+            return x + len(lst)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(1), my_list)
+
+        # Side effects should still be logged even though codegen never ran
+        self.assertGreater(len(records), 0)
+        self.assertIn("Mutating object of type list", records[0].getMessage())
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_logged_on_fullgraph_side_effect_error(self, records):
+        tracked_list = []
+        hop_list = []
+
+        def fn(x):
+            hop_list.append(1)
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def model(x, lst):
+            lst.append(1)
+            return torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "HOP: Unsafe side effect",
+        ):
+            model(torch.ones(1), tracked_list)
+
+        self.assertGreaterEqual(len(records), 1)
+        self.assertIn("Mutating object of type list", records[0].getMessage())
 
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
@@ -1220,7 +1275,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: L['z'].size()[0] == L['y'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
 +- __SHAPE_GUARD__: ((2*L['y'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",
         )
 
     @make_logging_test(guards=True)
@@ -1236,7 +1291,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",
         )
 
     @make_logging_test(guards=True)
@@ -1255,7 +1310,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
++- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",
         )
 
     @make_logging_test(guards=True)
@@ -1269,7 +1324,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         record = self.getRecord(records, "TREE_GUARD_MANAGER")
         self.assertExpectedInline(
             munge_global_state_json(record.getMessage()),
-            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",  # noqa: B950
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -1377,6 +1432,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env["TORCH_LOGS_OUT"] = file_path
             _, stderr = self.run_process_no_exception(
                 """\
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils._config_module")
 import torch
 @torch.compile(backend="eager")
 def fn(a):
@@ -1406,7 +1463,7 @@ fn(torch.randn(5))
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
         # Test program
-        @torch.compile()
+        @torch.compile(backend="eager")
         def foo():
             x = torch.ones([10])
 
@@ -1416,9 +1473,19 @@ fn(torch.randn(5))
                 z = y * x
                 return z
 
-            return bar(), bar
+            # force top-level trace of bar
+            try:
+                return bar(), bar
+            finally:
+                pass
 
         foo()
+
+        @torch.compile
+        def baz(x):
+            return x + 1
+
+        baz(torch.ones(3))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.
@@ -1434,6 +1501,7 @@ fn(torch.randn(5))
 TorchDynamo attempted to trace the following frames: [
   * foo test_logging.py:N
   * bar test_logging.py:N
+  * baz test_logging.py:N
 ]""",
         )
 
@@ -1490,6 +1558,7 @@ exclusions = {
     "annotation",
     "node_runtime_estimation",
     "caching",
+    "overlap_scheduling",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

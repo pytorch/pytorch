@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
 
+from __future__ import annotations
+
 import itertools
 import math
 import warnings
-from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, cast, Literal, Union
+from typing import Any, cast, Literal, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -15,7 +16,11 @@ from torch.nn import Module
 from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 
-from .optimizer import Optimizer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from .optimizer import Optimizer
 
 
 __all__ = [
@@ -31,11 +36,30 @@ __all__ = [
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 
-PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
+PARAM_LIST = tuple[Tensor, ...] | list[Tensor]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+
+    The EMA is computed as:
+
+    .. math::
+        W_0^{\\text{EMA}} = W_0^{\\text{model}}
+
+    .. math::
+        W_{t+1}^{\\text{EMA}} = \\text{decay} \\times W_t^{\\text{EMA}} + (1 - \\text{decay}) \\times W_{t+1}^{\\text{model}}
+
+    where :math:`W_t^{\\text{EMA}}` is the EMA parameter at step :math:`t`,
+    :math:`W_t^{\\text{model}}` is the model parameter at step :math:`t`,
+    and :math:`\\text{decay}` is the decay rate (default: 0.999).
+
+    Args:
+        decay (float): Decay rate for EMA. Must be in the range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: A function that updates EMA parameters given current model parameters
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -93,7 +117,26 @@ def get_swa_multi_avg_fn():
 
 
 def get_ema_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across a single param."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+
+    The EMA is computed as:
+
+    .. math::
+        W_0^{\\text{EMA}} = W_0^{\\text{model}}
+
+    .. math::
+        W_{t+1}^{\\text{EMA}} = \\text{decay} \\times W_t^{\\text{EMA}} + (1 - \\text{decay}) \\times W_{t+1}^{\\text{model}}
+
+    where :math:`W_t^{\\text{EMA}}` is the EMA parameter at step :math:`t`,
+    :math:`W_t^{\\text{model}}` is the model parameter at step :math:`t`,
+    and :math:`\\text{decay}` is the decay rate (default: 0.999).
+
+    Args:
+        decay (float): Decay rate for EMA. Must be in the range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: A function that updates EMA parameters given current model parameters
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -228,7 +271,7 @@ class AveragedModel(Module):
         multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
         | None = None,
         use_buffers=False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -435,7 +478,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr

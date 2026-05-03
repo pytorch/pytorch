@@ -28,7 +28,7 @@ import functools
 import logging
 from collections.abc import Callable, Iterable
 from importlib import import_module
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -36,6 +36,7 @@ from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+from torch._inductor.output_code import OutputCode
 
 from .common import aot_autograd
 from .registry import CompiledFn, CompilerFn, register_debug_backend as register_backend
@@ -54,6 +55,11 @@ def eager(
 ) -> Callable[..., Any]:
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
+
+    if torch._functorch.config.force_autograd_cache:
+        from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
+
+        return GraphModuleSerializableCallable(gm)
     return gm.forward
 
 
@@ -149,6 +155,161 @@ def torchscript(
     return torch.jit.script(gm)
 
 
+def invoke_subgraph_inner_compiler(
+    subgraph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    """Inner compiler that wraps forward/backward graphs in invoke_subgraph HOP.
+
+    This is used as the fw_compiler/bw_compiler for aot_autograd. When the resulting
+    function is traced by make_fx, it emits an invoke_subgraph HOP instead of inlining.
+    """
+    from torch._dynamo import disable
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
+
+    @disable
+    # pyrefly: ignore [deprecated]
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
+        return invoke_subgraph_infer(subgraph, *operands)
+
+    # NB: The direct to unboxed path is broken, you MUST DO THIS
+
+    def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        return invoke_subgraph_wrapper_unboxed(*args)
+
+    invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
+
+    return invoke_subgraph_wrapper
+
+
+# I cannot say how many times I had to revert to this vibe coded version of
+# the code, which worked, and the cleaner versions of the code did not work,
+# so I'm leaving this here until we fix the rest of the bugs.
+'''
+# Counter for unique subgraph names in invoke_subgraph backend
+_invoke_subgraph_counter = 0
+
+
+def invoke_subgraph_inner_compiler_good(
+    fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    """Inner compiler that wraps forward/backward graphs in invoke_subgraph HOP.
+
+    This is used as the fw_compiler/bw_compiler for aot_autograd. When the resulting
+    function is traced by make_fx, it emits an invoke_subgraph HOP instead of inlining.
+    """
+    from torch._higher_order_ops.invoke_subgraph import (
+        invoke_subgraph as invoke_subgraph_hop,
+    )
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    global _invoke_subgraph_counter
+    _invoke_subgraph_counter += 1
+    name = f"invoke_subgraph_{_invoke_subgraph_counter}"
+
+    from torch._dynamo import disable
+
+    # Check if fx_g uses boxed calling convention
+    fx_g_is_boxed = getattr(fx_g, "_boxed_call", False)
+
+    @disable
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper_unboxed(*args: Any) -> Any:
+        proxy_mode = get_proxy_mode()
+        if proxy_mode is not None:
+            # When being traced by make_fx, emit invoke_subgraph HOP
+            return invoke_subgraph_hop(fx_g, name, *args)  # type: ignore[arg-type]
+        else:
+            # Normal execution path - call fx_g with proper calling convention
+            if fx_g_is_boxed:
+                return fx_g(list(args))
+            else:
+                return fx_g(*args)
+
+    # Wrap to handle boxed arguments (list of args) as expected by AOTAutograd
+    def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        return invoke_subgraph_wrapper_unboxed(*args)
+
+    invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
+    return invoke_subgraph_wrapper
+'''
+
+
+@register_backend
+def invoke_subgraph(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
+) -> Callable[..., Any]:
+    """Backend that wraps forward/backward graphs in invoke_subgraph HOP when traced by make_fx.
+
+    This backend uses AOTAutograd to partition into forward/backward graphs, then wraps
+    each in an invoke_subgraph HOP. This is useful for recursive Dynamo tracing scenarios
+    where you want the compiled subgraph to appear as invoke_subgraph HOPs in the outer
+    trace rather than being inlined.
+
+    Requires:
+    - torch._dynamo.config.force_compile_during_fx_trace = True
+      (this implicitly overrides error_on_nested_fx_trace)
+    """
+    if kwargs:
+        log.warning("invoke_subgraph backend ignoring extra kwargs %s", kwargs)
+
+    # Use AOTAutograd to partition into forward/backward
+    return aot_autograd(
+        fw_compiler=invoke_subgraph_inner_compiler,
+        bw_compiler=invoke_subgraph_inner_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs)
+
+
+@dataclasses.dataclass
+class AOTEagerOutputCode(OutputCode):
+    """
+    An OutputCode that wraps a GraphModule for eager-mode execution.
+
+    This allows non-inductor backends (like aot_eager) to participate in
+    the bundled autograd cache and aot_compile serialization flow.
+    """
+
+    gm: torch.fx.GraphModule | None = None
+    _serialized_gm: bytes | None = dataclasses.field(default=None, init=False)
+
+    def __call__(self, inputs: Any) -> Any:
+        assert self.gm is not None
+        return self.gm.forward(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        assert self.gm is not None
+        for node in self.gm.graph.nodes:
+            node.meta.pop("nn_module_stack", None)
+            node.meta.pop("source_fn_stack", None)
+            node.meta.pop("example_value", None)
+
+        self._serialized_gm = GraphPickler.dumps(self.gm, Options(ops_filter=None))
+        self.gm = None
+
+    def post_compile(self, *args: Any, **kwargs: Any) -> None:
+        if self.gm is None and self._serialized_gm is not None:
+            from torch._subclasses import FakeTensorMode
+            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+            from torch.fx.graph import _BoxedCodeGen
+
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            gm = GraphPickler.loads(self._serialized_gm, fake_mode)
+            assert isinstance(gm, torch.fx.GraphModule)
+            self.gm = gm
+            assert isinstance(self.gm, torch.fx.GraphModule)
+            self.gm.graph.set_codegen(_BoxedCodeGen())
+            self.gm.recompile()
+            self._serialized_gm = None
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -158,6 +319,11 @@ def boxed_nop(
     # Set the graph to use boxed codegen
     fx_g.graph.set_codegen(_BoxedCodeGen())
     fx_g.recompile()
+
+    if functorch_config.force_autograd_cache or functorch_config.bundled_autograd_cache:
+        result = AOTEagerOutputCode(gm=fx_g)
+        result._boxed_call = True  # type: ignore[attr-defined]
+        return result
 
     # Wrap the forward method in a function so we can set _boxed_call attribute
     forward_fn = fx_g.forward
@@ -201,7 +367,7 @@ def boxed_nop_with_mode(
 def fake_crossref_boxed_nop(
     fx_g: torch.fx.GraphModule,
     example_inputs: list[torch.Tensor],
-    ignore_op_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None,
+    ignore_op_fn: Callable[[torch._ops.OpOverload], bool] | None = None,
 ) -> Callable[..., Any]:
     from torch.fx.graph import _BoxedCodeGen
 
@@ -241,8 +407,8 @@ def get_nop_func() -> Callable[
 def aot_eager(
     gm: torch.fx.GraphModule,
     fake_tensor_inputs: list[torch.Tensor],
-    fw_compiler: Optional[Callable[..., Any]] = None,
-    bw_compiler: Optional[Callable[..., Any]] = None,
+    fw_compiler: Callable[..., Any] | None = None,
+    bw_compiler: Callable[..., Any] | None = None,
     **kwargs: Any,
 ) -> Callable[..., Any]:
     return aot_autograd(
@@ -434,9 +600,9 @@ class ExplainOutput:
     graph_break_count: int
     break_reasons: list[GraphCompileReason]
     op_count: int
-    ops_per_graph: Optional[list[list["Target"]]] = None
-    out_guards: Optional[list[_guards.Guard]] = None
-    compile_times: Optional[str] = None
+    ops_per_graph: list[list["Target"]] | None = None
+    out_guards: list[_guards.Guard] | None = None
+    compile_times: str | None = None
 
     def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
@@ -534,7 +700,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend: Union[CompilerFn, str]) -> None:
+    def __init__(self, backend: CompilerFn | str) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)

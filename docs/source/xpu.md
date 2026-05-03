@@ -33,6 +33,7 @@
     set_stream
     stream
     synchronize
+    temperature
 ```
 
 ## Random Number Generator
@@ -60,6 +61,20 @@
 
     Event
     Stream
+```
+
+## Graphs
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_current_stream_capturing
+    graph_pool_handle
+    XPUGraph
+    graph
+    make_graphed_callables
 ```
 
 ```{eval-rst}
@@ -90,6 +105,7 @@
      reset_accumulated_memory_stats
      reset_peak_memory_stats
      set_per_process_memory_fraction
+     MemPool
 ```
 
 ```{eval-rst}
@@ -97,4 +113,12 @@
     :hidden:
 
     xpu.aliases.md
+```
+
+```{eval-rst}
+.. currentmodule:: torch.xpu
+```
+
+```{eval-rst}
+.. autoclass:: torch.xpu.use_mem_pool
 ```

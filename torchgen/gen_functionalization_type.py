@@ -37,6 +37,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    OperatorName,
     Return,
     SchemaKind,
     SelfArgument,
@@ -71,8 +72,20 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "resize_as_",
         # This function is used as for testing purposes only.
         "_fill_mem_eff_dropout_mask_",
+        # Inference-only op called behind a custom op graph break.
+        "_flash_attention_forward_no_dropout_inplace",
     ]
 )
+
+# Eager cumulative out variants compute in the out dtype when dtype is omitted.
+# Functionalization normally lowers mutable ops through their functional variants,
+# so these need to thread the out dtype explicitly to preserve eager semantics.
+CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
+    OperatorName.parse("cumsum.out"),
+    OperatorName.parse("cumprod.out"),
+    OperatorName.parse("cumsum.dimname_out"),
+    OperatorName.parse("cumprod.dimname_out"),
+}
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -105,14 +118,20 @@ class GenCompositeViewCopyKernel:
             return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
-        assert metadata is not None
+        if metadata is None:
+            raise AssertionError(
+                f"Expected metadata for view_copy kernel: {g.view_copy}"
+            )
 
         # We can make view_copy work in more cases by using reshape()
         # when a normal view call would ordinarily fail.
         # This also makes LTC more efficient, because they don't need to include
         # clone() calls in their graph (which is normally needed by reshape).
         if str(g.view_copy.func.name) == "view_copy":
-            assert metadata.kernel == "view_copy_symint"
+            if metadata.kernel != "view_copy_symint":
+                raise AssertionError(
+                    f"Expected kernel 'view_copy_symint', got '{metadata.kernel}'"
+                )
             return """\
 at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
@@ -139,10 +158,15 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
         )
 
         # view ops today always return either a Tensor or a list of Tensors
-        assert len(g.view.func.returns) == 1
-        assert g.view.func.returns[0].type == BaseType(
-            BaseTy.Tensor
-        ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        if len(g.view.func.returns) != 1:
+            raise AssertionError(f"Expected 1 return, got {len(g.view.func.returns)}")
+        if not (
+            g.view.func.returns[0].type == BaseType(BaseTy.Tensor)
+            or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        ):
+            raise AssertionError(
+                f"Expected Tensor or Tensor[] return type, got {g.view.func.returns[0].type}"
+            )
 
         if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
             return_cloned_output = """\
@@ -167,7 +191,8 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 
 
 def return_str(rets: tuple[Return, ...], names: list[str]) -> str:
-    assert len(rets) == len(names)
+    if len(rets) != len(names):
+        raise AssertionError(f"Expected {len(rets)} names, got {len(names)}")
     if len(rets) == 0:
         return ""
     elif len(rets) == 1:
@@ -279,15 +304,18 @@ def assert_view_op_properties(func: FunctionSchema) -> None:
 
     args = func.arguments.flat_non_out
     # The first argument is a tensor with an alias semantics (annotations)
-    assert (
-        len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor)
-    ), f"""In the functionalization codegen, we expect the first argument of every view operator to be a tensor,
-but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."""
+    if not (len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor)):
+        raise AssertionError(
+            f"In the functionalization codegen, we expect the first argument of every view operator to be a tensor, "
+            f"but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."
+        )
     # No other arguments have aliasing semantics
-    assert (
-        is_alias(args[0]) and not any(is_alias(a) for a in args[1:])
-    ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
-View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
+    if not (is_alias(args[0]) and not any(is_alias(a) for a in args[1:])):
+        raise AssertionError(
+            "In the functionalization codegen, we expect the first argument of every view "
+            "operator to alias the output. View operators with multiple aliasing inputs "
+            "aren't supported yet. Found an operator that doesn't satisfy this constraint"
+        )
 
 
 # One-liner expression for checking if an expression expr of type type has any
@@ -357,12 +385,16 @@ def emit_view_functionalization_body(
         # I'm assuming that every inplace-view op has a corresponding out-of-place view op,
         # with the same name but the trailing underscore removed.
         # This is currently asserted at parse time in gen.py (see error_check_native_functions).
-        assert g.view_inplace is not None
+        if g.view_inplace is None:
+            raise AssertionError(
+                "Expected view_inplace to be non-None for inplace view"
+            )
         f = g.view_inplace
     else:
         f = g.view
 
-    assert g.view_copy is not None
+    if g.view_copy is None:
+        raise AssertionError("Expected view_copy to be non-None")
     with native_function_manager(f):
         call_sig = DispatcherSignature.from_schema(g.view_copy.func)
 
@@ -539,9 +571,12 @@ def wrap_propagate_mutations_and_return(
     )
     # The outer function may have a mix of aliased and non-aliased outputs,
     # But the inner functional op that we're transforming to should only have non-aliased outputs
-    assert len(mutable_arg_names) + len(non_aliased_outer_rets) == len(
+    if len(mutable_arg_names) + len(non_aliased_outer_rets) != len(
         non_aliased_inner_rets
-    )
+    ):
+        raise AssertionError(
+            f"Expected {len(mutable_arg_names)} + {len(non_aliased_outer_rets)} == {len(non_aliased_inner_rets)}"
+        )
 
     # First, take all of the newly created outputs from the inner call and wrap them into functional tensors
     updates = []
@@ -583,6 +618,40 @@ def wrap_propagate_mutations_and_return(
     {returns_str}"""
 
 
+def maybe_replace_cumulative_out_dtype_exprs(
+    f: NativeFunction,
+    functional_sig: DispatcherSignature,
+    functional_exprs: list[str],
+) -> list[str]:
+    if (
+        f.func.kind() != SchemaKind.out
+        or f.func.name not in CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE
+    ):
+        return functional_exprs
+
+    if len(f.func.arguments.out) != 1:
+        raise AssertionError(
+            f"Expected a single out argument for cumulative out op: {f.func.name}"
+        )
+
+    dtype_arg_idx = next(
+        (i for i, arg in enumerate(functional_sig.arguments()) if arg.name == "dtype"),
+        None,
+    )
+    if dtype_arg_idx is None:
+        raise AssertionError(
+            f"Expected dtype argument for cumulative out op: {f.func.name}"
+        )
+
+    adjusted_exprs = functional_exprs.copy()
+    dtype_expr = adjusted_exprs[dtype_arg_idx]
+    adjusted_exprs[dtype_arg_idx] = (
+        f"{dtype_expr}.has_value() ? {dtype_expr} : "
+        f"std::optional<at::ScalarType>({f.func.arguments.out[0].name}_.scalar_type())"
+    )
+    return adjusted_exprs
+
+
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -590,7 +659,8 @@ def emit_inplace_functionalization_body(
     f: NativeFunction, g: NativeFunctionsGroup
 ) -> str:
     # mutation case
-    assert modifies_arguments(f)
+    if not modifies_arguments(f):
+        raise AssertionError(f"Expected function to modify arguments: {f.func}")
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
@@ -653,6 +723,9 @@ def emit_inplace_functionalization_body(
         e.expr
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
+    functional_exprs = maybe_replace_cumulative_out_dtype_exprs(
+        f, functional_sig, functional_exprs
+    )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:
@@ -853,7 +926,8 @@ struct TORCH_API {self.classname} : public ViewMeta {{
         )
 
         # Expected arguments for the operation.
-        assert self.g.view_copy is not None
+        if self.g.view_copy is None:
+            raise AssertionError("Expected view_copy to be non-None")
         op_arguments = functionalization.op_arguments(self.g.view_copy.func, is_reverse)
 
         # The context is composed by the constructor arguments (which are also
@@ -1026,7 +1100,10 @@ def gen_functionalization_registration(
     def emit_registration_helper(f: NativeFunction) -> str:
         if f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
-            assert metadata is not None
+            if metadata is None:
+                raise AssertionError(
+                    f"Expected metadata for composite implicit autograd kernel: {f.func}"
+                )
             native_api_name = metadata.kernel
             sig = NativeSignature(f.func, symint=metadata.supports_symint())
             # Note [Composite view ops in the functionalization pass]
@@ -1054,7 +1131,10 @@ def gen_functionalization_registration(
         view_str = []
         view_str.append(emit_registration_helper(g.view))
         if g.view_inplace is not None:
-            assert g.view_inplace.is_view_op
+            if not g.view_inplace.is_view_op:
+                raise AssertionError(
+                    f"Expected view_inplace to be a view op: {g.view_inplace.func}"
+                )
             view_str.append(emit_registration_helper(g.view_inplace))
         return view_str
 
@@ -1080,7 +1160,8 @@ def gen_functionalization_registration(
             # See Note [resize_ in Functionalization]
             return []
         if str(f.func.name.name) != "set_":
-            assert not f.is_view_op
+            if f.is_view_op:
+                raise AssertionError(f"Unexpected view op: {f.func}")
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
@@ -1107,7 +1188,10 @@ def gen_functionalization_definition(
         if not g.composite:
             # invariant: NativeFunctionsViewGroup's always have a view_copy operator
             # if the view is not composite (implicit autograd)
-            assert g.view_copy is not None, dataclass_repr(g, indent=1)
+            if g.view_copy is None:
+                raise AssertionError(
+                    f"Expected view_copy to be non-None: {dataclass_repr(g, indent=1)}"
+                )
             view_defs.append(emit_view_functionalization_body(g, view_inplace=False))
             if g.view_inplace is not None:
                 view_defs.append(emit_view_functionalization_body(g, view_inplace=True))
@@ -1124,7 +1208,12 @@ def gen_functionalization_definition(
             str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
             and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
         ):
-            assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
+            if not (
+                g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
+            ):
+                raise AssertionError(
+                    f"Expected composite implicit autograd kernel or non-modifying function: {g.func}"
+                )
         return []
     else:
         # Case 2: emit inplace -> out-of-place kernels for the functionalization pass

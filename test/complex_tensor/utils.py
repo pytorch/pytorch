@@ -89,14 +89,14 @@ class TestCase(PytorchTestCase):
         try:
             result_e = expected()
             exception_e = None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result_e = None
             exception_e = e
 
         try:
             result_a = actual()
             exception_a = None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result_a = None
             exception_a = e
 
@@ -148,9 +148,10 @@ class TestCase(PytorchTestCase):
     def check_consistency(
         self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
     ) -> None:
-        assert variant in {Variant.Op, Variant.Distributed}, (
-            "`check_consistency` called with the wrong `variant`."
-        )
+        if variant not in {Variant.Op, Variant.Distributed}:
+            raise AssertionError(
+                f"`check_consistency` called with the wrong `variant`: {variant}"
+            )
         desc = Descriptor(
             op=get_overload_packet_from_name(op.name),
             device_type=torch.device(device).type,

@@ -1225,7 +1225,7 @@ void qelu_kernel(
         // ELU
         const auto y = x >= 0
           ? x * scale_coef
-          : ((std::exp(x * input_scale_coef) - 1) * alpha_float * scale_coef);
+          : (std::expm1(x * input_scale_coef) * alpha_float * scale_coef);
 
         // quantize
         return at::native::quantize_val<scalar_t>(o_scale, o_zp, y);
@@ -1243,8 +1243,7 @@ void qelu_kernel(
             Vec dx_vec_copy_neg_elu = value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
-            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
-            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.expm1();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
             // blend
             value = Vec::blendv(dx_vec_copy_neg_elu, value,
@@ -3490,7 +3489,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (const auto task_id : c10::irange(begin, end)) {
-            fbgemm::Quantize<underlying_t, false /*LEGACY*/>(
+            fbgemm::Quantize<underlying_t>(
                 rd, /*src=*/
                 qd, /*dst=*/
                 rtensor.numel(), /*len*/
@@ -3511,7 +3510,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(qtensor, rtensor);
         const auto* qd =
-            reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
+            reinterpret_cast<const underlying_t*>(qtensor.const_data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams{};
         qparams.scale = scale;
         qparams.zero_point = zero_point;

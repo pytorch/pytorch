@@ -30,6 +30,15 @@ def stash_graph_created_object(obj: Any) -> Any:
     return obj
 
 
+CURRENT_STREAM_INDEX = 0
+
+
+def set_external_object_by_index(index: int, value: Any) -> None:
+    """Update an entry in the external object registry at runtime."""
+    keep_alive.append(value)
+    index_to_external_object_weakref[index] = weakref.ref(value)
+
+
 def get_external_object_by_index(index: int) -> Any:
     assert index in index_to_external_object_weakref, (
         "Index not registered in index_to_user_object_weakref"
@@ -94,3 +103,14 @@ def register_user_object(value: Any, source: Source) -> int:
             from_exc=e,
         )
     return index
+
+
+# Register a callback so invoke_leaf_function can retrieve nn.Module instances at runtime.
+# We use a callback pattern instead of having invoke_leaf_function import get_external_object_by_index
+# directly, because higher-order ops should not depend on dynamo (dynamo depends on them, not vice versa).
+from torch._higher_order_ops.invoke_leaf_function import (
+    set_leaf_function_module_retriever,
+)
+
+
+set_leaf_function_module_retriever(get_external_object_by_index)

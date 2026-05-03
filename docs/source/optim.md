@@ -149,6 +149,18 @@ for input, target in dataset:
     Optimizer.zero_grad
 ```
 
+## Module-level hooks
+
+```{eval-rst}
+.. currentmodule:: torch.optim.optimizer
+
+.. autofunction:: register_optimizer_step_post_hook
+
+.. autofunction:: register_optimizer_step_pre_hook
+
+.. currentmodule:: torch.optim
+```
+
 ## Algorithms
 
 ```{eval-rst}
@@ -547,10 +559,13 @@ Decay is a parameter between 0 and 1 that controls how fast the averaged paramet
 {func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
 ```{math}
-W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
+W_0^{\text{EMA}} = W_0^{\text{model}}
 ```
 
-where alpha is the EMA decay.
+```{math}
+W_{t+1}^{\text{EMA}} = \text{decay} \times W_t^{\text{EMA}} + (1 - \text{decay}) \times W_{t+1}^{\text{model}}
+```
+ where `W_t^{\text{EMA}}` is the EMA parameter at step `t`, `W_t^{\text{model}}` is the model parameter at step `t`, and decay is the EMA decay rate (default: 0.999).
 
 Here the model `model` can be an arbitrary {class}`torch.nn.Module` object. `averaged_model`
 will keep track of the running averages of the parameters of the `model`. To update these
@@ -682,6 +697,9 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 
     swa_utils.AveragedModel
     swa_utils.SWALR
+    swa_utils.get_ema_avg_fn
+    swa_utils.get_swa_avg_fn
+    swa_utils.get_swa_multi_avg_fn
 
 
 .. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn

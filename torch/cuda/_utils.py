@@ -4,6 +4,17 @@ from typing import Any
 
 import torch
 
+
+try:
+    from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        runtime as _cuda_bindings_runtime,
+    )
+
+    _HAS_CUDA_BINDINGS = True
+except ImportError:
+    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _HAS_CUDA_BINDINGS = False
+
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
@@ -59,6 +70,35 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
+def _check_cuda_bindings(result: Any) -> Any:
+    """Check a cuda.bindings (cuda-python) call result for errors.
+
+    All cuda.bindings runtime calls return ``(error, *outputs)``.  This
+    helper unpacks the tuple, raises on non-success, and returns the
+    outputs (``None`` for zero outputs, scalar for one, tuple otherwise).
+    """
+    if not _HAS_CUDA_BINDINGS:
+        raise RuntimeError("cuda.bindings is not available")
+    err, *out = result
+    if (
+        err
+        != _cuda_bindings_runtime.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
+    ):
+        _, err_str = (
+            _cuda_bindings_runtime.cudaGetErrorString(  # pyrefly: ignore[missing-attribute]
+                err
+            )
+        )
+        if isinstance(err_str, bytes):
+            err_str = err_str.decode()
+        raise RuntimeError(f"CUDA error: {err} ({err_str})")
+    if len(out) == 0:
+        return None
+    if len(out) == 1:
+        return out[0]
+    return out
+
+
 def _get_hiprtc_library() -> ctypes.CDLL:
     try:
         # pyrefly: ignore [import-error, missing-import]
@@ -79,8 +119,8 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     lib.nvrtcCreateProgram = lib.hiprtcCreateProgram  # type: ignore[attr-defined]
     lib.nvrtcDestroyProgram = lib.hiprtcDestroyProgram  # type: ignore[attr-defined]
     lib.nvrtcCompileProgram = lib.hiprtcCompileProgram  # type: ignore[attr-defined]
-    lib.nvrtcGetPTXSize = lib.hiprtcGetCodeSize  # type: ignore[attr-defined]
-    lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
+    lib.nvrtcGetCUBINSize = lib.hiprtcGetCodeSize  # type: ignore[attr-defined]
+    lib.nvrtcGetCUBIN = lib.hiprtcGetCode  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
     lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
@@ -263,11 +303,11 @@ def _nvrtc_compile(
         libnvrtc.nvrtcGetProgramLog(prog, log)
         raise RuntimeError(f"Kernel compilation failed:\n{log.value.decode()}")
 
-    # Get PTX
-    ptx_size = ctypes.c_size_t()
-    check_nvrtc(libnvrtc.nvrtcGetPTXSize(prog, ctypes.byref(ptx_size)))
-    ptx = ctypes.create_string_buffer(ptx_size.value)
-    check_nvrtc(libnvrtc.nvrtcGetPTX(prog, ptx))
+    # Get binary
+    binary_size = ctypes.c_size_t()
+    check_nvrtc(libnvrtc.nvrtcGetCUBINSize(prog, ctypes.byref(binary_size)))
+    binary = ctypes.create_string_buffer(binary_size.value)
+    check_nvrtc(libnvrtc.nvrtcGetCUBIN(prog, binary))
 
     # Get mangled name
     c_mangled_name = ctypes.c_char_p()
@@ -281,11 +321,9 @@ def _nvrtc_compile(
 
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
-    # For HIP, hipRTC generates raw CO binaries instead of PTX,
-    # and for some reason, ".value" causes the string to be truncated,
+    # For some reason, ".value" causes the string to be truncated,
     # likely due to the presence of '\0' in the string. So we use .raw instead.
-    ptx_bytes = ptx.raw if torch.version.hip else ptx.value
-    return ptx_bytes, mangled_name
+    return binary.raw, mangled_name
 
 
 class _CudaModule:

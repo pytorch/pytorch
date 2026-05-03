@@ -319,7 +319,7 @@ def _reshard(
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            # We don't run a even queue for freeing under torch compile atm
+            # We don't run an event queue for freeing under torch compile atm
             # But maybe we need to? TODO(voz): Look into this
             free_event = state._device_handle.Event()
             free_event.record()
@@ -600,7 +600,7 @@ def _root_pre_forward(
             args_tuple, kwargs_tuple = _to_kwargs(
                 args, kwargs, state.compute_device, False
             )
-        args = args_tuple[0] if args_tuple else tuple()
+        args = args_tuple[0] if args_tuple else ()
         kwargs = kwargs_tuple[0] if kwargs_tuple else {}
 
         return _root_cast_forward_input(state, module, args, kwargs)
@@ -1135,7 +1135,7 @@ def _catch_all_reshard(
     post-backward hook. This can happen when a module's output is used in the
     forward pass, meaning that its pre-backward hook runs (unsharding the
     parameter), but the post-backward hook does not run because the output was
-    not jused in the loss computation corresponding to this backward pass.
+    not used in the loss computation corresponding to this backward pass.
     """
     # Wrap with a try-except to provide a more informative traceback if an
     # error is raised

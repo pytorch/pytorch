@@ -27,6 +27,23 @@ endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
+# When built via scikit-build-core, Python_EXECUTABLE is already set.
+# For standalone cmake invocations, find it via find_package.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# Forward environment variables to CMake variables, replicating the behavior
+# previously handled by setup.py / tools/setup_helpers/cmake.py.
+# When built via setup.py, these are already set as -D flags; the module
+# skips variables that are already defined, so it is safe to include
+# unconditionally.
+include(cmake/EnvVarForwarding.cmake)
+
+# Pre-build steps: submodule init, NCCL checkout.
+# When built via setup.py, these are handled by build_deps() in setup.py;
+# the module checks for existing state, so it is safe to include
+# unconditionally.
+include(cmake/PreBuildSteps.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -40,12 +57,12 @@ string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
   message(
     WARNING
-      "C++ standard version definition detected in environment variable."
-      "PyTorch requires -std=c++17. Please remove -std=c++ settings in your environment."
+      "C++ standard version definition detected in environment variable. "
+      "PyTorch requires -std=c++20. Please remove -std=c++ settings in your environment."
   )
 endif()
 set(CMAKE_CXX_STANDARD
-    17
+    20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
@@ -56,11 +73,11 @@ set(CMAKE_C_STANDARD
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.3+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+# --- [ Check that minimal gcc version is 11.3+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   message(
     FATAL_ERROR
-      "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+      "GCC-11.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
 
@@ -232,6 +249,7 @@ option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
                        ON "BUILD_TEST" OFF)
+option(USE_RELATIVE_PATHS "Use relative paths in generated files for ccache friendliness" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
@@ -246,9 +264,11 @@ else()
   set(_USE_CUDA_EXPLICITLY_SET FALSE)
 endif()
 
-option(USE_CUDA "Use CUDA" ON)
+# CUDA is incompatible with TSAN
+cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 option(USE_XPU "Use XPU" ON)
+option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
@@ -291,7 +311,7 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
-                       OFF "USE_CUDA" OFF)
+                       ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
@@ -373,7 +393,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
        "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(
-  USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+  USE_CCACHE "Attempt using [S]CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(
   DEBUG_CUDA
@@ -405,6 +425,11 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
+  # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
+  # See https://github.com/pytorch/pytorch/issues/174344
+  if(CPU_AARCH64)
+    set(MI_NO_OPT_ARCH ON)
+  endif()
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
   # https://github.com/pytorch/pytorch/issues/138994
@@ -415,20 +440,23 @@ endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
+  find_program(SCCACHE_EXECUTABLE sccache)
   if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "C compiler launcher")
-    set(CMAKE_CXX_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CXX compiler launcher")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CUDA compiler launcher")
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${CCACHE_PROGRAM}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
+  elseif(SCCACHE_EXECUTABLE)
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${SCCACHE_EXECUTABLE}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
   else()
     message(
       STATUS
-        "Could not find ccache. Consider installing ccache to speed up compilation."
+        "Could not find neither ccache nor sccache. Consider installing ccache to speed up compilation."
     )
   endif()
 endif()
@@ -582,7 +610,7 @@ if(MSVC)
   # https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -805,6 +833,7 @@ if(INTERN_BUILD_MOBILE)
 endif()
 
 # ---[ Version numbers for generated libraries
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS version.txt)
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
 string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
@@ -816,16 +845,10 @@ if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
 endif()
 set(TORCH_BUILD_VERSION
     "${TORCH_DEFAULT_VERSION}"
-    CACHE STRING "Torch build version")
+    CACHE STRING "Torch build version" FORCE)
 if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION
       "$ENV{PYTORCH_BUILD_VERSION}"
-      CACHE STRING "Torch build version" FORCE)
-endif()
-if(NOT TORCH_BUILD_VERSION)
-  # An empty string was specified so force version to the default
-  set(TORCH_BUILD_VERSION
-      "${TORCH_DEFAULT_VERSION}"
       CACHE STRING "Torch build version" FORCE)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
@@ -940,8 +963,8 @@ cmake_dependent_option(
   OFF)
 
 
-IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Setting USE_MSLK for gfx942 to ON by default, doing ROCM build")
+IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
+  message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
   set(USE_MSLK_DEFAULT ON)
 elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
   message(STATUS "Setting USE_MSLK to ON by default , doing CUDA build for SM100a")
@@ -1178,12 +1201,22 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   endif()
+  # aarch64 C++ stack unwinding uses frame-pointer chain walking, so frame
+  # pointers must be present in all build types.  The cost is negligible on
+  # aarch64 (31 GPRs vs x86-64's 16, so dedicating x29 rarely spills).
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    append_cxx_flag_if_supported("-fno-omit-frame-pointer" CMAKE_CXX_FLAGS)
+  endif()
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+  endif()
+  # needed for compat with newer versions of clang that use C++20 mangling rules
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
+    append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.
@@ -1222,10 +1255,11 @@ if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_OBJCXX_FLAGS " --coverage -fprofile-abs-path")
   elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
-    string(APPEND CMAKE_CXX_FLAGS
-           " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
       ERROR
@@ -1446,6 +1480,12 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# File mirroring: copy source files into torchgen/packaged/, vendored
+# inductor templates, and symlink-replacement copies.  Previously handled
+# by setup.py; now consolidated here for both scikit-build-core and
+# setuptools builds.
+include(cmake/FileMirroring.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()

@@ -654,7 +654,7 @@ class RNN(RNNBase):
         super().__init__(mode, *args, **kwargs)
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
@@ -663,7 +663,7 @@ class RNN(RNNBase):
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
@@ -671,7 +671,7 @@ class RNN(RNNBase):
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         """
         Runs the forward pass.
         """
@@ -740,6 +740,7 @@ class RNN(RNNBase):
             raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
             if self.mode == "RNN_TANH":
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_tanh(
                     input,
                     hx,
@@ -752,6 +753,7 @@ class RNN(RNNBase):
                     self.batch_first,
                 )
             else:
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_relu(
                     input,
                     hx,
@@ -765,6 +767,7 @@ class RNN(RNNBase):
                 )
         else:
             if self.mode == "RNN_TANH":
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_tanh(
                     input,
                     batch_sizes,
@@ -777,6 +780,7 @@ class RNN(RNNBase):
                     self.bidirectional,
                 )
             else:
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_relu(
                     input,
                     batch_sizes,
@@ -1021,6 +1025,7 @@ class LSTM(RNNBase):
 
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
+    # pyrefly: ignore [bad-override]
     def check_forward_args(
         self,
         input: Tensor,
@@ -1053,25 +1058,25 @@ class LSTM(RNNBase):
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
         hx: tuple[Tensor, Tensor] | None = None,
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         pass
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
         hx: tuple[Tensor, Tensor] | None = None,
-    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
+    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         self._update_flat_weights()
 
         orig_input = input
@@ -1153,6 +1158,7 @@ class LSTM(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.lstm(
                 input,
                 hx,
@@ -1165,6 +1171,7 @@ class LSTM(RNNBase):
                 self.batch_first,
             )
         else:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.lstm(
                 input,
                 batch_sizes,
@@ -1349,24 +1356,24 @@ class GRU(RNNBase):
         super().__init__("GRU", *args, **kwargs)
 
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
         hx: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:  # noqa: F811
+    ) -> tuple[Tensor, Tensor]:
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
         hx: Tensor | None = None,
-    ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
+    ) -> tuple[PackedSequence, Tensor]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         self._update_flat_weights()
 
         orig_input = input
@@ -1427,6 +1434,7 @@ class GRU(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
                 input,
                 hx,
@@ -1439,6 +1447,7 @@ class GRU(RNNBase):
                 self.batch_first,
             )
         else:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
                 input,
                 batch_sizes,

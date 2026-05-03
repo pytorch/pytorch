@@ -599,12 +599,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
+            # pyrefly: ignore[bad-argument-type]
             decompositions=python_decomp_table,
             trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
+        assert isinstance(gm, torch.fx.GraphModule)  # noqa: S101
         gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they
@@ -884,6 +886,16 @@ def _get_updated_module_call_graph(
         **graph_signature.inputs_to_parameters,
         **graph_signature.inputs_to_buffers,
     }
+    old_graph_non_user_inputs = {
+        **old_graph_params_buffers,
+        **old_graph_signature.inputs_to_lifted_tensor_constants,
+        **old_graph_signature.inputs_to_lifted_custom_objs,
+    }
+    new_graph_non_user_inputs = {
+        **new_graph_params_buffers,
+        **graph_signature.inputs_to_lifted_tensor_constants,
+        **graph_signature.inputs_to_lifted_custom_objs,
+    }
 
     # use node-level provenance metadata to create a map
     # from old node names to new node names
@@ -895,7 +907,7 @@ def _get_updated_module_call_graph(
     ]
     old_user_input_names = list(
         filter(
-            lambda x: x not in old_graph_params_buffers
+            lambda x: x not in old_graph_non_user_inputs
             and x not in old_graph_signature.input_tokens,
             old_user_input_names,
         )
@@ -908,12 +920,12 @@ def _get_updated_module_call_graph(
         if history := node.meta.get("from_node", []):
             provenance[history[-1].name] = node.name
 
-        # For params and buffers, we might have applied parameterizaiton rule
+        # For params and buffers, we might have applied parameterization rule
         # so that the names might have changed. But for user inputs, we know we
         # must preserve the old name.
         elif node.op == "placeholder":
             if not (
-                node.target in new_graph_params_buffers
+                node.target in new_graph_non_user_inputs
                 or node.target in graph_signature.input_tokens
             ):
                 if node.target in new_user_input_names:

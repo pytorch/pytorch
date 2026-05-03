@@ -5,8 +5,16 @@ import unittest
 
 import torch
 from functorch.experimental.control_flow import map
-from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_attention
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+)
+from torch.nn.attention.flex_attention import (
+    _create_empty_block_mask,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing import make_tensor
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
@@ -77,6 +85,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "autograd_function_apply",
     "run_and_save_rng_state",
     "run_with_rng_state",
+    "run_dtensor_rng_op",
     "graphsafe_run_with_rng_state",
     "out_dtype",
     "trace_wrapped",
@@ -105,6 +114,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "aoti_call_delegate",
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
+    "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
 ]
 
 torch.library.define(
@@ -193,6 +203,99 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
     yield SampleInput(q, k, v, score_mod, block_mask)
 
 
+def sample_inputs_flex_attention_backward(
+    opinfo, device, dtype, requires_grad, **kwargs
+):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+
+    def score_mod(score, b, h, m, n):
+        return score
+
+    def mask_mod(b, h, m, n):
+        return m >= n
+
+    q, k, v = (make_arg(2, 2, 128, 16, low=0.1, high=2) for _ in range(3))
+    block_mask = create_block_mask(mask_mod, B=2, H=2, Q_LEN=128, KV_LEN=128, device=device)
+    scale = 1.0 / q.size(-1) ** 0.5
+    out, logsumexp, _ = flex_attention_hop(
+        q, k, v, score_mod, block_mask.as_tuple(), scale, {},
+    )
+    yield SampleInput(
+        q,
+        args=(
+            k, v, out.detach(), logsumexp.detach(), torch.rand_like(out), None,
+            score_mod, None, block_mask.as_tuple(),
+            scale, {}, (), (),
+        ),
+    )
+
+
+def sample_inputs_flex_attention_backward_explicit_buffers(
+    opinfo, device, dtype, requires_grad, **kwargs
+):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    mask_offset = torch.full((), 128, device=device, dtype=torch.int32)
+
+    def score_mod(score, b, h, m, n):
+        return score
+
+    def mask_mod(b, h, m, n):
+        return m + mask_offset >= n
+
+    q, k, v = (make_arg(2, 2, 128, 16, low=0.1, high=2) for _ in range(3))
+    block_mask = create_block_mask(mask_mod, B=2, H=2, Q_LEN=128, KV_LEN=128, device=device)
+    scale = 1.0 / q.size(-1) ** 0.5
+    out, logsumexp, _ = flex_attention_hop(
+        q, k, v, score_mod, block_mask.as_tuple(), scale, {},
+    )
+    yield SampleInput(
+        q,
+        args=(
+            k, v, out.detach(), logsumexp.detach(), torch.rand_like(out), None,
+            score_mod, None, block_mask.as_tuple(),
+            scale, {}, (), (),
+        ),
+    )
+
+
+def simple_flex_attention_backward(
+    query,
+    key,
+    value,
+    out,
+    logsumexp,
+    grad_out,
+    grad_logsumexp,
+    fw_graph,
+    joint_graph,
+    block_mask,
+    scale,
+    kernel_options,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+):
+    return torch.ops.higher_order.flex_attention_backward(
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+
 def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -242,7 +345,8 @@ def simple_local_map_hop(inp1, inp2):
 
     gm = torch.fx.symbolic_trace(body_gm)
 
-    assert torch.distributed.is_available()
+    if not torch.distributed.is_available():
+        raise AssertionError("Expected torch.distributed to be available")
     from torch.distributed.tensor.placement_types import Replicate
 
     gm.meta["local_map_kwargs"] = {
@@ -287,6 +391,27 @@ def simple_invoke_quant_packed(x):
         return (torch.sin(x),)
 
     return invoke_quant_packed(fn, x)[0] * 2.0
+
+
+def sample_inputs_inline_asm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+
+def simple_inline_asm(x):
+    if torch.version.hip:
+        return inline_asm_elementwise(
+            x,
+            asm_str="v_mov_b32_e32 $0, $1",
+            constraints="=v, v",
+            dtype=torch.float32,
+        )
+
+    return inline_asm_elementwise(
+        x, asm_str="mov.f32 $0, $1;", constraints="=f,f", dtype=torch.float32
+    )
 
 
 hop_db = [
@@ -473,14 +598,39 @@ hop_db = [
     OpInfo(
         name="flex_attention_backward",
         variant_test_name="simple",
-        op=flex_attention,
-        sample_inputs_func=sample_inputs_flex_attention,
+        op=simple_flex_attention_backward,
+        sample_inputs_func=sample_inputs_flex_attention_backward,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
+        decorators=[onlyCUDA],
+    ),
+    OpInfo(
+        name="flex_attention_backward",
+        variant_test_name="explicit_buffers",
+        op=simple_flex_attention_backward,
+        sample_inputs_func=sample_inputs_flex_attention_backward_explicit_buffers,
+        dtypes=custom_types(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        supports_gradgrad=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
             DecorateInfo(
@@ -516,5 +666,19 @@ hop_db = [
                 not torch.distributed.is_available(), "requires distributed build"
             ),
         ],
+    ),
+    OpInfo(
+        name="inline_asm_elementwise",
+        variant_test_name="simple",
+        op=simple_inline_asm,
+        sample_inputs_func=sample_inputs_inline_asm,
+        dtypes=custom_types(torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        decorators=[onlyCUDA],
     ),
 ]

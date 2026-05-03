@@ -70,7 +70,6 @@ struct SDPALogicalParams {
     TORCH_INTERNAL_ASSERT(
         query_.scalar_type() == attention_.scalar_type(),
         "scaled_dot_product_attention_xpu: query and attention tensors should have the same data type.");
-    const dims scalar_shape = {1};
 
     at::Tensor reshaped_query = query_;
     at::Tensor reshaped_key = key_;
@@ -125,17 +124,17 @@ struct SDPALogicalParams {
     LOGIC_TENSOR_DESC(key, dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
-        to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-        scalar_shape,
+        logical_tensor::data_type::f32,
+        0,
         logical_tensor::layout_type::strided,
-        logical_tensor::property_type::constant};
+        logical_tensor::property_type::host_scalar};
     if (is_causal) {
       neg_inf = {
           static_cast<size_t>(TensorID::neg_inf),
-          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-          scalar_shape,
+          logical_tensor::data_type::f32,
+          0,
           logical_tensor::layout_type::strided,
-          logical_tensor::property_type::constant};
+          logical_tensor::property_type::host_scalar};
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -431,7 +430,6 @@ struct SDPABackwardLogicalParams {
     TORCH_INTERNAL_ASSERT(
         logsumexp_.defined() && logsumexp_.scalar_type() == at::kFloat,
         "scaled_dot_product_attention_backward_xpu: Expected logsumexp to be defined and have FP32 data type");
-    const dims scalar_shape = {1};
 
     at::Tensor reshaped_grad_out = grad_out_;
     at::Tensor reshaped_query = query_;
@@ -479,17 +477,17 @@ struct SDPABackwardLogicalParams {
     LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
-        to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-        scalar_shape,
+        logical_tensor::data_type::f32,
+        0,
         logical_tensor::layout_type::strided,
-        logical_tensor::property_type::constant};
+        logical_tensor::property_type::host_scalar};
     if (is_causal) {
       neg_inf = {
           static_cast<size_t>(TensorID::neg_inf),
-          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-          scalar_shape,
+          logical_tensor::data_type::f32,
+          0,
           logical_tensor::layout_type::strided,
-          logical_tensor::property_type::constant};
+          logical_tensor::property_type::host_scalar};
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -782,6 +780,20 @@ partition& find_or_create_backward_graph_partition(
 } // namespace
 
 namespace at::native::onednn {
+
+// Ensure tensor satisfies OneDNN Block 2D Copy 64-byte base address alignment
+// requirement.
+static at::Tensor ensure_alignment_for_sdpa(const at::Tensor& t) {
+  if (is_64_bytes_aligned(t)) {
+    return t;
+  }
+  at::Tensor out = t.contiguous();
+  if (!is_64_bytes_aligned(out)) {
+    out = out.clone();
+  }
+  return out;
+}
+
 void sdpa(
     int batch_size,
     int seq_len_q,
@@ -802,8 +814,18 @@ void sdpa(
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
+  // Ensure query, key, value, and attn_mask satisfy OneDNN Block 2D Copy
+  // alignment requirements (64-byte base address). Attention and logsumexp are
+  // guaranteed to be aligned because they are newly allocated.
+  const Tensor query_aligned = ensure_alignment_for_sdpa(query);
+  const Tensor key_aligned = ensure_alignment_for_sdpa(key);
+  const Tensor value_aligned = ensure_alignment_for_sdpa(value);
+  if (attn_mask.has_value()) {
+    attn_mask = ensure_alignment_for_sdpa(*attn_mask);
+  }
+
   const auto get_tril_mask = [&]() {
-    auto opts = query.options();
+    auto opts = query_aligned.options();
     auto bool_tril =
         at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
     return at::where(
@@ -816,7 +838,7 @@ void sdpa(
   // and the reference implementation is worse than aten math + explicit causal
   // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
-  if (is_causal && query.dtype() == at::kFloat) {
+  if (is_causal && query_aligned.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
     is_causal = false;
   }
@@ -825,9 +847,9 @@ void sdpa(
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
   const sdpa_forward::SDPALogicalParams logical_params(
-      query,
-      key,
-      value,
+      query_aligned,
+      key_aligned,
+      value_aligned,
       attn_mask,
       attention,
       logsumexp,
@@ -846,18 +868,6 @@ void sdpa(
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
-  Tensor softmax_scale1 = at::full(
-      {},
-      softmax_scale,
-      query.options().dtype(at::toOpMathType(query.scalar_type())));
-  std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full(
-        {},
-        -std::numeric_limits<float>::infinity(),
-        query.options().dtype(at::toOpMathType(query.scalar_type())));
-  }
-
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, attention.data_ptr()},
   };
@@ -872,16 +882,19 @@ void sdpa(
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
 
-  ADD_INPUT(query);
-  ADD_INPUT(key);
-  ADD_INPUT(softmax_scale1);
-  if (neg_inf.has_value()) {
-    ADD_INPUT((*neg_inf));
+  ADD_INPUT(query_aligned);
+  ADD_INPUT(key_aligned);
+  inputs.emplace_back(
+      dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
+  if (is_causal) {
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], const_cast<float*>(&neg_inf_val)));
   }
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));
   }
-  ADD_INPUT(value);
+  ADD_INPUT(value_aligned);
 #undef ADD_INPUT
 
   compiled_partition->execute(strm, inputs, outputs);
@@ -903,15 +916,27 @@ void sdpa_backward(
     const Tensor& logsumexp,
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
-    double scale,
+    float softmax_scale,
     Tensor& grad_query,
     Tensor& grad_key,
     Tensor& grad_value) {
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
+  // Ensure grad_out, query, key, value satisfy OneDNN Block 2D Copy alignment
+  // requirements (64-byte base address). Attention, logsumexp, grad_query,
+  // grad_key, grad_value are guaranteed to be aligned because they are newly
+  // allocated.
+  const Tensor grad_out_aligned = ensure_alignment_for_sdpa(grad_out);
+  const Tensor query_aligned = ensure_alignment_for_sdpa(query);
+  const Tensor key_aligned = ensure_alignment_for_sdpa(key);
+  const Tensor value_aligned = ensure_alignment_for_sdpa(value);
+  if (attn_mask.has_value()) {
+    attn_mask = ensure_alignment_for_sdpa(*attn_mask);
+  }
+
   const auto get_tril_mask = [&]() {
-    auto opts = query.options();
+    auto opts = query_aligned.options();
     auto bool_tril =
         at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
     return at::where(
@@ -924,7 +949,7 @@ void sdpa_backward(
   // and the reference implementation is worse than aten math + explicit causal
   // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
-  if (is_causal && query.dtype() == at::kFloat) {
+  if (is_causal && query_aligned.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
     is_causal = false;
   }
@@ -933,10 +958,10 @@ void sdpa_backward(
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
   const sdpa_backward::SDPABackwardLogicalParams logical_params(
-      grad_out,
-      query,
-      key,
-      value,
+      grad_out_aligned,
+      query_aligned,
+      key_aligned,
+      value_aligned,
       out,
       logsumexp,
       attn_mask,
@@ -957,16 +982,6 @@ void sdpa_backward(
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
-  Tensor softmax_scale = at::full(
-      {}, scale, query.options().dtype(at::toOpMathType(query.scalar_type())));
-  std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full(
-        {},
-        -std::numeric_limits<float>::infinity(),
-        query.options().dtype(at::toOpMathType(query.scalar_type())));
-  }
-
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, grad_query.data_ptr()},
       {l_outputs[1], eng, grad_key.data_ptr()},
@@ -980,15 +995,18 @@ void sdpa_backward(
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
 
-  ADD_INPUT(grad_out);
-  ADD_INPUT(query);
-  ADD_INPUT(key);
-  ADD_INPUT(value);
+  ADD_INPUT(grad_out_aligned);
+  ADD_INPUT(query_aligned);
+  ADD_INPUT(key_aligned);
+  ADD_INPUT(value_aligned);
   ADD_INPUT(out);
   ADD_INPUT(logsumexp);
-  ADD_INPUT(softmax_scale);
-  if (neg_inf.has_value()) {
-    ADD_INPUT((*neg_inf));
+  inputs.emplace_back(
+      dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
+  if (is_causal) {
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], const_cast<float*>(&neg_inf_val)));
   }
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));

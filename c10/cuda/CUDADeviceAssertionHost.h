@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#ifdef USE_CUDA
+#if (defined(USE_CUDA) || defined(USE_ROCM)) && !defined(TORCH_USE_CUDA_DSA)
 #define TORCH_USE_CUDA_DSA
 #endif
 

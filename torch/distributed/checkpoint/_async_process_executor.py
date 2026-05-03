@@ -85,12 +85,10 @@ class _ProcessGroupInitInfo:
             if self.use_prefix_store:
                 master_addr = os.environ.get("MASTER_ADDR")
                 master_port = os.environ.get("MASTER_PORT")
-                assert master_addr is not None, (
-                    "DCP needs MASTER_ADDR to use prefix store"
-                )
-                assert master_port is not None, (
-                    "DCP needs MASTER_PORT to use prefix store"
-                )
+                if master_addr is None:
+                    raise AssertionError("DCP needs MASTER_ADDR to use prefix store")
+                if master_port is None:
+                    raise AssertionError("DCP needs MASTER_PORT to use prefix store")
                 master_port = int(master_port)
             else:
                 master_addr = os.environ.get("MASTER_ADDR")
@@ -277,7 +275,7 @@ class _AsyncCheckpointProcess:
                 # GC can optionally be called manually after each checkpoint
                 gc.disable()
                 logger.info("Disabled automatic garbage collection")
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             logger.error(
                 f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
             )
@@ -339,7 +337,7 @@ class _AsyncCheckpointProcess:
                             )
                             gc.freeze()
                     first_request = False
-                except BaseException as e:  # noqa: B036
+                except BaseException as e:
                     logger.error(
                         f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
                     )

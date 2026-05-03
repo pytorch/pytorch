@@ -3,7 +3,7 @@ import datetime
 import functools
 import unittest
 from collections import Counter
-from typing import Optional
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -168,7 +168,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def func(x):
             y = x * x
-            y = dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            dist.all_reduce(y, op=dist.ReduceOp.SUM)
             x = torch.nn.functional.silu(x)
             return x * y
 
@@ -282,7 +282,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         def all_reduce_non_functional_eager(x):
             y = x * x
             work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
-            assert isinstance(work, torch.distributed.Work)
+            if not isinstance(work, torch.distributed.Work):
+                raise AssertionError(
+                    f"Expected torch.distributed.Work, got {type(work)}"
+                )
             return work, y
 
         def all_reduce_wait(work, y):  # potentially compiled
@@ -719,7 +722,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
         ):
             lib.define(
-                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"
             )
             lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
             lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
@@ -1022,11 +1025,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_list(self):
@@ -1048,8 +1056,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
@@ -1074,11 +1086,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
@@ -1100,11 +1117,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
 
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @parametrize(
         "pg_mode",
@@ -1141,7 +1163,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         elif pg_mode == "kwargs_none":
             kwargs["group"] = None
         else:
-            assert pg_mode == "unspecified"
+            if pg_mode != "unspecified":
+                raise AssertionError(f"Unexpected pg_mode: {pg_mode}")
 
         inputs_compiled = torch.ones(2, device=self.device)
         inputs_eager = torch.ones(2, device=self.device)
@@ -1149,10 +1172,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(inputs_compiled, *args, **kwargs)
         func(inputs_eager, *args, **kwargs)
 
-        assert counter.frame_count == 1
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
         # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
-        assert counter.op_count == 3
-        assert same(inputs_compiled, inputs_eager)
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(inputs_compiled, inputs_eager):
+            raise AssertionError("Expected inputs_compiled to match inputs_eager")
 
     def test_dynamo_rewrite_dist_all_to_all_single(self):
         def func(output, input, pg):
@@ -1169,8 +1197,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(output_compiled, input_compiled, GroupMember.WORLD)
         func(output_eager, input_eager, GroupMember.WORLD)
 
-        assert counter.frame_count == 1
-        assert same(output_compiled, output_eager)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(output_compiled, output_eager):
+            raise AssertionError("Expected output_compiled to match output_eager")
 
     @parametrize(
         "reduce_op",
@@ -1225,7 +1257,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             elif source == "group.WORLD":
                 group = torch.distributed.group.WORLD
             else:
-                assert source == "_get_default_group"
+                if source != "_get_default_group":
+                    raise AssertionError(f"Unexpected source: {source}")
                 group = torch.distributed.distributed_c10d._get_default_group()
 
             torch.distributed.all_reduce(
@@ -1266,9 +1299,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert counter.op_count == 3
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 3:
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
@@ -1288,9 +1326,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 0
-        assert counter.op_count == 0
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 0:
+            raise AssertionError(
+                f"Expected frame_count == 0, got {counter.frame_count}"
+            )
+        if counter.op_count != 0:
+            raise AssertionError(f"Expected op_count == 0, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
@@ -1304,9 +1347,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter, fullgraph=True)
         outputs = compiled(inputs, pg=GroupMember.WORLD)
         correct_outputs = func(inputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert counter.op_count == 1
-        assert same(outputs, correct_outputs)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count == 1, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
@@ -1341,9 +1389,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
-        assert counter.op_count == 3  # It generates 2 getattr to unpack the array
-        assert same(out, correct)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if counter.op_count != 3:  # It generates 2 getattr to unpack the array
+            raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(out, correct):
+            raise AssertionError("Expected out to match correct")
 
     def test_backwards(self):
         """
@@ -1419,7 +1472,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1466,7 +1520,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1493,7 +1548,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1538,10 +1593,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
         # TODO make the test case more interesting and validate the actual desired behavior
-        assert node_stats is not None
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
@@ -1551,7 +1608,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1600,7 +1657,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                     "runtime_estimations_mms_benchmark": True,
                 }
@@ -1620,12 +1677,55 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_not("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_all_gather_bucket_copy_cat_fusion(self):
+        """Bucketed all_gather merge uses copy_(cat(...)) which inductor fuses
+        into 1 Triton kernel instead of N kernels from _foreach_copy_."""
+
+        def func(ag_0, ag_1, ag_2, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            return (
+                torch.ops.c10d_functional.wait_tensor(ag_0_out),
+                torch.ops.c10d_functional.wait_tensor(ag_1_out),
+                torch.ops.c10d_functional.wait_tensor(ag_2_out),
+            )
+
+        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # Bucketed merge should produce 1 copy kernel (fused copy_(cat(...))),
+        # not 3 separate kernels from _foreach_copy_.
+        num_triton_kernels = code.count("def triton_")
+        self.assertEqual(
+            num_triton_kernels,
+            1,
+            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
@@ -1682,7 +1782,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1724,7 +1824,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             with torch._inductor.config.patch(
                 {
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                 }
             ):
@@ -1746,11 +1847,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
             out = compiled(*inputs, **self.get_world_trs())
             correct = f(*inputs, **self.get_world_trs())
-            assert same(out, correct), f"{out} va {correct}"
+            if not same(out, correct):
+                raise AssertionError(
+                    f"Expected out to match correct: {out} vs {correct}"
+                )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all"])
+    @parametrize(
+        "bucket_mode", ["all"]
+    )  # "all" is just a placeholder, there is only one bucketmode
     def test_all_reduce_bucket(self, bucket_mode):
         def func(x, w, ar_0, ar_1, tag, ranks, group_size):
             y = torch.mm(x, w)
@@ -1801,11 +1907,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(*inputs, **self.get_world_trs())
         correct = f(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    @parametrize("bucket_mode", ["custom_ops_multidtype"])
     def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1838,7 +1945,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": bucket_mode,
+                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_bucket_mode": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1855,14 +1963,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
         out = compiled(*inputs, **self.get_world_trs())
         _, y_ag0, y_ag1 = out
-        assert y_ag0.dtype == ag_0.dtype
-        assert y_ag1.dtype == ag_1.dtype
+        if y_ag0.dtype != ag_0.dtype:
+            raise AssertionError(
+                f"Expected y_ag0.dtype == {ag_0.dtype}, got {y_ag0.dtype}"
+            )
+        if y_ag1.dtype != ag_1.dtype:
+            raise AssertionError(
+                f"Expected y_ag1.dtype == {ag_1.dtype}, got {y_ag1.dtype}"
+            )
 
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
@@ -1951,7 +2066,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1962,11 +2077,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     if _get_mm_like_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
-                    assert cache.lookup(cache_key) is not None
+                    if cache.lookup(cache_key) is None:
+                        raise AssertionError(
+                            f"Expected cache.lookup({cache_key}) to not be None"
+                        )
 
             if torch._inductor.config_comms.runtime_estimations_align_across_all_distributed_ranks:
                 for snode in snodes:
-                    assert snode.override_estimated_runtime is not None
+                    if snode.override_estimated_runtime is None:
+                        raise AssertionError(
+                            "Expected snode.override_estimated_runtime to not be None"
+                        )
             nonlocal node_stats
             (
                 reordered_snodes,
@@ -1977,9 +2098,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_fx": "all",
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
@@ -2041,8 +2164,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
-        assert node_stats is not None
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 4)
 
@@ -2072,7 +2197,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -2108,10 +2233,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
+        if not same(out, correct):
+            raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
         # TODO make the test case more interesting and validate the actual desired behavior
-        assert node_stats is not None
+        if node_stats is None:
+            raise AssertionError("Expected node_stats to not be None")
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 2)
         for stats in node_stats.values():
@@ -2193,6 +2320,236 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_node_order(self):
+        # Reproduces the cross-rank sync bug: when ranks have topologically
+        # identical graphs but different node creation orders (from different
+        # dict iteration orders in Dynamo tracing), the old name-based hash in
+        # has_same_nodes returns False → sync skipped → divergent min-cut.
+        #
+        # Both ranks have the same topology:
+        #   p1 → all_gather → wait → relu → output[0]
+        #   p2 → neg → output[1]
+        # But the computation nodes are created in different orders across
+        # ranks, producing different graph.nodes iteration orders.
+        import hashlib
+
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+
+        if self.rank == 0:
+            # Rank 0: deep path created first during tracing
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+        else:
+            # Rank 1: shallow path created first during tracing
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((relu_node, neg_node))
+
+        # Verify the bug condition: the old name-based hash diverges because
+        # graph.nodes iteration order differs across ranks.
+        node_str = "/".join(x.name for x in test_graph.nodes)
+        local_hash = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self._init_process_group()
+
+        all_hashes = [None, None]
+        torch.distributed.all_gather_object(all_hashes, local_hash)
+        self.assertNotEqual(all_hashes[0], all_hashes[1])
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        if self.rank == 0:
+            saved_values = [relu_node]
+        else:
+            saved_values = [neg_node]
+
+        # With the canonical naming fix, sync succeeds despite different
+        # node orderings. Both ranks agree on the same saved node.
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(len(result), 1)
+
+        # All ranks should agree on the result
+        result_targets = [None, None]
+        torch.distributed.all_gather_object(result_targets, str(result[0].target))
+        self.assertEqual(result_targets[0], result_targets[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_invalid_node_error(self):
+        # Reproduces the "Node X was invalid, but is output" assertion error.
+        #
+        # When two ranks have isomorphic graphs with matching node names and
+        # iteration order (so has_same_nodes returns True), but the same name
+        # maps to structurally different nodes across ranks, the old name-based
+        # sync communicates the wrong saved values. Using these wrong values
+        # for backward graph extraction triggers the assertion.
+        #
+        # Setup: both ranks create two relu nodes in the same order, but
+        # wire them to different placeholders:
+        #   Rank 0: relu="relu(p1)", relu_1="relu(p2)"
+        #   Rank 1: relu="relu(p2)", relu_1="relu(p1)"
+        # The backward computation needs relu(p1). On rank 0 that's "relu",
+        # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
+        # rank 1 gets relu(p2) instead → backward extraction fails.
+        from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch.partitioners import (
+            _extract_graph_with_inputs_outputs,
+            _sync_decision_cross_ranks,
+        )
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+        t1 = test_graph.placeholder("tangents_1")
+        t1.meta["val"] = torch.randn(10, 8)
+
+        # Both ranks create relu nodes in the same order → same auto-names.
+        # But the wiring to placeholders differs across ranks.
+        if self.rank == 0:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+        else:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        # Collective (required for has_collectives to return True)
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (relu_a,),
+        )
+        wt = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.wait_tensor.default,
+            (ag,),
+        )
+        wt.meta["val"] = torch.randn(10, 8)
+
+        # Backward: grad depends on relu(p1) specifically.
+        # On rank 0 that's relu_a, on rank 1 that's relu_b.
+        relu_p1 = relu_a if self.rank == 0 else relu_b
+        grad = test_graph.create_node(
+            "call_function", torch.ops.aten.mul.Tensor, (t1, relu_p1)
+        )
+        grad.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((wt, relu_b, grad))
+
+        self._init_process_group()
+
+        # Each rank correctly identifies relu(p1) as the node to save.
+        saved_values = [relu_p1]
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+
+        # Extract backward subgraph using the synced saved values.
+        # Without the fix: wrong node → "Node mul was invalid, but is output"
+        bwd_inputs = [t1] + result
+        bwd_outputs = [grad]
+        bwd_descs = [PlainAOTOutput(idx=0)]
+        _extract_graph_with_inputs_outputs(
+            test_graph, bwd_inputs, bwd_outputs, bwd_descs
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_align_runtime_estimations_across_all_distributed_ranks(self):
+        from torch._inductor.ir import ExternKernel
+        from torch._inductor.scheduler import (
+            BaseSchedulerNode,
+            ExternKernelSchedulerNode,
+        )
+
+        mock_node_1 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_1.node = mock.create_autospec(ExternKernel)
+        mock_node_1.node.python_kernel_name = "extern_kernels.mm"
+
+        mock_node_2 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_3 = mock.create_autospec(BaseSchedulerNode)
+
+        if self.rank == 0:
+            mock_node_1.override_estimated_runtime = 0.1
+            mock_node_2.override_estimated_runtime = 0.3
+            mock_node_3.override_estimated_runtime = 0.5
+        else:
+            mock_node_1.override_estimated_runtime = 0.2
+            mock_node_2.override_estimated_runtime = 0.4
+            mock_node_3.override_estimated_runtime = 0.6
+
+        mock_node_1.get_estimated_runtime.side_effect = (
+            lambda: mock_node_1.override_estimated_runtime
+        )
+        mock_node_2.get_estimated_runtime.side_effect = (
+            lambda: mock_node_2.override_estimated_runtime
+        )
+        mock_node_3.get_estimated_runtime.side_effect = (
+            lambda: mock_node_3.override_estimated_runtime
+        )
+
+        self._init_process_group()
+        from torch._inductor.comms import (
+            align_runtime_estimations_across_all_distributed_ranks,
+        )
+
+        align_runtime_estimations_across_all_distributed_ranks(
+            [mock_node_1, mock_node_2, mock_node_3]
+        )
+
+        # all nodes should be aligned across ranks (median)
+        self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
+        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
+        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
+
+    @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)
@@ -2222,10 +2579,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([8, 4])",
-                    "torch.Size([16, 4])",
-                ]
+                valid_sizes = ["torch.Size([8, 4])", "torch.Size([16, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2233,11 +2591,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for unbacked dynamic shape input estimation
         class TestModule(nn.Module):
@@ -2262,10 +2622,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([2*u0, 4])",
-                    "torch.Size([4*u0, 4])",
-                ]
+                valid_sizes = ["torch.Size([2*u0, 4])", "torch.Size([4*u0, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2273,11 +2634,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for backed dynamic shape input estimation
         inp = torch.ones(4, 4, device=self.device)
@@ -2286,11 +2649,15 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):
-                assert str(n.meta["val"].size()) in [
+                valid_sizes = [
                     "torch.Size([16, 4])",
                     "torch.Size([2*s75, s75])",
                     "torch.Size([4*s75, s75])",
                 ]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2298,11 +2665,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_comm_analysis(self):
@@ -2334,10 +2703,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_reduce_scatter_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([1, 4])",
-                    "torch.Size([2, 4])",
-                ]
+                valid_sizes = ["torch.Size([1, 4])", "torch.Size([2, 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2345,11 +2715,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for unbacked dynamic shape input estimation
         class TestModule(nn.Module):
@@ -2374,10 +2746,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_reduce_scatter_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([(u0//2), 4])",
-                    "torch.Size([(u0//4), 4])",
-                ]
+                valid_sizes = ["torch.Size([(u0//2), 4])", "torch.Size([(u0//4), 4])"]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2385,11 +2758,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for backed dynamic shape input estimation
         inp = torch.ones(4, 4, device=self.device)
@@ -2398,10 +2773,14 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_reduce_scatter_tensor(n):
-                assert str(n.meta["val"].size()) in [
+                valid_sizes = [
                     "torch.Size([(s75//2), s75])",
                     "torch.Size([(s75//4), s75])",
                 ]
+                if str(n.meta["val"].size()) not in valid_sizes:
+                    raise AssertionError(
+                        f"Expected size in {valid_sizes}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2409,11 +2788,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_comm_analysis(self):
@@ -2443,7 +2824,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) == "torch.Size([4, 4])"
+                expected_size = "torch.Size([4, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2451,11 +2836,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for unbacked dynamic shape input estimation
         class TestModule(nn.Module):
@@ -2480,7 +2867,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) == "torch.Size([u0, 4])"
+                expected_size = "torch.Size([u0, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2488,11 +2879,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for backed dynamic shape input estimation
         inp = torch.ones(4, 4, device=self.device)
@@ -2501,7 +2894,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) == "torch.Size([s75, s75])"
+                expected_size = "torch.Size([s75, s75])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2509,11 +2906,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_comm_analysis(self):
@@ -2555,7 +2954,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) == "torch.Size([8, 1])"
+                expected_size = "torch.Size([8, 1])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2563,11 +2966,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
         # test for unbacked dynamic shape input estimation
         class TestModule(nn.Module):
@@ -2592,7 +2997,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) == "torch.Size([4*u0, 4])"
+                expected_size = "torch.Size([4*u0, 4])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2600,7 +3009,8 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 # TODO(ruisizhang123): Currently, NCCL estimation API does not support kwargs input
                 # (input_split_sizes & output_split_sizes in all-to-all) with dynamic shapes.
                 # est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
@@ -2615,9 +3025,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert (
-                    str(n.meta["val"].size()) == "torch.Size([2*(((s75**2)//2)), s75])"
-                )
+                expected_size = "torch.Size([2*(((s75**2)//2)), s75])"
+                if str(n.meta["val"].size()) != expected_size:
+                    raise AssertionError(
+                        f"Expected size {expected_size}, got {n.meta['val'].size()}"
+                    )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2625,7 +3037,8 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 # TODO(ruisizhang123): Currently, NCCL estimation API does not support kwargs input
                 # (input_split_sizes & output_split_sizes in all-to-all) with dynamic shapes.
                 # est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
@@ -2671,11 +3084,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=False
                 )
-                assert est_ms > 0
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
-                assert est_ms_nccl > 0
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -2792,6 +3207,229 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         torch.compile(func, backend="inductor", fullgraph=True)(
             *inputs, group_size, group_name
         )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_device_put_sync(self):
+        """
+        Test that overlap scheduling handles async device_put correctly.
+
+        This test exercises the pattern from torchtitan's expert_parallel.py:
+        - Compute splits on GPU
+        - Transfer to CPU with .to(cpu, non_blocking=True/False)
+        - Use the CPU tensors in subsequent operations
+
+        The make_all_device_put_sync function in OverlapScheduler.__init__
+        protects against race conditions by converting all non_blocking=True
+        device_puts to non_blocking=False. This ensures the transfer completes
+        before the data is used.
+
+        Without this protection, the overlap scheduler could reorder operations
+        in a way that reads from an async-transferred tensor before the data
+        is ready, causing dirty reads. While this race is timing-dependent and
+        may not manifest in every run, this test verifies the pattern works
+        correctly with overlap scheduling.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        def overlap_pass(graph: torch.fx.Graph) -> torch.fx.GraphModule:
+            """Custom pass that runs overlap scheduling and verifies device_put sync."""
+            from torch._inductor.fx_passes.overlap_scheduling import (
+                schedule_overlap_bucketing,
+            )
+
+            result = schedule_overlap_bucketing(
+                graph.owning_module,
+                collective_bucketing=False,
+                insert_overlap_deps=True,
+                max_memory_increase_ratio=0.05,
+                collective_estimator="analytical",
+            )
+
+            # Verify all device_put nodes have non_blocking=False
+            for n in result.graph.nodes:
+                if (
+                    n.op == "call_function"
+                    and n.target == torch.ops.prims.device_put.default
+                ):
+                    # non_blocking can be in args (position 2) or kwargs
+                    # If not specified, it defaults to False
+                    non_blocking = False
+                    if len(n.args) >= 3:
+                        non_blocking = n.args[2]
+                    elif "non_blocking" in n.kwargs:
+                        non_blocking = n.kwargs["non_blocking"]
+                    if non_blocking is not False:
+                        raise AssertionError(
+                            f"device_put has non_blocking=True after overlap scheduling: {n}"
+                        )
+
+            return result
+
+        def func(num_tokens_per_expert, routed_input, group_size, group_name):
+            """
+            Pattern from expert_parallel.py:
+            1. Exchange token counts via all_to_all
+            2. Compute splits from CUDA tensors and transfer to CPU (one async, one sync)
+            3. Convert to list with .tolist() and use in all_to_all for data routing
+
+            The race condition occurs because:
+            - input_splits is computed and transferred with non_blocking=True
+            - output_splits is transferred with non_blocking=False
+            - .tolist() reads from the CPU tensors
+            - Without make_all_device_put_sync, overlap scheduler may reorder
+              the use of input_splits before the sync transfer completes
+            """
+            # Exchange token counts
+            num_tokens_per_expert_group = torch.ops._c10d_functional.all_to_all_single(
+                num_tokens_per_expert,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                group_name,
+            )
+            num_tokens_per_expert_group = torch.ops._c10d_functional.wait_tensor(
+                num_tokens_per_expert_group
+            )
+
+            # Compute input/output splits - one async, one sync
+            # This is the critical pattern from expert_parallel.py
+            input_splits = num_tokens_per_expert.view(group_size, -1).sum(dim=1)
+            output_splits = num_tokens_per_expert_group.view(group_size, -1).sum(dim=1)
+
+            # Transfer to CPU - async for input_splits, sync for output_splits
+            # User relies on the sync transfer to implicitly complete the async one
+            cpu_input_splits = input_splits.to(torch.device("cpu"), non_blocking=True)
+            cpu_output_splits = output_splits.to(
+                torch.device("cpu"), non_blocking=False
+            )
+
+            # Convert to lists - this is where the race manifests
+            # If async transfer isn't complete, .tolist() reads garbage
+            input_splits_list = cpu_input_splits.tolist()
+            output_splits_list = cpu_output_splits.tolist()
+
+            routed_output = torch.ops._c10d_functional.all_to_all_single(
+                routed_input,
+                output_splits_list,
+                input_splits_list,
+                group_name,
+            )
+            routed_output = torch.ops._c10d_functional.wait_tensor(routed_output)
+
+            return routed_output
+
+        # Setup inputs matching expert parallel pattern
+        num_local_experts = 4
+        num_experts = num_local_experts * self.world_size
+        num_tokens = 512
+        hidden_dim = 128
+        top_k = 2
+
+        # Random router scores for each token per expert
+        tokens_expert_scores = torch.randn(
+            num_tokens, num_experts, device=self.device, dtype=torch.float32
+        )
+
+        # Precompute num_tokens_per_expert from topk selection (outside compiled fn)
+        with torch.no_grad():
+            _, selected_experts = torch.topk(tokens_expert_scores, k=top_k, dim=1)
+            flat_experts = selected_experts.reshape(-1)
+            num_tokens_per_expert = torch.bincount(
+                flat_experts, minlength=num_experts
+            ).to(torch.int64)
+
+        # Total routed tokens = sum of tokens per expert
+        total_routed_tokens = int(num_tokens_per_expert.sum().item())
+        routed_input = torch.randn(
+            total_routed_tokens, hidden_dim, device=self.device, dtype=torch.float32
+        )
+
+        torch._inductor.config.post_grad_custom_post_pass = overlap_pass
+
+        compiled_fn = torch.compile(func, backend="inductor", fullgraph=True)
+
+        eager_out = func(num_tokens_per_expert, routed_input, group_size, group_name)
+        compiled_out = compiled_fn(
+            num_tokens_per_expert, routed_input, group_size, group_name
+        )
+
+        self.assertTrue(
+            torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
+            "Mismatch between eager and compiled output.",
+        )
+
+
+class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
+    """Unit tests for Node-typed group_name handling in bucketing.
+
+    In compile-on-one-rank graphs, collective ops receive
+    their group_name as an FX Node reference rather than a string literal.
+    These tests verify the resolution helpers work correctly.
+    """
+
+    def _make_graph_with_pg_node(self, group_name_str: str):
+        class MockPG:
+            def __init__(self, name: str):
+                self.group_name = name
+
+        graph = torch.fx.Graph()
+        pg_node = graph.placeholder("group_name")
+        pg_node.meta["val"] = MockPG(group_name_str)
+        input_node = graph.placeholder("input")
+        input_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        return graph, pg_node, input_node
+
+    def test_resolve_group_name_string(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        self.assertEqual(_resolve_group_name("pg0"), "pg0")
+
+    def test_resolve_group_name_node(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        graph, pg_node, _ = self._make_graph_with_pg_node("pg0")
+        self.assertEqual(_resolve_group_name(pg_node), "pg0")
+
+    def test_ag_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ag_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ag_node = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            args=(input_node, 2, pg_node),
+        )
+        ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+
+    def test_rs_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _rs_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        rs_node = graph.call_function(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            args=(input_node, "sum", 2, pg_node),
+        )
+        rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+
+    def test_ar_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ar_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ar_node = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default,
+            args=(input_node, "sum", pg_node),
+        )
+        ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
 
 
 if __name__ == "__main__":

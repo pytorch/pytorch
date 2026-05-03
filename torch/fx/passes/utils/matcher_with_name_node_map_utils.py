@@ -13,22 +13,24 @@ def _split_to_graph_and_name_node_map(
     from torch.fx.graph import _PyTreeInfo
     from torch.utils._pytree import tree_flatten, tree_unflatten
 
-    name_node_map = {}
+    name_node_map: dict[str, Node] = {}
     for n in gm.graph.nodes:
         if n.op == "output":
-            assert gm._out_spec is not None
+            if gm._out_spec is None:
+                raise AssertionError("gm._out_spec is None")
             output = tree_unflatten(n.args[0], gm._out_spec)
-            assert isinstance(output, tuple), (
-                "Expecting the pattern graph to return a tuple"
-            )
-            assert len(output) >= 2, (
-                "Expecting the pattern graph to have at least two outputs"
-            )
+            if not isinstance(output, tuple):
+                raise AssertionError("Expecting the pattern graph to return a tuple")
+            if len(output) < 2:
+                raise AssertionError(
+                    "Expecting the pattern graph to have at least two outputs"
+                )
             *out, name_node_map = output
             flattened, out_spec = tree_flatten(out)
-            assert isinstance(name_node_map, dict), (
-                "Expecting the input graph to have a dict output as the last element"
-            )
+            if not isinstance(name_node_map, dict):
+                raise AssertionError(
+                    "Expecting the input graph to have a dict output as the last element"
+                )
             n.args = (flattened,)
             orig_pytree_info = gm._graph._codegen.pytree_info  # type: ignore[attr-defined]
             gm._graph._codegen.pytree_info = _PyTreeInfo(  # type: ignore[attr-defined]
@@ -48,6 +50,7 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     initialization since we need to modify the graph (which requires `recompile` the GraphModule)
 
     Example::
+
         def pattern(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
@@ -91,21 +94,20 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """The returned InternalMatch will have name_node_map populated with a map
         from node name (str) to the target node, e.g.
-        {"conv": target_conv_ndoe, "relu": target_relu_node}
+        ``{"conv": target_conv_ndoe, "relu": target_relu_node}``
 
-        this requires the pattern graph returns an additional
-        output of node name to node, e.g. instead of:
-        ```
-        def pattern(...):
-            ...
-            return relu
-        ```
-        we should do:
-        ```
-        def pattern(...):
-            ...
-            return relu, {"conv": conv, "relu": relu}
-        ``` instead
+        This requires the pattern graph returns an additional
+        output of node name to node, e.g. instead of::
+
+            def pattern(...):
+                ...
+                return relu
+
+        we should do::
+
+            def pattern(...):
+                ...
+                return relu, {"conv": conv, "relu": relu}
         """
         internal_matches = super().match(graph, node_name_match)
         for internal_match in internal_matches:

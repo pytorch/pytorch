@@ -8,7 +8,7 @@ import subprocess
 import sys
 import warnings
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch._inductor import config
@@ -67,7 +67,7 @@ extern "C" void __avx_chk_kernel() {
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
 }
-"""  # noqa: B950
+"""
 
     _avx_py_load = """
 import torch
@@ -466,7 +466,7 @@ supported_vec_isa_list = [
 
 
 def get_isa_from_cpu_capability(
-    capability: Union[str, None],
+    capability: str | None,
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ):

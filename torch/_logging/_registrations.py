@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -214,6 +213,11 @@ register_artifact(
 register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
+    off_by_default=True,
+)
+register_artifact(
+    "overlap_scheduling",
+    "Detailed Inductor overlap scheduling pass information",
     off_by_default=True,
 )
 register_artifact(

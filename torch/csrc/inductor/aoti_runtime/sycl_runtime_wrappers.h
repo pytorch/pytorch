@@ -114,11 +114,13 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     const void* start,
     const void* end,
     const std::string& funcName,
-    uint32_t sharedMemBytes) {
+    uint32_t sharedMemBytes,
+    bool isSpirv) {
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
 
-  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size);
+  auto mod =
+      _createModule(reinterpret_cast<const uint8_t*>(start), size, isSpirv);
 
   return _createKernel(mod, funcName.c_str());
 }
@@ -132,8 +134,13 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     uint32_t numWarps,
     uint32_t sharedMemory,
     void** params,
-    sycl::queue* queuePtr,
-    uint32_t threadsPerWarp) {
+    sycl::queue* queuePtr) {
+  uint32_t threadsPerWarp = kernelPtr->get_info<
+      sycl::info::kernel_device_specific::compile_sub_group_size>(
+      queuePtr->get_device());
+  if (threadsPerWarp == 0) {
+    threadsPerWarp = 32; // default to 32 if not set
+  }
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();

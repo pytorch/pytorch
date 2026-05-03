@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -156,6 +157,7 @@ un_ops_under_test = [
     torch._foreach_abs,
     torch._foreach_sqrt,
     torch._foreach_rsqrt,
+    torch._foreach_clone,
     *foreach_map_un_ops_under_test,
 ]
 
@@ -1242,6 +1244,7 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
+    @skipIfRocm
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
@@ -1387,6 +1390,7 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
+    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):
@@ -1413,6 +1417,26 @@ class ForeachTests(TestCase):
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
+
+    @requires_gpu
+    def test_foreach_reorder_loops_with_nested_foreach_snodes(self):
+        def fn(x0, x1, y0, y1):
+            xs, ys = [x0, x1], [y0, y1]
+            torch._foreach_add_(xs, ys)
+            zs = torch._foreach_mul(xs, 2)
+            return [z.sum() for z in zs]
+
+        args = (
+            torch.randint(0, 10, (128, 128), device=GPU_TYPE),
+            torch.randint(0, 10, (128,), device=GPU_TYPE),
+            torch.randint(0, 10, (128, 128), device=GPU_TYPE),
+            torch.randint(0, 10, (128,), device=GPU_TYPE),
+        )
+        args_clone = tuple(a.clone() for a in args)
+
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args_clone)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

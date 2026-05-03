@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import bisect
 import itertools
+import json
 import math
 from collections import defaultdict, namedtuple
+from collections.abc import Callable
 from operator import attrgetter
-from typing import Any, Optional
+from typing import Any, NamedTuple
 from typing_extensions import deprecated
 
 import torch
@@ -13,6 +15,7 @@ from torch.autograd import DeviceType
 
 __all__ = [
     "EventList",
+    "EventMetadata",
     "FormattedTimesMixin",
     "Interval",
     "Kernel",
@@ -549,6 +552,104 @@ class Interval:
 Kernel = namedtuple("Kernel", ["name", "device", "duration"])
 
 
+class EventMetadata(NamedTuple):
+    # Kernel fields
+    registers_per_thread: int | None
+    shared_memory: int | None
+    grid: list[int] | None
+    block: list[int] | None
+    priority: int | None
+    blocks_per_sm: float | None
+    warps_per_sm: float | None
+    occupancy: dict[str, Any] | None
+    est_occupancy_pct: float | None
+    queued: int | None
+    graph_id: int | None
+    graph_node_id: int | None
+    stream: int | None
+    context: int | None
+    # Memory fields
+    bytes: int | None
+    bandwidth_gb_s: float | None
+    # NCCL fields
+    collective_name: str | None
+    dtype: str | None
+    in_msg_nelems: int | None
+    out_msg_nelems: int | None
+    in_split_size: str | None
+    out_split_size: str | None
+    global_rank_start: int | None
+    global_rank_stride: int | None
+    group_size: int | None
+    process_group_name: str | None
+    process_group_desc: str | None
+    group_ranks: str | None
+    rank: int | None
+    src_rank: int | None
+    dst_rank: int | None
+    seq: int | None
+    is_async: bool | None
+
+
+def _to_str(v: str) -> str:
+    return v.strip('"')
+
+
+def _to_bool(v: str) -> bool:
+    return v in ("1", "true")
+
+
+# Kineto key → (EventMetadata field name, converter from string)
+_EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
+    "registers per thread": ("registers_per_thread", int),
+    "shared memory": ("shared_memory", int),
+    "grid": ("grid", json.loads),  # list[int]
+    "block": ("block", json.loads),  # list[int]
+    "priority": ("priority", int),
+    "blocks per SM": ("blocks_per_sm", float),
+    "warps per SM": ("warps_per_sm", float),
+    "est. achieved occupancy %": ("est_occupancy_pct", float),
+    "occupancy": ("occupancy", json.loads),  # dict[str, Any]
+    "queued": ("queued", int),
+    "graph id": ("graph_id", int),
+    "graph node id": ("graph_node_id", int),
+    "stream": ("stream", int),
+    "context": ("context", int),
+    "bytes": ("bytes", int),
+    "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
+    "Collective name": ("collective_name", _to_str),
+    "dtype": ("dtype", _to_str),
+    "In msg nelems": ("in_msg_nelems", int),
+    "Out msg nelems": ("out_msg_nelems", int),
+    "In split size": ("in_split_size", _to_str),
+    "Out split size": ("out_split_size", _to_str),
+    "Global rank start": ("global_rank_start", int),
+    "Global rank stride": ("global_rank_stride", int),
+    "Group size": ("group_size", int),
+    "Process Group Name": ("process_group_name", _to_str),
+    "Process Group Description": ("process_group_desc", _to_str),
+    "Process Group Ranks": ("group_ranks", _to_str),
+    "Rank": ("rank", int),
+    "Src Rank": ("src_rank", int),
+    "Dst Rank": ("dst_rank", int),
+    "Seq": ("seq", int),
+    "Is asynchronized op": ("is_async", _to_bool),
+}
+
+
+def _build_metadata(extra_meta):
+    fields: dict[str, Any] = {}
+    any_populated = False
+    for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
+        v = extra_meta.get(kineto_key)
+        if v is not None:
+            fields[field_name] = convert(v)
+            any_populated = True
+        else:
+            fields[field_name] = None
+    return EventMetadata(**fields) if any_populated else None
+
+
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function.
 
@@ -573,7 +674,10 @@ class FunctionEvent(FormattedTimesMixin):
         count (int): Number of times this event was called (usually 1).
         cpu_children (List[FunctionEvent]): Direct CPU child operations.
         cpu_parent (FunctionEvent): Direct CPU parent operation.
-        input_shapes (Tuple[int, ...]): Shapes of input tensors (requires record_shapes=true).
+        input_shapes (List[List[int]]): Shapes of input tensors (requires record_shapes=True).
+            For plain tensor inputs, each entry is a list of dimensions (e.g. ``[16, 16]``).
+            TensorList inputs are represented as an empty list ``[]``; use
+            ``structured_input_shapes`` to get per-element shapes for TensorList inputs.
         concrete_inputs (List[Any]): Concrete input values (requires record_shapes=true).
         kwinputs (Dict[str, Any]): Keyword arguments (requires record_shapes=true).
         stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
@@ -590,7 +694,15 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
-        metadata_json (str): Additional metadata in JSON format.
+        metadata_json (str): Deprecated. Use event_metadata instead.
+        event_metadata (EventMetadata): Additional metadata in structured format.
+        structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
+            but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
+            TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
+            Matches the ``"Input Dims"`` field in the Chrome trace JSON.
+        structured_input_strides (List[List[int] | List[List[int]]]): Strides of input
+            tensors in the same format as ``structured_input_shapes`` (requires
+            record_shapes=True).
 
     Properties:
         cpu_time_total (float): Total CPU time in microseconds.
@@ -637,7 +749,21 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        is_python_function=False,
+        activity_type=None,
         metadata_json=None,
+        flow_id=None,
+        flow_type=None,
+        flow_start=None,
+        external_id=0,
+        linked_correlation_id=0,
+        extra_meta=None,
+        structured_input_shapes=None,
+        structured_input_strides=None,
+        input_dtypes=None,
+        python_id=-1,
+        python_parent_id=-1,
+        python_module_id=-1,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -648,11 +774,11 @@ class FunctionEvent(FormattedTimesMixin):
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
-        self.fwd_thread: Optional[int] = fwd_thread
+        self.fwd_thread: int | None = fwd_thread
         self.kernels: list[Kernel] = []
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
-        self.cpu_parent: Optional[FunctionEvent] = None
+        self.cpu_parent: FunctionEvent | None = None
         # pyrefly: ignore [bad-assignment]
         self.input_shapes: tuple[int, ...] = input_shapes
         # pyrefly: ignore [bad-assignment]
@@ -662,7 +788,7 @@ class FunctionEvent(FormattedTimesMixin):
         # pyrefly: ignore [bad-assignment]
         self.stack: list = stack
         self.scope: int = scope
-        self.use_device: Optional[str] = use_device
+        self.use_device: str | None = use_device
         self.cpu_memory_usage: int = cpu_memory_usage
         self.device_memory_usage: int = device_memory_usage
         self.is_async: bool = is_async
@@ -674,12 +800,31 @@ class FunctionEvent(FormattedTimesMixin):
             thread if device_resource_id is None else device_resource_id
         )
         self.is_legacy: bool = is_legacy
-        self.flops: Optional[int] = flops
-        self.is_user_annotation: Optional[bool] = is_user_annotation
+        self.flops: int | None = flops
+        self.is_user_annotation: bool | None = is_user_annotation
+        self.is_python_function: bool = is_python_function
+        self.activity_type: str | None = activity_type
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
-        self.metadata_json = metadata_json
+        self._metadata_json = metadata_json
+        self.flow_id: int | None = flow_id
+        self.flow_type: int | None = flow_type
+        self.flow_start: bool | None = flow_start
+        self.external_id: int = external_id
+        self.linked_correlation_id: int = linked_correlation_id
+        self.event_metadata: EventMetadata | None = (
+            _build_metadata(extra_meta) if extra_meta else None
+        )
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_shapes: list = structured_input_shapes
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_strides: list = structured_input_strides
+        # pyrefly: ignore [bad-assignment]
+        self.input_dtypes: list[str] = input_dtypes
+        self.python_id: int = python_id
+        self.python_parent_id: int = python_parent_id
+        self.python_module_id: int = python_module_id
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:
@@ -735,6 +880,14 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     @deprecated(
+        "`metadata_json` is deprecated. Use `event_metadata` instead.",
+        category=FutureWarning,
+    )
+    def metadata_json(self):
+        return self._metadata_json
+
+    @property
+    @deprecated(
         "`self_cuda_memory_usage` is deprecated. Use `self_device_memory_usage` instead.",
         category=FutureWarning,
     )
@@ -775,9 +928,10 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
+                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, HPU or XPU, but got {self.device_type}"
                 )
             return self.time_range.elapsed_us()
 
@@ -803,9 +957,10 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
+                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, HPU or XPU, but got {self.device_type}"
                 )
             return self.device_time_total
 
@@ -883,26 +1038,26 @@ class FunctionEventAvg(FormattedTimesMixin):
     """
 
     def __init__(self) -> None:
-        self.key: Optional[str] = None
+        self.key: str | None = None
         self.count: int = 0
         self.node_id: int = 0
         self.is_async: bool = False
         self.is_remote: bool = False
-        self.use_device: Optional[str] = None
+        self.use_device: str | None = None
         self.cpu_time_total: int = 0
         self.device_time_total: int = 0
         self.self_cpu_time_total: int = 0
         self.self_device_time_total: int = 0
-        self.input_shapes: Optional[list[list[int]]] = None
-        self.overload_name: Optional[str] = None
-        self.stack: Optional[list] = None
-        self.scope: Optional[int] = None
+        self.input_shapes: list[list[int]] | None = None
+        self.overload_name: str | None = None
+        self.stack: list | None = None
+        self.scope: int | None = None
         self.cpu_memory_usage: int = 0
         self.device_memory_usage: int = 0
         self.self_cpu_memory_usage: int = 0
         self.self_device_memory_usage: int = 0
-        self.cpu_children: Optional[list[FunctionEvent]] = None
-        self.cpu_parent: Optional[FunctionEvent] = None
+        self.cpu_children: list[FunctionEvent] | None = None
+        self.cpu_parent: FunctionEvent | None = None
         self.device_type: DeviceType = DeviceType.CPU
         self.is_legacy: bool = False
         self.flops: int = 0
@@ -987,13 +1142,12 @@ class MemRecordsAcc:
             tmp = sorted([(r[0].start_ns(), i) for i, r in enumerate(mem_records)])
             self._start_nses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
-    def in_interval(self, start_us, end_us):
+    def in_interval(self, start_ns, end_ns):
         r"""
         Return all records in the given interval
-        To maintain backward compatibility, convert us to ns in function
         """
-        start_idx = bisect.bisect_left(self._start_nses, start_us * 1000)
-        end_idx = bisect.bisect_right(self._start_nses, end_us * 1000)
+        start_idx = bisect.bisect_left(self._start_nses, start_ns)
+        end_idx = bisect.bisect_right(self._start_nses, end_ns)
         for i in range(start_idx, end_idx):
             yield self._mem_records[self._indices[i]]
 
@@ -1159,7 +1313,6 @@ def _build_table(
     if append_node_id:
         headers.append("Node ID")
 
-    # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
     row_format_lst = [""]
     header_sep_lst = [""]
@@ -1220,7 +1373,6 @@ def _build_table(
     line_length = line_length_lst[0]
     add_column = None  # type: ignore[assignment]
 
-    # Have to use a list because nonlocal is Py3 only...
     result = []
 
     def append(s):
@@ -1240,6 +1392,7 @@ def _build_table(
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.XPU,
             ]
             and not evt.is_user_annotation
         ):
@@ -1425,7 +1578,7 @@ def _canonicalize_profiler_events(events):
 
         events_with_traces.append(
             {
-                "event_name": event_name[:20],
+                "event_name": event_name[:30],
                 "node_name": node_name,
                 "stack_trace": stack_trace,
                 "start_time": event.get("ts", 0),

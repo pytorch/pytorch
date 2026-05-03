@@ -1,3 +1,4 @@
+import hashlib
 import itertools
 import math
 from collections import defaultdict
@@ -7,6 +8,7 @@ from typing import Any, cast, NamedTuple
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _MaskPartial,
     _StridedShard,
     Partial,
@@ -16,6 +18,13 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.utils._debug_mode import _stringify_shape
 from torch.utils._dtype_abbrs import dtype_abbrs
+
+
+# Defined here (not in placement_types.py) because decoding split_factor into
+# a shard order is a DTensorSpec concern — placement_types doesn't know about
+# shard orders.
+class _StridedShardNotDecodableError(ValueError):
+    """Raised when _StridedShard split_factor cannot be decoded into a shard order."""
 
 
 class ShardOrderEntry(NamedTuple):
@@ -88,29 +97,51 @@ class DTensorSpec:
     #     )
     shard_order: ShardOrder = None  # type: ignore[assignment]
 
+    # When True, _StridedShard placements encode the shard order, and the
+    # shard_order field must be left as None (it will be derived on demand).
+    # Set explicitly to False to treat _StridedShard as a regular Shard,
+    # e.g., in view propagation.
+    use_strided_shard_as_shard_order: bool | None = None
+
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
-        if self.shard_order is None:
-            _, self.shard_order = self._normalize_placements_into_shard_order(
-                self.placements, self.mesh
-            )
+        if self.use_strided_shard_as_shard_order is None:
+            if any(isinstance(p, _StridedShard) for p in self.placements):
+                self.use_strided_shard_as_shard_order = True
+            else:
+                self.use_strided_shard_as_shard_order = False
+        if self.use_strided_shard_as_shard_order:
+            if self.shard_order is not None:
+                raise ValueError(
+                    "DTensorSpec doesn't allow specify shard_order when "
+                    "use_strided_shard_as_shard_order is True. This may result "
+                    "in conflicting shard order."
+                )
+        else:
+            if self.shard_order is None:
+                self.shard_order = self.compute_default_shard_order(self.placements)
+
         self._hash: int | None = None
 
     @staticmethod
     def _normalize_placements_into_shard_order(
-        placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
-        # If the returned shard_order is None, it means the StridedShard/Shard
-        # combinations can't be interpreted as shard order.
-        # If no _StridedShard in placements, we create default order.
-        if not any(isinstance(p, _StridedShard) for p in placements):
-            return placements, DTensorSpec.compute_default_shard_order(placements)
-        # _StridedShard in placements, try check if it can be decoded as shard order
-        shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
-            placements, mesh
-        )
-        if shard_order is not None:
+        placements: tuple[Placement, ...],
+        mesh: DeviceMesh,
+        use_strided_shard_as_shard_order: bool = True,
+    ) -> tuple[tuple[Placement, ...], ShardOrder]:
+        # If use_strided_shard_as_shard_order, it means the StridedShard/Shard
+        # combinations should be interpreted as shard order.
+        if use_strided_shard_as_shard_order:
+            # _StridedShard in placements, try check if it can be decoded as shard order
+            shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                placements, mesh
+            )
+            if shard_order is None:
+                raise _StridedShardNotDecodableError(
+                    f"_StridedShard placements {placements} cannot be decoded "
+                    "into a corresponding shard_order"
+                )
             normalized_placements = tuple(
                 [
                     p if not isinstance(p, _StridedShard) else Shard(p.dim)
@@ -118,9 +149,8 @@ class DTensorSpec:
                 ]
             )
             return normalized_placements, shard_order
-        # unable to decode placements to shard order(e.g., the _StridedShard is
-        # also used by `view` op shard propagation).
-        return placements, None
+        else:
+            return placements, DTensorSpec.compute_default_shard_order(placements)
 
     @staticmethod
     def compute_default_shard_order(
@@ -131,20 +161,22 @@ class DTensorSpec:
 
         Returns a ShardOrder where each ShardOrderEntry maps a tensor dimension
         to the mesh dimensions it's sharded on, in left-to-right order.
+
+        Args:
+            placements: Tuple of Placement objects representing how a tensor is
+                distributed across mesh dimensions.
         """
         # follow default left-to-right device order if shard_order is not specified
         tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
         mesh_ndim = len(placements)
         for mesh_dim in range(mesh_ndim):
-            # shard_order doesn't work with _StridedShard
-            if isinstance(placements[mesh_dim], _StridedShard):
-                return ()
-            if isinstance(placements[mesh_dim], Shard):
-                placement = cast(Shard, placements[mesh_dim])
-                shard_dim = placement.dim
-                assert shard_dim >= 0, (
-                    f"Shard dim {shard_dim} in placements {placements} must be normalized"
-                )
+            if _is_shard_like(placements[mesh_dim]):
+                placement = placements[mesh_dim]
+                shard_dim = placement.dim  # pyrefly: ignore [missing-attribute]
+                if shard_dim < 0:
+                    raise AssertionError(
+                        f"Shard dim {shard_dim} in placements {placements} must be normalized"
+                    )
                 tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
 
         # Convert dict into ShardOrderEntry tuples
@@ -289,9 +321,7 @@ class DTensorSpec:
         """
         if not any(isinstance(p, _StridedShard) for p in placements):
             return DTensorSpec.compute_default_shard_order(placements)
-        max_tensor_dim = (
-            max([i.dim for i in placements if isinstance(i, Shard | _StridedShard)]) + 1
-        )
+        max_tensor_dim = max([i.dim for i in placements if _is_shard_like(i)]) + 1
         shard_order = []
 
         tensor_dim_to_mesh_dims_order: list[list[int]] = [
@@ -299,8 +329,7 @@ class DTensorSpec:
         ]
         for mesh_dim in reversed(range(len(placements))):
             cur_placement = placements[mesh_dim]
-            # _StridedShard may not be a subclass of Shard in the future, so write in this way:
-            if isinstance(cur_placement, Shard | _StridedShard):
+            if _is_shard_like(cur_placement):
                 tensor_dim = cur_placement.dim
                 mesh_dims_order = tensor_dim_to_mesh_dims_order[tensor_dim]
                 cur_sf = 1
@@ -338,28 +367,34 @@ class DTensorSpec:
         """Verify that the shard_order is valid and matches the placements."""
         total_shard = 0
         if any(isinstance(p, _StridedShard) for p in self.placements):
+            # _StridedShard shard_order validation not yet supported;
+            # the Shard-only checks below (line 390, 394) would fail.
             return
         prev_tensor_dim = -1
         for entry in shard_order:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0, f"shard_order {shard_order} has empty mesh dim"
-            assert tensor_dim >= 0, (
-                f"shard_order {shard_order} has invalid tensor dim {tensor_dim}"
-            )
-            assert tensor_dim > prev_tensor_dim, (
-                "tensor dim should be sorted in shard_order"
-            )
+            if len(mesh_dims) <= 0:
+                raise AssertionError(f"shard_order {shard_order} has empty mesh dim")
+            if tensor_dim < 0:
+                raise AssertionError(
+                    f"shard_order {shard_order} has invalid tensor dim {tensor_dim}"
+                )
+            if tensor_dim <= prev_tensor_dim:
+                raise AssertionError("tensor dim should be sorted in shard_order")
             prev_tensor_dim = tensor_dim
             total_shard += len(mesh_dims)
             for mesh_dim in mesh_dims:
-                assert 0 <= mesh_dim < len(self.placements), (
-                    f"shard_order {shard_order} has invalid mesh dim {mesh_dims}"
-                )
-                assert self.placements[mesh_dim] == Shard(tensor_dim), (
-                    f"placement[{mesh_dim}] doesn't have a matching shard in shard_order"
-                )
-        assert total_shard == sum(1 for p in self.placements if isinstance(p, Shard))
+                if not (0 <= mesh_dim < len(self.placements)):
+                    raise AssertionError(
+                        f"shard_order {shard_order} has invalid mesh dim {mesh_dims}"
+                    )
+                if self.placements[mesh_dim] != Shard(tensor_dim):
+                    raise AssertionError(
+                        f"placement[{mesh_dim}] doesn't have a matching shard in shard_order"
+                    )
+        if total_shard != sum(1 for p in self.placements if isinstance(p, Shard)):
+            raise AssertionError
 
     def __setattr__(self, attr: str, value: Any) -> None:
         if attr == "shard_order" and value is not None:
@@ -384,7 +419,21 @@ class DTensorSpec:
             # TODO: the TensorMetadata arises from
             # test/distributed/tensor/experimental/test_tp_transform.py::TensorParallelTest::test_tp_transform_e2e
             # but I actually can't reproduce it, maybe it is also a bug!
-            assert isinstance(value, TensorMeta | TensorMetadata), value
+            if not isinstance(value, TensorMeta | TensorMetadata):
+                raise AssertionError(repr(value))
+
+    def _hash_key(self) -> tuple[Any, ...]:
+        """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
+        if self.tensor_meta is not None:
+            return (
+                self.mesh,
+                self.placements,
+                self.shard_order,
+                self.tensor_meta.shape,
+                self.tensor_meta.stride,
+                self.tensor_meta.dtype,
+            )
+        return (self.mesh, self.placements, self.shard_order)
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -392,18 +441,7 @@ class DTensorSpec:
         # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them.
-        if self.tensor_meta is not None:
-            return hash(
-                (
-                    self.mesh,
-                    self.placements,
-                    self.shard_order,
-                    self.tensor_meta.shape,
-                    self.tensor_meta.stride,
-                    self.tensor_meta.dtype,
-                )
-            )
-        return hash((self.mesh, self.placements, self.shard_order))
+        return hash(self._hash_key())
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -413,6 +451,17 @@ class DTensorSpec:
         if self._hash is None:
             self._hash = self._hash_impl()
         return self._hash
+
+    def _stable_hash(self) -> str:
+        """
+        Return a stable hash for AOT autograd caching.
+        [See note: Tensor subclass stable hashing for AOT autograd cache]
+        """
+        # Get hash key, but replace mesh with its stable hash
+        key = self._hash_key()
+        # First element is mesh, replace with its stable hash
+        stable_key = (self.mesh._stable_hash(),) + key[1:]
+        return hashlib.blake2b(repr(stable_key).encode(), digest_size=16).hexdigest()
 
     def _check_equals(self, other: object, skip_shapes: bool = False) -> bool:
         if not (
@@ -455,6 +504,10 @@ class DTensorSpec:
         """
         Check if the device order is the default left-to-right order.
         """
+        if shard_order is None:
+            # Missing `shard_order` attribute, possibly due to _StridedShard in
+            # placements.
+            return False
         for entry in shard_order:
             mesh_dims = entry.mesh_dims
             is_increasing = all(
@@ -511,14 +564,15 @@ class DTensorSpec:
         # native dtensor-style sharding representation: map from mesh
         # dim to tensor dim
         for mesh_dim, placement in enumerate(placements):
-            if isinstance(placement, Shard):
+            if _is_shard_like(placement):
                 if shard_order is not None:
                     for entry in shard_order:
                         tensor_dim = entry.tensor_dim
                         mesh_dims = entry.mesh_dims
 
                         if placement.dim == tensor_dim:
-                            assert mesh_dim in mesh_dims
+                            if mesh_dim not in mesh_dims:
+                                raise AssertionError
                             if len(mesh_dims) > 1:
                                 out_str += f"{placement}[{mesh_dims.index(mesh_dim)}]"
                             else:
@@ -554,7 +608,7 @@ class DTensorSpec:
     def num_shards(self) -> int:
         num_shards = 1
         for i, placement in enumerate(self.placements):
-            if placement.is_shard():
+            if _is_shard_like(placement):
                 num_shards *= self.mesh.size(i)
         return num_shards
 
@@ -590,8 +644,8 @@ class DTensorSpec:
         # and int >=0 represent shard on that device mesh dim
         r = [-1] * self.ndim
         for i, placement in enumerate(self.placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
+            if _is_shard_like(placement):
+                shard_dim = placement.dim
                 if r[shard_dim] > -1:
                     raise ValueError(
                         f"Tensor dim {shard_dim} is already sharded on mesh dim {r[shard_dim]},"
@@ -618,9 +672,8 @@ class DTensorSpec:
         """
         r = [1] * self.ndim
         for i, placement in enumerate(self.placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
-                r[shard_dim] *= self.mesh.size(i)
+            if _is_shard_like(placement):
+                r[placement.dim] *= self.mesh.size(i)
 
         return r
 
@@ -669,7 +722,7 @@ class DTensorSpec:
         for i, m in enumerate(dim_map):
             if m >= 0:
                 placement = placements[m]
-                if placement.is_shard():
+                if placement.is_shard():  # dim_map only produces Shard placements
                     placement = cast(Shard, placement)
                     raise RuntimeError(
                         f"DeviceMesh dimension can't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
@@ -690,9 +743,9 @@ class DTensorSpec:
 
     def is_sharded(self) -> bool:
         """
-        return True if the current DTensorSpec uses Shard() placement on any mesh dims (devices)
+        return True if the current DTensorSpec uses Shard() or _StridedShard() placement on any mesh dims (devices)
         """
-        return any(placement.is_shard() for placement in self.placements)
+        return any(_is_shard_like(placement) for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: TensorMeta | None
@@ -700,9 +753,11 @@ class DTensorSpec:
         """
         Shallow copy the DTensorSpec with a new tensor_meta.
         """
-        assert tensor_meta is not None, "shallow copy with no tensor_meta!"
+        if tensor_meta is None:
+            raise AssertionError("shallow copy with no tensor_meta!")
         return DTensorSpec(
             self.mesh,
             self.placements,
             tensor_meta=tensor_meta,
+            use_strided_shard_as_shard_order=self.use_strided_shard_as_shard_order,
         )

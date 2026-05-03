@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
-    skipCUDAIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -749,7 +748,6 @@ class TestPoolingNNDeviceType(NNTestCase):
 
     @slowTest
     @onlyNativeDeviceTypes
-    @skipCUDAIfRocm
     @parametrize_test(
         "module_name,module_size,output_size,test_index,should_error",
         [
@@ -839,7 +837,16 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                self.assertIn(error_msg, output, "The expected error was not found")
+                # CUDA shows assertion message
+                # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
+                has_cuda_assert = error_msg in output
+                has_hip_error = (
+                    "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
+                )
+                self.assertTrue(
+                    has_cuda_assert or has_hip_error,
+                    f"Expected device assert error, got: {output[-500:]}",
+                )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
         else:
@@ -1106,6 +1113,81 @@ torch.cuda.synchronize()
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyNativeDeviceTypes
+    @gcIfJetson
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    def test_avg_pool3d_nhwc(self, device, dtype):
+        def helper(
+            n,
+            c,
+            d,
+            h,
+            w,
+            kernel_size,
+            stride=None,
+            count_include_pad=True,
+            divisor_override=None,
+            padding=0,
+        ):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, d, h, w, dtype=dtype, device=device)
+            input = input.contiguous(
+                memory_format=torch.channels_last_3d
+            ).requires_grad_()
+            # Calculate output size considering padding
+            out_d = (d + 2 * padding - kernel_size) // stride + 1
+            out_h = (h + 2 * padding - kernel_size) // stride + 1
+            out_w = (w + 2 * padding - kernel_size) // stride + 1
+            grad = torch.randn(
+                n,
+                c,
+                out_d,
+                out_h,
+                out_w,
+                dtype=dtype,
+                device=device,
+            )
+            pool = torch.nn.AvgPool3d(
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor_override,
+            ).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AvgPool3d(
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor_override,
+            ).to(device)
+
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertEqual(out, ref_out)
+            if dtype == torch.half:
+                self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=1e-1)
+            else:
+                self.assertEqual(input.grad, ref_input.grad)
+
+        helper(4, 8, 8, 8, 8, 3)
+        helper(4, 8, 8, 8, 8, 3, count_include_pad=False, padding=1)
+        helper(4, 8, 8, 8, 8, 3, count_include_pad=False, padding=1, stride=2)
+        helper(4, 8, 8, 8, 8, 3, divisor_override=42)
+        helper(4, 8, 8, 8, 8, 7)
+        helper(4, 8, 7, 7, 7, 3, stride=1)
+        helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
+        helper(2, 16, 10, 10, 10, 3, stride=2)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -1681,7 +1763,8 @@ torch.cuda.synchronize()
         stride = list(grad.stride())
         stride[0] = stride[0] * 2
         grad.set_(grad.storage(), 0, grad.size(), stride)
-        assert grad.is_contiguous()
+        if not grad.is_contiguous():
+            raise AssertionError("Expected grad to be contiguous")
 
         y.backward(grad)
 

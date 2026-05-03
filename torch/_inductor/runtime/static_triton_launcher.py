@@ -93,6 +93,7 @@ class StaticallyLaunchedTritonKernel:
         def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
             # pyrefly: ignore [missing-attribute]
             if hasattr(kernel.metadata, param_name):
+                # pyrefly: ignore [missing-attribute]
                 if getattr(kernel.metadata, param_name) > 0:
                     raise NotImplementedError(
                         f"{scratch_name} scratch not yet supported"
@@ -345,4 +346,6 @@ def statically_launched_kernel_by_device(
     elif device_type == "xpu":
         return StaticallyLaunchedXpuKernel(kernel)
     else:
-        raise NotImplementedError(f"Device type {device_type} not supported")
+        raise NotImplementedError(
+            f"Device type {device_type} is not supported for static launcher"
+        )

@@ -48,7 +48,7 @@ static PyObject* THPEvent_pynew(
   self->weakreflist = nullptr;
 
   // TODO: blocking and interprocess are not supported yet. To support them, the
-  // flag system of c10::Event needs to be refactored. C10::Event should also
+  // flag system of c10::Event needs to be refactored. c10::Event should also
   // provide a generic constructor to support blocking and interprocess events.
   (void)blocking;
   (void)interprocess;
@@ -109,7 +109,7 @@ static PyObject* THPEvent_record(
     TORCH_WARN("Parsing THPEvent_record arg fails");
     return nullptr;
   }
-  if (_stream != Py_None) {
+  if (!Py_IsNone(_stream)) {
     auto stream = reinterpret_cast<THPStream*>(_stream);
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
@@ -187,7 +187,7 @@ static PyObject* THPEvent_wait(
       TORCH_WARN("Parsing THPEvent_wait arg fails");
       return nullptr;
     }
-    if (_stream != Py_None) {
+    if (!Py_IsNone(_stream)) {
       auto stream = reinterpret_cast<THPStream*>(_stream);
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
@@ -213,6 +213,10 @@ static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
+  // We expect it to be an explicit torch.Event instance.
+  TORCH_CHECK(
+      Py_TYPE(_other) == THPEventClass,
+      "expected other to be a torch.Event object");
   auto other = reinterpret_cast<THPEvent*>(_other);
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS

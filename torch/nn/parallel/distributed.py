@@ -26,6 +26,142 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 RPC_AVAILABLE = False
+
+# Default bucket size in MiB for gradient reduction
+_DEFAULT_BUCKET_CAP_MB = 25
+# Conversion factor from MiB to bytes
+_MB_TO_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class _BucketCapacityConfig:
+    """Configuration for DDP gradient reduction bucket capacities.
+
+    This immutable dataclass encapsulates bucket size settings for
+    DistributedDataParallel. Use the `create()` factory method to construct.
+
+    The bucket capacity determines how parameters are grouped for AllReduce:
+    - Smaller buckets: more frequent, smaller AllReduce operations
+    - Larger buckets: less frequent, larger AllReduce operations
+
+    Attributes:
+        bucket_bytes_cap: The primary bucket size limit in bytes. This is passed
+            to the C++ Reducer as the default bucket size.
+
+        per_bucket_bytes_caps: Per-bucket size limits in bytes when user specifies
+            bucket_cap_mb_list. Empty tuple means use uniform bucket_bytes_cap.
+
+        first_bucket_bytes_cap: Size limit for the first bucket in bytes. Can be
+            smaller than bucket_bytes_cap to reduce latency (first bucket contains
+            parameters whose gradients complete last, so a smaller first bucket
+            allows AllReduce to start sooner).
+    """
+
+    bucket_bytes_cap: int
+    per_bucket_bytes_caps: tuple[int, ...]
+    first_bucket_bytes_cap: int
+
+    @classmethod
+    def create(
+        cls,
+        bucket_cap_mb: int | None,
+        bucket_cap_mb_list: list[int] | None,
+        use_python_reducer: bool,
+    ) -> "_BucketCapacityConfig":
+        """Factory method to create a BucketCapacityConfig from user inputs.
+
+        Args:
+            bucket_cap_mb: Single bucket size limit in MiB. If None, uses default
+                of 25 MiB. Ignored if bucket_cap_mb_list is provided.
+            bucket_cap_mb_list: Per-bucket size limits in MiB. When provided, each
+                bucket gets its own size limit.
+            use_python_reducer: Whether Python reducer is being used (for validation).
+
+        Returns:
+            A new BucketCapacityConfig instance.
+
+        Raises:
+            AssertionError: If bucket_cap_mb_list is provided with Python reducer.
+        """
+        is_using_default = bucket_cap_mb is None
+        effective_bucket_cap_mb = (
+            bucket_cap_mb if bucket_cap_mb is not None else _DEFAULT_BUCKET_CAP_MB
+        )
+
+        # Process per-bucket size list if provided
+        per_bucket_bytes_caps: tuple[int, ...] = ()
+        if bucket_cap_mb_list:
+            if use_python_reducer:
+                raise AssertionError(
+                    "when using bucket_cap_mb_list, python reducer is not supported"
+                )
+            per_bucket_bytes_caps = tuple(
+                int(cap_mb * _MB_TO_BYTES) for cap_mb in bucket_cap_mb_list
+            )
+            effective_bucket_cap_mb = max(bucket_cap_mb_list)
+            is_using_default = False
+
+        bucket_bytes_cap = int(effective_bucket_cap_mb * _MB_TO_BYTES)
+
+        # First bucket optimization: use smaller size when using defaults
+        # to reduce latency for early-computed gradients
+        first_bucket_bytes_cap = (
+            dist._DEFAULT_FIRST_BUCKET_BYTES if is_using_default else bucket_bytes_cap
+        )
+
+        return cls(
+            bucket_bytes_cap=bucket_bytes_cap,
+            per_bucket_bytes_caps=per_bucket_bytes_caps,
+            first_bucket_bytes_cap=first_bucket_bytes_cap,
+        )
+
+    @property
+    def bucket_cap_mb(self) -> int:
+        """Return bucket size in MiB (for backward compatibility)."""
+        return self.bucket_bytes_cap // _MB_TO_BYTES
+
+    @property
+    def has_custom_per_bucket_caps(self) -> bool:
+        """Return True if user specified per-bucket size limits."""
+        return len(self.per_bucket_bytes_caps) > 0
+
+    def compute_bucket_size_limits(
+        self,
+        static_graph: bool,
+        find_unused_parameters: bool,
+    ) -> tuple[list[int], list[int]]:
+        """Compute bucket size limits for initial bucketing and rebuilding.
+
+        Args:
+            static_graph: Whether the computation graph is static.
+            find_unused_parameters: Whether to find unused parameters.
+
+        Returns:
+            A tuple of (bucket_size_limits, bucket_size_limits_for_rebuilding):
+            - bucket_size_limits: Used for initial bucket assignment
+            - bucket_size_limits_for_rebuilding: Passed to C++ Reducer (empty list
+              means use C++ Reducer's default logic)
+        """
+        # Case 1: User provided explicit per-bucket size limits
+        if self.has_custom_per_bucket_caps:
+            limits = list(self.per_bucket_bytes_caps)
+            return (limits, limits)
+
+        # Case 2: Compute default bucket size limits
+        # When static_graph or not finding unused params, disable initial bucketing
+        # by using maxsize (put all params in one bucket initially)
+        if static_graph or not find_unused_parameters:
+            bucket_size_limits = [sys.maxsize]
+        elif self.first_bucket_bytes_cap < self.bucket_bytes_cap:
+            # Use smaller first bucket for latency optimization
+            bucket_size_limits = [self.first_bucket_bytes_cap, self.bucket_bytes_cap]
+        else:
+            bucket_size_limits = [self.bucket_bytes_cap]
+
+        # Empty list lets C++ Reducer use its default logic
+        return (bucket_size_limits, [])
+
+
 if dist.is_available():
     from torch.distributed.distributed_c10d import (
         _get_default_group,
@@ -518,7 +654,7 @@ class DistributedDataParallel(Module, Joinable):
         If you plan on using this module with a ``nccl`` backend or a ``gloo``
         backend (that uses Infiniband), together with a DataLoader that uses
         multiple workers, please change the multiprocessing start method to
-        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        ``forkserver`` or ``spawn``. Unfortunately
         Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
         likely experience deadlocks if you don't change this setting.
 
@@ -637,6 +773,17 @@ class DistributedDataParallel(Module, Joinable):
                     This requires that unused parameters remain the same across all ranks throughout
                     the entire training process. If this condition is not met, it may cause
                     desynchronization and result in training hang.
+        batched_grad_copy (bool): When set to ``True``, individual per-parameter
+                    gradient-to-bucket copy and division operations are deferred
+                    and flushed as a single ``_foreach_copy_`` plus one flat
+                    ``div_`` when a bucket becomes ready. This reduces per-parameter
+                    kernel launches down to 2 kernels per bucket, which can improve
+                    throughput for models with many small parameters. The
+                    optimization is most effective with
+                    ``optimizer.zero_grad(set_to_none=True)`` (the default), where
+                    ``gradient_as_bucket_view`` alone cannot avoid copies because
+                    the bucket view alias is destroyed every iteration.
+                    (default: ``False``)
 
 
     Attributes:
@@ -671,6 +818,8 @@ class DistributedDataParallel(Module, Joinable):
         mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
+        bucket_cap_mb_list: list[int] | None = None,
+        batched_grad_copy=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -771,24 +920,23 @@ class DistributedDataParallel(Module, Joinable):
             or self.is_multi_device_module
         ):
             if device_ids or output_device:
+                devices = {p.device for p in self._module_parameters}
                 self._log_and_throw(
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
+                    f"and module parameters {devices}.",
                 )
 
             self.device_ids = None
             self.output_device = None
         else:
-            # pyrefly: ignore [bad-assignment]
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
 
-            # pyrefly: ignore [bad-assignment]
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False
@@ -800,6 +948,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.batched_grad_copy = batched_grad_copy
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -826,14 +975,21 @@ class DistributedDataParallel(Module, Joinable):
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = 250 * 1024 * 1024
 
-        # reduction bucket size
-        if bucket_cap_mb is None:
-            # default case (bucket cap is 25 MiB)
-            bucket_cap_mb = 25
-            self.bucket_bytes_cap_default = True
-        else:
-            self.bucket_bytes_cap_default = False
-        self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+        # Initialize bucket capacity configuration using the factory method
+        self._bucket_config = _BucketCapacityConfig.create(
+            bucket_cap_mb=bucket_cap_mb,
+            bucket_cap_mb_list=bucket_cap_mb_list,
+            use_python_reducer=self._use_python_reducer,
+        )
+        # Expose config values as instance attributes for backward compatibility
+        # TODO: Remove in the future
+        self.bucket_bytes_cap = self._bucket_config.bucket_bytes_cap
+        self.bucket_bytes_cap_list = list(self._bucket_config.per_bucket_bytes_caps)
+        self.bucket_bytes_cap_default = (
+            self._bucket_config.first_bucket_bytes_cap
+            < self._bucket_config.bucket_bytes_cap
+        )
+        bucket_cap_mb = self._bucket_config.bucket_cap_mb
 
         # Whether to perform input tensor CPU to GPU copies on a side-stream
         self.use_side_stream_for_tensor_copies = (
@@ -940,6 +1096,7 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_communication = True
+            # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
             # Directly adding this to the trace rule will disturb the users
             # who are using DDPOptimizer.
@@ -1197,17 +1354,16 @@ class DistributedDataParallel(Module, Joinable):
         # After the first iteration, it's OK to rebuild buckets,
         # because "bucket rebuild" bucketizes parameters based on its real execution order in backward graph.
 
-        # Can remove this branching once #73732 is landed.
-        if static_graph is True or self.find_unused_parameters is False:
-            bucket_size_limits = [sys.maxsize]
-        else:
-            if self.bucket_bytes_cap_default:
-                bucket_size_limits = [
-                    dist._DEFAULT_FIRST_BUCKET_BYTES,
-                    self.bucket_bytes_cap,
-                ]
-            else:
-                bucket_size_limits = [self.bucket_bytes_cap]
+        # Compute bucket size limits for initial bucketing and rebuilding
+        # See BucketCapacityConfig.compute_bucket_size_limits for detailed explanation
+        (
+            bucket_size_limits,
+            bucket_size_limits_for_rebuilding,
+        ) = self._bucket_config.compute_bucket_size_limits(
+            static_graph=static_graph,
+            find_unused_parameters=self.find_unused_parameters,
+        )
+
         (
             bucket_indices,
             per_bucket_size_limits,
@@ -1241,15 +1397,13 @@ class DistributedDataParallel(Module, Joinable):
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
             param_to_name_mapping,
-            # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
-            # bucket.
-            (
-                dist._DEFAULT_FIRST_BUCKET_BYTES
-                if self.bucket_bytes_cap_default
-                else self.bucket_bytes_cap
-            ),
+            # First bucket can be smaller for reduced latency. See
+            # BucketCapacityConfig.first_bucket_bytes_cap for details.
+            self._bucket_config.first_bucket_bytes_cap,
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
+            bucket_size_limits_for_rebuilding,
+            self.batched_grad_copy,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1483,11 +1637,17 @@ class DistributedDataParallel(Module, Joinable):
     @contextmanager
     @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
+        # Save and restore the previous _active_ddp_module to handle nested
+        # DDP correctly (e.g., TorchRec wraps embeddings in an inner DDP inside
+        # an outer DDP).  Without this, the inner DDP's exit would clear the
+        # flag to None, causing DDPOptimizer to miss compiled regions that run
+        # after the inner forward.
+        old = DistributedDataParallel._active_ddp_module
         DistributedDataParallel._active_ddp_module = self
         try:
             yield
         finally:
-            DistributedDataParallel._active_ddp_module = None
+            DistributedDataParallel._active_ddp_module = old
 
     def _run_ddp_forward(self, *inputs, **kwargs):
         if self._use_python_reducer:
@@ -1938,7 +2098,7 @@ class DistributedDataParallel(Module, Joinable):
                             hook will run _after_ the forward pass.
 
             NOTE: To maximize performance, users can return a
-                List[torch.futures.Future] from their hook, and DDP will
+                list[torch.futures.Future] from their hook, and DDP will
                 install and await these hooks appropriately at the end of
                 the backward pass. This will ensure all buffers are
                 synchronized by the end of the backward pass. If this
@@ -2201,7 +2361,10 @@ class DistributedDataParallel(Module, Joinable):
             # Update self.modules_buffers in case any buffers were
             # reassigned.
             self._assign_modules_buffers()
-            self._sync_module_buffers(authoritative_rank)
+            with torch.autograd._unsafe_preserve_version_counter(
+                tuple(self.modules_buffers)
+            ):
+                self._sync_module_buffers(authoritative_rank)
 
     def _sync_module_buffers(self, authoritative_rank):
         if not hasattr(self, "buffer_hook"):

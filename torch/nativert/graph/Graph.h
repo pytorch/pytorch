@@ -28,6 +28,7 @@ class Type {
     None,
     Tensor,
     TensorList,
+    NestedTensorList,
     OptionalTensorList,
     SymInt,
     SymIntList,
@@ -99,6 +100,7 @@ using Constant = std::variant<
     std::vector<bool>,
     std::vector<std::string>,
     std::vector<std::vector<int64_t>>,
+    std::vector<std::vector<double>>,
     std::unique_ptr<Graph>>;
 
 c10::IValue constantToIValue(const Constant& constant);

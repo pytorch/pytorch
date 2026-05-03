@@ -186,7 +186,6 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
-    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -327,6 +326,7 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
 ]
 
 GENERATED_AOTI_CUDA_CPP = [

@@ -165,7 +165,8 @@ class FSDPMemTracker(MemTracker):
         optm: torch.optim.Optimizer | None = None,
     ) -> None:
         super().__init__()
-        assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
+        if not isinstance(mod, FSDPModule):
+            raise AssertionError("FSDPMemTracker only supports FSDP modules")
         self._root_mod = mod
         self._optm = optm
         self._fsdp_mod_to_saved_methods: WeakIdKeyDictionary = WeakIdKeyDictionary()
@@ -212,7 +213,8 @@ class FSDPMemTracker(MemTracker):
         ) -> tuple[tuple[Unpack[_Ts]], dict[str, Any]]:
             self._fsdp_state = _FSDPState.PRE_FW
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
-            assert mod_fqn is not None
+            if mod_fqn is None:
+                raise AssertionError
             if fsdp_mod not in self.memory_tracking:
                 mod_stat = _FSDPModMemStats(mod_fqn)
                 self.memory_tracking[fsdp_mod] = mod_stat
@@ -255,6 +257,7 @@ class FSDPMemTracker(MemTracker):
                 state = _FSDPModState.AFT_PRE_FW
             mod_stat.snapshots.setdefault(state, []).append(self.get_tracker_snapshot())
             self._fsdp_state = _FSDPState.FW
+            # pyrefly: ignore [bad-return]
             return args, kwargs
 
         return inner

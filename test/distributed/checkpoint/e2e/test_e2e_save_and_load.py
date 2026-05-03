@@ -160,7 +160,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)
 
-        assert model_type in ModelType, f"{model_type} is not supported."
+        if model_type not in ModelType:
+            raise AssertionError(f"{model_type} is not supported.")
         if model_type == ModelType.FSDP:
             device_mesh = init_device_mesh(self.device_type, (self.world_size,))
             model = FSDP(
@@ -299,7 +300,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             if isinstance(async_save_response_or_future, Future):
                 save_future = async_save_response_or_future
             else:
-                assert isinstance(async_save_response_or_future, AsyncSaveResponse)
+                if not isinstance(async_save_response_or_future, AsyncSaveResponse):
+                    raise AssertionError(
+                        f"Expected AsyncSaveResponse, got {type(async_save_response_or_future)}"
+                    )
                 save_future = async_save_response_or_future.upload_completion
             # wait for the future to complete
             t = time.monotonic()

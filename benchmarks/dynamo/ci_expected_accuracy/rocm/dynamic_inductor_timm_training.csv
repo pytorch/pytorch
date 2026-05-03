@@ -34,7 +34,7 @@ inception_v3,pass,6
 
 
 
-mobilenetv2_100,fail_accuracy,7
+mobilenetv2_100,pass,7
 
 
 
@@ -62,7 +62,7 @@ tf_efficientnet_b0,pass,6
 
 
 
-visformer_small,fail_accuracy,7
+visformer_small,pass,7
 
 
 

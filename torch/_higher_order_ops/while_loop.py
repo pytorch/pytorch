@@ -2,18 +2,23 @@
 import contextlib
 import functools
 from collections.abc import Callable
-from typing import Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.auto_functionalize import (
+    can_auto_functionalize,
+    do_auto_functionalize_v2,
+)
 from torch._higher_order_ops.utils import (
+    _check_alias_and_mutation,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
-    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
+    get_graph_output_example_values,
+    HopInstance,
     materialize_as_graph,
     reenter_make_fx,
     validate_subgraph_args_types,
@@ -35,9 +40,11 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
+        *,
+        mutated_arg_indices: str = "",
     ):
         if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
@@ -50,11 +57,27 @@ class WhileLoopOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        kwargs = {}
+        if mutated_arg_indices:
+            kwargs["mutated_arg_indices"] = mutated_arg_indices
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return super().__call__(
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
+            **kwargs,
+        )
 
     # pyrefly: ignore [bad-override]
-    def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
+    def gen_schema(
+        self,
+        cond_fn,
+        body_fn,
+        carried_inputs,
+        additional_inputs,
+        mutated_arg_indices="",
+    ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
@@ -71,32 +94,12 @@ class WhileLoopOp(HigherOrderOperator):
             else materialize_as_graph(body_fn, all_inputs)
         )
 
-        def _find_example_value(n, real_inp):
-            if "val" in n.meta:
-                return n.meta["val"]
-            elif "example_value" in n.meta:
-                return n.meta["example_value"]
-            else:
-                assert not isinstance(real_inp, torch.Tensor)
-                return real_inp
-
-        (
-            _,
-            _,
-            _,
-            body_mutated_inputs,
-            body_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(body_gm)
-
-        (
-            _,
-            _,
-            _,
-            cond_mutated_inputs,
-            _,
-        ) = check_input_alias_and_mutation_return_outputs(cond_gm)
-
-        mutated_inputs = set(body_mutated_inputs) | set(cond_mutated_inputs)
+        body_outputs = get_graph_output_example_values(body_gm)
+        mutated_inputs = (
+            {int(i) for i in mutated_arg_indices.split(",") if i}
+            if mutated_arg_indices
+            else set()
+        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("cond_fn", cond_gm)
@@ -119,7 +122,10 @@ class WhileLoopOp(HigherOrderOperator):
             schema_gen.add_output(out)
 
         schema_gen.add_schema_tree_spec(
-            cond_fn, body_fn, carried_inputs, additional_inputs
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
         )
         return schema_gen.gen_schema()
 
@@ -129,17 +135,19 @@ while_loop_op = WhileLoopOp()
 
 def while_loop(cond_fn, body_fn, carried_inputs):
     r"""
-    Run body_fn(*carried_inputs) while cond_fn(*carried_inputs) returns a True scalar tensor. Returns the output of body_fn or
-    initial carried_inputs.
+    Run ``body_fn(*carried_inputs)`` while ``cond_fn(*carried_inputs)`` returns
+    a True scalar tensor. Returns the output of body_fn or initial
+    carried_inputs.
 
     .. warning::
+
         `torch.while_loop` is a prototype feature in PyTorch. It has limited support for input and output types and
         doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     `while_loop` is a structured control flow operator. It preserves the loop semantic across the torch.compile and torch.export.
 
-    `while_loop` is equivalent to the following:
+    `while_loop` is equivalent to the following::
 
         def while_loop(cond_fn, body_fn, carried_inputs):
             val = carried_inputs
@@ -157,25 +165,29 @@ def while_loop(cond_fn, body_fn, carried_inputs):
             the corresponding return of while_loop will be another int with unknown values because we don't know how many
             iterations while_loop will run.
 
-    Example 1:
+    Example 1::
 
         def cond_fn(iter, x):
             return iter.sum() < 10
 
+
         def body_fn(iter, x):
             return iter + 1, x.sin()
 
+
         while_loop(cond_fn, body_fn, (torch.zeros(1), torch.randn(3, 4)))
 
-    Example 2:
+    Example 2::
 
         def cond_fn(int_iter, x):
             return 2 * int_iter < x.shape[0]
 
+
         def body_fn(int_iter, x):
             return int_iter + 1, x + int_iter
 
-        while_loop(cond,_fn, body_fn, (0, torch.randn(3, 4)))
+
+        while_loop(cond_fn, body_fn, (0, torch.randn(3, 4)))
 
     Restrictions:
 
@@ -187,10 +199,8 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
-    .. warning::
-        Temporal Limitations:
-
-        - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
+        - During inference, body_fn and cond_fn can in-place mutate tensors that are not
+          carried_inputs, such as module buffers and captured tensors from the enclosing scope.
 
     """
 
@@ -239,17 +249,22 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     def _while_loop_op_wrapper(*args, **kwargs):
         return while_loop_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(_while_loop_op_wrapper, backend=backend, fullgraph=True)(
-            flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()
-        )
+    return _hop_compile_and_call(
+        _while_loop_op_wrapper,
+        (flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()),
+    )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(
-    cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
     carried_vals = carried_inputs
 
@@ -294,12 +309,12 @@ def while_loop_dense(
             for i, o in enumerate(out):
                 outputs[i].append(o)
 
-        assert isinstance(out, tuple), (
-            f"body_fn should return a tuple but got {type(out)}"
-        )
-        assert len(out) == len(carried_inputs), (
-            "body_fn should return the same number of elements as carried_inputs"
-        )
+        if not isinstance(out, tuple):
+            raise AssertionError(f"body_fn should return a tuple but got {type(out)}")
+        if len(out) != len(carried_inputs):
+            raise AssertionError(
+                f"body_fn should return the same number of elements as carried_inputs, got {len(out)} vs {len(carried_inputs)}"
+            )
         carried_vals = out
 
         should_loop = cond_fn(*carried_vals, *additional_inputs)
@@ -314,7 +329,9 @@ def while_loop_dense(
 
 
 @while_loop_op.py_autograd_impl
-def while_loop_autograd(cond_fn, body_fn, operands, additional_inputs):
+def while_loop_autograd(
+    cond_fn, body_fn, operands, additional_inputs, mutated_arg_indices=""
+):
     return WhileLoopAutogradOp.apply(
         cond_fn,
         body_fn,
@@ -338,9 +355,8 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
 def _create_unbacked_symint(
     fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
-    assert fake_mode is not None and fake_mode.shape_env is not None, (
-        "Must provide a fake_mode with shape_env."
-    )
+    if fake_mode is None or fake_mode.shape_env is None:
+        raise AssertionError("Must provide a fake_mode with shape_env.")
     ctx = (
         contextlib.nullcontext()
         if not ignore_fresh_unbacked_symbols
@@ -358,11 +374,18 @@ def while_loop_tracing(
     carried_inputs,
     additional_inputs,
     stack_output=False,
+    mutated_arg_indices="",
 ):
     op = while_loop_stack_output_op if stack_output else while_loop_op
 
     def _trace_while_loop(
-        proxy_mode, op, cond_fn, body_fn, carried_inputs, additional_inputs
+        proxy_mode,
+        op,
+        cond_fn,
+        body_fn,
+        carried_inputs,
+        additional_inputs,
+        mutated_arg_indices,
     ):
         # NOTE [unspecialize int carry with unbacked symints]
         # When we support int carry, we'll also need to support int output of body_fn because.
@@ -453,21 +476,31 @@ def while_loop_tracing(
                 next_name = candidate
         cond_graph_name = next_name
         body_graph_name = f"while_loop_body_graph_{i}"
-        assert not hasattr(proxy_mode.tracer.root, body_graph_name)
+        if hasattr(proxy_mode.tracer.root, body_graph_name):
+            raise AssertionError(
+                f"proxy_mode.tracer.root already has attribute {body_graph_name}"
+            )
 
         proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
 
         args = (cond_graph, body_graph, carried_inputs, additional_inputs)
+        kwargs = {}
+        if not stack_output and mutated_arg_indices:
+            kwargs["mutated_arg_indices"] = mutated_arg_indices
 
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
         out_proxy = proxy_mode.tracer.create_proxy(
-            "call_function", op, proxy_args, {}, name=op._name
+            "call_function", op, proxy_args, kwargs, name=op._name
         )
 
         out = op(
-            cond_graph, body_graph, unspecialized_carried_inputs, additional_inputs
+            cond_graph,
+            body_graph,
+            unspecialized_carried_inputs,
+            additional_inputs,
+            **kwargs,
         )
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
@@ -480,12 +513,19 @@ def while_loop_tracing(
         body_fn,
         carried_inputs,
         additional_inputs,
+        mutated_arg_indices,
     )
 
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
-    mode, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    mode,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -533,7 +573,10 @@ def while_loop_fake_tensor_mode(
 
         if stack_output:
             n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
-            assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
+            if not all(isinstance(x, torch.Tensor) for x in carried_inputs):
+                raise AssertionError(
+                    f"all carried_inputs must be tensors for stack_output, got {[type(x) for x in carried_inputs]}"
+                )
             fake_outputs = tuple(
                 out.clone()
                 .unsqueeze(0)
@@ -564,11 +607,37 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(
-    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    ctx,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
-
     op = while_loop_stack_output_op if stack_output else while_loop_op
+    # For now, we only support auto-functionalization for while_loop when using python
+    # functionalization mode
+    if not stack_output and hasattr(ctx, "mode"):
+        hop_instance = HopInstance.create(
+            op,
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
+            mutated_arg_indices=mutated_arg_indices,
+        )
+        if can_auto_functionalize(hop_instance):
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                tuple(
+                    pytree.tree_flatten(
+                        (cond_fn, body_fn, carried_inputs, additional_inputs)
+                    )[0]
+                ),
+                {},
+            )
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -582,11 +651,15 @@ def while_loop_func(
             (body_fn, "body_fn"),
         ]:
             _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
+        op_kwargs = {}
+        if not stack_output and mutated_arg_indices:
+            op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         ret = op(
             functional_cond_fn,
             functional_body_fn,
             unwrapped_carried_inputs,
             unwrapped_additional_inputs,
+            **op_kwargs,
         )
         return ctx.wrap_tensors(ret)
 
@@ -612,8 +685,8 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
     ):
         if not isinstance(carried_inputs, (tuple, list)):
@@ -709,11 +782,16 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                 cond_fn, body_fn, carries, additional_inputs
             )
 
-        assert not hasattr(ctx, "fw_cond_fn")
-        assert not hasattr(ctx, "fw_body_fn")
-        assert not hasattr(ctx, "carries")
-        assert not hasattr(ctx, "additional_inputs")
-        assert not hasattr(ctx, "fw_outputs")
+        if hasattr(ctx, "fw_cond_fn"):
+            raise AssertionError("ctx already has fw_cond_fn attribute")
+        if hasattr(ctx, "fw_body_fn"):
+            raise AssertionError("ctx already has fw_body_fn attribute")
+        if hasattr(ctx, "carries"):
+            raise AssertionError("ctx already has carries attribute")
+        if hasattr(ctx, "additional_inputs"):
+            raise AssertionError("ctx already has additional_inputs attribute")
+        if hasattr(ctx, "fw_outputs"):
+            raise AssertionError("ctx already has fw_outputs attribute")
         ctx.fw_cond_fn = cond_fn
         ctx.fw_body_fn = body_fn
         ctx.carries = carries
@@ -724,10 +802,16 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         for out in fw_outputs:
             if isinstance(out, torch.Tensor):
                 if loop_count is not None:
-                    assert out.size(0) == loop_count
+                    if out.size(0) != loop_count:
+                        raise AssertionError(
+                            f"inconsistent loop_count: expected {loop_count}, got {out.size(0)}"
+                        )
                 else:
                     loop_count = out.size(0)
-        assert loop_count is not None
+        if loop_count is None:
+            raise AssertionError(
+                "loop_count must not be None after processing fw_outputs"
+            )
 
         # Remove the loop_count from pending_fresh_unbacked_symbols
         # because it's not part of forward output and it's impossible
@@ -746,7 +830,8 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        assert len(fw_outputs) > 0, "fw_outputs shouldn't be empty"
+        if len(fw_outputs) <= 0:
+            raise AssertionError("fw_outputs shouldn't be empty")
         # Only the last of the output fw_outputs need to be returned
         return tuple(ckp[-1] for ckp in fw_outputs)
 
@@ -781,7 +866,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             if need_keep
         )
         # We need to the forward inputs to each iteration to compute the backward
-        # which is the concatenation of first iteraiton input i.e. ctx.carries and all iterations's
+        # which is the concatenation of first iteration input i.e. ctx.carries and all iterations'
         # output except the last iteration.
         fw_carries = [
             torch.cat([carry.unsqueeze(0), carries[:-1]])
@@ -808,7 +893,10 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                 fw_carries,
                 additional_inputs,
             ) = pytree.tree_unflatten(flat_args, spec)
-            assert isinstance(fw_carries[0], torch.Tensor), fw_carries[0]
+            if not isinstance(fw_carries[0], torch.Tensor):
+                raise AssertionError(
+                    f"expected fw_carries[0] to be torch.Tensor, got {type(fw_carries[0])}"
+                )
             # excluding the last iteration's output
             return idx < fw_carries[0].size(0)
 
@@ -828,7 +916,10 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                 bw_body_fn(*selected_fw_carries, *additional_inputs, *grad_carries),
                 [len(ctx.carries), len(ctx.additional_inputs)],
             )
-            assert all(isinstance(t, torch.Tensor) for t in cur_grad_carries)
+            if not all(isinstance(t, torch.Tensor) for t in cur_grad_carries):
+                raise AssertionError(
+                    f"all cur_grad_carries must be tensors, got {[type(t) for t in cur_grad_carries]}"
+                )
             cur_grad_carries_tensors = filter_with_masks(
                 cur_grad_carries, carries_tensor_masks
             )

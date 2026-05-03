@@ -81,7 +81,6 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 set(TORCH_PYTHON_LINK_LIBRARIES
     Python::Module
     pybind::pybind11
-    opentelemetry::api
     httplib
     nlohmann
     moodycamel
@@ -173,10 +172,6 @@ endif()
 if(USE_XPU)
     include(${TORCH_ROOT}/cmake/public/xpu.cmake)
     append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
-    if(NOT WIN32)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ze_loader)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES sycl)
-    endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 
@@ -238,9 +233,9 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
 
-file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
-file(GLOB_RECURSE pyi_python "${TOOLS_PATH}/pyi/*.py")
+file(GLOB_RECURSE torchgen_python CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+file(GLOB_RECURSE autograd_python CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE pyi_python CONFIGURE_DEPENDS "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -266,7 +261,7 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
-file(GLOB_RECURSE datapipe_files "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
+file(GLOB_RECURSE datapipe_files CONFIGURE_DEPENDS "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"

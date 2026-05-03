@@ -39,10 +39,8 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
@@ -59,6 +57,25 @@ def aot_eager_regional_inductor():
         fw_compiler=regional_inductor,
         bw_compiler=regional_inductor,
     )
+
+
+class SingleCondModel(torch.nn.Module):
+    def __init__(self, d=64):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(d, d)
+        self.fc2 = torch.nn.Linear(d, d)
+
+    def forward(self, x):
+        x = self.fc1(x)
+
+        def true_fn(x):
+            return x * 2.0
+
+        def false_fn(x):
+            return x * 3.0
+
+        x = torch.cond(x.shape[0] < 32, true_fn, false_fn, (x,))
+        return self.fc2(x)
 
 
 class MooType:
@@ -357,7 +374,7 @@ class TestVLLMModel(MultiModalMixin, TextModel):
 def _subprocess_entry(fn, queue):
     try:
         fn()
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException as exc:
         import traceback
 
         queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
@@ -404,7 +421,10 @@ def _subprocess_disable_guard_check():
                 raise AssertionError("Guard check should have failed")
             compiled_fn.disable_guard_check()
             actual = compiled_fn(*inputs)
-            assert torch.allclose(actual, expected)
+            if not torch.allclose(actual, expected):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
         finally:
             torch.set_grad_enabled(prev_grad)
 
@@ -435,7 +455,10 @@ def _subprocess_grad_mode_after_prior_compile():
         with torch.no_grad():
             actual = compiled_fn(*inputs)
             expected = target_fn(*inputs)
-            assert torch.allclose(actual, expected)
+            if not torch.allclose(actual, expected):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
 
 
 def _subprocess_aot_compile_module():
@@ -473,7 +496,10 @@ def _subprocess_aot_compile_module():
                 args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
             ),
         ]
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+        if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
+            raise AssertionError(
+                f"Expected OptimizedModule, got {type(model).__name__}"
+            )
         model._aot_compile(inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
@@ -481,7 +507,10 @@ def _subprocess_aot_compile_module():
             eager_inputs = (torch.randn(3, 3),)
             expected = mod(*eager_inputs)
             actual = model(*eager_inputs)
-            assert torch.allclose(expected, actual)
+            if not torch.allclose(expected, actual):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
             model.train()
             expected.sum().backward()
 
@@ -497,7 +526,10 @@ def _subprocess_aot_compile_module():
                     "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
                 },
             )
-            assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+            if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
+                raise AssertionError(
+                    f"Expected OptimizedModule, got {type(model).__name__}"
+                )
             with open(path, "rb") as f:
                 data = f.read()
                 model._load_aot_compiled_module(data)
@@ -507,7 +539,10 @@ def _subprocess_aot_compile_module():
                 eager_inputs = (torch.randn(3, 3),)
                 expected = mod(*eager_inputs)
                 actual = model(*eager_inputs)
-                assert torch.allclose(expected, actual)
+                if not torch.allclose(expected, actual):
+                    raise AssertionError(
+                        f"Expected tensors to be close, got {actual} vs {expected}"
+                    )
 
 
 class RedistributeModel(torch.nn.Module):
@@ -643,7 +678,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -671,12 +706,50 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*example_inputs)
             self.assertEqual(expected, actual)
 
+    def test_eager_backend(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
+    def test_aot_eager_backend(self):
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, backend="aot_eager"
+        ).aot_compile(((torch.randn(3, 4), torch.randn(3, 4)), {}))
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
     def test_decorated_function_with_functools_wrap_aot(self):
         def check_inputs(fn):
             @functools.wraps(fn)
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -793,7 +866,7 @@ from user code:
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -862,7 +935,8 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        assert hasattr(backend_result.compiled_fn, "serialize")
+        if not hasattr(backend_result.compiled_fn, "serialize"):
+            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
     def test_aot_compile_portable_guards_unsafe(self):
@@ -900,8 +974,46 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        assert hasattr(backend_result.compiled_fn, "serialize")
+        if not hasattr(backend_result.compiled_fn, "serialize"):
+            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_aot_cache_predicate_not_pickleable(self):
+        import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
+
+        model = SingleCondModel().eval()
+
+        old_cacheable = torch.ops.higher_order.cond._cacheable
+        torch.ops.higher_order.cond._cacheable = True
+        try:
+            with (
+                functorch_config.patch(
+                    enable_autograd_cache=True,
+                    force_non_lazy_backward_lowering=True,
+                    strict_autograd_cache=True,
+                ),
+                inductor_config.patch(
+                    fx_graph_cache=True,
+                    fx_graph_remote_cache=False,
+                ),
+            ):
+                compiled = torch.compile(model, backend="inductor", dynamic=True)
+
+                # Test both branches of the cond predicate (x.shape[0] < 32).
+                for batch_size in (16, 64):
+                    inp = torch.randn(batch_size, 64)
+                    expected = model(inp)
+                    actual = compiled(inp)
+                    self.assertEqual(expected, actual)
+
+                # If the SymBool predicate is not pickleable, the FxGraphCache
+                # silently bypasses instead of caching. Assert no bypass occurred.
+                self.assertEqual(
+                    torch._dynamo.utils.counters["inductor"]["fxgraph_cache_bypass"], 0
+                )
+        finally:
+            torch.ops.higher_order.cond._cacheable = old_cacheable
 
     def test_fullgraph_capture_with_pytree_module(self):
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -1045,9 +1157,9 @@ from user code:
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_aot_compile_with_aoti(self):
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             from torch._dynamo.hooks import Hooks
 
             def fn(x, y):
@@ -1073,9 +1185,9 @@ from user code:
             actual = compiled_fn(*test_inputs)
             self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_aot_compile_with_aoti_module(self):
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             from torch._dynamo.hooks import Hooks
 
             mod = SimpleLinearModule()
@@ -1107,9 +1219,9 @@ from user code:
             actual.sum().backward()
             self.assertEqual(get_grads(original_mod), expected_grads)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_aot_compile_with_aoti_torch_compile(self):
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
 
             def fn(x, y):
                 return x + y
@@ -1296,9 +1408,30 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_builtins_dict_survives_serialization(self):
+        """Test that __builtins_dict__ is preserved through serialize/deserialize."""
+
+        def fn(x):
+            return x + 1, type
+
+        x = torch.randn(4)
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))
+
+        # Save and reload without f_globals
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded_fn = torch.compiler.load_compiled_function(
+                f, f_globals=fn.__globals__
+            )
+
+        expected = fn(x)
+        actual = loaded_fn(x)
+        self.assertEqual(expected[0], actual[0])
+        self.assertEqual(expected[1], actual[1])
+
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_aot_compile(self):
-        """Test cross-compilation using fake cuda tensors and backward correctness"""
+        """Test cross-compilation using fake tensors and backward correctness"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -1306,8 +1439,8 @@ from user code:
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             fake_inputs = (
-                torch.randn(3, 4, device="cuda", requires_grad=True),
-                torch.randn(3, 4, device="cuda", requires_grad=True),
+                torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
+                torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
             )
         compiled_fn = torch.compile(
             fn,
@@ -1321,8 +1454,8 @@ from user code:
             loaded_fn = torch.compiler.load_compiled_function(f)
 
         inputs = (
-            torch.randn(3, 4, device="cuda", requires_grad=True),
-            torch.randn(3, 4, device="cuda", requires_grad=True),
+            torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
+            torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
         )
         expected = fn(*inputs)
         actual = loaded_fn(*inputs)
@@ -1346,7 +1479,7 @@ from user code:
             self.assertEqual(eg, cg)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_cross_compile_realistic_transformer_model(self):
         """
         Test cross-compilation with transformer model with DTensors,
@@ -1398,7 +1531,7 @@ from user code:
             This ensures reproducible results across eager and compiled runs.
             """
             torch.manual_seed(seed)
-            torch.cuda.manual_seed(seed)
+            getattr(torch, GPU_TYPE).manual_seed(seed)
             for name, param in module.named_parameters():
                 if param.requires_grad:
                     local_param = (
@@ -1414,7 +1547,7 @@ from user code:
 
         try:
             rank = c10d.get_rank()
-            device = torch.device(f"cuda:{rank}")
+            device = torch.device(f"{GPU_TYPE}:{rank}")
             vocab_size = 1000
             embed_dim = 256
             num_heads = 8
@@ -1425,7 +1558,7 @@ from user code:
             seq_len = 16
 
             device_mesh = init_device_mesh(
-                "cuda",
+                GPU_TYPE,
                 (1,),
                 mesh_dim_names=("dp",),
             )
@@ -1462,9 +1595,7 @@ from user code:
 
             from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-            gm = dynamo_graph_capture_for_export(model, restore_state_dict=True)(
-                input_ids_dt
-            )
+            gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
 
             fake_mode = gm.meta["fake_mode"]
 
@@ -1615,6 +1746,79 @@ from user code:
                     )
         finally:
             c10d.destroy_process_group()
+
+
+class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
+    """Tests for triton kernel side table serialization."""
+
+    def test_kernel_side_table_serialization_roundtrip(self):
+        """
+        Test that the kernel_side_table is properly serialized and restored.
+
+        This test verifies that when we serialize the triton kernel side table
+        and then clear it (simulating a new process), deserialization properly
+        restores the kernels so they can be looked up by index.
+
+        Without this fix, deserialization in a new process would fail with:
+            AssertionError: Kernel index X not found in id_to_kernel
+        """
+        from torch._dynamo.aot_compile_types import (
+            _deserialize_triton_kernel,
+            _serialize_triton_kernel,
+        )
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        try:
+            # Create a mock kernel-like object that mimics triton JITFunction structure.
+            # Triton JITFunction has a `fn` attribute pointing to the wrapped function.
+            class MockTritonKernel:
+                def __init__(self, fn):
+                    self.fn = fn
+
+            # Use a real importable function (torch.sin) as the wrapped function
+            mock_kernel = MockTritonKernel(torch.sin)
+
+            # Add the kernel to the side table (this is what dynamo does during tracing)
+            kernel_idx = kernel_side_table.add_kernel(mock_kernel)
+
+            # Add some constant args too
+            const_args = {"BLOCK_SIZE": 128, "num_warps": 4}
+            const_args_idx = kernel_side_table.add_constant_args(const_args)
+
+            # Simulate serialization: capture the kernel side table state
+            triton_kernels = {
+                idx: _serialize_triton_kernel(kernel)
+                for idx, kernel in kernel_side_table.id_to_kernel.items()
+            }
+            triton_constant_args = dict(kernel_side_table.constant_args)
+
+            # Simulate a new process by clearing the side table
+            kernel_side_table.reset_table()
+
+            # Verify the table is empty - looking up the kernel should fail
+            with self.assertRaisesRegex(AssertionError, "not found in id_to_kernel"):
+                kernel_side_table.get_kernel(kernel_idx)
+
+            # Simulate deserialization: restore the kernel side table
+            for idx, kernel_info in triton_kernels.items():
+                restored_kernel = _deserialize_triton_kernel(kernel_info)
+                kernel_side_table.id_to_kernel[idx] = restored_kernel
+                kernel_side_table.kernel_to_id[restored_kernel] = idx
+
+            for idx, args in triton_constant_args.items():
+                kernel_side_table.constant_args[idx] = args
+
+            # Now the kernel lookup should succeed
+            restored = kernel_side_table.get_kernel(kernel_idx)
+            # The restored kernel is torch.sin (the underlying function), not the mock wrapper
+            self.assertIs(restored, torch.sin)
+
+            # Constant args should also be restored
+            self.assertEqual(
+                kernel_side_table.constant_args[const_args_idx], const_args
+            )
+        finally:
+            kernel_side_table.reset_table()
 
 
 if __name__ == "__main__":

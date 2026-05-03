@@ -9,8 +9,10 @@ from typing_extensions import deprecated
 import torch
 
 from ._utils import _device_t, _get_device_index
+from .graphs import Graph
 from .memory import (
     empty_cache,
+    empty_host_cache,
     get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
@@ -23,6 +25,7 @@ from .memory import (
 
 
 __all__ = [
+    "Graph",
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
@@ -31,6 +34,7 @@ __all__ = [
     "device_count",
     "device_index",
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "is_available",
     "max_memory_allocated",
@@ -165,7 +169,10 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
 
     Returns:
         dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
-            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types for which
+              tensors can be allocated on the accelerator and type conversion across
+              supported dtypes are supported. Any operator support outside of that
+              is not guaranteed
 
     Examples:
         >>> # xdoctest: +SKIP("requires cuda")

@@ -337,7 +337,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 20)
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -390,7 +390,20 @@ function(torch_compile_options libname)
       endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wmove)
+      if(NOT USE_CUDA)
+        # NS: One can not compile CUDA code with extra-semi flag as nvcc generates code like
+        # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
+        list(APPEND private_compile_options -Wextra-semi)
+      else()
+        # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
+        list(APPEND private_compile_options -Wno-deprecated-copy)
+        # NVCC + clang18  reports spurious deprecated deprecated literal operator declaration when there were none
+        # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
+        # but if one to look at the source code, there are no space there
+        list(APPEND private_compile_options -Wno-deprecated-literal-operator)
+
+      endif()
+      list(APPEND private_compile_options -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at

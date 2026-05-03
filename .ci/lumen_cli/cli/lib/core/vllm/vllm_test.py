@@ -161,21 +161,23 @@ class VllmTestRunner(BaseRunner):
     def _install_test_dependencies(self):
         """
         This method replaces torch dependencies with local torch wheel info in
-        requirements/test.in file from vllm repo. then generates the test.txt
+        requirements/test/cuda.in file from vllm repo. then generates the test.txt
         in runtime
         """
-        logger.info("generate test.txt from requirements/test.in with local torch whls")
+        logger.info(
+            "generate test.txt from requirements/test/cuda.in with local torch whls"
+        )
         preprocess_test_in()
-        copy("requirements/test.txt", "snapshot_constraint.txt")
+        copy("requirements/test/cuda.txt", "snapshot_constraint.txt")
 
         run_command(
-            f"{sys.executable} -m uv pip compile requirements/test.in "
-            "-o test.txt "
+            f"{sys.executable} -m uv pip compile requirements/test/cuda.in "
+            "-o test/cuda.txt "
             "--index-strategy unsafe-best-match "
             "--constraint snapshot_constraint.txt "
-            "--torch-backend cu128"
+            "--torch-backend cu129"
         )
-        pip_install_packages(requirements="test.txt", prefer_uv=True)
+        pip_install_packages(requirements="test/cuda.txt", prefer_uv=True)
         logger.info("Done. installed requirements for test dependencies")
 
     def _install_dependencies(self):
@@ -187,7 +189,7 @@ class VllmTestRunner(BaseRunner):
         run_python("use_existing_torch.py")
 
         # install common packages
-        for requirements in ["requirements/common.txt", "requirements/build.txt"]:
+        for requirements in ["requirements/common.txt", "requirements/build/cuda.txt"]:
             pip_install_packages(
                 requirements=requirements,
                 prefer_uv=True,
@@ -222,7 +224,8 @@ class VllmTestRunner(BaseRunner):
 
 
 def preprocess_test_in(
-    target_file: str = "requirements/test.in", additional_packages: Iterable[str] = ()
+    target_file: str = "requirements/test/cuda.in",
+    additional_packages: Iterable[str] = (),
 ):
     """
     This modifies the target_file file in place in vllm work directory.
@@ -234,7 +237,6 @@ def preprocess_test_in(
         "torch",
         "torchvision",
         "torchaudio",
-        "mamba_ssm",
     ] + additional_package_to_move
     # Read current requirements
     target_path = Path(target_file)

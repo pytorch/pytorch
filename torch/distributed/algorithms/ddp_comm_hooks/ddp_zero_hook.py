@@ -39,9 +39,10 @@ def _perform_local_step(
     """
     overlap_info = zero._overlap_info
     bucket_index = bucket.index()
-    assert len(zero.optim.param_groups) == 1, (
-        "Overlapping DDP with ZeRO only supports a single parameter group"
-    )
+    if len(zero.optim.param_groups) != 1:
+        raise AssertionError(
+            "Overlapping DDP with ZeRO only supports a single parameter group"
+        )
 
     # Construct the `gradients` input for the local optimizer step, which
     # expects `None` in a list position to indicate that the corresponding
@@ -50,9 +51,10 @@ def _perform_local_step(
     gradients: list[torch.Tensor | None] = [
         _NO_PARAM_UPDATE for _ in range(num_local_optim_params)
     ]
-    assert bucket_index in overlap_info.offsets, (
-        f"Bucket index {bucket_index} was not assigned to rank {rank}"
-    )
+    if bucket_index not in overlap_info.offsets:
+        raise AssertionError(
+            f"Bucket index {bucket_index} was not assigned to rank {rank}"
+        )
     gradients_offset = overlap_info.offsets[bucket_index]
     bucket_assignment = zero._bucket_assignments_per_rank[rank][bucket_index]
     bucket_offset = bucket_assignment.offset
@@ -78,19 +80,20 @@ def _broadcast_bucket(
             :class:`ZeroRedundancyOptimizer` instance.
     """
     overlap_info = zero._overlap_info
-    assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, (
-        "`assigned_ranks_per_bucket` is not fully constructed"
-    )
+    if len(overlap_info.assigned_ranks_per_bucket) <= bucket_index:
+        raise AssertionError("`assigned_ranks_per_bucket` is not fully constructed")
     # Sort to ensure the same ordering across ranks
     assigned_ranks = sorted(overlap_info.assigned_ranks_per_bucket[bucket_index])
-    assert len(assigned_ranks) > 0, (
-        f"Bucket {bucket_index} should be assigned to at least one rank"
-    )
+    if len(assigned_ranks) <= 0:
+        raise AssertionError(
+            f"Bucket {bucket_index} should be assigned to at least one rank"
+        )
     for assigned_rank in assigned_ranks:
         bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
         if bucket_index in bucket_assignments:
             send_tensor = bucket_assignments[bucket_index].tensor
-            assert send_tensor is not None
+            if send_tensor is None:
+                raise AssertionError
             overlap_info.broadcast_handles.append(
                 dist.broadcast(
                     send_tensor,
@@ -119,7 +122,8 @@ def _save_ddp_bucket_info(
     """
     overlap_info = zero._overlap_info
     bucket_params = bucket.parameters()
-    assert len(bucket_params) > 0, "Empty bucket"
+    if len(bucket_params) <= 0:
+        raise AssertionError("Empty bucket")
 
     # Save the parameters in the bucket
     overlap_info.params_per_bucket.append(bucket_params)
@@ -128,7 +132,8 @@ def _save_ddp_bucket_info(
         bucket_size = 0
         for param in bucket_params:
             bucket_size += param.numel()
-        assert overlap_info.total_size is not None
+        if overlap_info.total_size is None:
+            raise AssertionError
         overlap_info.total_size += bucket_size
 
 
@@ -154,7 +159,8 @@ def _hook_with_zero_step_setup(
     """
     # Proceed as normal until the DDP buckets have been rebuilt
     if not ddp_ref()._has_rebuilt_buckets:  # type: ignore[union-attr]
-        assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
+        if zero._overlap_info.status != _OverlapStatus.UNINITIALIZED:
+            raise AssertionError
         return
 
     bucket_index = bucket.index()
@@ -271,10 +277,10 @@ def hook_with_zero_step(
         bucket_index = bucket.index()
         rank = zero.global_rank
 
-        assert overlap_info.status == _OverlapStatus.INITIALIZED
-        assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, (
-            "`assigned_ranks_per_bucket` is not fully constructed"
-        )
+        if overlap_info.status != _OverlapStatus.INITIALIZED:
+            raise AssertionError
+        if len(overlap_info.assigned_ranks_per_bucket) <= bucket_index:
+            raise AssertionError("`assigned_ranks_per_bucket` is not fully constructed")
         assigned_to_bucket = (
             rank in overlap_info.assigned_ranks_per_bucket[bucket_index]
         )
@@ -287,11 +293,11 @@ def hook_with_zero_step(
         # Check that buckets are indexed incrementally starting from 0 in the
         # order of their autograd hooks firing
         if len(overlap_info.bucket_indices_seen) > 0:
-            assert overlap_info.bucket_indices_seen[-1] == bucket_index - 1, (
-                "Bucket indices are not in incremental order"
-            )
+            if overlap_info.bucket_indices_seen[-1] != bucket_index - 1:
+                raise AssertionError("Bucket indices are not in incremental order")
         else:
-            assert bucket_index == 0, "Bucket indices do not start from 0"
+            if bucket_index != 0:
+                raise AssertionError("Bucket indices do not start from 0")
         overlap_info.bucket_indices_seen.append(bucket_index)
 
         # Directly return the future without any optimizer computation if this
@@ -311,10 +317,11 @@ def hook_with_zero_step(
             if rank in assigned_ranks:
                 # Wait on the bucket's all-reduce future to ensure correct
                 # gradients
-                assert bucket_index in overlap_info.bucket_index_to_future, (
-                    f"All-reduce future for bucket {bucket_index} not saved "
-                    f"on rank {rank}"
-                )
+                if bucket_index not in overlap_info.bucket_index_to_future:
+                    raise AssertionError(
+                        f"All-reduce future for bucket {bucket_index} not saved "
+                        f"on rank {rank}"
+                    )
                 allreduce_future = overlap_info.bucket_index_to_future[bucket_index]
                 allreduce_future.wait()
 
