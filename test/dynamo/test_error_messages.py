@@ -754,12 +754,12 @@ User code traceback:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Invalid call to __build_class__
-  Explanation: Encountered TypeError when trying to handle op __build_class__
+  Explanation: Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: Non-constant args to __build_class__: (NestedUserFunctionVariable(), ConstantVariable(str: 'Foo')) {}
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0375.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb8977.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -782,10 +782,10 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Reconstruction failure: source.reconstruct not implemented
-  Explanation: Dynamo has no bytecode reconstruction implemented for <class 'torch._dynamo.source.EphemeralSource'> variable EphemeralSource(desc='Foo').
+  Explanation: Dynamo has no bytecode reconstruction implemented for <class 'torch._dynamo.source.EphemeralSource'> variable EphemeralSource(desc=None).
   Hint: This is likely to be a Dynamo bug. Please report an issue to PyTorch.
 
-  Developer debug context: EphemeralSource(desc='Foo')
+  Developer debug context: EphemeralSource(desc=None)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0093.html
 
@@ -946,7 +946,7 @@ Reconstruction failure
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
 Stack variable source attribution:
-  NullVariable originated from:
+  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:
   File "test_error_messages.py", line N
                 torch._dynamo.graph_break()
 

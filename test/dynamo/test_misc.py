@@ -14815,7 +14815,6 @@ fn
         res = fn(t)
         self.assertEqual(res, t.sin())
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True)
