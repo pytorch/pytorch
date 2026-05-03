@@ -57,7 +57,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..external_utils import _ApplyBackwardHook, call_hook_from_backward_state
+from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
@@ -1873,89 +1873,65 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
-            # ----------Handling intermediate tensor custom hooks------
-            # Rewrite intermediate tensor hook as custom autograd function
-            # Given:
-            # glb_list = []
-            # glb_dict = {}
-            #
-            # def fn(x):
-            #     y = x * 2
-            #     glb_list.append(y)
-            #     glb_dict['tensor'] = y
-            #     a = glb_list[0] * 3      # Should use output of register_hook
-            #     b = glb_dict['tensor'] + 1  # Should use hooked_y
-            #     y.register_hook(lambda grad: grad + 1)
-            #     return (a + b).sum()
-            # We basically want to replace y.register_hook(lambda grad: grad + 1) with
-            # custom autograd function where the forward is just identity while backward
-            # calls custom hook.
-            # The algo works by:
-            #    1. When we see a hook, create a node with custom autograd function apply (y')
-            #    2. Move the custom autograd node just after definition of the intermediate tensor (y in above),
-            #       THEN update references to y with y'.
-            # As a result of this algo, above example turns into:
-            # def fn(x):
-            #     y = x * 2
-            #     y_prime = custom_autograd_function.apply()
-            #     glb_list.append(y_prime)
-            #     glb_dict['tensor'] = y_prime
-            #     a = glb_list[0] * 3
-            #     b = glb_dict['tensor'] + 1
-            #     return (a + b).sum()
-            # Get the original tensor's node and save its current users
-            tensor_node = self.as_proxy().node
+            # Register the hook via a trampoline in the graph where the
+            # tensor's proxy lives. During AOTAutograd's make_fx, the
+            # trampoline calls tensor.register_hook(hook_fn). The hook
+            # fires on the accumulated gradient during backward
+            # tracing, matching eager semantics. When inside a subgraph
+            # (e.g. checkpoint), the node is created in the parent
+            # graph so the hook is not confined to the HOP scope.
+            from .higher_order_ops import speculate_subgraph
 
-            users_to_replace = list(tensor_node.users.keys())
+            tensor_proxy = self.as_proxy()
+            target_tracer = tensor_proxy.tracer
 
-            # Create the ApplyBackwardHook call
-            apply_hook_var = variables.AutogradFunctionVariable(_ApplyBackwardHook)
-            result = apply_hook_var.call_apply(tx, [self, hook], {})
+            # Trace the hook body with strict mode so stride-dependent
+            # operations (e.g. is_contiguous()) graph break instead of
+            # silently specializing on the FakeTensor's strides.
+            try:
+                with tx.strict_translation_mode(lambda v: v.is_tensor()):
+                    (body_r, _), hook_graph, hook_freevars = speculate_subgraph(
+                        tx,
+                        hook,
+                        [self],
+                        {},
+                        "register_hook",
+                        source_target=None,
+                        enable_grad=None,
+                        set_subgraph_inputs="automatic_with_forced_inputs",  # pyrefly: ignore[bad-argument-type]
+                        restore_side_effects=True,
+                    )
+            except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
+                unimplemented(
+                    gb_type="register_hook with stride-dependent code",
+                    context="Hook accesses grad metadata (e.g. is_contiguous)",
+                    explanation="register_hook callbacks that branch on "
+                    "gradient metadata are not supported because grad "
+                    "properties are unknown at trace time.",
+                    hints=[],
+                )
 
-            # Get the hooked tensor's node (this is the getitem node)
-            tensor_prime_node = result.as_proxy().node
+            hook_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
+            hook_name = tx.output.install_subgraph(
+                "hook_body",
+                torch.fx.GraphModule(hook_nn_modules.nn_modules, hook_graph),
+            )
+            hook_node = target_tracer.create_proxy("get_attr", hook_name, (), {})
 
-            # DFS to collect all nodes that tensor_prime_node depends on,
-            # stopping at tensor_node. These are the nodes we need to move right
-            # after tensor_node.
-            nodes_to_move: list[torch.fx.Node] = []
-            visited: set[torch.fx.Node] = set()
+            from torch._higher_order_ops.register_hook import register_hook_op
 
-            def collect_deps(node: torch.fx.Node, stop_at: torch.fx.Node) -> None:
-                if node in visited or node is stop_at:
-                    return
-                for arg in node.args:
-                    if isinstance(arg, torch.fx.Node):
-                        collect_deps(arg, stop_at)
-                for kwarg in node.kwargs.values():
-                    if isinstance(kwarg, torch.fx.Node):
-                        collect_deps(kwarg, stop_at)
-                visited.add(node)
-                nodes_to_move.append(node)
-
-            collect_deps(tensor_prime_node, tensor_node)
-
-            # Move each node to right after tensor_node using node.append()
-            insert_point = tensor_node
-            for node in nodes_to_move:
-                insert_point.append(node)
-                insert_point = node
-
-            # Replace uses of tensor with tensor_prime, but only for the users
-            # that existed before we created the hook node
-            for user in users_to_replace:
-                user.replace_input_with(tensor_node, tensor_prime_node)
-
-            # Update tensor to point to the tensor_prime
-            assert isinstance(result, TensorVariable)
-            self.proxy = result.as_proxy()
-            # TensorVariable doesn't actually store the grad_fn
-            # so this is fine.
+            p_args = (tensor_proxy, hook_node, *list(hook_freevars.keys()))
+            hooked_proxy = target_tracer.create_proxy(
+                "call_function",
+                register_hook_op,
+                tuple(p_args),
+                {},
+            )
+            hooked_proxy.node.meta["example_value"] = tensor_proxy.node.meta[
+                "example_value"
+            ]
+            self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
-
-            # Return a RemovableHandleVariable for API compatibility
-            # can't fall through because side_effects.register_hook
-            # require source.
             return variables.RemovableHandleVariable(
                 mutation_type=variables.base.ValueMutationNew(),
             )
