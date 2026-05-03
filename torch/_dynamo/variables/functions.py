@@ -4182,7 +4182,8 @@ class MemberDescriptorVariable(VariableTracker):
                 tx,
                 args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
             )
-        return VariableTracker.build(tx, resolved, self.source)
+        result_source = obj.source and AttrSource(obj.source, name)
+        return VariableTracker.build(tx, resolved, result_source)
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -4229,15 +4230,23 @@ class GetSetDescriptorVariable(VariableTracker):
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
-        try:
-            resolved = self.desc.__get__(obj.value)  # type: ignore[attr-defined]
-        except AttributeError:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
-            )
-        return VariableTracker.build(tx, resolved, self.source)
+        attr_name = self.desc.__name__
+        # When obj has a concrete value (e.g. UDOV), call the C getter
+        # directly. Otherwise (e.g. TensorVariable), delegate to
+        # var_getattr which handles proxy-based attribute access.
+        obj_value = getattr(obj, "value", None)
+        if obj_value is not None:
+            try:
+                resolved = self.desc.__get__(obj_value)
+            except AttributeError:
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"],
+                )
+            result_source = obj.source and AttrSource(obj.source, attr_name)
+            return VariableTracker.build(tx, resolved, result_source)
+        return obj.var_getattr(tx, attr_name)
 
 
 class PropertyVariable(VariableTracker):

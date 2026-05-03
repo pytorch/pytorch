@@ -4608,6 +4608,60 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
+    def test_wrapper_descriptor_as_input(self):
+        wd = str.__eq__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(descriptor, a, b):
+            return descriptor(a, b)
+
+        self.assertTrue(fn(wd, "hello", "hello"))
+        self.assertFalse(fn(wd, "hello", "world"))
+
+    def test_method_descriptor_as_input(self):
+        md = list.append
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(descriptor, lst, val):
+            descriptor(lst, val)
+            return lst
+
+        result = fn(md, [1, 2], 3)
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_method_wrapper_as_input(self):
+        bound = "hello".__add__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(method, val):
+            return method(val)
+
+        self.assertEqual(fn(bound, " world"), "hello world")
+
+    def test_member_descriptor_get_as_input(self):
+        class Foo:
+            __slots__ = ("x",)
+
+            def __init__(self, x):
+                self.x = x
+
+        getter = Foo.__dict__["x"].__get__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(getter, obj):
+            return getter(obj)
+
+        self.assertEqual(fn(getter, Foo(42)), 42)
+
+    def test_getset_descriptor_get_as_input(self):
+        getter = torch.Tensor.shape.__get__
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(getter, t):
+            return getter(t)
+
+        self.assertEqual(fn(getter, torch.ones(2, 3)), torch.Size([2, 3]))
+
 
 def udf_mul(x, y):
     return x * y

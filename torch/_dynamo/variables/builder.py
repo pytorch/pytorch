@@ -209,10 +209,14 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodDescriptorVariable,
+    MethodWrapperVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
     UserFunctionVariable,
+    WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
@@ -1175,6 +1179,12 @@ class VariableBuilder:
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif isinstance(value, CudagraphOverrideContextManager):
             return CudagraphOverrideVariable(value.fwd, value.bwd)
+        elif isinstance(value, types.WrapperDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return WrapperDescriptorVariable(value, source=self.source)
+        elif isinstance(value, types.MethodDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return MethodDescriptorVariable(value, source=self.source)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1502,11 +1512,26 @@ class VariableBuilder:
             # accesses. Since these are unlikely to change during the program
             # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
+        elif isinstance(value, types.MemberDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return MemberDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.MethodWrapperType):
-            # Method-wrappers are written in C, and they are not guaranteed to
-            # return the same object on attribute lookup. Therefore, we cannot
-            # insert a ID_MATCH guard here. method-wrappers are very
-            # unlikely to change, so its ok to skip the guard here.
+            # A method-wrapper is produced by wrapperdescr_get binding a
+            # wrapper_descriptor to an instance. Look up the unbound
+            # descriptor on the type and build a MethodWrapperVariable.
+            # When __self__ is a getset_descriptor (e.g.
+            # torch.Tensor.shape.__get__), fall through to
+            # ConstantMethodWrapperVariable which has special handling
+            # for tensor attribute getters.
+            obj = value.__self__
+            if not isinstance(obj, types.GetSetDescriptorType):
+                descriptor = type(obj).__dict__.get(value.__name__)
+                if isinstance(descriptor, types.WrapperDescriptorType):
+                    obj_source = self.source and AttrSource(self.source, "__self__")
+                    obj_vt = VariableTracker.build(self.tx, obj, obj_source)
+                    return MethodWrapperVariable(
+                        descriptor, obj_vt, value.__name__, source=self.source
+                    )
             return ConstantMethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
@@ -4314,6 +4339,10 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
+        elif isinstance(value, types.WrapperDescriptorType):
+            return WrapperDescriptorVariable(value)
+        elif isinstance(value, types.MethodDescriptorType):
+            return MethodDescriptorVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -4339,6 +4368,12 @@ class SourcelessBuilder:
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
+            obj = value.__self__
+            if not isinstance(obj, types.GetSetDescriptorType):
+                descriptor = type(obj).__dict__.get(value.__name__)
+                if isinstance(descriptor, types.WrapperDescriptorType):
+                    obj_vt = SourcelessBuilder.create(tx, obj)
+                return MethodWrapperVariable(descriptor, obj_vt, value.__name__)
             return ConstantMethodWrapperVariable(value)
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
@@ -4464,6 +4499,9 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+        handlers[types.MemberDescriptorType] = (
+            lambda tx, value: MemberDescriptorVariable(value)
         )
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
