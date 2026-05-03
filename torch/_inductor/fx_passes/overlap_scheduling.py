@@ -1598,7 +1598,7 @@ class OverlapScheduler:
         return self.compute_potential_hidden_nodes(self.collective_info.keys())
 
     def compute_potential_hidden_waits(self) -> dict[fx.Node, fx.Node]:
-        """Compute which wait operations could be hidden by compte."""
+        """Compute which wait operations could be hidden by compute."""
         wait_nodes = [info.wait_node for info in self.collective_info.values()]
         return self.compute_potential_hidden_nodes(wait_nodes)
 
