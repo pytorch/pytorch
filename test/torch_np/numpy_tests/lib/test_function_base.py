@@ -2884,11 +2884,12 @@ class TestPercentile(TestCase):
         o = np.ones((1,))
         np.percentile(d, 5, None, o, False, "linear")
 
-    # def test_complex(self):
-    #     arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
-    #     assert_raises(TypeError, np.percentile, arr_c, 0.5)
-    #     arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="F")
-    #     assert_raises(TypeError, np.percentile, arr_c, 0.5)
+    @xfail  # (reason="TODO: implement")
+    def test_complex(self):
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="D")
+        assert_raises(TypeError, np.percentile, arr_c, 0.5)
+        arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="F")
+        assert_raises(TypeError, np.percentile, arr_c, 0.5)
 
     def test_2D(self):
         x = np.array([[1, 1, 1], [1, 1, 1], [4, 4, 3], [1, 1, 1], [1, 1, 1]])
