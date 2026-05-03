@@ -206,7 +206,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
 }
 
 void quantile_checks(const Tensor& self, const Tensor& q) {
-  TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
+  TORCH_SYM_CHECK(self.sym_numel().sym_gt(0), "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
   TORCH_CHECK(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
@@ -219,26 +219,26 @@ void quantile_checks(const Tensor& self, const Tensor& q) {
       "quantile() q tensor must be on the same device as the input tensor");
 }
 
-std::vector<int64_t> quantile_output_shape(
+std::vector<c10::SymInt> quantile_output_shape(
     const std::optional<int64_t> original_dim,
     const Tensor& self,
     const Tensor& q,
     const bool keepdim,
     int64_t wrapped_dim) {
   // Compute output shape: q_size + reduced_size
-  std::vector<int64_t> out_shape;
+  std::vector<c10::SymInt> out_shape;
   if (original_dim && self.dim() > 0) {
-    out_shape = self.sizes().vec();
+    out_shape = self.sym_sizes().vec();
     if (keepdim) {
       out_shape[wrapped_dim] = 1;
     } else {
       out_shape.erase(out_shape.begin() + wrapped_dim);
     }
   } else if (keepdim) {
-    out_shape = std::vector<int64_t>(self.dim(), 1);
+    out_shape = std::vector<c10::SymInt>(self.dim(), 1);
   }
   if (q.dim() > 0) {
-    out_shape.insert(out_shape.begin(), q.numel());
+    out_shape.insert(out_shape.begin(), q.sym_numel());
   }
 
   return out_shape;
@@ -252,11 +252,13 @@ Tensor quantile_compute(
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan,
     int64_t wrapped_dim,
-    std::vector<int64_t> out_shape) {
+    std::vector<c10::SymInt> out_shape) {
   // Checks that all q values are between 0 and 1, inclusive
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
-  if (self.device().is_cpu()) {
+  // The check is also skipped when the actual q values are not available yet
+  // e.g. with symbolic shapes or during export
+  if (self.device().is_cpu() && !isTensorSubclassLike(q)) {
     auto all_q_in_range = q.ge(0).logical_and_(q.le(1)).all();
     TORCH_CHECK(at::is_scalar_tensor_true(all_q_in_range),
                 "quantile() q values must be in the range [0, 1]");
@@ -275,18 +277,18 @@ Tensor quantile_compute(
 
   // Treat q as a 1D tensor for the following computations
   if (q.dim() == 0) {
-    out_shape.insert(out_shape.begin(), q.numel());
+    out_shape.insert(out_shape.begin(), 1);
   }
 
   // View input as reduced_size + size of dim to reduce
-  std::vector<int64_t> in_shape(out_shape.size());
+  std::vector<c10::SymInt> in_shape(out_shape.size());
   std::copy(out_shape.begin() + 1, out_shape.end(), in_shape.begin());
-  in_shape[in_shape.size() - 1] = sorted.size(-1);
-  sorted = sorted.view(in_shape);
+  in_shape[in_shape.size() - 1] = sorted.sym_size(-1);
+  sorted = sorted.view_symint(in_shape);
 
   // Ensure converting from int64_t to double won't overflow
-  TORCH_CHECK(
-      sorted.size(-1) <= std::pow(2, 24),
+  TORCH_SYM_CHECK(
+      sorted.sym_size(-1).sym_le(1 << 24),
       "quantile() input tensor is too large");
 
   // Convert q in [0, 1] to ranks in [0, reduction_size)
@@ -308,7 +310,7 @@ Tensor quantile_compute(
   } else {
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
-    int64_t last_index = sorted.size(-1) - 1;
+    auto last_index = sorted.sym_size(-1) - 1;
     std::vector<Tensor> tl =
         at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
@@ -388,7 +390,7 @@ void quantile_out_impl(
   int64_t wrapped_dim = at::maybe_wrap_dim(original_dim.value_or(0), self.dim());
 
   auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
-  resize_output(out, out_shape);
+  resize_output_symint(out, out_shape);
 
   auto quantile = quantile_compute(
       self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));

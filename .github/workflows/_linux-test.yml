@@ -72,6 +72,38 @@ on:
         required: false
         type: number
         default: 1
+      use-arc:
+        required: false
+        type: boolean
+        default: false
+        description: If true, use ARC (OSDC) runner path instead of EC2.
+      python-version:
+        required: false
+        type: string
+        default: ""
+        description: Python version to use for the OSDC test.
+      compiler:
+        required: false
+        type: string
+        default: ""
+        description: Compiler to use for the OSDC test.
+      cuda-version:
+        required: false
+        type: string
+        default: ""
+        description: CUDA version to use for the OSDC test.
+      export-profiler-trace:
+        description: |
+          If set to "1", export Chrome profiler traces from performance benchmarks.
+        required: false
+        type: string
+        default: ""
+      enable-torch-trace:
+        description: |
+          If set to "1", enable TORCH_TRACE structured logging and collect tlparse output.
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -92,7 +124,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && !inputs.use-arc
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -112,23 +144,15 @@ jobs:
             All testing is done inside the container, to start an interactive session run:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          no-sudo: true
-          checkout-mode: treeless
-          submodules: false
-
-      - name: Setup Python
-        if: contains(matrix.runner, 'b200')
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-          cache: pip
-
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(matrix.runner, 'b200')
+        id: setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check TPU Availability
         id: check-tpu
@@ -192,21 +216,14 @@ jobs:
         run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
         if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' && !contains(matrix.runner, 'b200') }}
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
         shell: bash
         continue-on-error: true
         env:
-          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
           WORKFLOW_NAME: ${{ github.workflow }}
           WORKFLOW_RUN_ID: ${{github.run_id}}
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
@@ -262,13 +279,20 @@ jobs:
             echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
           fi
 
-          # Verify CUDA libraries are present
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
           echo "CUDA libraries:"
           ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
-
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conveniently
@@ -279,7 +303,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
-          job-name: ${{ steps.get-job-id.outputs.job-name }}
+          job-name: ${{ steps.setup-linux.outputs.job-name }}
 
       - name: Set Test step time
         id: test-timeout
@@ -318,9 +342,9 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+          BRANCH: ${{ steps.setup-linux.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           TEST_CONFIG: ${{ matrix.config }}
@@ -347,6 +371,8 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          EXPORT_PROFILER_TRACE: ${{ inputs.export-profiler-trace }}
+          ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           # Use offline mode by default, only enable online mode to refresh the models
@@ -358,7 +384,7 @@ jobs:
           HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           TORCH_TPU: ${{ steps.check-tpu.outputs.has_tpu == 'true' && '1' || '' }}
           TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
         run: |
@@ -366,8 +392,6 @@ jobs:
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.ci/onnx/test.sh
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
@@ -458,6 +482,8 @@ jobs:
             -e HF_DATASETS_OFFLINE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
+            -e EXPORT_PROFILER_TRACE \
+            -e ENABLE_TORCH_TRACE \
             -e ARTIFACTS_FILE_SUFFIX \
             -e TORCH_TPU \
             -e TORCH_TPU_TEXT_FILE \
@@ -540,7 +566,7 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
 
@@ -564,8 +590,8 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
-          job_id: ${{ steps.get-job-id.outputs.job-id }}
-          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          job_id: ${{ steps.setup-linux.outputs.job-id }}
+          job_name: ${{ steps.setup-linux.outputs.job-name }}
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
@@ -581,3 +607,237 @@ jobs:
           # on s390x stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true
+
+  test-osdc:
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && inputs.use-arc
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ inputs.docker-image }}
+      options: "--gpus all"
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Setup Linux
+        id: setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: pytorch/pytorch/.github/actions/download-td-artifacts@main
+
+      - name: Download Windows torch wheel for cross-compilation
+        if: matrix.win_torch_wheel_artifact != ''
+        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+        with:
+          name: ${{ matrix.win_torch_wheel_artifact }}
+          path: win-torch-wheel
+
+      - name: Extract Windows wheel and setup CUDA libraries
+        if: matrix.win_torch_wheel_artifact != ''
+        shell: bash
+        run: |
+          set -x
+
+          # Find the wheel file
+          WHEEL_FILE=$(find win-torch-wheel -name "*.whl" -type f | head -n 1)
+          if [ -z "$WHEEL_FILE" ]; then
+            echo "Error: No wheel file found in win-torch-wheel directory"
+            exit 1
+          fi
+          echo "Found wheel file: $WHEEL_FILE"
+
+          # Unzip the wheel file
+          unzip -q "$WHEEL_FILE" -d win-torch-wheel-extracted
+          echo "Extracted wheel contents"
+
+          # Setup CUDA libraries (cuda.lib and cudart.lib) directory
+          mkdir -p win-torch-wheel-extracted/lib/x64
+          if [ -f "win-torch-wheel/cuda.lib" ]; then
+            mv win-torch-wheel/cuda.lib win-torch-wheel-extracted/lib/x64/
+            echo "Moved cuda.lib to win-torch-wheel-extracted/lib/x64/"
+          fi
+          if [ -f "win-torch-wheel/cudart.lib" ]; then
+            mv win-torch-wheel/cudart.lib win-torch-wheel-extracted/lib/x64/
+            echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
+          fi
+
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
+          echo "CUDA libraries:"
+          ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
+
+      - name: Check for keep-going label and re-enabled test issues
+        # This uses the filter-test-configs action because it conveniently
+        # checks for labels and re-enabled test issues. It does not actually do
+        # any filtering.  All filtering is done in the build step.
+        id: keep-going
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.setup-linux.outputs.job-name }}
+
+      - name: Set test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Test
+        id: test
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+          BRANCH: ${{ steps.setup-linux.outputs.branch }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
+          OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
+          SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
+          XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HF_CACHE: /mnt/hf_cache
+          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
+          TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
+          USE_ARC: "1"
+        shell: bash
+        run: |
+          set -x
+
+          if [[ "${TEST_CONFIG}" == 'multigpu' ]]; then
+            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          else
+            TEST_COMMAND=.ci/pytorch/test.sh
+          fi
+
+          # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
+          # used for anything besides vLLM jobs
+          if [[ ! -d "${HF_CACHE}" ]]; then
+            export HF_CACHE="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_CACHE}"
+
+            # When there is no cache directory, e.g. benchmark, the job has no
+            # way but to reach out to HF if needed
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
+          fi
+
+          # shellcheck disable=SC2046
+          python3 -m pip install $(echo dist/*.whl)[opt-einsum]
+          ${TEST_COMMAND}
+
+      - name: Configure AWS credentials
+        id: aws-creds-benchmark
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          aws-region: us-east-1
+
+      - name: Upload pytest cache if tests failed
+        uses: pytorch/pytorch/.github/actions/pytest-cache-upload@main
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && steps.aws-creds-benchmark.outcome == 'success'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          test_config: ${{ matrix.config }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+
+      - name: Upload the benchmark results
+        if: steps.aws-creds-benchmark.outcome == 'success'
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always() && steps.test.conclusion
+        run: |
+          cat test/**/*_toprint.log || true
+
+      - name: Upload test artifacts
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@main
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
+          use-gha: ${{ inputs.use-gha }}
+          s3-bucket: ${{ inputs.s3-bucket }}

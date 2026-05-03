@@ -231,6 +231,23 @@ class TestSelectAlgorithm(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test_bmm_small_m(self):
+        # Verify BMM works when M < BLOCK_M. The triton_bmm template's
+        # tl.max_contiguous/tl.multiple_of hints must be guarded by
+        # M >= BLOCK_M to avoid out-of-bounds vectorized loads (see #179267).
+        @torch.compile
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        # M=2 is smaller than any BLOCK_M autotuning config (typically >= 16)
+        foo(
+            torch.randn(4, 2, 64, device=GPU_TYPE),
+            torch.randn(4, 64, 32, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_not_even_k(self):
         @torch.compile
         def foo(a, b):
@@ -801,6 +818,73 @@ def patch_lowering(lowering_overrides) -> Callable[[], None]:
             )
 
         yield
+
+
+class TestDtypeViewAutotuning(TestCase):
+    @requires_gpu()
+    @unittest.skipIf(
+        not hasattr(torch, "float4_e2m1fn_x2"),
+        "float4_e2m1fn_x2 dtype not available",
+    )
+    @patches
+    def test_benchmark_example_value_preserves_dtype_view(self):
+        """
+        Verify that benchmark_example_value preserves the dtype when the IR
+        node is a dtype view (e.g. uint8 storage viewed as float4_e2m1fn_x2).
+        """
+        from torch._inductor import ir
+
+        m, k = 256, 2048
+        device = torch.device(GPU_TYPE)
+
+        # We need a V.graph context for benchmark_example_value.
+        # Compile a trivial function to set up V.graph, then call the
+        # function under test within the compilation callback.
+        captured_results = {}
+
+        orig_lowering = torch._inductor.lowering.lowerings[aten.add.Tensor]
+
+        def patched_lowering(*args, **kwargs):
+            # We're inside compilation — V.graph is valid.
+            # Construct a dtype-viewed IR node and test benchmark_example_value.
+            base_layout = ir.FixedLayout(
+                device=device, dtype=torch.uint8, size=[m, k], stride=[k, 1]
+            )
+            base_buf = ir.Buffer(name="test_buf", layout=base_layout)
+
+            fp4_layout = ir.FixedLayout(
+                device=device,
+                dtype=torch.float4_e2m1fn_x2,
+                size=[m, k],
+                stride=[k, 1],
+            )
+            fp4_view = ir.ReinterpretView(data=base_buf, layout=fp4_layout)
+
+            example = select_algorithm.AlgorithmSelectorCache.benchmark_example_value(
+                fp4_view
+            )
+            captured_results["ir_dtype"] = fp4_view.get_dtype()
+            captured_results["example_dtype"] = example.dtype
+            captured_results["example_shape"] = tuple(example.shape)
+
+            return orig_lowering(*args, **kwargs)
+
+        torch._dynamo.reset()
+        with patch.dict(
+            torch._inductor.lowering.lowerings,
+            {aten.add.Tensor: patched_lowering},
+        ):
+            compiled_fn = torch.compile(lambda x: x + 1)
+            compiled_fn(torch.randn(4, device=device))
+
+        self.assertIn("ir_dtype", captured_results, "Patched lowering was not called")
+        self.assertEqual(
+            captured_results["example_dtype"],
+            torch.float4_e2m1fn_x2,
+            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            f"after unwrapping the view, but got {captured_results['example_dtype']}",
+        )
+        self.assertEqual(captured_results["example_shape"], (m, k))
 
 
 class TestTemplateRender(TestCase):

@@ -45,6 +45,56 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 
+def _propagate_use_strided_shard_flag(
+    op_strategy: OpStrategy,
+    op_schema: OpSchema,
+) -> None:
+    """Propagate use_strided_shard_as_shard_order from input specs to output specs.
+
+    When inputs carry _StridedShard with an explicit flag, all output (and input)
+    DTensorSpecs in the strategy that also contain _StridedShard must agree.
+    Strategy functions may forget to propagate the flag; this function fixes
+    them up centrally after the strategy is produced.
+    """
+    _use_strided: bool | None = None
+    for spec in op_schema.args_spec:
+        if any(isinstance(p, _StridedShard) for p in spec.placements):
+            val = spec.use_strided_shard_as_shard_order
+            if _use_strided is not None and _use_strided != val:
+                raise ValueError(
+                    "Conflicting use_strided_shard_as_shard_order across "
+                    f"input specs: got both {_use_strided} and {val}"
+                )
+            _use_strided = val
+
+    if _use_strided is None:
+        return
+
+    def _fixup(spec: DTensorSpec) -> None:
+        if not any(isinstance(p, _StridedShard) for p in spec.placements):
+            return
+        if spec.use_strided_shard_as_shard_order == _use_strided:
+            return
+        spec.use_strided_shard_as_shard_order = _use_strided
+        if _use_strided:
+            spec.shard_order = None  # pyrefly: ignore[bad-assignment]
+        else:
+            spec.shard_order = DTensorSpec.compute_default_shard_order(spec.placements)
+
+    for op_spec in op_strategy.strategies:
+        out = op_spec.output_specs
+        if out is not None:
+            if isinstance(out, DTensorSpec):
+                _fixup(out)
+            else:
+                for s in out:
+                    if s is not None:
+                        _fixup(s)
+        if op_spec.input_specs is not None:
+            for s in op_spec.input_specs:
+                _fixup(s)
+
+
 def _length(obj) -> int:
     if obj is None:
         return 0
@@ -53,14 +103,15 @@ def _length(obj) -> int:
     return len(obj)
 
 
-def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
+def _get_expected_num_tensor_outputs(op: OpOverload) -> int | None:
     """
     Get the expected number of tensor outputs for an operator based on its schema.
 
     Returns:
         The number of tensor outputs expected. Returns 0 for ops that don't return tensors
         (e.g., _linalg_check_errors). Returns 1 for single tensor return, and >1 for
-        tuple returns where each element is a tensor.
+        tuple returns where each element is a tensor. Returns None for List[Tensor]
+        returns where the length is unknown at schema time.
     """
     return_types = op._schema.returns
     if len(return_types) == 0:
@@ -71,8 +122,8 @@ def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
         # Could be single tensor or tuple of tensors
         return len(return_types)
     elif isinstance(first_return.type, torch.ListType):
-        # List[Tensor] - we don't know the length at schema time, treat as 1
-        return 1
+        # List[Tensor] - we don't know the length at schema time
+        return None
     else:
         # Not a tensor return type
         return 0
@@ -100,6 +151,16 @@ def _validate_tensor_meta_count(
         actual_outputs = 1
     else:
         actual_outputs = len(tensor_meta)
+
+    if expected_outputs is None:
+        # List[Tensor] return type: length unknown at schema time, but
+        # tensor_meta must be a list of TensorMeta.
+        if not isinstance(tensor_meta, list):
+            raise AssertionError(
+                f"Tensor meta for {op_schema.op} should be a list[TensorMeta] "
+                f"(op returns List[Tensor]), but got {type(tensor_meta).__name__}"
+            )
+        return
 
     if actual_outputs != expected_outputs:
         raise AssertionError(
@@ -346,6 +407,22 @@ class ShardingPropagator:
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
         }
+        # ops with individual scalar shape args that need local adjustment
+        # maps op -> callable(input_specs, schema) -> adjusted schema
+        # populated by op modules (e.g. _math_ops.py) at registration time
+        self.op_to_scalar_shape_adjuster: dict[
+            OpOverload,
+            Callable[[list[DTensorSpec], OpSchema], OpSchema],
+        ] = {}
+        # squeeze ops that need dim arg rewritten to only globally-singleton dims
+        self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
+            aten.squeeze.default: aten.squeeze.dims,
+            aten.squeeze.dim: aten.squeeze.dims,
+            aten.squeeze.dims: aten.squeeze.dims,
+            aten.squeeze_.default: aten.squeeze_.dims,
+            aten.squeeze_.dim: aten.squeeze_.dims,
+            aten.squeeze_.dims: aten.squeeze_.dims,
+        }
 
     def register_sharding_prop_rule(
         self,
@@ -541,21 +618,11 @@ class ShardingPropagator:
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
-                        # NOTE: aten.convolution_backward.default is an exception and it
-                        # needs extra handling because any Tensor in the output tuple
-                        # can be `None` depending on the output_mask parameter. This can
-                        # occur during double backpropagation or when certain gradients
-                        # are not needed (e.g., grad_input when input has requires_grad=False,
-                        # grad_weight/grad_bias when weight/bias have requires_grad=False,
-                        # or grad_bias when bias is None). We explicitly allow the
-                        # corresponding TensorMeta to be `None`.
-                        if (
-                            op == aten.convolution_backward.default
-                            and i in (0, 1, 2)
-                            and output_tensor_meta_i is None
-                        ):
-                            if not isinstance(output_specs, list):
-                                raise AssertionError
+                        # Some ops (e.g. convolution_backward, native_layer_norm_backward,
+                        # _fused_rms_norm_backward) have an output_mask parameter that
+                        # controls which outputs are computed. When output_mask[i] is
+                        # False, the output at position i is None and has no TensorMeta.
+                        if output_tensor_meta_i is None:
                             new_specs.append(None)
                             continue
                         else:
@@ -713,6 +780,7 @@ class ShardingPropagator:
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
+                _propagate_use_strided_shard_flag(op_strategy, op_schema)
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
 
@@ -770,6 +838,28 @@ class ShardingPropagator:
                         needs_redistribute = True
                         use_val_from_redistribute_schema = True
 
+                # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
+                if op_schema.op in self.op_to_scalar_shape_adjuster:
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for spec in expected_input_specs
+                        for p in spec.placements
+                    ):
+                        schema = suggestion_schema or op_schema
+                        adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
+                        suggestion_schema = adjuster(expected_input_specs, schema)
+                        needs_redistribute = True
+                        use_val_from_redistribute_schema = True
+
+                # rewrite squeeze to use only globally-singleton dims
+                if op_schema.op in self.squeeze_op_to_dims_variant:
+                    schema = suggestion_schema or op_schema
+                    adjusted = self._adjust_squeeze_to_global_singletons(schema)
+                    if adjusted is not None:
+                        suggestion_schema = adjusted
+                        needs_redistribute = True
+                        use_val_from_redistribute_schema = True
+
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
                     # for ops that return multiple tensors and the output_specs is not
@@ -784,6 +874,7 @@ class ShardingPropagator:
                                 mesh=output_specs.mesh,
                                 placements=output_specs.placements,
                                 tensor_meta=output_specs.tensor_meta,
+                                use_strided_shard_as_shard_order=output_specs.use_strided_shard_as_shard_order,
                             )
                             for _ in range(len(op_schema.op._schema.returns))
                         )
@@ -809,9 +900,11 @@ class ShardingPropagator:
                 for strategy in op_strategy.children:
                     if not isinstance(strategy, OpStrategy):
                         raise AssertionError
+                    _propagate_use_strided_shard_flag(strategy, op_schema)
                     selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
-                    out_spec_list.append(selected_strategy.output_spec)
+                    if selected_strategy.output_specs is not None:
+                        out_spec_list.append(selected_strategy.output_spec)
 
                 needs_redistribute = False
                 suggestion_args: list[object] = []
@@ -957,3 +1050,47 @@ class ShardingPropagator:
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)
+
+    def _adjust_squeeze_to_global_singletons(self, schema: OpSchema) -> OpSchema | None:
+        """
+        Rewrite squeeze ops to squeeze.dims with only globally-singleton dims.
+        Fixes bug where sharded dims with local size 1 get incorrectly squeezed.
+        Returns None if no rewrite is needed (already squeeze.dims with correct args).
+        """
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        input_spec = cast(DTensorSpec, schema.args_schema[0])
+        tensor_meta = input_spec.tensor_meta
+        if tensor_meta is None:
+            raise RuntimeError("squeeze requires tensor metadata")
+        global_shape = tensor_meta.shape
+        ndim = len(global_shape)
+
+        def normalize(d: int) -> int:
+            return d if d >= 0 else d + ndim
+
+        def is_singleton(d: int) -> bool:
+            nd = normalize(d)
+            return 0 <= nd < ndim and guard_or_false(global_shape[nd] == 1)
+
+        # guard_or_false: conservatively keep dims when size is symbolic/unknown
+        if schema.op in (aten.squeeze.default, aten.squeeze_.default):
+            target_dims = tuple(
+                i for i, s in enumerate(global_shape) if guard_or_false(s == 1)
+            )
+        elif schema.op in (aten.squeeze.dim, aten.squeeze_.dim):
+            dim = normalize(schema.args_schema[1])  # type: ignore[arg-type]
+            target_dims = (dim,) if is_singleton(dim) else ()
+        else:
+            dims = cast(Sequence[int], schema.args_schema[1])
+            target_dims = tuple(  # type: ignore[union-attr]
+                normalize(d) for d in dims if is_singleton(d)
+            )
+
+        dims_variant = self.squeeze_op_to_dims_variant[schema.op]
+        # Skip rewrite if already targeting the right op with the same dims
+        if schema.op == dims_variant and len(schema.args_schema) > 1:
+            existing_dims = schema.args_schema[1]
+            if existing_dims == target_dims:
+                return None
+        return OpSchema(dims_variant, (input_spec, target_dims), {})

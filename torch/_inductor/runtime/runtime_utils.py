@@ -193,6 +193,27 @@ def compile_mps_shader(source: str) -> Any:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
 
 
+def compile_mps_shaders(
+    kernels: list[tuple[str, str, list[str]]],
+) -> dict[str, Any]:
+    """Compile a batch of Metal kernels into one library.
+
+    Args:
+        kernels: list of (kernel_name, metal_source, headers) tuples.
+            headers are bare names resolved as <c10/metal/{name}.h>.
+
+    Returns:
+        dict mapping each kernel_name to its compiled function handle.
+    """
+    from torch.utils._ordered_set import OrderedSet
+
+    all_headers = sorted(OrderedSet(h for _, _, hs in kernels for h in hs))
+    header_src = "\n".join(f"#include <c10/metal/{h}.h>" for h in all_headers)
+    body_src = "\n".join(src for _, src, _ in kernels)
+    lib = compile_mps_shader(header_src + "\n" + body_src)
+    return {name: getattr(lib, name) for name, _, _ in kernels}
+
+
 def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
     """
     Map PyTorch dtype to actual JAX dtype object at runtime.
@@ -385,6 +406,7 @@ def pallas_permute(x, perm):
     # Unrolled loop: extract slices with static indices, apply sub-perm,
     # then stack along the loop output dimension.
     slices = []
+    # pyrefly: ignore [bad-argument-type]
     for i in range(loop_size):
         idx: list[Any] = [slice(None)] * ndim
         idx[loop_in_dim] = i
@@ -697,7 +719,7 @@ def pallas_make_block_spec(
 
     if buf_nd == 0:
         # Scalar — untouched regardless of grid shape.
-        return pl.BlockSpec((), _make_index_map([], buf_nd, n_grid))
+        return pl.BlockSpec((1,), _make_index_map([], 1, n_grid))
 
     bs = list(buf_shape)
     tiled_pairs: list[tuple[int, int]] = []
@@ -786,3 +808,22 @@ def _make_index_map(
         )
 
     return index_map
+
+
+def pallas_ensure_nonzero_rank(x: torch.Tensor) -> torch.Tensor:
+    if len(x.shape) == 0:
+        return x.reshape((1,))
+    return x
+
+
+def pallas_make_block_spec_non_tiled(shape: tuple[int, ...]) -> Any:
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+    from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
+        pallas as pl,
+    )
+
+    nonzero_rank_shape = shape if len(shape) > 0 else (1,)
+    return pl.BlockSpec(
+        nonzero_rank_shape,
+        lambda i: [jnp.int32(i)] * len(nonzero_rank_shape),
+    )

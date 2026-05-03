@@ -6,6 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 
 
 namespace at::native {

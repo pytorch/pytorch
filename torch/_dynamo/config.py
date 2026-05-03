@@ -442,9 +442,6 @@ use_lamba_guard_for_object_aliasing = True
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
-# Defaults to True. If Traceable FSDP2 is used, set this to False.
-skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -462,7 +459,7 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 skip_tensor_guards_with_matching_dict_tags = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
-skip_guards_on_constant_func_defaults = True
+skip_guards_on_constant_func_defaults = False
 
 
 # The recursive-dict-tag guard relies on the class/function identity staying
@@ -485,7 +482,7 @@ assume_dunder_attributes_remain_unchanged = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = True
+use_recursive_dict_tags_for_guards = False
 
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
@@ -564,11 +561,13 @@ enable_faithful_generator_behavior = True
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+    deprecated=True,
+    deprecation_message="does not do anything, inline_inbuilt_nn_modules is always True",
 )
 
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
-nested_graph_breaks = False
+nested_graph_breaks: bool = False
 
 # If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
 # If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
@@ -882,7 +881,8 @@ wrap_top_frame = False
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
 
-enable_aot_compile = False
+# Flag to enable the use of torch.compile().aot_compile() API. Should be always True.
+enable_aot_compile = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Any | None = None
@@ -897,6 +897,10 @@ enable_invoke_subgraph_regional_compile: bool = False
 # flat graph.
 inline_invoke_subgraph: bool = False
 
+# Inline invoke_subgraph HOPs that are referenced by exactly one call site.
+# Single-use subgraphs add overhead without deduplication benefit.
+inline_single_use_invoke_subgraph: bool = True
+
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
 # can block torch.utils.swap_tensors from working after compile.
@@ -907,7 +911,7 @@ inline_invoke_subgraph: bool = False
 invalidate_compile_context_weakrefs: bool | None = None
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
     def _make_closure_patcher(**changes: Any) -> Any: ...
 

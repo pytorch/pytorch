@@ -174,12 +174,22 @@ def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | 
 
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
+    # CPython: PySequence_Contains → _PySequence_IterSearch → PyObject_GetIter
+    # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
-        # use __iter__ if __contains__ is not available
         for x in b:
             if x == a:
                 return True
         return False
+    if hasattr(b, "__getitem__"):
+        i = 0
+        while True:
+            try:
+                if b.__getitem__(i) == a:
+                    return True
+                i += 1
+            except IndexError:
+                return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
@@ -327,7 +337,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
@@ -557,27 +567,54 @@ def predicate(obj: object) -> bool:
 
 def cmp_eq(a: object, b: object) -> bool:
     # Note that the commented `is` check should ideally be removed. This is a
-    # CPython optimization that skips the __eq__ checks it the obj id's are
+    # CPython optimization that skips the __eq__ checks if the obj id's are
     # same. But, these lines adds many `is` nodes in the Fx graph for
     # SymNodeVariable. For now, we can just skip this check. This is STILL
     # correct because one of the __eq__ checks will pass later, just could be
     # slow in some corner cases.
     # if a is b:
     #     return True
-    result = a.__eq__(b)
+    if isinstance(a, type):
+        # Default metaclass equality is identity-based. Preserve the reflected
+        # operand fallback without tracing through type.__eq__.
+        if type(a).__eq__ is type.__eq__:
+            result = True if a is b else NotImplemented
+        else:
+            result = type(a).__eq__(a, b)
+    else:
+        result = a.__eq__(b)
     if result is NotImplemented:
-        result = b.__eq__(a)
+        if isinstance(b, type):
+            if type(b).__eq__ is type.__eq__:
+                result = True if a is b else NotImplemented
+            else:
+                result = type(b).__eq__(b, a)
+        else:
+            result = b.__eq__(a)
     return result is not NotImplemented and result
 
 
 def cmp_ne(a: object, b: object) -> bool:
-    # Check if __ne__ is overridden
-    if isinstance(type(a).__ne__, types.FunctionType):
+    if isinstance(a, type):
+        if type(a).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(a).__ne__(a, b)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
         if result is not NotImplemented:
             return result
         # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(type(b).__ne__, types.FunctionType):
+    if isinstance(b, type):
+        if type(b).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(b).__ne__(b, a)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(b).__ne__, types.FunctionType):
         result = b.__ne__(a)
         if result is not NotImplemented:
             return result

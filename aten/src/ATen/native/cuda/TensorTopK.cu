@@ -319,7 +319,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   }
   __syncthreads();
   // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
-  IndexType numIterations = round_up(inputSliceSize, (IndexType) warpSize);
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) C10_WARP_SIZE);
 
   // phase 1: write actual > `pattern` (or < `pattern`, depending on the sort direction) values to the output.
   // prefetching data from global memory.
@@ -447,8 +447,9 @@ constexpr int MAX_WARP_TOPK_SLICE = 512;
 // GTOp/LTOp instead of bitwise conversion. Bitwise conversion is only needed for radix sorting.
 
 // Kernel using WarpMergeSort for small topK operations
+// See Note [warp merge sort WARP_SIZE template param]
 template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,
-          typename scalar_t, typename IndexType, bool is_descending>
+          typename scalar_t, typename IndexType, bool is_descending, int WARP_SIZE>
 __global__ void warpMergeSortTopK(
     at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
     IndexType inputSliceSize,
@@ -486,14 +487,14 @@ __global__ void warpMergeSortTopK(
 
   namespace cub = ROCM_HIPCUB(at_cuda_detail::cub);
 
-  CUDA_KERNEL_ASSERT(blockDim.x == C10_WARP_SIZE);
+  CUDA_KERNEL_ASSERT(blockDim.x == WARP_SIZE);
   CUDA_KERNEL_ASSERT(blockDim.y <= max_block_dim_y);
-  constexpr int items_per_thread = sort_size / C10_WARP_SIZE;
-  static_assert(items_per_thread * C10_WARP_SIZE == sort_size,
-                "sort_size must be a multiple of C10_WARP_SIZE");
+  constexpr int items_per_thread = sort_size / WARP_SIZE;
+  static_assert(items_per_thread * WARP_SIZE == sort_size,
+                "sort_size must be a multiple of WARP_SIZE template param");
 
   using LoadKeys = cub::WarpLoad<scalar_t, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
-  using Sort = cub::WarpMergeSort<scalar_t, items_per_thread, C10_WARP_SIZE, int64_t>;
+  using Sort = cub::WarpMergeSort<scalar_t, items_per_thread, WARP_SIZE, int64_t>;
   using StoreKeys = cub::WarpStore<scalar_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
   using StoreIndices = cub::WarpStore<int64_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
 
@@ -569,12 +570,30 @@ void launch(
                         "Too many slices for warp topk");
 
   // Dispatch based on sort size and sort direction
+  // See Note [warp merge sort WARP_SIZE template param]
+#ifdef USE_ROCM
   #define LAUNCH_KERNEL(SORT_SIZE, IS_DESCENDING) \
-    warpMergeSortTopK<Dim, Dim, SORT_SIZE, max_block_dim_y, scalar_t, IndexType, IS_DESCENDING> \
+  if (at::cuda::warp_size() == 32) { \
+    warpMergeSortTopK<Dim, Dim, SORT_SIZE, max_block_dim_y, scalar_t, IndexType, IS_DESCENDING, 32> \
+      <<<grid, block, 0, stream>>>( \
+          input, inputSliceSize, k, numInputSlices, inputWithinSliceStride, \
+          topK, topKWithinSliceStride, indices, indicesWithinSliceStride); \
+  } \
+  else { \
+    warpMergeSortTopK<Dim, Dim, SORT_SIZE, max_block_dim_y, scalar_t, IndexType, IS_DESCENDING, 64> \
+      <<<grid, block, 0, stream>>>( \
+          input, inputSliceSize, k, numInputSlices, inputWithinSliceStride, \
+          topK, topKWithinSliceStride, indices, indicesWithinSliceStride); \
+  } \
+  C10_CUDA_KERNEL_LAUNCH_CHECK()
+#else
+  #define LAUNCH_KERNEL(SORT_SIZE, IS_DESCENDING) \
+    warpMergeSortTopK<Dim, Dim, SORT_SIZE, max_block_dim_y, scalar_t, IndexType, IS_DESCENDING, 32> \
       <<<grid, block, 0, stream>>>( \
           input, inputSliceSize, k, numInputSlices, inputWithinSliceStride, \
           topK, topKWithinSliceStride, indices, indicesWithinSliceStride); \
     C10_CUDA_KERNEL_LAUNCH_CHECK()
+#endif
 
   // We have specialized launches for different sizes, as sort_size affects
   // shared memory, registers per thread and occupancy. We can use 'LAUNCH_KERNEL(512, false);'
@@ -849,8 +868,9 @@ __global__ void computeBlockwiseWithinKCounts(
     }
   }
 
-  constexpr int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
-  __shared__ uint32_t warp_counts[num_warps];
+  constexpr int SHMEM_SIZE = RADIX_DIGITS / C10_WARP_SIZE_LOWER_BOUND;  // max shmem size on ROCm
+  const int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
+  __shared__ uint32_t warp_counts[SHMEM_SIZE];
   if (tidx % C10_WARP_SIZE == 0) {
     warp_counts[warp] = count;
   }
@@ -1023,8 +1043,9 @@ __global__ void computeBlockwiseWithinKCounts(
     }
   }
 
-  constexpr int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
-  __shared__ uint32_t warp_counts[num_warps];
+  constexpr int SHMEM_SIZE = RADIX_DIGITS / C10_WARP_SIZE_LOWER_BOUND; // max shmem size on ROCm
+  const int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
+  __shared__ uint32_t warp_counts[SHMEM_SIZE];
   if (tidx % C10_WARP_SIZE == 0) {
     warp_counts[warp] = count;
   }

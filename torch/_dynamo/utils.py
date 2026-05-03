@@ -1740,6 +1740,7 @@ def _get_dynamo_config_for_logging() -> str | None:
             "_autograd_backward_strict_mode_banned_ops",
             "reorderable_logging_functions",
             "ignore_logger_methods",
+            "ignore_logging_functions",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
@@ -1864,7 +1865,7 @@ def record_compilation_metrics(
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
         "config_suppress_errors": config.suppress_errors,
-        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
+        "config_inline_inbuilt_nn_modules": True,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
@@ -2357,9 +2358,13 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
 
 
 def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
-    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
+    """Copy a single dynamo attribute from src to dst, or remove it from dst
+    if src doesn't have it. Uses .copy() for container types (set, dict) to
+    avoid shared references between src and dst, and assigns directly for
+    primitive types like bool (e.g., _has_dynamo_dim_marking)."""
     if hasattr(src, attr):
-        setattr(dst, attr, getattr(src, attr).copy())
+        val = getattr(src, attr)
+        setattr(dst, attr, val.copy() if hasattr(val, "copy") else val)
     elif hasattr(dst, attr):
         delattr(dst, attr)
 
@@ -2377,6 +2382,8 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
 
 def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:
@@ -2794,21 +2801,25 @@ def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
-    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
-        # Find if the arg would be realized as SymNodeVariable later on. If yes,
-        # realize it and specialize. Else return the arg.
+    if isinstance(arg, LazyVariableTracker):
+        if not arg.is_realized():
+            # Find if the arg would be realized as SymNodeVariable later on. If yes,
+            # realize it and specialize. Else return the arg.
 
-        source = arg.original_source()
-        value = arg.original_value()
+            source = arg.original_source()
+            value = arg.original_value()
 
-        is_symnode_vt = is_torch_sym(value) or (
-            not config.specialize_int
-            and type(value) is int
-            and not is_int_specialization_case(value, source)
-        )
+            is_symnode_vt = is_torch_sym(value) or (
+                not config.specialize_int
+                and type(value) is int
+                and not is_int_specialization_case(value, source)
+            )
 
-        if not is_symnode_vt:
-            return arg
+            if not is_symnode_vt:
+                return arg
+
+        # Realize to get the underlying variable (handles both realized and unrealized)
+        arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
@@ -2919,6 +2930,24 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+def enumerate_items_with_dict_position(
+    obj: dict[K, V],
+) -> Iterable[tuple[int, K, V | Any]]:
+    """Enumerate dict items yielding (dict_keys_position, key, value).
+
+    For OrderedDicts where move_to_end/prepend has been used, the OrderedDict
+    iteration order can differ from dict.keys() order.  We iterate in
+    OrderedDict order (correct execution semantics) but return each key's
+    dict.keys() position so that ConstDictKeySource indices stay consistent
+    with PyDict_Next / C++ DictGuardManager.
+    """
+    items = get_items_from_dict(obj)
+    if isinstance(obj, OrderedDict):
+        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
+        return ((key_to_pos[k], k, v) for k, v in items)
+    return ((i, k, v) for i, (k, v) in enumerate(items))
+
+
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
     torch.nn.Module.__init__(obj)
@@ -2939,6 +2968,29 @@ def dataclass_fields(cls: Any) -> Any:
 
 
 iter_next = next
+
+
+def normalize_count_iter(count_iter: Iterator[Any]) -> tuple[Any, Any]:
+    try:
+        _, args = count_iter.__reduce__()
+    except TypeError:
+        # Python 3.14 no longer pickles itertools.count, so fall back to the
+        # repr and only recover literal arguments. Non-literal arguments still
+        # fall back to user-defined handling via the NotImplemented sentinel.
+        import ast
+
+        count_repr = repr(count_iter)
+        if not count_repr.startswith("count(") or not count_repr.endswith(")"):
+            return (NotImplemented, NotImplemented)
+        try:
+            args = ast.literal_eval(f"({count_repr[6:-1]},)")
+        except (SyntaxError, ValueError):
+            return (NotImplemented, NotImplemented)
+        if not isinstance(args, tuple) or not 1 <= len(args) <= 2:
+            return (NotImplemented, NotImplemented)
+    if len(args) == 1:
+        return (args[0], 1)
+    return (args[0], args[1])
 
 
 def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
@@ -2964,12 +3016,10 @@ dict_getitem = dict.__getitem__
 
 @torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Call dict(d) to prevent calling overridden __iter__/keys
-    dict_class = dict
-    if isinstance(d, OrderedDict):
-        dict_class = OrderedDict
+    # Use dict.keys() to match the iteration order of PyDict_Next used by
+    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
     # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict_class.keys(d), n, n + 1))
+    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_getitem(s: set[T], n: int) -> T:
@@ -3034,7 +3084,6 @@ def raise_args_mismatch(
     actual: str = "",
 ) -> None:
     from torch._dynamo.exc import raise_observed_exception
-    from torch._dynamo.variables import ConstantVariable
 
     msg_str = (
         f"wrong number of arguments or keyword arguments for {name}() call.\n"
@@ -3045,7 +3094,7 @@ def raise_args_mismatch(
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(msg_str)],
+        args=[msg_str],
     )
 
 
@@ -3056,7 +3105,6 @@ def iter_contains(
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
-    from .variables.constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
 
     if search.is_python_constant():
         found_const = any(
@@ -3077,7 +3125,7 @@ def iter_contains(
         if must_check_tensor_id:
             if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
-                    return CONSTANT_VARIABLE_TRUE
+                    return ConstantVariable.create(True)
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
@@ -3091,7 +3139,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = CONSTANT_VARIABLE_FALSE
+        found = ConstantVariable.create(False)
     return found
 
 
@@ -3147,7 +3195,7 @@ def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
+from torch._subclasses import UnsupportedFakeTensorException
 
 
 def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
@@ -3431,8 +3479,8 @@ def same(
 
                 def get_multiplier() -> float:
                     # In some particular cases, we expect high difference in results.
-                    # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
-                    # In case of it the res_error is at least one order of magnitude higher.
+                    # At the moment one of these cases is inductor freezing bfloat16 convolution const folding.
+                    # In this case, the res_error is at least one order of magnitude higher.
                     if force_max_multiplier:
                         return 10.0
                     # In the case of using AMP (Automatic Mixed Precision), certain models have
@@ -4646,6 +4694,123 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     return None
 
 
+def format_source_range(
+    filename: str,
+    lineno: int | None,
+    end_lineno: int | None = None,
+    col_offset: int | None = None,
+    end_col_offset: int | None = None,
+    *,
+    function_name: str = "<unknown>",
+) -> str:
+    if lineno is None:
+        return ""
+
+    last_lineno = end_lineno if end_lineno is not None else lineno
+    source_lines = [
+        linecache.getline(filename, current_lineno).rstrip()
+        for current_lineno in range(lineno, last_lineno + 1)
+    ]
+    if not any(source_lines):
+        return ""
+
+    if (
+        sys.version_info >= (3, 13)
+        and end_lineno is not None
+        and end_lineno != lineno
+        and col_offset is not None
+        and end_col_offset is not None
+    ):
+        # Keep single-line ranges on Dynamo's manual path. The stdlib traceback
+        # formatter is useful for multiline spans on 3.13+, but for single-line
+        # spans it can emit version-specific mixed `~`/`^` markers or omit the
+        # marker line entirely for comments.
+        frame_summary = traceback.FrameSummary(
+            filename,
+            lineno,
+            function_name,
+            end_lineno=end_lineno,
+            colno=col_offset,
+            end_colno=end_col_offset,
+        )
+        result = traceback.format_list([frame_summary])[0]
+        result = "\n".join(result.splitlines()[1:])
+        source_lines_dedent = textwrap.dedent("\n".join(source_lines)).splitlines()
+        if not source_lines_dedent:
+            return result
+        indent_len = len(source_lines[0]) - len(source_lines_dedent[0])
+        indent = source_lines[0][:indent_len]
+        return textwrap.indent(textwrap.dedent(result), indent)
+
+    first_line = source_lines[0]
+    if end_lineno is None or col_offset is None or end_col_offset is None:
+        return first_line
+
+    start_offset = _fix_offset(first_line, col_offset)
+    segment = ""
+    markers: list[str] = []
+
+    if end_lineno == lineno:
+        end_offset = _fix_offset(first_line, end_col_offset)
+        segment = first_line[start_offset:end_offset]
+        markers.append(" " * start_offset + "~" * (end_offset - start_offset))
+    else:
+        segment = first_line[start_offset:] + "\n"
+        markers.append(" " * start_offset + "~" * (len(first_line) - start_offset))
+        last_line = source_lines[-1]
+        end_offset = _fix_offset(last_line, end_col_offset)
+        for line in source_lines[1:-1]:
+            segment += line + "\n"
+            num_spaces = len(line) - len(line.lstrip())
+            markers.append(" " * num_spaces + "~" * (len(line) - num_spaces))
+        segment += last_line[:end_offset]
+        num_spaces = len(last_line) - len(last_line.lstrip())
+        markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
+
+    anchors: _Anchors | None = None
+    try:
+        anchors = _extract_anchors_from_expr(segment)
+    except AssertionError:
+        pass
+
+    if anchors is None:
+        markers = [marker.replace("~", "^") for marker in markers]
+    else:
+        mutable_markers: list[list[str]] = [list(marker) for marker in markers]
+
+        if anchors.left_end_lineno == 0:
+            anchors.left_end_offset += start_offset
+        if anchors.right_start_lineno == 0:
+            anchors.right_start_offset += start_offset
+
+        for marker_lineno in range(len(markers)):
+            for col in range(len(mutable_markers[marker_lineno])):
+                if marker_lineno < anchors.left_end_lineno:
+                    continue
+                if (
+                    marker_lineno == anchors.left_end_lineno
+                    and col < anchors.left_end_offset
+                ):
+                    continue
+                if (
+                    marker_lineno == anchors.right_start_lineno
+                    and col >= anchors.right_start_offset
+                ):
+                    continue
+                if marker_lineno > anchors.right_start_lineno:
+                    continue
+                if mutable_markers[marker_lineno][col] == "~":
+                    mutable_markers[marker_lineno][col] = "^"
+
+        markers = ["".join(marker) for marker in mutable_markers]
+
+    result = ""
+    for line, marker in zip(source_lines, markers):
+        result += line + "\n"
+        result += marker + "\n"
+    return result
+
+
 def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
@@ -4661,121 +4826,15 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
-    if sys.version_info >= (3, 13):
-        # multiline traceback implemented in 3.13+
-        frame_summary = traceback.FrameSummary(
-            code.co_filename,
-            inst.positions.lineno,
-            code.co_name,
-            end_lineno=inst.positions.end_lineno,
-            colno=inst.positions.col_offset,
-            end_colno=inst.positions.end_col_offset,
-        )
-        result = traceback.format_list([frame_summary])[0]
-        # remove first line containing filename info
-        result = "\n".join(result.splitlines()[1:])
-        # indent lines with original indentation
-        orig_lines = [
-            linecache.getline(code.co_filename, lineno).rstrip()
-            for lineno in range(inst.positions.lineno, inst.positions.end_lineno + 1)
-        ]
-        orig_lines_dedent = textwrap.dedent("\n".join(orig_lines)).splitlines()
-        indent_len = len(orig_lines[0]) - len(orig_lines_dedent[0])
-        indent = orig_lines[0][:indent_len]
-        result = textwrap.indent(textwrap.dedent(result), indent)
-        return result
-
     assert hasattr(inst, "positions") and inst.positions is not None
-    if inst.positions.lineno is None:
-        return ""
-    # The rstrip + "\n" pattern is used throughout this function to handle
-    # linecache.getline errors. Error lines are treated as empty strings "", but we want
-    # to treat them as blank lines "\n".
-    first_line = linecache.getline(code.co_filename, inst.positions.lineno).rstrip()
-    if inst.positions.end_lineno is None:
-        return first_line
-    if inst.positions.col_offset is None or inst.positions.end_col_offset is None:
-        return first_line
-
-    # character index of the start of the instruction
-    start_offset = _fix_offset(first_line, inst.positions.col_offset)
-    # character index of the end of the instruction
-    # compute later since end may be a different line
-    end_offset = None
-    # expression corresponding to the instruction so we can get anchors
-    segment = ""
-    # underline markers to be printed - start with `~` marker and replace with `^` later
-    markers = []
-
-    # Compute segment and initial markers
-    if inst.positions.end_lineno == inst.positions.lineno:
-        end_offset = _fix_offset(first_line, inst.positions.end_col_offset)
-        segment = first_line[start_offset:end_offset]
-        markers.append(" " * start_offset + "~" * (end_offset - start_offset))
-    else:
-        segment = first_line[start_offset:] + "\n"
-        markers.append(" " * start_offset + "~" * (len(first_line) - start_offset))
-        last_line = linecache.getline(
-            code.co_filename, inst.positions.end_lineno
-        ).rstrip()
-        end_offset = _fix_offset(last_line, inst.positions.end_col_offset)
-        for lineno in range(inst.positions.lineno + 1, inst.positions.end_lineno):
-            line = linecache.getline(code.co_filename, lineno).rstrip()
-            segment += line + "\n"
-            # don't underline leading spaces
-            num_spaces = len(line) - len(line.lstrip())
-            markers.append(" " * num_spaces + "~" * (len(line) - num_spaces))
-        segment += last_line[:end_offset]
-        num_spaces = len(last_line) - len(last_line.lstrip())
-        markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
-
-    anchors: _Anchors | None = None
-    try:
-        anchors = _extract_anchors_from_expr(segment)
-    except AssertionError:
-        pass
-
-    # replace `~` markers with `^` where necessary
-    if anchors is None:
-        markers = [marker.replace("~", "^") for marker in markers]
-    else:
-        # make markers mutable
-        mutable_markers: list[list[str]] = [list(marker) for marker in markers]
-
-        # anchor positions do not take start_offset into account
-        if anchors.left_end_lineno == 0:
-            anchors.left_end_offset += start_offset
-        if anchors.right_start_lineno == 0:
-            anchors.right_start_offset += start_offset
-
-        # Turn `~`` markers between anchors to `^`
-        for lineno in range(len(markers)):
-            for col in range(len(mutable_markers[lineno])):
-                if lineno < anchors.left_end_lineno:
-                    continue
-                if lineno == anchors.left_end_lineno and col < anchors.left_end_offset:
-                    continue
-                if (
-                    lineno == anchors.right_start_lineno
-                    and col >= anchors.right_start_offset
-                ):
-                    continue
-                if lineno > anchors.right_start_lineno:
-                    continue
-                if mutable_markers[lineno][col] == "~":
-                    mutable_markers[lineno][col] = "^"
-
-        # make markers into strings again
-        markers = ["".join(marker) for marker in mutable_markers]
-
-    result = ""
-    for i in range(len(markers)):
-        result += (
-            linecache.getline(code.co_filename, inst.positions.lineno + i).rstrip()
-            + "\n"
-        )
-        result += markers[i] + "\n"
-    return result
+    return format_source_range(
+        code.co_filename,
+        inst.positions.lineno,
+        inst.positions.end_lineno,
+        inst.positions.col_offset,
+        inst.positions.end_col_offset,
+        function_name=code.co_name,
+    )
 
 
 def get_static_address_type(t: Any) -> Any:
@@ -5308,11 +5367,30 @@ def get_traced_code() -> list[CodeType] | None:
     return TracingContext.get_traced_code()
 
 
+def is_pybind11_enum_member(value: Any) -> bool:
+    """Check if value is a pybind11 enum member (singleton with stable hash).
+
+    Pybind11 enums have __members__ on their type and each member is a singleton.
+    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
+    into the type's __dict__, which trips raise_on_overridden_hash. But these
+    are safe: members are singletons with hash == value, same as Python enums.
+    """
+    t = type(value)
+    members = getattr(t, "__members__", None)
+    if members is None:
+        return False
+    name = getattr(value, "name", None)
+    return name is not None and members.get(name) is value
+
+
 def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
     from . import graph_break_hints
     from .exc import unimplemented
 
     is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden and is_pybind11_enum_member(obj):
+        return
 
     if is_overridden:
         unimplemented(

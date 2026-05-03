@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
@@ -17,7 +15,7 @@ class HolderModule(Module):
     that uses the attributes
     """
 
-    def __init__(self, d):
+    def __init__(self, d: dict[str, Module | None]) -> None:
         super().__init__()
         for k, v in d.items():
             self.add_module(k, v)
