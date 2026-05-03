@@ -440,7 +440,7 @@ class MetaTensorDescriber:
             stride=stride,
             # pyrefly: ignore [bad-argument-type]
             storage_offset=storage_offset,
-            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
+            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", ())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None

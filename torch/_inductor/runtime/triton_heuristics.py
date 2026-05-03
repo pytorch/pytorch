@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -321,6 +321,83 @@ def check_autotune_cache(
     return configs, autotune_cache, autotune_cache_info
 
 
+# Sentinel returned by plugin hooks to defer to the next plugin or to the
+# default behavior. Tested with ``is DEFER``.
+DEFER: Final[object] = object()
+
+
+class CachingAutotunerPlugin:
+    """Base class for ``CachingAutotuner`` plugins.
+
+    Each hook returns ``DEFER`` to fall through to the next plugin / default
+    behavior, or any other value to short-circuit ``run()`` with that value.
+    """
+
+    def pre_compile(self, autotuner: CachingAutotuner) -> object:
+        """Fires at the top of ``CachingAutotuner.precompile`` (the
+        parent-side, non-warm-cache-only path).
+
+        Returning ``DEFER`` lets the standard precompile flow run
+        (``_precompile_worker`` → ``_make_launchers`` →
+        ``_dynamic_scale_rblock``). Returning anything else short-
+        circuits ``precompile`` entirely — the plugin owns compile and
+        launcher creation from this point on, including any
+        ``TritonBundler`` interaction (the standard
+        ``static_triton_bundle_key`` bundling path is skipped).
+        """
+        return DEFER
+
+    def pre_dispatch(
+        self,
+        autotuner: CachingAutotuner,
+        *args: object,
+        stream: object,
+        **kwargs: object,
+    ) -> object:
+        """Fires before kernel dispatch, ahead of precompile or autotune.
+
+        Note: ``run()``'s steady-state fast path returns ``self._cached_launcher``
+        directly once it is populated (after autotune converges to one
+        launcher), bypassing this hook entirely on subsequent calls.
+        Plugins that need every-call interception cannot rely on
+        ``pre_dispatch`` alone.
+        """
+        return DEFER
+
+    def pre_autotune(
+        self,
+        autotuner: CachingAutotuner,
+        *args: object,
+        stream: object,
+        **kwargs: object,
+    ) -> object:
+        """Fires after precompile when more than one launcher remains, in
+        place of ``autotune_to_one_config()``.
+
+        Returning non-``DEFER`` short-circuits the *entire* remainder of
+        ``run()`` — the plugin must perform ``_pre_launch`` / kernel
+        launch / ``_post_launch`` / ``TritonBundler.put_winner`` /
+        ``save_gpu_kernel`` and any post-autotune transforms (combo
+        tuning, coordinate descent) itself, and return the launch
+        result. Plugins that only want to influence config selection
+        should mutate ``autotuner.launchers`` and return ``DEFER``
+        instead.
+        """
+        return DEFER
+
+
+def get_caching_autotuner_plugins(
+    autotuner: CachingAutotuner,
+) -> list[CachingAutotunerPlugin]:
+    """Build the list of plugins active for ``autotuner``.
+
+    Each plugin adds an entry here, gated on its own config flag, with
+    imports kept inside the relevant branch.
+    """
+    plugins: list[CachingAutotunerPlugin] = []
+    return plugins
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -379,6 +456,7 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
+        self.cpu_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -450,6 +528,8 @@ class CachingAutotuner(KernelInterface):
             and not self.dump_launch_params
             and not self.dump_launch_tensors
         )
+
+        self._plugins = get_caching_autotuner_plugins(self)
 
         # Compile-time info included in runtime logginging
         self.compile_id: CompileId | None = None
@@ -526,6 +606,14 @@ class CachingAutotuner(KernelInterface):
             # we need to actually run compilation on the parent process
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
+            # Plugin opt-out: ``pre_compile`` returning anything other
+            # than ``DEFER`` means the plugin owns compile + launcher
+            # creation entirely. We return without running
+            # ``_precompile_worker`` / ``_make_launchers`` /
+            # ``_dynamic_scale_rblock``.
+            for plugin in self._plugins:
+                if plugin.pre_compile(self) is not DEFER:
+                    return
             self._precompile_worker()
             if static_triton_bundle_key is not None and self.is_statically_launchable():
                 TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
@@ -658,25 +746,13 @@ class CachingAutotuner(KernelInterface):
                     triton_config,
                     new_config,
                 )
-                if self.fn.fn is None:
-                    """
-                    We are in the parent process, while this program was compiled in a worker
-                    and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
-                    containing the real fn yet.
-                    """
-                    assert hasattr(self, "_reload_kernel")
-                    assert callable(self._reload_kernel)
-                    self.fn = self._reload_kernel().fn
+                self._ensure_kernel_loaded()
                 self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
 
             self._make_launchers()
 
     def compile_by_disabling_pipelining(self, config):
-        # self.fn.fn is dropped by prepare_for_pickle() after the initial
-        # compile; reload it so triton.compile can access the source.
-        if self.fn.fn is None:
-            assert callable(self._reload_kernel)
-            self.fn = self._reload_kernel().fn
+        self._ensure_kernel_loaded()
         cfg = copy.deepcopy(config)
         cfg.num_stages = 1
         if "NUM_STAGES" in cfg.kwargs:
@@ -685,6 +761,24 @@ class CachingAutotuner(KernelInterface):
         self.compile_results = [result]
         return result.make_launcher()
 
+    def _make_launcher(
+        self, compile_result: CompileResult[_KernelType]
+    ) -> tuple[LauncherType, None] | tuple[None, Exception]:
+        """Create a launcher from a compile result.
+
+        Caller must hold a DeviceGuard for the target device.
+        Returns (launcher, None) on success, or (None, exception) on failure.
+        """
+        try:
+            return compile_result.make_launcher(), None
+        except (
+            OutOfResources,
+            PTXASError,
+            torch.cuda.OutOfMemoryError,
+            IntelGPUError,
+        ) as e:
+            return None, e
+
     def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
             return
@@ -692,22 +786,14 @@ class CachingAutotuner(KernelInterface):
         from torch._dynamo.device_interface import DeviceGuard
 
         device_interface = self.get_device_interface()
-
-        # load binary to the correct device
+        launchers = []
+        exc = None
+        # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
-            launchers = []
-            exc = None
             for result in self.compile_results:
-                try:
-                    launchers.append(result.make_launcher())
-
-                except (
-                    OutOfResources,
-                    PTXASError,
-                    torch.cuda.OutOfMemoryError,
-                    IntelGPUError,
-                ) as e:
-                    exc = e
+                launcher, exc = self._make_launcher(result)
+                if launcher is not None:
+                    launchers.append(launcher)
             if len(launchers) == 0:
                 result = self.compile_results[-1]
                 config = result.config
@@ -724,6 +810,22 @@ class CachingAutotuner(KernelInterface):
                     f"No valid triton configs. {type(exc).__name__}: {exc}"
                 )
         self.launchers = launchers
+
+    def _ensure_kernel_loaded(self) -> None:
+        """Reload the kernel in the parent process if needed.
+
+        When this autotuner was compiled in a worker subprocess and
+        unpickled into the parent, ``prepare_for_pickle`` cleared
+        ``self.fn.fn`` so the worker's JITFunction wouldn't follow
+        across the pickle. Any path that needs the live function in
+        the parent (coordesc, dynamic_scale_rblock, kernel_autotune
+        metrics) must reload first via the stashed ``_reload_kernel``
+        callback. No-op when the function is already present.
+        """
+        if self.fn.fn is None:
+            assert hasattr(self, "_reload_kernel")
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
 
     def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
@@ -783,11 +885,13 @@ class CachingAutotuner(KernelInterface):
         return {
             **self.__dict__,
             "lock": None,
+            "_plugins": [],
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.lock = threading.Lock()
+        self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
@@ -1109,7 +1213,7 @@ class CachingAutotuner(KernelInterface):
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
         """
         To support benchmarking in the presence of mutated args, we need to avoid
-        autotuning contanminating them. We try to pass cloned args to the kernel.
+        autotuning contaminating them. We try to pass cloned args to the kernel.
         If those clones would increase the peak memory usage, however, we instead
         copy to cpu and restore them after each iteration. Figure out the args
         to be copied and do the copying.
@@ -1269,8 +1373,7 @@ class CachingAutotuner(KernelInterface):
                     )
 
             if metrics.is_metric_table_enabled("kernel_autotune"):
-                if self.fn.fn is None:
-                    self.fn = self._reload_kernel().fn
+                self._ensure_kernel_loaded()
 
                 kernel_path = self.fn.fn.__code__.co_filename
                 kernel_name = self.fn.__name__
@@ -1370,9 +1473,7 @@ class CachingAutotuner(KernelInterface):
         if not combo_tuning_groups:
             return launcher
 
-        if self.fn.fn is None:
-            assert hasattr(self, "_reload_kernel")
-            self.fn = self._reload_kernel().fn
+        self._ensure_kernel_loaded()
 
         signature_keys = OrderedSet(self.triton_meta["signature"])
         best_config = launcher.config
@@ -1575,6 +1676,62 @@ class CachingAutotuner(KernelInterface):
         CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
+    def save_cpu_kernel(self, launcher):
+        """AOTI counterpart of save_gpu_kernel for CPU Triton kernels.
+
+        Captures the kernel and launcher `.so` files into
+        `CpuTritonKernelCache` for `CppWrapperCpu` to dlopen at runtime.
+        Triton CPU backend needs to emit `run_from_nativert`.
+        """
+        from torch._inductor.codecache import CpuTritonKernelCache
+
+        key = self.inductor_meta.get("kernel_name")
+        assert key is not None, "kernel_name can not be None"
+
+        compiled = launcher.bin
+        kernel_bytes = compiled.asm.get("so")
+        launcher_bytes = compiled.asm.get("launcher.so")
+        if kernel_bytes is None or launcher_bytes is None:
+            raise RuntimeError(
+                f"CPU AOTI requires a Triton CPU backend that emits a launcher "
+                f"`.so` exporting `run_from_nativert`; kernel '{key}' has "
+                f"compiled.asm keys {list(compiled.asm.keys())}."
+            )
+        kernel_symbol = (
+            compiled.metadata.name
+            if hasattr(compiled.metadata, "name")
+            else compiled.metadata["name"]
+        )
+        signature = compiled.src.signature
+
+        CpuTritonKernelCache.set(
+            key,
+            kernel_bytes=kernel_bytes,
+            launcher_bytes=launcher_bytes,
+            kernel_symbol=kernel_symbol,
+            signature=signature,
+        )
+        self.cpu_kernel_saved = True
+
+    @functools.cached_property
+    def _should_coordesc_tune(self) -> bool:
+        """Whether this autotuner is eligible for coordinate descent tuning."""
+        if self.heuristic_type in (
+            HeuristicType.TEMPLATE,
+            HeuristicType.USER_AUTOTUNE,
+            HeuristicType.FIXED,
+        ):
+            return False
+        # Deterministic mode forbids tuning RBLOCK / num_warps for reductions
+        # because those knobs shift numerics.
+        if self.deterministic_mode and self.heuristic_type in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+            HeuristicType.SPLIT_SCAN,
+        ):
+            return False
+        return True
+
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
         Coordinate descent tuning can be run with or without max-autotune.
@@ -1586,24 +1743,7 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if self.heuristic_type in (
-            HeuristicType.TEMPLATE,
-            HeuristicType.USER_AUTOTUNE,
-            HeuristicType.FIXED,
-        ):
-            # skip triton template
-            return launcher
-
-        if self.deterministic_mode and self.heuristic_type in (
-            HeuristicType.REDUCTION,
-            HeuristicType.PERSISTENT_REDUCTION,
-            HeuristicType.SPLIT_SCAN,
-        ):
-            # Not only RBLOCK size matters for numericals of reduction.
-            # num_warps also matters since that affect how much data
-            # is handled by each thread, how many warp-reduction we do
-            # in parallel and how much data is there for block
-            # reduction.
+        if not self._should_coordesc_tune:
             return launcher
 
         with dynamo_timed(
@@ -1622,16 +1762,7 @@ class CachingAutotuner(KernelInterface):
     def _coordinate_descent_tuning(self, launcher, *args, **kwargs):
         config2launcher = {launcher.config: launcher}
 
-        # TODO: should we just load the kernels ahead of time if we know we're going to call this?
-        if self.fn.fn is None:
-            """
-            We are in the parent process, while this program was compiled in a worker
-            and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
-            containing the real fn yet.
-            """
-            assert hasattr(self, "_reload_kernel")
-            assert callable(self._reload_kernel)
-            self.fn = self._reload_kernel().fn
+        self._ensure_kernel_loaded()
 
         def benchmark_one_config(config):
             with self.lock:
@@ -1800,13 +1931,28 @@ class CachingAutotuner(KernelInterface):
                 **self.configs[0].kwargs,
             )
 
+        for plugin in self._plugins:
+            if (
+                result := plugin.pre_dispatch(self, *args, stream=stream, **kwargs)
+            ) is not DEFER:
+                return result
+
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
                 self.precompile()
                 self.precompile_time_taken_ns = time.time_ns() - start_time
             if len(self.launchers) > 1:
-                self.autotune_to_one_config(*args, **kwargs)
+                for plugin in self._plugins:
+                    if (
+                        result := plugin.pre_autotune(
+                            self, *args, stream=stream, **kwargs
+                        )
+                    ) is not DEFER:
+                        return result
+                # Re-check: a plugin may have mutated launchers down to one.
+                if len(self.launchers) > 1:
+                    self.autotune_to_one_config(*args, **kwargs)
 
         if self.inductor_meta.get("combo_tuning_groups") and not getattr(
             self.launchers[0].config, "found_by_combo_autotune", False
@@ -1839,7 +1985,11 @@ class CachingAutotuner(KernelInterface):
         # autotuning entirely, this is the only call site that records the winner.
         TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
-            self.save_gpu_kernel(stream, launcher)
+            if self.device_props.type == "cpu":
+                if not self.cpu_kernel_saved:
+                    self.save_cpu_kernel(launcher)
+            else:
+                self.save_gpu_kernel(stream, launcher)
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
@@ -2621,7 +2771,10 @@ class DebugAutotuner(CachingAutotuner):
             (launcher,) = self.launchers
 
             if launcher.store_cubin:
-                self.save_gpu_kernel(stream, launcher)
+                if self.device_props.type == "cpu":
+                    self.save_cpu_kernel(launcher)
+                else:
+                    self.save_gpu_kernel(stream, launcher)
 
             if self.cached is None:
                 ms = self.bench(launcher, *args, with_profiler=self.with_profiler)

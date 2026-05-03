@@ -826,10 +826,6 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
 
-    if is_8bit_input_type:
-        if dense_B.is_contiguous():
-            raise AssertionError("dense input must be transposed for 8bit dtypes")
-
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
@@ -845,6 +841,7 @@ def meta__cslt_sparse_mm(
             in {
                 torch.float16,
                 torch.bfloat16,
+                torch.float32,
                 torch.int32,
                 torch.float8_e4m3fn,
             }
@@ -4521,7 +4518,7 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     # Do not allow bool+other->bool in-place
     if is_booleanic(self) and not is_booleanic(other):
         raise RuntimeError(
-            "Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change."
+            "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change."
         )
 
     if isinstance(other, torch.Tensor):

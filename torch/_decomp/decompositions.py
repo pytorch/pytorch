@@ -1446,12 +1446,10 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
-    if split_size == 0:
-        if dim_size != 0:
-            raise AssertionError(
-                f"split_size is 0 but dim_size is {dim_size}, expected 0"
-            )
+    if dim_size == 0:
         return (self.detach(),)
+    if split_size == 0:
+        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
