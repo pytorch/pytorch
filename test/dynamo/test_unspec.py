@@ -514,7 +514,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return z
 
         z = fn(x)
-        self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
+        self.assertEqual(z._dynamo_propagated_dynamic_indices, {0})
 
     def test_rshift_dynamic(self):
         def shift_right(tensor: torch.Tensor) -> torch.Tensor:
@@ -525,6 +525,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         )
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
+
+    def test_lshift_scalar_dynamic(self):
+        def shift_left(x: int) -> int:
+            return 1 << x
+
+        opt_fn = torch.compile(
+            shift_left, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(1), 2)
+        self.assertEqual(opt_fn(5), 32)
+
+    def test_rshift_scalar_dynamic(self):
+        def shift_right(x: int) -> int:
+            return 64 >> x
+
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(2), 16)
+        self.assertEqual(opt_fn(4), 4)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symfloat_to_tensor(self):
