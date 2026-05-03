@@ -28,6 +28,7 @@ def rearrange(
         Tensor: the rearranged tensor
 
     Examples:
+        >>> from torch.func import rearrange
         >>> # suppose we have a set of 32 images in "h w c" format (height-width-channel)
         >>> images = torch.randn((32, 30, 40, 3))
 
