@@ -49,7 +49,11 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with Claude.
+Disclose that the PR was authored with an AI assistant. Do this informally in
+the commit body (e.g., "Authored by Claude." or a similar attribution for
+whichever assistant was used). NEVER add a `Co-authored-by:` trailer
+attributing the AI assistant, as it interferes with the Linux Foundation CLA
+bot.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
