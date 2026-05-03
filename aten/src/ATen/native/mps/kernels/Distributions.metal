@@ -7,20 +7,33 @@ using namespace metal;
 
 constant constexpr float eps = 1.19209e-07f;
 
+// Cauchy, geometric, and log_normal each draw 4 samples per thread from a
+// single Philox-4x32-10 round, matching the existing exponential / bernoulli
+// pattern. This eliminates the bit-level waste that was 75% of the philox
+// output in the old 1-element-per-thread implementations and pairs with the
+// host-side change that advances the generator offset by ceil(N/4) instead
+// of N.
+
 template <typename T>
 kernel void cauchy(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  // Generate uniform random in (0, 1)
-  float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  // Clamp to avoid tan(+- pi / 2) singularities
-  u = clamp(u, eps, 1.0f - eps);
-  // Cauchy inverse CDF: median + sigma * tan(pi * (u - 0.5))
-  float result =
-      params.x + params.y * ::metal::precise::tan(M_PI_F * (u - 0.5f));
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float median = params.x;
+  float sigma = params.y;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    // Clamp to avoid tan(+- pi / 2) singularities.
+    float u = clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] = static_cast<T>(
+        median + sigma * ::metal::precise::tan(M_PI_F * (u - 0.5f)));
+  }
 }
 
 template <typename T>
@@ -28,15 +41,35 @@ kernel void log_normal(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  long offset = seed_base_offset.y + 2 * tid;
-  float u1 =
-      clamp(c10::metal::rand(seed_base_offset.x, offset), eps, 1.0f - eps);
-  float u2 = c10::metal::rand(seed_base_offset.x, offset + 1);
-  float z = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1)) *
-      ::metal::precise::cos(2.0f * M_PI_F * u2);
-  float result = ::metal::precise::exp(params.x + params.y * z);
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  // Box-Muller turns each (u1, u2) pair into two independent N(0,1) samples
+  // via (R cos theta, R sin theta) with R = sqrt(-2 ln u1), theta = 2 pi u2.
+  // One philox round therefore yields 4 standard normals from two pairs.
+  float u1a = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[0]), eps, 1.0f - eps);
+  float u2a = c10::metal::detail::uint32_to_uniform_float(raw[1]);
+  float u1b = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[2]), eps, 1.0f - eps);
+  float u2b = c10::metal::detail::uint32_to_uniform_float(raw[3]);
+  float ra = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1a));
+  float rb = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1b));
+  float ta = 2.0f * M_PI_F * u2a;
+  float tb = 2.0f * M_PI_F * u2b;
+  float z[4] = {
+      ra * ::metal::precise::cos(ta),
+      ra * ::metal::precise::sin(ta),
+      rb * ::metal::precise::cos(tb),
+      rb * ::metal::precise::sin(tb),
+  };
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    output[base + i] =
+        static_cast<T>(::metal::precise::exp(params.x + params.y * z[i]));
+  }
 }
 
 template <typename T>
@@ -44,11 +77,18 @@ kernel void geometric(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  u = clamp(u, eps, 1.0f - eps);
-  float result = ceil(::metal::precise::log(u) / params.x);
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] =
+        static_cast<T>(ceil(::metal::precise::log(u) / params.x));
+  }
 }
 
 template <typename T>
@@ -73,7 +113,7 @@ kernel void exponential(
 
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
-      device DTYPE*, constant float2&, constant long2&, uint)
+      device DTYPE*, constant float2&, constant long2&, constant uint&, uint)
 
 REGISTER_OP(cauchy, float);
 REGISTER_OP(cauchy, half);
