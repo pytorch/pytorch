@@ -69,14 +69,6 @@ install_ubuntu() {
   # see: https://github.com/pytorch/pytorch/issues/65931
   apt-get install -y libgnutls30
 
-  GIT_VERSION=$(git --version | awk '{print $3}')
-  GIT_MAJOR=${GIT_VERSION%%.*}
-  GIT_MINOR=${GIT_VERSION#*.}; GIT_MINOR=${GIT_MINOR%%.*}
-  if (( GIT_MAJOR < 2 || (GIT_MAJOR == 2 && GIT_MINOR < 36) )); then
-    echo "ERROR: git ${GIT_VERSION} is too old; need >= 2.36" >&2
-    exit 1
-  fi
-
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
