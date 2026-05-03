@@ -8,7 +8,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/native_dropout_backward_native.h>
 #include <ATen/ops/native_dropout_native.h>
@@ -31,16 +30,18 @@ std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std
 
   using namespace mps;
 
-  TORCH_CHECK(isFloatingType(input.scalar_type()),
-              "native_dropout_mps: input must be a floating-point tensor, got ",
-              input.scalar_type());
+  const auto stype = input.scalar_type();
+  TORCH_CHECK(isFloatingType(stype) || isComplexType(stype),
+              "native_dropout_mps: input must be a floating-point or complex tensor, got ",
+              stype);
 
   const float p_comp = static_cast<float>(1.0 - p);
   const float scale = p_comp == 0.0f ? 0.0f : 1.0f / p_comp;
 
-  // The fused kernel walks contiguous buffers; force a contiguous copy for
-  // strided inputs so we keep the kernel as a simple linear pass.
-  Tensor input_c = input.contiguous();
+  // The kernel treats the buffer as flat memory. Any storage-dense layout
+  // (channels-last, permuted strides, etc.) works as long as `output` and
+  // `mask` are allocated with matching strides via `empty_like`.
+  Tensor input_c = input.is_non_overlapping_and_dense() ? input : input.contiguous();
   Tensor output = at::empty_like(input_c);
   Tensor mask = at::empty_like(input_c, input_c.options().dtype(c10::kBool));
 
@@ -87,11 +88,22 @@ Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, doubl
   using namespace mps;
 
   // Match CPU promotion: integer grads are upcast to float32, output is
-  // float-family. The dedicated Metal kernel only has float/half/bfloat
-  // specializations, so the cast also makes lookup well-defined.
-  Tensor grad_c = isFloatingType(grad.scalar_type()) ? grad.contiguous()
-                                                     : grad.to(c10::kFloat).contiguous();
-  Tensor mask_c = mask.contiguous();
+  // float-family. The Metal kernel is registered for float/half/bfloat plus
+  // float2/half2; everything else (bool, integer dtypes) goes through the
+  // float promotion before kernel lookup.
+  const auto gtype = grad.scalar_type();
+  Tensor grad_promoted = (isFloatingType(gtype) || isComplexType(gtype)) ? grad : grad.to(c10::kFloat);
+  // Storage-dense layouts that match between grad and mask can be treated as
+  // flat memory; otherwise fall back to row-major contiguous.
+  Tensor grad_c, mask_c;
+  if (grad_promoted.is_non_overlapping_and_dense() && mask.is_non_overlapping_and_dense() &&
+      grad_promoted.strides() == mask.strides()) {
+    grad_c = grad_promoted;
+    mask_c = mask;
+  } else {
+    grad_c = grad_promoted.contiguous();
+    mask_c = mask.contiguous();
+  }
   Tensor grad_input = at::empty_like(grad_c);
 
   if (grad_input.numel() == 0) {

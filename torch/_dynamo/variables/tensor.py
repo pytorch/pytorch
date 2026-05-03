@@ -1545,6 +1545,25 @@ class TensorVariable(VariableTracker):
     def method___float__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_float_impl(tx)
 
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.neg,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___neg__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_negative_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2115,6 +2134,22 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def is_python_hashable(self) -> bool:
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -2266,6 +2301,22 @@ class SymNodeVariable(VariableTracker):
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_float_impl(
         self,
         tx: "InstructionTranslator",
@@ -2287,6 +2338,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_float_impl(tx)
+
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.neg(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___neg__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_negative_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
