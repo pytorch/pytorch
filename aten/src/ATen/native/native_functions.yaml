@@ -12666,6 +12666,10 @@
     QuantizedCPU: avg_pool3d_quantized_cpu
   tags: core
 
+- func: avg_pool3d_legacy(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
+  dispatch:
+    CPU: avg_pool3d_legacy_cpu
+
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   structured: True
@@ -12680,6 +12684,10 @@
   structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
     MkldnnCPU: mkldnn_avg_pool3d_backward
+
+- func: avg_pool3d_backward_legacy(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
+  dispatch:
+    CPU: avg_pool3d_backward_legacy_cpu
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d.output(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
