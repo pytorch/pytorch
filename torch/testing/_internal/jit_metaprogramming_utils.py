@@ -426,7 +426,7 @@ class SplitInputs:
         self.nontensor_args = [arg for arg in args if not self._is_tensor_input(arg)]
         self.tensor_kwargs = {k: v for k, v in kwargs.items() if self._is_tensor_input(v)}
         self.nontensor_kwargs = {k: v for k, v in kwargs.items() if not self._is_tensor_input(v)}
-        self.all_tensors = [*self.tensor_args, *list(self.tensor_kwargs.values())]
+        self.all_tensors = [*self.tensor_args, *self.tensor_kwargs.values()]
         self.kwarg_order = list(kwargs.keys())
 
     def nontensors_match(self, other: 'SplitInputs'):
