@@ -16,22 +16,22 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-def libtorch_generated_sources(gencode_pattern):
-    return [gencode_pattern.format(name) for name in [
-        "torch/csrc/autograd/generated/Functions.cpp",
-        "torch/csrc/autograd/generated/VariableType_0.cpp",
-        "torch/csrc/autograd/generated/VariableType_1.cpp",
-        "torch/csrc/autograd/generated/VariableType_2.cpp",
-        "torch/csrc/autograd/generated/VariableType_3.cpp",
-        "torch/csrc/autograd/generated/VariableType_4.cpp",
-        "torch/csrc/autograd/generated/ViewFuncs.cpp",
-        "torch/csrc/autograd/generated/TraceType_0.cpp",
-        "torch/csrc/autograd/generated/TraceType_1.cpp",
-        "torch/csrc/autograd/generated/TraceType_2.cpp",
-        "torch/csrc/autograd/generated/TraceType_3.cpp",
-        "torch/csrc/autograd/generated/TraceType_4.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/"):
+    return [gencode_pattern.format(path_prefix + name) for name in [
+        "autograd/generated/Functions.cpp",
+        "autograd/generated/VariableType_0.cpp",
+        "autograd/generated/VariableType_1.cpp",
+        "autograd/generated/VariableType_2.cpp",
+        "autograd/generated/VariableType_3.cpp",
+        "autograd/generated/VariableType_4.cpp",
+        "autograd/generated/ViewFuncs.cpp",
+        "autograd/generated/TraceType_0.cpp",
+        "autograd/generated/TraceType_1.cpp",
+        "autograd/generated/TraceType_2.cpp",
+        "autograd/generated/TraceType_3.cpp",
+        "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/ADInplaceOrViewType_0.cpp",
+        "autograd/generated/ADInplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
