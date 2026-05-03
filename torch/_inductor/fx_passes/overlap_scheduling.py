@@ -16,6 +16,7 @@ from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprin
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
     _get_collective_node_from_wait,
+    _resolve_group_name,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -118,7 +119,7 @@ def get_group_name(n: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    return kwargs["group_name"]
+    return _resolve_group_name(kwargs["group_name"])
 
 
 def get_custom_estimation(
@@ -1188,8 +1189,7 @@ class OverlapScheduler:
             latency = estimate_collective_time(
                 node, 0, custom_runtime_estimation=self.custom_runtime_estimation
             )
-            assert latency <= info.exposed_time_ms
-            info.exposed_time_ms = info.exposed_time_ms - latency
+            info.exposed_time_ms = max(0, info.exposed_time_ms - latency)
 
         self.in_flight[node] = info
         self.in_flight_bytes += info.size_bytes
@@ -1702,7 +1702,11 @@ def gather_node_runtime_estimations(
             compute_analytical,
         )
 
-    if log_estimations and collective_nodes:
+    # Skip analytical logging when a custom estimator is provided: the
+    # analytical estimates weren't used for scheduling, and the logging
+    # path calls into NCCL estimation which can crash when group_name
+    # is an FX Node (compile-on-one-rank graphs).
+    if log_estimations and collective_nodes and custom_runtime_estimation is None:
         from torch._inductor.fx_passes.node_runtime_estimation import (
             _log_collective_benchmarks,
         )
@@ -1768,6 +1772,8 @@ def schedule_overlap_bucketing(
     max_off_bucket_gb: float | None = 0.5,
     bucket_mode: BucketMode | None = None,
     pge_profile_path: str | None = None,
+    pre_bucketing_fsdp_collectives: bool = True,
+    pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1795,9 +1801,25 @@ def schedule_overlap_bucketing(
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
         bucket_mode: Bucketing mode for grouping collectives.
+        pre_bucketing_fsdp_collectives: Pre-bucket FSDP collectives into bandwidth-saturating
+            buckets before overlap scheduling.
+        pre_bucketing_fsdp_collectives_bucket_cap_mb: Override bucket cap in MB for pre-bucketing.
+            When None, auto-computes based on NCCL bandwidth model.
     """
-    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+    if not gm.graph.find_nodes(
+        op="call_function",
+        target=torch.ops._c10d_functional.wait_tensor.default,
+    ):
         return gm
+
+    if pre_bucketing_fsdp_collectives:
+        from torch._inductor.fx_passes.fsdp import pre_bucket_fsdp_collectives
+
+        pre_bucket_fsdp_collectives(
+            gm,
+            mode=bucket_mode,
+            bucket_cap_mb=pre_bucketing_fsdp_collectives_bucket_cap_mb,
+        )
 
     trace_structured(
         "artifact",
@@ -1849,7 +1871,10 @@ def schedule_overlap_bucketing_from_inductor_configs(
     Reads configuration from torch._inductor.config.aten_distributed_optimizations
     and calls schedule_overlap_bucketing with those settings.
     """
-    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+    if not gm.graph.find_nodes(
+        op="call_function",
+        target=torch.ops._c10d_functional.wait_tensor.default,
+    ):
         return gm
 
     from torch._inductor import config
@@ -1876,6 +1901,8 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
         "bucket_mode",
+        "pre_bucketing_fsdp_collectives",
+        "pre_bucketing_fsdp_collectives_bucket_cap_mb",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

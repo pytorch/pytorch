@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
@@ -611,6 +612,293 @@ PyTypeObject StaticCudaLauncherType = {
     nullptr, // tp_alloc
     nullptr, // tp_new
 };
+// ---------------------------------------------------------------------------
+// getPointerFast: extract device pointer WITHOUT cuPointerGetAttribute.
+// Uses THPVariable_Unpack (direct C++ field access) + at::Tensor::data_ptr()
+// instead of going through Python data_ptr() method.
+// No THPVariable_Check or tensor.defined() guard: in the _FastCudaLauncher
+// path all 'O'-typed args are guaranteed to be tensors by inductor codegen.
+// ---------------------------------------------------------------------------
+inline CUdeviceptr getPointerFast(PyObject* obj) {
+  if (THPUtils_checkLong(obj)) {
+#if defined(USE_ROCM)
+    return reinterpret_cast<hipDeviceptr_t>(THPUtils_unpackUInt64(obj));
+#else
+    return THPUtils_unpackUInt64(obj);
+#endif
+  }
+  if (obj == Py_None) {
+    return 0;
+  }
+  // Fast type check: inductor-generated tensors are always exact THPVariable
+  // (or Parameter). Use CheckExact — a single Py_TYPE pointer comparison —
+  // instead of THPVariable_Check which also calls PyObject_IsInstance.
+  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+    auto tensor = THPVariable_Unpack(obj);
+    TORCH_CHECK(
+        tensor.defined(),
+        "_FastCudaLauncher: received undefined tensor argument");
+    return reinterpret_cast<CUdeviceptr>(tensor.data_ptr());
+  }
+  // Slow fallback for non-tensor objects with a data_ptr() method
+  // (e.g. tensor-like wrappers / proxy objects).
+  PyObject* data_ptr_method = PyObject_GetAttrString(obj, "data_ptr");
+  TORCH_CHECK(
+      data_ptr_method,
+      "_FastCudaLauncher: expected tensor or object with data_ptr() method");
+  PyObject* ret = PyObject_CallNoArgs(data_ptr_method);
+  Py_DECREF(data_ptr_method);
+  TORCH_CHECK(ret, "_FastCudaLauncher: data_ptr() call failed");
+  auto raw = THPUtils_unpackUInt64(ret);
+  Py_DECREF(ret);
+  // C-style cast: static_cast on CUDA (uint64→unsigned long long),
+  // reinterpret_cast on HIP (uint64→void*).
+  return (CUdeviceptr)raw;
+}
+
+// ---------------------------------------------------------------------------
+// _FastCudaLauncher: pre-bound callable that uses vectorcall (PEP 590)
+// to launch a triton kernel with minimal overhead.
+//
+// Pre-binds: CUfunction, numWarps, sharedMemBytes, argTypes, scratch slots.
+// Per-call:  only grid, stream, and kernel args are passed.
+// Skips:     cuCtxGetCurrent, cuPointerGetAttribute, PyArg_ParseTuple for
+//            kernel metadata.
+// ---------------------------------------------------------------------------
+struct FastCudaLauncherObject {
+  PyObject_HEAD
+  vectorcallfunc vectorcall;
+  CUfunction func;
+  uint32_t numWarps;
+  uint32_t sharedMemBytes;
+  int numKernelArgs; // args passed from Python
+  int numTotalArgs; // numKernelArgs + nScratch
+  char argTypes[MAX_ARGS + 1]; // null-terminated
+  // Thread safety: argStorage/kernelArgs are shared across calls but safe
+  // because the GIL is held throughout fast_launcher_vectorcall (no
+  // Py_BEGIN_ALLOW_THREADS).  cuLaunchKernel copies arg values from the
+  // kernelArgs pointers synchronously before returning, so by the time the
+  // GIL could be released the driver already has its own copy.
+  // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
+  // If two threads call the same instance concurrently without the GIL,
+  // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
+  uint64_t argStorage[MAX_ARGS];
+  void* kernelArgs[MAX_ARGS];
+};
+
+static PyObject* fast_launcher_vectorcall(
+    PyObject* callable,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames);
+
+static PyObject* FastCudaLauncher_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwds) {
+  HANDLE_TH_ERRORS
+  auto* self =
+      reinterpret_cast<FastCudaLauncherObject*>(type->tp_alloc(type, 0));
+  if (!self)
+    return nullptr;
+
+  uint64_t func_ptr = 0;
+  int numWarps = 0, shared = 0, nScratch = 0;
+  const char* argTypes = nullptr;
+  if (!PyArg_ParseTuple(
+          args, "Kiisi", &func_ptr, &numWarps, &shared, &argTypes, &nScratch)) {
+    Py_DECREF(self);
+    return nullptr;
+  }
+
+  self->func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
+  self->numWarps = static_cast<uint32_t>(numWarps);
+  self->sharedMemBytes = static_cast<uint32_t>(shared);
+
+  int nKernel = static_cast<int>(std::strlen(argTypes));
+  int nTotal = nKernel + nScratch;
+  if (nTotal > MAX_ARGS) {
+    Py_DECREF(self);
+    PyErr_Format(
+        PyExc_ValueError,
+        "_FastCudaLauncher: too many arguments (%d > %d)",
+        nTotal,
+        MAX_ARGS);
+    return nullptr;
+  }
+
+  self->numKernelArgs = nKernel;
+  self->numTotalArgs = nTotal;
+  std::memcpy(self->argTypes, argTypes, nKernel);
+  // Scratch slots are pointer type ('O')
+  for (int i = nKernel; i < nTotal; ++i) {
+    self->argTypes[i] = 'O';
+  }
+  self->argTypes[nTotal] = '\0';
+
+  // Pre-compute kernelArgs pointers and zero all storage.
+  std::memset(self->argStorage, 0, sizeof(self->argStorage));
+  for (int i = 0; i < nTotal; ++i) {
+    self->kernelArgs[i] = &self->argStorage[i];
+  }
+
+  // Set vectorcall function pointer.
+  self->vectorcall = fast_launcher_vectorcall;
+
+  return reinterpret_cast<PyObject*>(self);
+  END_HANDLE_TH_ERRORS
+}
+
+static void FastCudaLauncher_dealloc(PyObject* self) {
+  Py_TYPE(self)->tp_free(self);
+}
+
+// The hot path — called every kernel launch via vectorcall.
+// args layout: [grid_x, grid_y, grid_z, stream, kernel_arg0, ...]
+static PyObject* fast_launcher_vectorcall(
+    PyObject* callable,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      kwnames == nullptr,
+      "_FastCudaLauncher: keyword arguments are not supported");
+  auto* self = reinterpret_cast<FastCudaLauncherObject*>(callable);
+  Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+
+  // We expect at least 4 fixed args (grid_x, grid_y, grid_z, stream)
+  // plus numKernelArgs kernel arguments.
+  TORCH_CHECK(
+      nargs >= 4 + self->numKernelArgs,
+      "_FastCudaLauncher: expected ",
+      4 + self->numKernelArgs,
+      " args, got ",
+      nargs);
+
+  // Grid and stream are always integers from inductor codegen.
+  // Debug-only guard; zero cost in release/opt builds.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      PyLong_Check(args[0]) && PyLong_Check(args[1]) && PyLong_Check(args[2]),
+      "_FastCudaLauncher: grid dimensions must be integers");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      PyLong_Check(args[3]), "_FastCudaLauncher: stream must be an integer");
+
+  int gridX = static_cast<int>(THPUtils_unpackLong(args[0]));
+  int gridY = static_cast<int>(THPUtils_unpackLong(args[1]));
+  int gridZ = static_cast<int>(THPUtils_unpackLong(args[2]));
+
+  if (gridX <= 0 || gridY <= 0 || gridZ <= 0) {
+    Py_RETURN_NONE;
+  }
+
+  uint64_t stream = THPUtils_unpackUInt64(args[3]);
+
+  // Pack kernel args from Python into pre-allocated argStorage.
+  for (int i = 0; i < self->numKernelArgs; ++i) {
+    PyObject* item = args[4 + i];
+    void* slot = static_cast<void*>(&self->argStorage[i]);
+    char typeChar = self->argTypes[i];
+    switch (typeChar) {
+      case 'O': {
+        *reinterpret_cast<CUdeviceptr*>(slot) = getPointerFast(item);
+        break;
+      }
+      case 'b':
+        convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
+        break;
+      case 'h':
+        convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
+        break;
+      case 'i':
+        convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
+        break;
+      case 'l':
+        convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
+        break;
+      case 'B':
+        convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
+        break;
+      case 'H':
+        convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
+        break;
+      case 'I':
+        convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
+        break;
+      case 'K':
+        convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+        break;
+      case 'f':
+        convertType<float>(THPUtils_unpackDouble, "float", slot, item);
+        break;
+      case 'd':
+        convertType<double>(THPUtils_unpackDouble, "double", slot, item);
+        break;
+      default:
+        TORCH_CHECK(
+            false, "_FastCudaLauncher: unknown arg type '", typeChar, "'");
+    }
+  }
+  // Scratch slots already zeroed at construction time and stay zero.
+  // Invariant: inductor codegen always passes None for scratch args, so the
+  // pre-zeroed nullptr values remain valid across launches.  If scratch
+  // semantics ever require non-null per-launch values, re-zero here.
+
+  launchKernel(
+      self->func,
+      static_cast<uint32_t>(gridX),
+      static_cast<uint32_t>(gridY),
+      static_cast<uint32_t>(gridZ),
+      self->numWarps,
+      self->sharedMemBytes,
+      self->kernelArgs,
+      reinterpret_cast<cudaStream_t>(stream)); // NOLINT
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyTypeObject FastCudaLauncherType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FastCudaLauncher", // tp_name
+    sizeof(FastCudaLauncherObject), // tp_basicsize
+    0, // tp_itemsize
+    FastCudaLauncher_dealloc, // tp_dealloc
+    offsetof(FastCudaLauncherObject, vectorcall), // tp_vectorcall_offset
+    nullptr, // tp_getattr
+    nullptr, // tp_setattr
+    nullptr, // tp_reserved
+    nullptr, // tp_repr
+    nullptr, // tp_as_number
+    nullptr, // tp_as_sequence
+    nullptr, // tp_as_mapping
+    nullptr, // tp_hash
+    PyVectorcall_Call, // tp_call — fallback for non-vectorcall callers
+    nullptr, // tp_str
+    nullptr, // tp_getattro
+    nullptr, // tp_setattro
+    nullptr, // tp_as_buffer
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_VECTORCALL,
+    "Pre-bound fast launcher for triton CUDA kernels (vectorcall)", // tp_doc
+    nullptr, // tp_traverse
+    nullptr, // tp_clear
+    nullptr, // tp_richcompare
+    0, // tp_weaklistoffset
+    nullptr, // tp_iter
+    nullptr, // tp_iternext
+    nullptr, // tp_methods
+    nullptr, // tp_members
+    nullptr, // tp_getset
+    nullptr, // tp_base
+    nullptr, // tp_dict
+    nullptr, // tp_descr_get
+    nullptr, // tp_descr_set
+    0, // tp_dictoffset
+    nullptr, // tp_init
+    nullptr, // tp_alloc
+    FastCudaLauncher_new, // tp_new
+};
+
 } // anonymous namespace
 // Module initialization: add StaticCudaLauncher to the module with our static
 // methods.
@@ -638,6 +926,19 @@ bool StaticCudaLauncher_init(PyObject* module) {
           module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
       0) {
     Py_DECREF(&StaticCudaLauncherType);
+    return false;
+  }
+  return true;
+}
+
+bool FastCudaLauncher_init(PyObject* module) {
+  if (PyType_Ready(&FastCudaLauncherType) < 0) {
+    return false;
+  }
+  Py_INCREF(&FastCudaLauncherType);
+  if (PyModule_AddObject(
+          module, "_FastCudaLauncher", (PyObject*)&FastCudaLauncherType) < 0) {
+    Py_DECREF(&FastCudaLauncherType);
     return false;
   }
   return true;
