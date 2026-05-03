@@ -514,7 +514,45 @@ inline bool prefill_attention_supports_head_dim(int64_t head_dim) {
   }
 }
 
+inline bool mpp_attention_supports_head_dim(int64_t head_dim) {
+  return head_dim == 64 || head_dim == 96 || head_dim == 128 || head_dim == 256;
+}
+
+inline PrefillBlockShape mpp_prefill_block_shape_for_head_dim(int64_t head_dim) {
+  switch (head_dim) {
+    case 64:
+    case 96:
+    case 128:
+    case 256:
+      return {64, 32, 4, 1};
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unsupported head_dim for MPP attention: ", head_dim);
+  }
+}
+
 } // namespace
+
+static bool can_use_mpp_prefill(const Tensor& q,
+                                const std::optional<Tensor>& mask,
+                                int64_t query_head_dim,
+                                int64_t value_head_dim,
+                                int64_t qL,
+                                int64_t kL,
+                                bool supports_fast_sdpa) {
+  if (!at::mps::is_macos_13_or_newer(at::mps::MacOSVersion::MACOS_VER_26_0_PLUS))
+    return false;
+  if (supports_fast_sdpa || qL <= 8 || kL <= 0)
+    return false;
+  if (q.scalar_type() != at::kHalf && q.scalar_type() != at::kBFloat16)
+    return false;
+  if (query_head_dim != value_head_dim)
+    return false;
+  if (!mpp_attention_supports_head_dim(query_head_dim))
+    return false;
+  if (mask.has_value() && mask->dtype() != at::kBool && mask->dtype() != q.dtype())
+    return false;
+  return true;
+}
 
 static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
                                                    const Tensor& k_,
@@ -523,7 +561,8 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
                                                    bool is_causal,
                                                    std::optional<double> scale,
                                                    const Tensor& orig_query,
-                                                   bool unsqueezed) {
+                                                   bool unsqueezed,
+                                                   bool use_mpp = false) {
   using namespace mps;
 
   const int64_t batchSize = q_.size(0);
@@ -580,12 +619,13 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
     mask_params.M_strides[3] = static_cast<int>(m.stride(3));
   }
 
-  const auto shape = prefill_block_shape_for_head_dim(headSize);
+  const auto shape =
+      use_mpp ? mpp_prefill_block_shape_for_head_dim(headSize) : prefill_block_shape_for_head_dim(headSize);
 
   // Compose kernel name. Name format must match the instantiations in
   // Attention.metal:
-  //   prefill_attention_<dtype>_bq<BQ>_bk<BK>_bd<BD>_wm<WM>_wn<WN>
-  //                    _hm<has_mask>_dc<do_causal>_mask<mask_dtype>
+  //   prefill_attention[_mpp]_<dtype>_bq<BQ>_bk<BK>_bd<BD>_wm<WM>_wn<WN>
+  //                          _hm<has_mask>_dc<do_causal>_mask<mask_dtype>
   std::string_view dtype_str;
   switch (q_.scalar_type()) {
     case kFloat:
@@ -611,16 +651,26 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
     }
   }
 
-  const std::string kname = fmt::format("prefill_attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
-                                        dtype_str,
-                                        shape.BQ,
-                                        shape.BK,
-                                        static_cast<int>(headSize),
-                                        shape.WM,
-                                        shape.WN,
-                                        has_mask ? 1 : 0,
-                                        is_causal ? 1 : 0,
-                                        mask_dtype_str);
+  const std::string kname = use_mpp ? fmt::format("prefill_attention_mpp_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
+                                                  dtype_str,
+                                                  shape.BQ,
+                                                  shape.BK,
+                                                  static_cast<int>(headSize),
+                                                  shape.WM,
+                                                  shape.WN,
+                                                  has_mask ? 1 : 0,
+                                                  is_causal ? 1 : 0,
+                                                  mask_dtype_str)
+                                    : fmt::format("prefill_attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
+                                                  dtype_str,
+                                                  shape.BQ,
+                                                  shape.BK,
+                                                  static_cast<int>(headSize),
+                                                  shape.WM,
+                                                  shape.WN,
+                                                  has_mask ? 1 : 0,
+                                                  is_causal ? 1 : 0,
+                                                  mask_dtype_str);
 
   // Threadgroup grid: (Q-blocks, head, batch).
   const int64_t nQ = (qL + shape.BQ - 1) / shape.BQ;
@@ -749,7 +799,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool supports_prefill = !prefill_attention_disabled && !supports_fast_sdpa && prefill_supported_dtype &&
       prefill_mask_compatible && prefill_head_dim_supported && prefill_q_long_enough && (k_.size(2) > 0);
 
-  if (!supports_fast_sdpa && !supports_prefill) {
+  bool supports_mpp =
+      can_use_mpp_prefill(q_, mask_, query_head_dim, value_head_dim, query_seq_len, k_.size(2), supports_fast_sdpa);
+
+  if (!supports_fast_sdpa && !supports_prefill && !supports_mpp) {
     return sdpa_general_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 
@@ -760,8 +813,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   Tensor k_contig = can_use_kernel_strides(k_) ? k_ : k_.contiguous();
   Tensor v_contig = can_use_kernel_strides(v_) ? v_ : v_.contiguous();
 
-  if (supports_prefill) {
-    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query, unsqueezed);
+  if (supports_mpp || supports_prefill) {
+    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query, unsqueezed, supports_mpp);
   }
 
   // for short sequences, differentiate based on key sequence length
