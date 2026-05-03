@@ -216,6 +216,11 @@ def prod_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
     return ComplexTensor(u, v).to(dtype)  # type: ignore[bad-return]
 
 
+@register_complex(aten.complex)
+def complex_impl(re: torch.Tensor, im: torch.Tensor) -> ComplexTensor:
+    return ComplexTensor(re, im)
+
+
 @register_complex(aten.pow)
 def pow_impl(self: ComplexTensor, exponent: ComplexTensor) -> ComplexTensor:
     out_dt, (self, exponent) = promote_tensors(self, exponent)
