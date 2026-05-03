@@ -58,7 +58,6 @@ enum MPSReductionType {
   AMIN,
   PROD,
   MEAN,
-  COUNT_NONZERO,
   TRACE,
 };
 
@@ -203,9 +202,6 @@ static void reduction_out_mps(const Tensor& input_t,
       case MPSReductionType::MEAN:
         output_t.fill_(std::numeric_limits<float>::quiet_NaN());
         break;
-      case MPSReductionType::COUNT_NONZERO:
-        output_t.zero_();
-        break;
       case MPSReductionType::AMAX:
       case MPSReductionType::AMIN:
       case MPSReductionType::MAX:
@@ -250,12 +246,6 @@ static void reduction_out_mps(const Tensor& input_t,
         castOutputTensor = [mpsGraph reductionProductWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::MEAN) {
         castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
-      } else if (reduction_type == MPSReductionType::COUNT_NONZERO) {
-        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0 dataType:castInputTensor.dataType];
-
-        MPSGraphTensor* nonZeros = [mpsGraph notEqualWithPrimaryTensor:castInputTensor secondaryTensor:zeros name:nil];
-
-        castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMAX) {
         castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMIN) {
@@ -918,7 +908,10 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
 
     auto out_metal = scalarToMetalTypeString(output);
     auto p1_kernel = fmt::format("{}reduction_{}_{}", kernel_prefix, scalarToMetalTypeString(input), out_metal);
-    auto p2_kernel = fmt::format("{}reduction_{}_{}", kernel_prefix, out_metal, out_metal);
+    // Pass 2 combines partials by summing them regardless of pass-1 mode.
+    // For count_nonzero the partials are already per-block counts (long);
+    // counting them again would be wrong, so always use "sum_" here.
+    auto p2_kernel = fmt::format("sum_reduction_{}_{}", out_metal, out_metal);
 
     // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1
     // Dim 0 (non-reduced): size=num_groups, input_stride=elems_per_group, output_stride=1
@@ -1103,6 +1096,10 @@ static void mean_kernel_mps(TensorIterator& iter) {
   sum_nansum_kernel_mps(iter, "sum_", static_cast<float>(reduction_size));
 }
 
+static void count_nonzero_kernel_mps(TensorIterator& iter) {
+  sum_nansum_kernel_mps(iter, "count_nonzero_");
+}
+
 Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
 
@@ -1172,32 +1169,11 @@ Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
 }
 
 Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
-  int64_t shape_size = dims.size() == 0 ? 0 : self.sizes().size() - dims.size();
-  int64_t out_shape = std::max(shape_size, 0LL);
-  std::vector<int64_t> output_shape(out_shape);
-  std::vector<int64_t> dims_vec = dims.vec();
-  std::for_each(dims_vec.begin(), dims_vec.end(), [&](int64_t& n) { n = maybe_wrap_dim(n, self); });
-
-  if (out_shape != 0) {
-    int out_dim = 0;
-    for (const auto self_dim : c10::irange((self.sizes().size()))) {
-      if (std::find(dims_vec.begin(), dims_vec.end(), self_dim) == dims_vec.end()) {
-        output_shape[out_dim++] = (self.sizes()[self_dim]);
-      }
-    }
-  }
-
-  Tensor output_t =
-      at::empty(IntArrayRef(output_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
-  reduction_out_mps(self,
-                    dims,
-                    false,
-                    self.scalar_type(),
-                    const_cast<Tensor&>(output_t),
-                    MPSReductionType::COUNT_NONZERO,
-                    "count_nonzero_mps");
-
-  return output_t;
+  Tensor result = create_reduction_result(self, dims, /*keepdim=*/false, ScalarType::Long);
+  auto iter =
+      make_reduction("count_nonzero_mps", result, self, dims, /*keepdim=*/false, self.scalar_type(), ScalarType::Long);
+  count_nonzero_kernel_mps(iter);
+  return result;
 }
 
 Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {

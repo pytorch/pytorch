@@ -77,8 +77,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 
 # Only mkl-static and mkl-include are needed; the mkl package contains
 # dynamic libraries that are not discoverable by our build scripts.
-mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
-mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
@@ -184,7 +184,7 @@ psutil
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
-pytest==7.3.2
+pytest==9.0.3
 #Description: testing framework
 #Pinned versions:
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
@@ -321,8 +321,7 @@ z3-solver==4.15.1.0 ; platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-tensorboard==2.13.0 ; python_version < "3.13"
-tensorboard==2.18.0 ; python_version >= "3.13"
+tensorboard==2.18.0
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard
@@ -335,7 +334,7 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #test that import:
 
 lxml==5.3.0 ; python_version < "3.14"
-lxml==6.0.2 ; python_version >= "3.14"
+lxml==6.1.0 ; python_version >= "3.14"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -403,7 +402,7 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "Darwin"
+cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
 #test that import: test_cuda.py
 

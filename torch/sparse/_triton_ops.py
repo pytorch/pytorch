@@ -552,28 +552,28 @@ def scatter_mm_meta(
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 16
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 1
                 TILE_M = 32
                 TILE_N = 32
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 8
@@ -581,28 +581,28 @@ def scatter_mm_meta(
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -610,35 +610,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 8
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 16
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 4
@@ -646,35 +646,35 @@ def scatter_mm_meta(
                 TILE_N = 128
                 GROUP_SIZE = 8
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 4
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N = 8
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 4
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N = 4
                 TILE_M = 64
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N = 2
@@ -682,21 +682,21 @@ def scatter_mm_meta(
                 TILE_N = 256
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 2  # noqa: E225,E231,E702
+                num_warps = 2  # noqa: E225, E231
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N = 2
                 TILE_M = 32
                 TILE_N = 64
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 1  # noqa: E225,E231,E702
+                num_warps = 1  # noqa: E225, E231
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N = 2
                 TILE_M = 64
                 TILE_N = 128
                 GROUP_SIZE = 2
                 num_stages = 1
-                num_warps = 4  # noqa: E225,E231,E702
+                num_warps = 4  # noqa: E225, E231
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:

@@ -674,7 +674,7 @@ from a multi-output view call"
                 )
             ) or (
                 # 2. If the output_type is alias_of_input, and no in-place view
-                #    operationthe was run on the input (base tensor).
+                #    operation was run on the input (base tensor).
                 #
                 # In this case, we need to check for metadata mutation because
                 # the runtime explicitly reconstructs the inputs, before actually

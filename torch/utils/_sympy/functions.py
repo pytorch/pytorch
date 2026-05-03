@@ -590,9 +590,9 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return base * 2**shift
+        return base * PowByNatural(sympy.Integer(2), shift)
 
 
 class RShift(sympy.Function):
@@ -600,9 +600,9 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return FloorDiv(base, 2**shift)
+        return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -808,8 +808,8 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                     if isinstance(a, other):
                         a0 = a.args[0]
                         if (  # noqa: E712
-                            (a0 > T) if other == Max else (a0 < T)  # noqa: E712
-                        ) == True:  # noqa: E712
+                            (a0 > T) if other == Max else (a0 < T)
+                        ) == True:
                             args[i] = cls.identity  # type: ignore[attr-defined]
 
         # remove redundant symbolic args
@@ -938,13 +938,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
-        i.is_antihermitian
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_antihermitian for i in s.args
+    )
     _eval_is_commutative = lambda s: _torf(  # noqa: E731
-        i.is_commutative
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_commutative for i in s.args
+    )
     _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
     _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
     _eval_is_even = lambda s: _torf(i.is_even for i in s.args)  # noqa: E731
@@ -957,13 +955,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
     _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
     _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
-        i.is_nonnegative
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_nonnegative for i in s.args
+    )
     _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
-        i.is_nonpositive
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_nonpositive for i in s.args
+    )
     _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
     _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
     _eval_is_polar = lambda s: _torf(i.is_polar for i in s.args)  # noqa: E731
@@ -972,13 +968,11 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
     _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
     _eval_is_extended_real = lambda s: _torf(  # noqa: E731
-        i.is_extended_real
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_extended_real for i in s.args
+    )
     _eval_is_transcendental = lambda s: _torf(  # noqa: E731
-        i.is_transcendental
-        for i in s.args  # noqa: E731
-    )  # noqa: E731
+        i.is_transcendental for i in s.args
+    )
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
 
