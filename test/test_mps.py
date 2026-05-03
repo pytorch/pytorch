@@ -6283,6 +6283,45 @@ class TestMPS(TestCaseMPS):
             if stable:
                 self.assertEqual(ci, mi.cpu())
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
+    @parametrize("descending", [False, True])
+    @parametrize("dup", [False, True])
+    def test_sort_multi_block(self, dtype, descending, dup):
+        # shapes chosen to hit the metal multi block merge path
+        cases = {
+            2: [((1, 4096), -1), ((2, 3000), -1)],
+            4: [((1, 2049), -1), ((1, 8192), -1), ((2, 16384), -1),
+                ((5, 8192), -1), ((10, 8192), -1), ((10, 5000, 20), 1)],
+            8: [((10, 2000), -1)],
+        }
+        strided_cases = {
+            4: [((2, 16384), -1)],
+            8: [((10, 4000), -1)],
+        }
+        elem_size = torch.tensor([], dtype=dtype).element_size()
+        lo, hi = (0, 5) if dup else (-1000, 1000)
+
+        def make(shape):
+            if dtype.is_floating_point:
+                return torch.randint(lo, hi, shape).to(dtype)
+            return torch.randint(lo, hi, shape, dtype=dtype)
+
+        def check(cpu, dim=-1):
+            mps = cpu.to("mps")
+            cv, _ = torch.sort(cpu, dim=dim, descending=descending)
+            mv, mi = torch.sort(mps, dim=dim, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, dim, mi).cpu(), mv.cpu())
+            sorted_mi, _ = torch.sort(mi, dim=dim)
+            shape = [1] * mi.ndim
+            shape[dim] = mi.size(dim)
+            self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(dim)).view(shape).expand_as(mi))
+
+        for shape, dim in cases.get(elem_size, []):
+            check(make(shape), dim)
+        for shape, dim in strided_cases.get(elem_size, []):
+            check(make(shape)[:, ::2], dim)
+
     def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 

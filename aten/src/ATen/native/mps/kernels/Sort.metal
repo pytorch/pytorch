@@ -4,17 +4,24 @@
 using namespace metal;
 
 // =============================================================================
-// Sort kernels for MPS. This file contains single-block sort path: one
-// threadgroup per row, used when the segment fits in threadgroup memory.
-// Multi-block merge and radix paths are planned for follow-up PRs.
+// Sort kernels for MPS. 2 Paths are currently supported:
+//   Path 1 - single-block: one threadgroup per row, used when the segment
+//            fits in threadgroup memory.
+//   Path 2 - multi-block:  segment split into ELEMS_PER_TG-sized blocks,
+//            each block sorted independently, then log2(n_blocks) passes
+//            of pairwise merges. Used when sort_size exceeds what one
+//            threadgroup can hold, or when single-block would dispatch
+//            too few TGs to keep the GPU busy.
+// Radix is planned for a follow-up PR.
 //
 // File layout:
-//   1. Shared comparators & padding  (sort_compare, sort_init)
-//   2. Merge primitives              (merge_partition, merge_step)
-//   3. SIMD bitonic building blocks  (sort_shuffle_xor, bitonic_substage,
-//                                     simd_bitonic_sort4)
-//   4. Block merge sort              (block_merge_sort)
-//   5. Single-block sort kernel      (sort_block)
+//   1. Shared comparators & padding   (sort_compare, sort_init)
+//   2. Merge primitives               (merge_partition, merge_step)
+//   3. SIMD bitonic building blocks   (sort_shuffle_xor, bitonic_substage,
+//                                      simd_bitonic_sort4)
+//   4. Block merge sort               (block_merge_sort)
+//   5. Path 1 - single-block kernel   (sort_block)
+//   6. Path 2 - multi-block kernels   (mb_sort_block, mb_merge)
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -97,10 +104,10 @@ inline T sort_init(bool desc) {
 // sorted runs; merge_step sequentially merges TN elements from that split.
 // -----------------------------------------------------------------------------
 
-template <typename T>
+template <typename Ptr>
 inline int merge_partition(
-    const threadgroup T* A,
-    const threadgroup T* B,
+    Ptr A,
+    Ptr B,
     int a_sz,
     int b_sz,
     int diag,
@@ -375,7 +382,7 @@ inline void block_merge_sort(
 }
 
 // =============================================================================
-// 5. Single-block sort kernel
+// 5. Path 1 - single-block sort kernel
 //
 // One threadgroup per row. The whole segment is loaded into threadgroup
 // memory, sorted in place with block_merge_sort and written out. Selected
@@ -414,22 +421,224 @@ kernel void sort_block(
   }
 }
 
+// =============================================================================
+// 6. Path 2 - multi-block merge kernels
+//
+// Segment is split into n_blocks = ceil(size / ELEMS_PER_TG) blocks.
+//   mb_sort_block sorts each block independently (one threadgroup per block).
+//   mb_merge      repeatedly merges adjacent pairs of sorted runs, doubling
+//                 the run size each pass. dims.y (merge_tiles) tells each
+//                 threadgroup which pair of runs it's merging. Host
+//                 ping-pongs input/output buffers across passes and uses
+//                 mb_merge_final on the last pass to emit long indices
+//                 directly (skipping a separate index-widen copy).
+// =============================================================================
+
+template <typename T, typename IdxT, short TPTG, short TN, bool STABLE>
+kernel void mb_sort_block(
+    const device T* inp [[buffer(0)]],
+    device T* dv [[buffer(1)]],
+    device IdxT* di [[buffer(2)]],
+    constant int& size [[buffer(3)]],
+    constant long2& strides [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  const long stride_sort = strides.x;
+  const long stride_seg = strides.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  T init = sort_init<T>(desc);
+  long seg = tid.y * stride_seg;
+  int blk = tid.x * ELEMS_PER_TG;
+  threadgroup T tgv[ELEMS_PER_TG];
+  threadgroup IdxT tgi[ELEMS_PER_TG];
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = blk + i;
+    tgv[i] = g < size ? inp[seg + g * stride_sort] : init;
+    tgi[i] = IdxT(g);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  block_merge_sort<T, IdxT, TPTG, TN, STABLE>(tgv, tgi, lid.x, desc);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  int row = tid.y * size;
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = blk + i;
+    if (g < size) {
+      dv[row + g] = tgv[i];
+      di[row + g] = tgi[i];
+    }
+  }
+}
+
+template <typename T, typename InIdxT, typename OutIdxT, short TPTG, short TN>
+kernel void mb_merge(
+    const device T* vi [[buffer(0)]],
+    const device InIdxT* ii [[buffer(1)]],
+    device T* vo [[buffer(2)]],
+    device OutIdxT* io [[buffer(3)]],
+    constant int3& dims [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  const int size = dims.x;
+  const int merge_tiles = dims.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  T init = sort_init<T>(desc);
+  vi += tid.y * size;
+  ii += tid.y * size;
+  vo += tid.y * size;
+  io += tid.y * size;
+
+  // Locate the merge group (mg) and our tile inside it (ml). The merge group
+  // covers [g_start, g_start + g_span); A is its first half, B is its second.
+  const int mg = tid.x / merge_tiles;
+  const int ml = tid.x % merge_tiles;
+  const int g_start = ELEMS_PER_TG * merge_tiles * mg;
+  const int g_span = ELEMS_PER_TG * merge_tiles;
+  const int A0 = min(size, g_start);
+  const int A1 = min(size, g_start + g_span / 2);
+  const int B1 = min(size, g_start + g_span);
+  const int asz0 = A1 - A0, bsz0 = B1 - A1;
+  const int diag_lo = min(asz0 + bsz0, ELEMS_PER_TG * ml);
+  const int diag_hi = min(asz0 + bsz0, ELEMS_PER_TG * (ml + 1));
+
+  // TG-wide partition: every thread does the same binary search over device
+  // memory in registers. Cheaper than the lid.x==0 broadcast: same result, no
+  // barriers, no narrowing through InIdxT (which would corrupt at sort_size
+  // = 65536 where Ast/Aed can equal size).
+  const int Ast =
+      A0 + merge_partition(vi + A0, vi + A1, asz0, bsz0, diag_lo, desc);
+  const int Aed =
+      A0 + merge_partition(vi + A0, vi + A1, asz0, bsz0, diag_hi, desc);
+  const int Bst = min(size, A0 + A1 + diag_lo - Ast);
+  const int Bed = min(size, A0 + A1 + diag_hi - Aed);
+  const int Asz = Aed - Ast, Bsz = Bed - Bst;
+
+  threadgroup T tgv[ELEMS_PER_TG];
+  threadgroup InIdxT tgi[ELEMS_PER_TG];
+  for (int x = lid.x; x < ELEMS_PER_TG; x += TPTG) {
+    if (x < Asz + Bsz) {
+      bool fromA = x < Asz;
+      tgv[x] = fromA ? vi[Ast + x] : vi[Bst + x - Asz];
+      tgi[x] = fromA ? ii[Ast + x] : ii[Bst + x - Asz];
+    } else {
+      tgv[x] = init;
+      tgi[x] = InIdxT(0);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  int md = min(Asz + Bsz, TN * int(lid.x));
+  int ap = merge_partition(tgv, tgv + Asz, Asz, Bsz, md, desc);
+  thread T lv[TN];
+  thread InIdxT li[TN];
+  merge_step<T, InIdxT, TN>(
+      tgv + ap,
+      tgv + Asz + md - ap,
+      tgi + ap,
+      tgi + Asz + md - ap,
+      Asz - ap,
+      Bsz - md + ap,
+      lv,
+      li,
+      desc);
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int i = 0; i < TN; ++i) {
+    tgv[lid.x * TN + i] = lv[i];
+    tgi[lid.x * TN + i] = li[i];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  int base = tid.x * ELEMS_PER_TG;
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = base + i;
+    if (g < size) {
+      vo[g] = tgv[i];
+      io[g] = OutIdxT(tgi[i]);
+    }
+  }
+}
+
 // TODO: reuse DEFAULT_ILP from c10/metal/common.h for TN
-#define INSTANTIATE_SORT_VARIANT(T, TPTG, TN, STABLE, SUFFIX)              \
-  template[[host_name("sort_block_" #T "_tptg" #TPTG SUFFIX)]] kernel void \
-  sort_block<T, TPTG, TN, STABLE>(                                         \
-      const device T*,                                                     \
-      device T*,                                                           \
-      device long*,                                                        \
-      constant int&,                                                       \
-      constant long2&,                                                     \
-      constant bool&,                                                      \
-      uint3,                                                               \
+#define INSTANTIATE_SORT_VARIANT(T, TPTG, TN, STABLE, SUFFIX)                 \
+  template[[host_name("sort_block_" #T "_tptg" #TPTG SUFFIX)]] kernel void    \
+  sort_block<T, TPTG, TN, STABLE>(                                            \
+      const device T*,                                                        \
+      device T*,                                                              \
+      device long*,                                                           \
+      constant int&,                                                          \
+      constant long2&,                                                        \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template[[host_name("mb_sort_block_" #T "_tptg" #TPTG SUFFIX)]] kernel void \
+  mb_sort_block<T, uint, TPTG, TN, STABLE>(                                   \
+      const device T*,                                                        \
+      device T*,                                                              \
+      device uint*,                                                           \
+      constant int&,                                                          \
+      constant long2&,                                                        \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_sort_block_" #T "_tptg" #TPTG "_u16" SUFFIX)]]     \
+  kernel void mb_sort_block<T, ushort, TPTG, TN, STABLE>(                     \
+      const device T*,                                                        \
+      device T*,                                                              \
+      device ushort*,                                                         \
+      constant int&,                                                          \
+      constant long2&,                                                        \
+      constant bool&,                                                         \
+      uint3,                                                                  \
       uint3);
 
-#define INSTANTIATE_SORT(T, TPTG, TN)              \
-  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, false, "") \
-  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, true, "_stable")
+#define INSTANTIATE_MERGE(T, TPTG, TN)                              \
+  template [[host_name("mb_merge_" #T "_tptg" #TPTG)]]              \
+  kernel void mb_merge<T, uint, uint, TPTG, TN>(                    \
+      const device T*,                                              \
+      const device uint*,                                           \
+      device T*,                                                    \
+      device uint*,                                                 \
+      constant int3&,                                               \
+      constant bool&,                                               \
+      uint3,                                                        \
+      uint3);                                                       \
+  template [[host_name("mb_merge_final_" #T "_tptg" #TPTG)]]        \
+  kernel void mb_merge<T, uint, long, TPTG, TN>(                    \
+      const device T*,                                              \
+      const device uint*,                                           \
+      device T*,                                                    \
+      device long*,                                                 \
+      constant int3&,                                               \
+      constant bool&,                                               \
+      uint3,                                                        \
+      uint3);                                                       \
+  template [[host_name("mb_merge_" #T "_tptg" #TPTG "_u16")]]       \
+  kernel void mb_merge<T, ushort, ushort, TPTG, TN>(                \
+      const device T*,                                              \
+      const device ushort*,                                         \
+      device T*,                                                    \
+      device ushort*,                                               \
+      constant int3&,                                               \
+      constant bool&,                                               \
+      uint3,                                                        \
+      uint3);                                                       \
+  template [[host_name("mb_merge_final_" #T "_tptg" #TPTG "_u16")]] \
+  kernel void mb_merge<T, ushort, long, TPTG, TN>(                  \
+      const device T*,                                              \
+      const device ushort*,                                         \
+      device T*,                                                    \
+      device long*,                                                 \
+      constant int3&,                                               \
+      constant bool&,                                               \
+      uint3,                                                        \
+      uint3);
+
+#define INSTANTIATE_SORT(T, TPTG, TN)                    \
+  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, false, "")       \
+  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, true, "_stable") \
+  INSTANTIATE_MERGE(T, TPTG, TN)
 
 #define INSTANTIATE_ALL_TPTG(T) \
   INSTANTIATE_SORT(T, 32, 4)    \
