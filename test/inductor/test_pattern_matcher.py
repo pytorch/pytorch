@@ -30,6 +30,11 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch._library.opaque_object import (
+    get_opaque_type_name,
+    OpaqueBase,
+    register_opaque_type,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
@@ -45,6 +50,26 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
+
+
+class OpaqueScaleFactor(OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return isinstance(other, OpaqueScaleFactor) and self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (
+            f"OpaqueScaleFactor({self.val!r})",
+            {"OpaqueScaleFactor": OpaqueScaleFactor},
+        )
+
+
+register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
 
 
 @instantiate_parametrized_tests
@@ -838,23 +863,36 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-    def test_pointless_convert(self):
-        def fn1(x):
-            x = torch.ops.prims.convert_element_type.default(x, torch.float16)
-            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+    @parametrize(
+        "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
+        [
+            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, True, 2),
+            (torch.float16, torch.float32, True, 1),
+        ],
+    )
+    def test_pointless_convert(
+        self, input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls
+    ):
+        def fn(x):
+            x = torch.ops.prims.convert_element_type.default(x, intermediate_dtype)
+            x = torch.ops.prims.convert_element_type.default(x, input_dtype)
             return x
 
-        gm = torch.fx.symbolic_trace(fn1)
+        x = torch.randn(8, device=GPU_TYPE, dtype=input_dtype)
+        gm = make_fx(fn)(x)
         self.assertEqual(count_calls(gm.graph), 2)
-        joint_graph.joint_graph_passes(gm)
-        self.assertEqual(count_calls(gm.graph), 1)
+        with inductor_config.patch(emulate_precision_casts=emulate_precision_casts):
+            joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), expected_calls)
 
-        def fn2(x):
+        def fn_int(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.int32)
             x = torch.ops.prims.convert_element_type.default(x, torch.float32)
             return x
 
-        gm = torch.fx.symbolic_trace(fn2)
+        x = torch.randn(8, device=GPU_TYPE, dtype=torch.float32)
+        gm = make_fx(fn_int)(x)
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
@@ -2150,6 +2188,214 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
 
+    def test_register_replacement_single_tensor_input(self):
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            return x - 1
+
+        my_patterns = PatternMatcherPass()
+
+        # Single tensor should fail fast instead of reaching tracing logic.
+        example_input = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        with self.assertRaisesRegex(
+            TypeError,
+            f"example_inputs must be a list or tuple, got {type(example_input)}",
+        ):
+            register_replacement(
+                pattern, replacement, example_input, fwd_only, my_patterns
+            )
+
+    def _inject_test_metadata(self, graph):
+        """Inject identifiable metadata on all call_function nodes for testing."""
+        for node in graph.nodes:
+            if node.op == "call_function":
+                node.meta["stack_trace"] = f"trace_for_{node.name}"
+                node.meta["nn_module_stack"] = {"test": ("m", "M")}
+                node.meta["_numeric_debug_handle"] = 42
+                node.meta["custom"] = {"test_key": "test_value"}
+
+    def test_metadata_propagation_register_replacement(self):
+        """Verify metadata from matched nodes transfers to replacement nodes."""
+
+        def pattern(x, y):
+            return x + y
+
+        def replacement(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            # _transfer_meta runs inside replace_with_graph for
+            # each old->new pair to propagate metadata fields
+            my_patterns.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
+    def test_metadata_propagation_register_replacement_multinode(self):
+        """Verify metadata propagation for multi-node patterns."""
+
+        def pattern(x, y):
+            tmp = x + y
+            return tmp * 2
+
+        def replacement(x, y):
+            return (x + y) * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            my_patterns.apply(graph)
+
+        def fn(x, y):
+            tmp = x + y
+            return tmp * 2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
+    def test_metadata_propagation_graph_pattern_replace_by_example(self):
+        """Verify metadata propagation for replace_by_example (single-node match)."""
+
+        test_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+            pass_dict=test_pass,
+        )
+        def add_to_mul(match: Match, x, y):
+            def repl(a, b):
+                return a * b
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [x, y])
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            test_pass.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+
+    def test_metadata_propagation_replace_by_example_multinode(self):
+        """Verify metadata propagation for replace_by_example with a multi-node
+        match.  The output node should inherit metadata from the matched output
+        node via replace_with_graph's replace() inner function."""
+
+        test_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.mul.Tensor,
+                CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+                KeywordArg("z"),
+            ),
+            pass_dict=test_pass,
+        )
+        def add_mul_to_sub(match: Match, x, y, z):
+            def repl(a, b, c):
+                return (a - b) * c
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [x, y, z])
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            test_pass.apply(graph)
+
+        def fn(x, y, z):
+            return (x + y) * z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+        z = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y, z)
+
+    def test_metadata_propagation_lowering_pattern(self):
+        """Verify metadata propagation for LoweringPatternEntry.apply.
+
+        LoweringPatternEntry uses _transfer_meta to copy _COPY_META_FIELDS
+        and stack_trace from the matched node to the replacement.
+        """
+        from torch._inductor.pattern_matcher import _transfer_meta
+
+        test_pass = PatternMatcherPass()
+
+        counter = 0
+
+        @register_graph_pattern(
+            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
+            pass_dict=test_pass,
+        )
+        def manual_lowering(match: Match, x, y):
+            nonlocal counter
+            # Manually exercise the LoweringPatternEntry code path:
+            # create a replacement node, propagate meta, and replace
+            node = match.output_node()
+            graph = match.graph
+            with graph.inserting_before(node):
+                replacement = graph.call_function(aten.mul.Tensor, (x, y))
+                _transfer_meta(replacement.meta, node)
+                node.replace_all_uses_with(replacement)
+            match.erase_nodes()
+            counter += 1
+
+        def custom_pass(graph: torch.fx.Graph):
+            self._inject_test_metadata(graph)
+            test_pass.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, options={"post_grad_custom_post_pass": custom_pass}
+        )
+        compiled_fn(x, y)
+        self.assertEqual(counter, 1)
+
 
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
@@ -2420,6 +2666,73 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 count2 = sum(counters.get(counter_key, {}).values())
 
                 self.assertEqual(accumulated_count, count1 + count2)
+
+    def test_opaque_obj_custom_op(self):
+        with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
+            lib.define(
+                f"original_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl("original_op", lambda x, s: x * s.val, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("_test_pm::original_op", lib=lib)
+            def _orig_fake(x, s):
+                return torch.empty_like(x)
+
+            lib.define(
+                f"replacement_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl(
+                "replacement_op", lambda x, s: x + s.val, "CompositeExplicitAutograd"
+            )
+
+            @torch.library.register_fake("_test_pm::replacement_op", lib=lib)
+            def _repl_fake(x, s):
+                return torch.empty_like(x)
+
+            def pattern(x, factor):
+                return torch.ops._test_pm.original_op(x, factor)
+
+            def replacement(x, factor):
+                return torch.ops._test_pm.replacement_op(x, factor)
+
+            patterns = PatternMatcherPass()
+            register_replacement(
+                pattern,
+                replacement,
+                [torch.randn(4, 4), OpaqueScaleFactor(2.0)],
+                fwd_only,
+                patterns,
+            )
+
+            count = 0
+            post_pass_graph = None
+
+            def custom_pass(graph):
+                nonlocal count, post_pass_graph
+                count = patterns.apply(graph)
+                post_pass_graph = graph
+                return graph
+
+            def custom_backend(graph, example_inputs):
+                from torch._inductor.compile_fx import compile_fx
+
+                current_config = inductor_config.get_config_copy()
+                current_config["post_grad_custom_post_pass"] = custom_pass
+                return compile_fx(graph, example_inputs, config_patches=current_config)
+
+            @torch.compile(backend=custom_backend)
+            def f(x, s):
+                return torch.ops._test_pm.original_op(x, s)
+
+            inp = torch.randn(4, 4)
+            result = f(inp, OpaqueScaleFactor(4.0))
+            self.assertEqual(result, inp + 4.0)
+            self.assertEqual(count, 1)
+            op_targets = [
+                n.target for n in post_pass_graph.nodes if n.op == "call_function"
+            ]
+            self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
+            self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
 
 
 if __name__ == "__main__":

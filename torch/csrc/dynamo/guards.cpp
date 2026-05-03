@@ -6,6 +6,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -16,6 +17,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
@@ -345,7 +347,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
     auto handle = py::handle(item);
-    if (item == Py_None) {
+    if (Py_IsNone(item)) {
       vec.emplace_back(std::nullopt);
     } else if (torch::is_symint(handle)) {
       vec.emplace_back(py::cast<c10::SymInt>(handle));
@@ -366,7 +368,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
 static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
     PyObject* dynamic_dims_py) {
   std::vector<std::vector<std::optional<c10::SymInt>>> per_tensor_dynamic_dims;
-  if (dynamic_dims_py != Py_None) {
+  if (!Py_IsNone(dynamic_dims_py)) {
     Py_ssize_t size = PyList_Size(dynamic_dims_py);
     for (Py_ssize_t i = 0; i < size; i++) {
       PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
@@ -537,13 +539,15 @@ PyObject* TensorGuards_check_verbose(
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(item));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
       fail_reason << "expected type of '" << tensor_check_names[i]
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return Py_BuildValue("s", fail_reason.str().c_str());
     }
@@ -874,20 +878,26 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 #if IS_PYTHON_3_12_PLUS
 
-static std::unordered_map<PyObject*, uint64_t> dict_version_map;
+struct DictVersionState {
+  std::unordered_map<PyObject*, uint64_t> map;
+  uint64_t next_id = 1;
+};
+
+static c10::Synchronized<DictVersionState> dict_version_state;
 static int dict_version_watcher_id;
 static int dict_recursive_tag_watcher_id;
-static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  if (event == PyDict_EVENT_DEALLOCATED) {
-    dict_version_map.erase(dict);
-  } else if (event != PyDict_EVENT_CLONED) {
-    dict_version_map[dict] = global_dict_version_id++;
-  }
+  dict_version_state.withLock([&](DictVersionState& state) {
+    if (event == PyDict_EVENT_DEALLOCATED) {
+      state.map.erase(dict);
+    } else if (event != PyDict_EVENT_CLONED) {
+      state.map[dict] = state.next_id++;
+    }
+  });
   return 0;
 }
 
@@ -899,10 +909,13 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
   TORCH_CHECK(
       !PyDict_Watch(dict_version_watcher_id, dict),
       "failed to add version watcher to dict!");
-  if (!dict_version_map.count(dict)) {
-    dict_version_map[dict] = global_dict_version_id++;
-  }
-  return dict_version_map[dict];
+  return dict_version_state.withLock([&](DictVersionState& state) -> uint64_t {
+    auto [it, inserted] = state.map.try_emplace(dict, state.next_id);
+    if (inserted) {
+      state.next_id++;
+    }
+    return it->second;
+  });
 
 #else
 
@@ -911,16 +924,11 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
 #endif
 }
 
-static PyObject* dict_version(PyObject* dummy, PyObject* args) {
-  // Retrieves the version of a dictionary.
-  PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return nullptr;
-  }
-  if (!PyDict_Check(obj)) {
-    return nullptr;
-  }
+static PyObject* dict_version(PyObject* dummy, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyDict_Check(obj), "dict_version expects a dict");
   return THPUtils_packUInt64(get_dict_version_unchecked(obj));
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
@@ -1054,6 +1062,48 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
+  /*
+   * If the tensor's data pointer is not 16-byte aligned, return a
+   * clone that preserves strides. Otherwise return the original
+   * tensor (new reference).  Implemented in C++ so the aligned
+   * fast-path is just a pointer check with minimal Python overhead.
+   *
+   * NOTE: kAlignment is hardcoded to match torch._inductor.utils.ALIGNMENT.
+   * If alignment requirements ever change or become per-platform, this
+   * constant must be updated (or turned into a parameter).
+   */
+  constexpr size_t kAlignment = 16;
+
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    return nullptr;
+  }
+
+  at::Tensor tensor = THPVariable_Unpack(item);
+
+  if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
+    // Already aligned – return the original tensor.
+    Py_INCREF(item);
+    return item;
+  }
+
+  // Misaligned – clone while preserving strides.
+  // Same logic as torch._inductor.utils.clone_preserve_strides.
+  int64_t needed_size = 0;
+  if (tensor.numel() > 0) {
+    auto sizes = tensor.sizes();
+    auto strides = tensor.strides();
+    for (int64_t i = 0; i < tensor.dim(); ++i) {
+      needed_size += (sizes[i] - 1) * strides[i];
+    }
+    needed_size += 1;
+  }
+  at::Tensor flat = at::as_strided(tensor, {needed_size}, {1}).clone();
+  at::Tensor result = at::as_strided(flat, tensor.sizes(), tensor.strides());
+  return THPVariable_Wrap(std::move(result));
+}
+
 template <typename T>
 static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
@@ -1176,7 +1226,8 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
-    {"dict_version", dict_version, METH_VARARGS, nullptr},
+    {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
+    {"dict_version", dict_version, METH_O, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cpu_pinned",
      _empty_strided_cpu_pinned,
@@ -1227,7 +1278,7 @@ bool is_immutable_object(py::handle example_value) {
     return true;
   }
 
-  return (example_value.ptr() == Py_None) ||
+  return (Py_IsNone(example_value.ptr())) ||
       PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
       PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
@@ -1637,7 +1688,22 @@ class DictGuardManager;
 // the container can grow large over the lifetime of the process.  That’s
 // acceptable: lookup is by pointer (hash/equals = identity) and each entry
 // stores only lightweight pointers.
-std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
+using DictToGuardManagersMap =
+    std::unordered_map<PyObject*, std::list<GuardManager*>>;
+c10::Synchronized<DictToGuardManagersMap> dict_to_guard_managers;
+
+// Compare two Python objects for equality. Returns true if equal, false
+// otherwise. If false_on_error is true, any Python exception raised
+// during comparison is cleared — this is the right behavior for guard checks
+// where an exception just means "these don't match" and we want guard failure
+// (recompile), not a crash. Set false_on_error to false if the caller wants to
+// handle exceptions themselves.
+static bool py_equals(PyObject* a, PyObject* b, bool false_on_error) {
+  int eq = PyObject_RichCompareBool(a, b, Py_EQ);
+  if (false_on_error && eq == -1)
+    PyErr_Clear();
+  return eq == 1;
+}
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -1683,7 +1749,6 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map) {
-    // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict());
   }
@@ -1726,7 +1791,8 @@ class LAMBDA_GUARD : public LeafGuard {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
-      throw py::type_error("LAMBDA_GUARD expects (callable, str)");
+      throw py::type_error(
+          "LAMBDA_GUARD expects (callable, str)"); // @allow-raw-throw
     }
   }
 
@@ -1788,6 +1854,53 @@ class TYPE_MATCH : public LeafGuard {
   intptr_t _expected;
 };
 
+// Type match that unwraps FakeScriptObject before checking. During outer
+// AOTAutograd tracing, opaque objects (e.g. DeviceMesh) are wrapped in a
+// FakeScriptObject for FX tracing; at runtime Dynamo sees the real object.
+// The guard must pass in both cases.
+class FAKE_SCRIPT_TYPE_MATCH : public LeafGuard {
+ public:
+  FAKE_SCRIPT_TYPE_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object fake_script_object_type,
+      py::object type_id,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _fake_script_object_type(std::move(fake_script_object_type)),
+        _expected(py::cast<intptr_t>(std::move(type_id))) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int is_fake = PyObject_IsInstance(value, _fake_script_object_type.ptr());
+    if (is_fake == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    if (is_fake == 1) {
+      PyObject* real_obj = PyObject_GetAttrString(value, "real_obj");
+      if (real_obj == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      bool result = Py_TYPE(real_obj) == (void*)_expected;
+      Py_DECREF(real_obj);
+      return result;
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return Py_TYPE(value) == (void*)_expected;
+  }
+
+ private:
+  // The FakeScriptObject Python class, used for the isinstance check.
+  py::object _fake_script_object_type;
+  // id of the expected (unwrapped) type.
+  intptr_t _expected;
+};
+
 class ID_MATCH : public LeafGuard {
  public:
   // obj_id = id(obj)
@@ -1824,7 +1937,7 @@ class NONE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_None;
+    return Py_IsNone(value);
   }
 };
 
@@ -1840,7 +1953,7 @@ class TRUE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_True;
+    return Py_IsTrue(value);
   }
 };
 
@@ -1856,7 +1969,7 @@ class FALSE_MATCH : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value == Py_False;
+    return Py_IsFalse(value);
   }
 };
 
@@ -1882,13 +1995,7 @@ class EQUALS_MATCH : public LeafGuard {
       if (Py_TYPE(value) != _value_type) {
         return false;
       }
-      int result = PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
-      // Check for exception
-      if (result == -1) {
-        PyErr_Clear();
-        return false;
-      }
-      return result;
+      return py_equals(value, _value.ptr(), /*false_on_error=*/true);
     }
     return true;
   }
@@ -2047,7 +2154,7 @@ class NOT_NONE : public LeafGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return value != Py_None;
+    return !Py_IsNone(value);
   }
 };
 
@@ -2070,9 +2177,9 @@ class MAPPING_KEYS_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     PyObject* keys = PyMapping_Keys(value); // new ref
-    int result = PyObject_RichCompareBool(keys, _keys.ptr(), Py_EQ);
+    bool match = py_equals(keys, _keys.ptr(), /*false_on_error=*/false);
     Py_DECREF(keys);
-    return result;
+    return match;
   }
 
  private:
@@ -2102,16 +2209,11 @@ class DEFAULT_DEVICE : public LeafGuard {
     // ref it. Interned strings are used for things like variable names and are
     // leaked by design.
     static PyObject* current_device_str =
-        PyUnicode_InternFromString("CURRENT_DEVICE");
+        THPUtils_internString("CURRENT_DEVICE");
     PyObject* device = PyDict_GetItem(
         _utils_device_dict.ptr(), current_device_str); // borrowed ref
     if (device != _device.ptr()) {
-      int result = PyObject_RichCompareBool(device, _device.ptr(), Py_EQ);
-      if (result == -1) {
-        PyErr_Clear();
-        return false;
-      }
-      return result;
+      return py_equals(device, _device.ptr(), /*false_on_error=*/true);
     }
     return true;
   }
@@ -2154,7 +2256,8 @@ class GLOBAL_STATE : public LeafGuard {
         owner_(std::move(initial_state)),
         _guard((GlobalStateGuard*)owner_.ptr()) {
     if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
-      throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
+      throw py::type_error(
+          "GLOBAL_STATE expects a GlobalStateGuard"); // @allow-raw-throw
     }
   }
 
@@ -2536,11 +2639,13 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
     _nargs = _nargs_int + _nargs_float;
     if (PyErr_Occurred()) {
+      // @allow-raw-throw
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
     }
     uintptr_t addr = PyLong_AsUnsignedLongLong(py_addr.ptr());
     if (PyErr_Occurred()) {
+      // @allow-raw-throw
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
     }
@@ -2632,47 +2737,273 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
   std::function<int8_t(int64_t*, double*)> _guard_check_fn;
 };
 
-class DYNAMIC_INDICES : public LeafGuard {
-  // C++ equivalent of
-  //  code.append(
-  //      f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-  //      if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
-  //      noqa: B950
+// DIMENSION_DYNAMIC_MARKING_GUARD: A unified C++ guard for all dimension
+// marking attributes set by mark_dynamic, mark_static, mark_unbacked, and
+// maybe_mark_dynamic. Instead of installing separate Python lambda guards for
+// each marking attribute on every input tensor, this guard consolidates all
+// checks into a single C++ call — eliminating Python interpreter round-trips
+// on the hot path.
+//
+// The guard receives three categories of compile-time marking info:
+//   - expected_attrs: attributes present at compile time (runtime markings
+//     must be a SUBSET of compiled markings; absent at runtime means
+//     "unspecified = don't care", passes). Subset semantics mean marking APIs
+//     express additive constraints — mark_dynamic(x, [0]) means "ensure dim 0
+//     is dynamic", not "only dim 0 is dynamic".
+//   - absent_attrs: attributes absent at compile time (must remain absent)
+//   - dependent_attrs: attributes gated on another attribute (e.g.,
+//     _dynamo_shape_ids is only checked when _dynamo_unbacked_indices exists)
+//
+// Optimization 1: When we compile with a tensor that has no
+// _has_dynamo_dim_marking (the common case — the vast majority of tensors),
+// the guard only checks whether _has_dynamo_dim_marking is absent at runtime.
+// If absent, the guard passes with a single PyObject_HasAttr call — instead
+// of checking 4+ individual attributes. If present, the user added markings
+// at runtime that weren't there at compile time, so we recompile.
+//
+// Optimization 2: When we compile with a tensor that has markings
+// (_has_dynamo_dim_marking present), but the runtime tensor does not have
+// _has_dynamo_dim_marking, the guard passes immediately — "unspecified =
+// don't care" means the runtime tensor is happy to reuse whatever compiled
+// graph is available, skipping all detailed attribute checks.
+//
+// See [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
+
+class DIMENSION_DYNAMIC_MARKING_GUARD : public LeafGuard {
  public:
-  DYNAMIC_INDICES(
+  // expected_attrs: dict {attr_name: expected_value} - attrs present at compile
+  //   time. Runtime: if attr present -> runtime must be subset; if absent ->
+  //   pass.
+  // absent_attrs: list of attr_name strings - attrs absent at compile time.
+  //   Runtime: must NOT have attr.
+  // dependent_attrs: dict {attr_name: (expected_value, gate_attr_name)} -
+  //   checked only when gate attribute is present on runtime tensor.
+  DIMENSION_DYNAMIC_MARKING_GUARD(
       RootGuardManager* root_guard_manager,
-      py::set dynamic_indices,
+      py::dict expected_attrs,
+      py::list absent_attrs,
+      py::dict dependent_attrs,
       py::object verbose_code_parts,
       py::object user_stack)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)),
-        _dynamic_indices(std::move(dynamic_indices)) {}
+            std::move(user_stack)) {
+    // Pre-intern all attribute name strings for fast lookup on hot path.
+    for (auto& item : expected_attrs) {
+      PyObject* key = THPUtils_internString(py::cast<std::string>(item.first));
+      _expected_attrs.emplace_back(
+          key, py::reinterpret_borrow<py::object>(item.second));
+    }
+    for (auto& item : absent_attrs) {
+      PyObject* key = THPUtils_internString(py::cast<std::string>(item));
+      _absent_attrs.emplace_back(key);
+    }
+    for (auto& item : dependent_attrs) {
+      py::tuple val = py::cast<py::tuple>(item.second);
+      PyObject* attr_key =
+          THPUtils_internString(py::cast<std::string>(item.first));
+      PyObject* gate_key = THPUtils_internString(py::cast<std::string>(val[1]));
+      _dependent_attrs.emplace_back(
+          attr_key, py::reinterpret_borrow<py::object>(val[0]), gate_key);
+    }
+    // Fast path: when compiled without any markings (all absent, no expected
+    // or dependent), we only need to check _has_dynamo_dim_marking.
+    _all_absent = _expected_attrs.empty() && _dependent_attrs.empty();
+  }
 
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    // Make an interned string
-    static PyObject* dynamic_indices_str =
-        PyUnicode_InternFromString("_dynamo_dynamic_indices");
-    PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
-    if (indices == nullptr) {
-      // Attr absent. Clear exception.
-      PyErr_Clear();
-      // This is true deliberately. If hasattr fails, we return true.
+  bool check_nopybind(PyObject* value) override {
+    // Fast path for the common case: tensor compiled without any markings.
+    // Just check the single flag — if absent, no markings were added at
+    // runtime either, so the guard passes. If present, recompile.
+    if (_all_absent) {
+      return !PyObject_HasAttr(value, has_marking_str());
+    }
+
+    // Compiled with markings. If runtime tensor has no markings at all,
+    // that means "unspecified = don't care" — the guard passes.
+    if (!PyObject_HasAttr(value, has_marking_str())) {
       return true;
     }
 
-    static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodObjArgs(
-        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
-    bool result = PyObject_IsTrue(call_result);
-    Py_DECREF(call_result);
-    Py_DECREF(indices);
-    return result;
+    // Both compiled and runtime have markings — need subset match.
+    // Check expected attrs: if runtime has attr -> runtime must be a subset
+    // of compiled (runtime asks for fewer-or-equal marked dims);
+    // if runtime doesn't have attr -> pass (unspecified = don't care).
+    for (auto& [attr_str, expected] : _expected_attrs) {
+      PyObject* actual = PyObject_GetAttr(value, attr_str);
+      if (actual == nullptr) {
+        // PyObject_GetAttr sets an AttributeError when the attr is missing.
+        // Clear it so the stale exception doesn't propagate to Python later.
+        PyErr_Clear();
+        continue; // absent = don't care
+      }
+      // Runtime markings must be a subset of compiled markings.
+      // PyObject_CallMethodObjArgs calls actual.issubset(expected).
+      PyObject* result = PyObject_CallMethodObjArgs(
+          actual, issubset_str(), expected.ptr(), nullptr);
+      Py_DECREF(actual);
+      TORCH_INTERNAL_ASSERT(
+          result != nullptr,
+          "issubset call failed unexpectedly in DIMENSION_DYNAMIC_MARKING_GUARD");
+      bool is_subset = PyObject_IsTrue(result);
+      Py_DECREF(result);
+      if (!is_subset)
+        return false;
+    }
+
+    // Check absent attrs: runtime must NOT have these.
+    for (auto& attr_str : _absent_attrs) {
+      if (PyObject_HasAttr(value, attr_str)) {
+        return false;
+      }
+    }
+
+    // Check dependent attrs: only check if gate attr is present.
+    for (auto& [attr_str, expected, gate_str] : _dependent_attrs) {
+      if (!PyObject_HasAttr(value, gate_str)) {
+        continue; // gate absent = don't care
+      }
+      PyObject* actual = PyObject_GetAttr(value, attr_str);
+      if (actual == nullptr) {
+        // PyObject_GetAttr sets an AttributeError when the attr is missing.
+        // Clear it so the stale exception doesn't propagate to Python later.
+        PyErr_Clear();
+        // Runtime has gate but not the dependent attr.
+        // expected could be None (compile-time also didn't have it) -> pass.
+        // expected could be non-None -> fail.
+        if (expected.is_none()) {
+          continue;
+        }
+        return false;
+      }
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
+      Py_DECREF(actual);
+      if (!match)
+        return false;
+    }
+
+    return true;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    // Fast path: no markings at compile time.
+    if (_all_absent) {
+      if (PyObject_HasAttr(value, has_marking_str())) {
+        return GuardDebugInfo(
+            false,
+            "_has_dynamo_dim_marking is present on runtime tensor but was "
+            "absent at compile time",
+            0);
+      }
+      return GuardDebugInfo(true, 0);
+    }
+
+    // Compiled with markings, runtime has none -> pass (unspecified = don't
+    // care).
+    if (!PyObject_HasAttr(value, has_marking_str())) {
+      return GuardDebugInfo(true, 0);
+    }
+
+    // Both have markings — check expected attrs (subset match)
+    for (auto& [attr_str, expected] : _expected_attrs) {
+      PyObject* actual = PyObject_GetAttr(value, attr_str);
+      if (actual == nullptr) {
+        // PyObject_GetAttr sets an AttributeError when the attr is missing.
+        // Clear it so the stale exception doesn't propagate to Python later.
+        PyErr_Clear();
+        continue;
+      }
+      // Runtime markings must be a subset of compiled markings.
+      PyObject* result = PyObject_CallMethodObjArgs(
+          actual, issubset_str(), expected.ptr(), nullptr);
+      TORCH_INTERNAL_ASSERT(
+          result != nullptr,
+          "issubset call failed unexpectedly in DIMENSION_DYNAMIC_MARKING_GUARD");
+      bool is_subset = PyObject_IsTrue(result);
+      Py_DECREF(result);
+      if (!is_subset) {
+        std::string attr_name = PyUnicode_AsUTF8(attr_str);
+        std::string actual_str =
+            py::repr(py::reinterpret_borrow<py::object>(actual))
+                .cast<std::string>();
+        Py_DECREF(actual);
+        return GuardDebugInfo(
+            false,
+            attr_name + " not a subset: runtime " + actual_str +
+                " is not a subset of compiled " +
+                py::repr(expected).cast<std::string>(),
+            0);
+      }
+      Py_DECREF(actual);
+    }
+
+    // Check absent attrs
+    for (auto& attr_str : _absent_attrs) {
+      if (PyObject_HasAttr(value, attr_str)) {
+        std::string attr_name = PyUnicode_AsUTF8(attr_str);
+        return GuardDebugInfo(
+            false,
+            attr_name + " should be absent but is present on runtime tensor",
+            0);
+      }
+    }
+
+    // Check dependent attrs
+    for (auto& [attr_str, expected, gate_str] : _dependent_attrs) {
+      if (!PyObject_HasAttr(value, gate_str)) {
+        continue;
+      }
+      PyObject* actual = PyObject_GetAttr(value, attr_str);
+      if (actual == nullptr) {
+        // PyObject_GetAttr sets an AttributeError when the attr is missing.
+        // Clear it so the stale exception doesn't propagate to Python later.
+        PyErr_Clear();
+        if (!expected.is_none()) {
+          std::string attr_name = PyUnicode_AsUTF8(attr_str);
+          return GuardDebugInfo(
+              false,
+              attr_name + " expected " +
+                  py::repr(expected).cast<std::string>() +
+                  " but attribute is absent on runtime tensor",
+              0);
+        }
+        continue;
+      }
+      bool match = py_equals(actual, expected.ptr(), /*false_on_error=*/false);
+      if (!match) {
+        std::string attr_name = PyUnicode_AsUTF8(attr_str);
+        Py_DECREF(actual);
+        return GuardDebugInfo(
+            false,
+            attr_name + " mismatch: expected " +
+                py::repr(expected).cast<std::string>(),
+            0);
+      }
+      Py_DECREF(actual);
+    }
+
+    return GuardDebugInfo(true, 0);
   }
 
  private:
-  py::set _dynamic_indices;
+  // Pre-interned attr names + expected values
+  std::vector<std::pair<PyObject*, py::object>> _expected_attrs;
+  std::vector<PyObject*> _absent_attrs;
+  // (attr_name, expected_value, gate_attr_name)
+  std::vector<std::tuple<PyObject*, py::object, PyObject*>> _dependent_attrs;
+  // True when compiled without any markings (common case fast path).
+  bool _all_absent;
+  // Lazy-init interned strings. Must not intern at static init time because
+  // the Python interpreter may not be active yet (causes segfault on load).
+  static PyObject* has_marking_str() {
+    static PyObject* s = THPUtils_internString("_has_dynamo_dim_marking");
+    return s;
+  }
+  static PyObject* issubset_str() {
+    static PyObject* s = THPUtils_internString("issubset");
+    return s;
+  }
 };
 
 class DICT_VERSION : public LeafGuard {
@@ -2687,7 +3018,7 @@ class DICT_VERSION : public LeafGuard {
             std::move(verbose_code_parts),
             std::move(user_stack)) {
     if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict");
+      throw py::type_error("DICT_VERSION expects a dict"); // @allow-raw-throw
     }
     _tag = get_dict_version_unchecked(value.ptr());
   }
@@ -2778,7 +3109,7 @@ inline TensorCheck make_tensor_check(
 }
 
 struct RecordedTensorMetadata {
-  PyObject* tensor_ptr;
+  py::weakref tensor_weakref;
   TensorCheck check;
 };
 
@@ -2824,7 +3155,6 @@ class GuardAccessor {
   // subtree on immutable dict getitems.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
-    // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
@@ -2961,6 +3291,7 @@ class GuardManager {
       if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
         PyCapsule_SetName(e.cap, "DeadGuardManager");
       }
+      Py_DECREF(e.cap);
       Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
     _tag_safe_entries.clear();
@@ -3047,8 +3378,8 @@ class GuardManager {
 
   void stash_tensor_pointers(
       PyObject* value,
-      std::vector<PyObject*> tensor_pointers) {
-    _tensor_pointers[value] = tensor_pointers;
+      std::vector<py::weakref> tensor_pointers) {
+    _tensor_pointers[value] = std::move(tensor_pointers);
   }
 
   void stash_tensor_metadata(
@@ -3058,7 +3389,14 @@ class GuardManager {
   }
 
   void disable_recursive_dict_tag_optimization() {
-    unwatch_all_saved_dict_pointers();
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      disable_recursive_dict_tag_optimization(map);
+    });
+  }
+
+  // Caller must hold dict_to_guard_managers lock.
+  void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
+    unwatch_all_saved_dict_pointers(map);
     _disable_dict_tag_matching = true;
   }
 
@@ -3189,10 +3527,17 @@ class GuardManager {
       return true;
     }
     for (auto& recorded_tensor : it->second) {
-      if (!THPVariable_Check(recorded_tensor.tensor_ptr) ||
-          !recorded_tensor.check.check(
-              get_local_state(_root),
-              THPVariable_Unpack(recorded_tensor.tensor_ptr))) {
+      PyObject* tensor_ptr = nullptr;
+      if (PyWeakref_GetRef(recorded_tensor.tensor_weakref.ptr(), &tensor_ptr) ==
+          0) {
+        _disable_dict_tag_matching = true;
+        return false;
+      }
+      bool ok = THPVariable_Check(tensor_ptr) &&
+          recorded_tensor.check.check(
+              get_local_state(_root), THPVariable_Unpack(tensor_ptr));
+      Py_DECREF(tensor_ptr);
+      if (!ok) {
         return false;
       }
     }
@@ -3202,8 +3547,15 @@ class GuardManager {
   bool check_no_tensor_aliasing_guards_fast(PyObject* value) {
     std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
         get_no_tensor_aliasing_guard(_root);
-    for (auto* tensor_pointer : _tensor_pointers[value]) {
-      if (!no_tensor_aliasing_guard->check_nopybind(tensor_pointer)) {
+    for (auto& tensor_weakref : _tensor_pointers[value]) {
+      PyObject* tensor_ptr = nullptr;
+      if (PyWeakref_GetRef(tensor_weakref.ptr(), &tensor_ptr) == 0) {
+        _disable_dict_tag_matching = true;
+        return false;
+      }
+      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor_ptr);
+      Py_DECREF(tensor_ptr);
+      if (!ok) {
         return false;
       }
     }
@@ -3394,6 +3746,7 @@ class GuardManager {
       return false;
     }
     // These will be decrefed in destructor
+    Py_INCREF(capsule);
     _tag_safe_entries.push_back({wr, capsule});
     return true;
   }
@@ -3424,26 +3777,16 @@ class GuardManager {
         PyErr_Clear();
         return false;
       }
-      dict_to_guard_managers[dict_pointer].push_back(this);
+      dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+        map[dict_pointer].push_back(this);
+      });
     }
 #endif
     return true;
   }
 
-  void unwatch_all_saved_dict_pointers() {
-    /*
-    We may have recorded hundreds/thousands of dict pointers for the recursive
-    dict-tag optimisation. If any of those dicts mutates, we want to disable the
-    optimisation and then unwatch as many dict pointers as we can.
-
-    Be careful: the same dict pointer can be recorded by multiple GuardManagers.
-    So the flow is:
-
-      1) Remove *this* GuardManager from dict_to_guard_managers[dict_pointer].
-      2) If the list for that dict becomes empty, then:
-          - PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer)
-          - erase the dict_pointer entry from dict_to_guard_managers.
-    */
+  // Caller must hold dict_to_guard_managers lock.
+  void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
     if (!_disable_dict_tag_matching) {
       for (auto& value_stashed_pointers : _dict_pointers) {
@@ -3452,20 +3795,15 @@ class GuardManager {
         for (auto& stashed_pointer : stashed_pointers) {
           PyObject* dict_pointer = stashed_pointer.first;
 
-          // Delete the guard manager from the dict_to_guard_managers
           auto it = std::find(
-              dict_to_guard_managers[dict_pointer].begin(),
-              dict_to_guard_managers[dict_pointer].end(),
-              this);
-          if (it != dict_to_guard_managers[dict_pointer].end()) {
-            dict_to_guard_managers[dict_pointer].erase(it);
+              map[dict_pointer].begin(), map[dict_pointer].end(), this);
+          if (it != map[dict_pointer].end()) {
+            map[dict_pointer].erase(it);
           }
 
-          // Unwatch the dict pointer if this was the last guard manager
-          // watching it.
-          if (dict_to_guard_managers[dict_pointer].empty()) {
+          if (map[dict_pointer].empty()) {
             PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            dict_to_guard_managers.erase(dict_pointer);
+            map.erase(dict_pointer);
           }
         }
       }
@@ -3660,7 +3998,7 @@ class GuardManager {
 
   void add_permitted_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     // Selectively called for permitted guards. This is used by DictGuardManager
-    // which overrides the add_leaf_guard manager to throw runtime error.
+    // which overrides the add_leaf_guard manager to raise a runtime error.
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
@@ -3715,7 +4053,7 @@ class GuardManager {
   bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
       _dict_pointers;
-  std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
+  std::unordered_map<PyObject*, std::vector<py::weakref>> _tensor_pointers;
   std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
@@ -4012,12 +4350,13 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
-    _recorded_tensor_pointers.push_back(tensor_pointer);
+    _recorded_tensor_pointers.push_back(
+        py::weakref(py::handle(tensor_pointer)));
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
-        tensor_pointer,
+        py::reinterpret_borrow<py::object>(tensor_pointer),
         make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
     });
   }
@@ -4077,7 +4416,7 @@ class RootGuardManager : public GuardManager {
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
-  std::vector<PyObject*> _recorded_tensor_pointers;
+  std::vector<py::weakref> _recorded_tensor_pointers;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
 
@@ -4291,10 +4630,14 @@ class DictGuardManager : public GuardManager {
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
-    // If you are calling this, you probably want to go through a key, value
-    // child manager and then add a leaf guard on them. DictGuardManager already
-    // has TYPE_MATCH and LENGTH_CHECK built in.
-    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
+    // DictGuardManager handles TYPE_MATCH and LENGTH_CHECK inline.
+    // Most leaf guards should go on key/value child managers instead.
+    // ID_MATCH is the exception — it guards the container's identity,
+    // not its contents, and is needed when user code calls id() on a dict.
+    TORCH_CHECK(
+        dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr,
+        "DictGuardManager only supports ID_MATCH as a leaf guard");
+    GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr
@@ -4440,15 +4783,18 @@ static int dict_recursive_tag_watch_callback(
     PyObject* key,
     PyObject* new_value) noexcept {
   if (event != PyDict_EVENT_CLONED) {
-    auto it = dict_to_guard_managers.find(dict);
-    if (it != dict_to_guard_managers.end()) {
-      auto guard_managers = it->second;
-      for (auto& guard_manager : guard_managers) {
-        if (guard_manager) {
-          guard_manager->disable_recursive_dict_tag_optimization();
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      auto it = map.find(dict);
+      if (it != map.end()) {
+        // Copy the list — unwatch_all_saved_dict_pointers may mutate it.
+        auto guard_managers = it->second;
+        for (auto& guard_manager : guard_managers) {
+          if (guard_manager) {
+            guard_manager->disable_recursive_dict_tag_optimization(map);
+          }
         }
       }
-    }
+    });
   }
   return 0; // keep watching
 }
@@ -4494,7 +4840,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     } else {
-      throw py::type_error("Invalid guard manager enum");
+      throw py::type_error("Invalid guard manager enum"); // @allow-raw-throw
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);
@@ -4686,13 +5032,15 @@ class TENSOR_MATCH : public LeafGuard {
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(value));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
       fail_reason << "expected type of '" << _tensor_name
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }
@@ -6025,22 +6373,47 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
+  //
+  // In CPython 3.12+, types with Py_TPFLAGS_MANAGED_DICT (e.g. enum.Enum)
+  // can have tp_dict=NULL because the dict is lazily materialized. Use
+  // PyType_GetDict() which handles this transparently. It returns a new
+  // reference, so we must decref after use.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+#if PY_VERSION_HEX >= 0x030C0000
+    PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
+    if (x == nullptr) {
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+#else
     PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
     if (x == nullptr) {
       return false;
     }
     return _guard_manager->check_nopybind(x);
+#endif
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+#if PY_VERSION_HEX >= 0x030C0000
+    PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type dict on " + repr(), 0);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+#else
     PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
     if (x == nullptr) {
       return GuardDebugInfo(false, "null type dict on " + repr(), 0);
     }
     return _guard_manager->check_verbose_nopybind(x);
+#endif
   }
 
   std::string repr() const override {
@@ -6704,7 +7077,7 @@ void install_object_aliasing_guard(
     GuardManager* y,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds tensor X is tensor Y guard. This is a an example of relational guard.
+  // Adds tensor X is tensor Y guard. This is an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<OBJECT_ALIASING>(
       x->get_root(), std::move(verbose_code_parts), std::move(user_stack));
@@ -6727,7 +7100,7 @@ void install_no_tensor_aliasing_guard(
     const py::list& tensor_names,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks none of tensors alias. This is a an example of
+  // Adds a guard that checks none of tensors alias. This is an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
@@ -6756,7 +7129,7 @@ void install_symbolic_shape_guard(
     py::object py_addr_keep_alive,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks symbolic shapes. This is a an example of
+  // Adds a guard that checks symbolic shapes. This is an example of
   // relational guard. There is one guard object that is shared between
   // multiple guard managers.
   std::shared_ptr<RelationalGuard> guard =
@@ -7015,6 +7388,17 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &TYPE_MATCH::check);
+  py::class_<
+      FAKE_SCRIPT_TYPE_MATCH,
+      LeafGuard,
+      std::shared_ptr<FAKE_SCRIPT_TYPE_MATCH>>(py_m, "FAKE_SCRIPT_TYPE_MATCH")
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::list,
+           py::object>())
+      .def("__call__", &FAKE_SCRIPT_TYPE_MATCH::check);
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &ID_MATCH::check);
@@ -7117,10 +7501,19 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "COMPLEX_IS_NAN")
       .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &COMPLEX_IS_NAN::check);
-  py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
-      py_m, "DYNAMIC_INDICES")
-      .def(py::init<RootGuardManager*, py::set, py::list, py::object>())
-      .def("__call__", &DYNAMIC_INDICES::check);
+  py::class_<
+      DIMENSION_DYNAMIC_MARKING_GUARD,
+      LeafGuard,
+      std::shared_ptr<DIMENSION_DYNAMIC_MARKING_GUARD>>(
+      py_m, "DIMENSION_DYNAMIC_MARKING_GUARD")
+      .def(py::init<
+           RootGuardManager*,
+           py::dict,
+           py::list,
+           py::dict,
+           py::list,
+           py::object>())
+      .def("__call__", &DIMENSION_DYNAMIC_MARKING_GUARD::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -7346,6 +7739,21 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<TYPE_MATCH>(
                 self.get_root(),
                 std::move(value),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fake_script_type_match_guard",
+          [](GuardManager& self,
+             py::object fake_script_object_type,
+             py::object type_id,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FAKE_SCRIPT_TYPE_MATCH");
+            self.add_leaf_guard(std::make_shared<FAKE_SCRIPT_TYPE_MATCH>(
+                self.get_root(),
+                std::move(fake_script_object_type),
+                std::move(type_id),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
@@ -7612,16 +8020,21 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(user_stack)));
           })
       .def(
-          "add_dynamic_indices_guard",
+          "add_dimension_marking_guard",
           [](GuardManager& self,
-             py::set value,
+             py::dict expected_attrs,
+             py::list absent_attrs,
+             py::dict dependent_attrs,
              py::object verbose_code_parts,
              py::object user_stack) -> void {
-            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
-                self.get_root(),
-                std::move(value),
-                std::move(verbose_code_parts),
-                std::move(user_stack)));
+            self.add_leaf_guard(
+                std::make_shared<DIMENSION_DYNAMIC_MARKING_GUARD>(
+                    self.get_root(),
+                    std::move(expected_attrs),
+                    std::move(absent_attrs),
+                    std::move(dependent_attrs),
+                    std::move(verbose_code_parts),
+                    std::move(user_stack)));
           })
       .def(
           "add_dict_version_guard",
@@ -8223,7 +8636,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_symbolic_shape_guard", install_symbolic_shape_guard);
   py_m.def("profile_guard_manager", profile_guard_manager);
 
-// initialize dict_version_map watcher for 3.12
+// initialize dict version watcher for 3.12
 #if IS_PYTHON_3_12_PLUS
 
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);

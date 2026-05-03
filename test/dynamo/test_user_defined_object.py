@@ -597,5 +597,99 @@ class TestSlotsFromCPython(TestCase):
         dynamo_testing.standard_test(self, fn, nargs=1)
 
 
+class TestUserDefinedClassDict(TestCase):
+    def test_class_dict_read(self):
+        class MyClass:
+            x = 3
+
+        def fn(t):
+            t = t + MyClass.__dict__["x"]
+            t = t + MyClass.__dict__.get("x", 0)
+            t = t + MyClass.__dict__.get("z", 99)
+            t = t + (1 if "x" in MyClass.__dict__ else 0)
+            t = t + (1 if "z" in MyClass.__dict__ else 0)
+            return t
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_class_dict_via_arg(self):
+        class MyClass:
+            x = 7
+
+        def fn(t, cls):
+            return t + cls.__dict__.get("x", 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        result = compiled(torch.tensor([0.0]), MyClass)
+        self.assertEqual(result, torch.tensor([7.0]))
+
+    def test_class_dict_mutation_recompiles(self):
+        # Mutating a class attribute between calls should trigger recompilation,
+        # and the compiled function should see the updated value.
+        class MyClass:
+            x = 1
+
+        def fn(t):
+            return t + MyClass.__dict__["x"]
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([1.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.x = 10
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([10.0]))
+        # Should have recompiled due to guard failure
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_dict_add_key_recompiles(self):
+        # Adding a new attribute to the class should trigger recompilation
+        # when the compiled code checks for key presence.
+        class MyClass:
+            x = 1
+
+        def fn(t):
+            return t + (1 if "y" in MyClass.__dict__ else 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([0.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.y = 99
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([1.0]))
+        # Should have recompiled
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_dict_delete_key_recompiles(self):
+        # Deleting a class attribute should trigger recompilation.
+        class MyClass:
+            x = 5
+            y = 10
+
+        def fn(t):
+            return t + MyClass.__dict__.get("y", 0)
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+
+        result1 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result1, torch.tensor([10.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        del MyClass.y
+        result2 = compiled(torch.tensor([0.0]))
+        self.assertEqual(result2, torch.tensor([0.0]))
+        # Should have recompiled
+        self.assertEqual(cnt.frame_count, 2)
+
+
 if __name__ == "__main__":
     run_tests()

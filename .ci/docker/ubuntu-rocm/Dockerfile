@@ -13,6 +13,7 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
+RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev && rm -rf /var/lib/apt/lists/*
 
 # Install user
 COPY ./common/install_user.sh install_user.sh
@@ -43,13 +44,6 @@ ARG CLANG_VERSION
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
-# (optional) Install vision packages like OpenCV
-ARG VISION
-COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
-ENV INSTALLED_VISION ${VISION}
-
 # Install rocm
 ARG ROCM_VERSION
 ENV ROCM_VERSION=${ROCM_VERSION}
@@ -71,9 +65,19 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
-# ROCm environment variables are set in /etc/rocm_env.sh by install_rocm.sh
-# and sourced via /etc/bash.bashrc for interactive shells.
-# CI scripts should source /etc/rocm_env.sh directly.
+# Default ROCm environment; /etc/rocm_env.sh (created by install_rocm.sh) may
+# override these at runtime for different install methods (tarballs vs wheels).
+ENV ROCM_PATH=/opt/rocm \
+    ROCM_HOME=/opt/rocm \
+    ROCM_SOURCE_DIR=/opt/rocm \
+    ROCM_BIN=/opt/rocm/bin \
+    ROCM_CMAKE=/opt/rocm \
+    ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
+    HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
+    MAGMA_HOME=/opt/rocm/magma
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
@@ -81,11 +85,6 @@ ENV LC_ALL C.UTF-8
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
-
-COPY ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
-ENV OPENSSL_DIR /opt/openssl
 
 ARG INDUCTOR_BENCHMARKS
 ARG ANACONDA_PYTHON_VERSION
@@ -97,12 +96,6 @@ COPY ci_commit_pins/timm.txt timm.txt
 COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
-
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
 
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
@@ -128,9 +121,6 @@ RUN rm install_openmpi.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

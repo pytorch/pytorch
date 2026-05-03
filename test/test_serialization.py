@@ -60,7 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_MTIA,
     TestCase,
 )
-from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._import_utils import import_dill
 from pickle import UnpicklingError
 
@@ -4673,7 +4673,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             try:
                 old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
-                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807
+                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()
                 unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
                 self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
             finally:
@@ -4912,6 +4912,41 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(state_dict, checkpoint)
         ref2 = sys.getrefcount(storage)
         self.assertEqual(ref1, ref2)
+
+    def test_load_safetensors(self):
+        # Test loading .safetensors files
+        try:
+            import safetensors.torch
+        except ImportError:
+            self.skipTest("safetensors not installed")
+
+        # Create a simple state dict
+        state_dict = {
+            'tensor1': torch.randn(3, 4),
+            'tensor2': torch.randn(5, 6),
+            'tensor3': torch.tensor([1, 2, 3, 4, 5]),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "state.safetensors")
+            safetensors.torch.save_file(state_dict, path)
+
+            # Test loading with torch.load (no map_location)
+            loaded = torch.load(path)
+            self.assertEqual(len(loaded), len(state_dict))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded[key]))
+
+            # Test loading with map_location as string
+            loaded_cpu = torch.load(path, map_location='cpu')
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu[key]))
+                self.assertEqual(loaded_cpu[key].device.type, 'cpu')
+
+            # Test loading with map_location as torch.device
+            loaded_cpu2 = torch.load(path, map_location=torch.device('cpu'))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu2[key]))
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

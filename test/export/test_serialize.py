@@ -24,6 +24,11 @@ if HAS_GPU:
 
     from torch.library import wrap_triton
     from torch.utils._triton import has_triton
+else:
+
+    def has_triton():
+        return False
+
 
 import torch
 import torch._dynamo as torchdynamo
@@ -1953,11 +1958,13 @@ def forward(self, x):
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
-    def test_serialize_float8(self):
+    def test_serialize_dtypes(self):
         for dtype in [
             torch.float8_e5m2,
             torch.float8_e4m3fn,
             torch.float8_e8m0fnu,
+            torch.uint32,
+            torch.uint64,
         ]:
 
             class MyModule(torch.nn.Module):
@@ -2532,6 +2539,96 @@ def forward(self, x):
         ).shape_env
         s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
         self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestPredispatchSerialization(TestCase):
+    def test_predispatch_jvp_serialize_roundtrip(self):
+        """Test that JVP predispatch wrapper functions survive serialization round-trip."""
+        from torch._functorch.predispatch import (
+            _jvp_decrement_nesting,
+            _jvp_increment_nesting,
+        )
+
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        ep = export(JVP(), inp, strict=False)
+
+        graph_str = str(ep.graph)
+        self.assertIn("_jvp_increment_nesting", graph_str)
+        self.assertIn("_jvp_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_jvp_increment_nesting", loaded_graph_str)
+        self.assertIn("_jvp_decrement_nesting", loaded_graph_str)
+
+        # Verify the deserialized targets are the actual functions
+        for node in loaded_ep.graph.nodes:
+            if node.op == "call_function":
+                if "increment" in node.name:
+                    self.assertIs(node.target, _jvp_increment_nesting)
+                elif "decrement" in node.name:
+                    self.assertIs(node.target, _jvp_decrement_nesting)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out[0], actual_out[0]))
+        self.assertTrue(torch.allclose(exp_out[1], actual_out[1]))
+
+    def test_predispatch_vmap_serialize_roundtrip(self):
+        """Test that vmap predispatch wrapper functions survive serialization round-trip."""
+        from torch.export._trace import _export
+
+        class Vmap(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (x * y + 1).sum(dim=0)  # noqa: E731
+                return torch.vmap(f)(x, y).sum(dim=0)
+
+        inp = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
+
+        ep = _export(Vmap(), inp, pre_dispatch=True)
+
+        # Verify predispatch vmap nodes are in the graph
+        graph_str = str(ep.graph)
+        self.assertIn("_vmap_increment_nesting", graph_str)
+        self.assertIn("_vmap_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        # Verify predispatch nodes survive round-trip
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_vmap_increment_nesting", loaded_graph_str)
+        self.assertIn("_vmap_decrement_nesting", loaded_graph_str)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out, actual_out))
 
 
 if __name__ == "__main__":

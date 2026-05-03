@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include <ATen/ceil_div.h>
 #include <c10/hip/HIPGuard.h>
@@ -42,9 +43,54 @@ namespace c10d::nvshmem_extension {
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 64
 
+namespace {
+
+bool parse_rocshmem_version_ge(
+    const char* version,
+    unsigned min_major,
+    unsigned min_minor,
+    unsigned min_patch) {
+  if (version == nullptr) {
+    return false;
+  }
+  char* end = nullptr;
+  unsigned long major = std::strtoul(version, &end, 10);
+  if (end == version || *end != '.') {
+    return false;
+  }
+  version = end + 1;
+  unsigned long minor = std::strtoul(version, &end, 10);
+  if (end == version || *end != '.') {
+    return false;
+  }
+  version = end + 1;
+  unsigned long patch = std::strtoul(version, &end, 10);
+  if (end == version) {
+    return false;
+  }
+  if (major > min_major) {
+    return true;
+  }
+  if (major < min_major) {
+    return false;
+  }
+  if (minor > min_minor) {
+    return true;
+  }
+  if (minor < min_minor) {
+    return false;
+  }
+  return patch >= min_patch;
+}
+
+} // namespace
+
 extern "C" void rocshmem_init() __attribute__((weak));
+
 bool is_nvshmem_available() {
-  return true;
+  static const bool ok =
+      parse_rocshmem_version_ge(rocshmem::VERSION, 3, 3, 0);
+  return ok;
 }
 
 void nvshmemx_cumodule_init(uintptr_t module) {

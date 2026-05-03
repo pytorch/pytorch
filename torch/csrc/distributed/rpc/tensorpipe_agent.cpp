@@ -1265,23 +1265,14 @@ void TensorPipeAgent::updateGroupMembership(
     workerNameToURL_.erase(name);
 
     // remove reverse device maps that are no longer used
-    for (auto it = reverseDeviceMaps_.begin();
-         it != reverseDeviceMaps_.end();) {
-      if (reverseDeviceMaps.find(it->first) == reverseDeviceMaps.end()) {
-        it = reverseDeviceMaps_.erase(it);
-      } else {
-        it++;
-      }
-    }
+    std::erase_if(reverseDeviceMaps_, [&reverseDeviceMaps](const auto& kv) {
+      return !reverseDeviceMaps.contains(kv.first);
+    });
 
     // remove devices that are no longer used
-    for (auto it = devices_.begin(); it != devices_.end();) {
-      if (std::find(devices.begin(), devices.end(), *it) == devices.end()) {
-        it = devices_.erase(it);
-      } else {
-        it++;
-      }
-    }
+    std::erase_if(devices_, [&](const auto& d) {
+      return std::find(devices.begin(), devices.end(), d) == devices.end();
+    });
   }
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {

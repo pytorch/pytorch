@@ -71,10 +71,13 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    skipIfRocm,
+    xfailIf,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -372,7 +375,7 @@ class TestFX(JitTestCase):
 
     def test_args_kwargs_no_self(self):
         class T(torch.nn.Module):
-            def forward(*args, **kwargs):  # noqa: B902
+            def forward(*args, **kwargs):
                 self = args[0]
                 return torch.relu(args[1])
 
@@ -2055,6 +2058,7 @@ class TestFX(JitTestCase):
                         f"got {tensor_meta[1].shape}"
                     )
 
+    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
@@ -4429,7 +4433,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     # This only fails on navi31
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")
@@ -4481,8 +4484,29 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         else:
             kernel_event = "cudaLaunchKernel"
             kernel_event_relu = "cudaLaunchKernel"
-
-        expected = f"""\
+        if IS_WINDOWS:
+            expected = f"""\
+event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event={kernel_event_relu} node=relu stack_trace=return F.relu(input, inplace=self.inplace)
+event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
+        else:
+            expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
@@ -4590,6 +4614,7 @@ event=aten::add node=add stack_trace=a = s + self.c
 event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_graph_module_with_hop_serialization(self):
         """
@@ -5167,6 +5192,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool1d": PROXY_ITERABLE,
         "max_pool2d": PROXY_ITERABLE,
         "max_pool3d": PROXY_ITERABLE,
+        "max_pool3d_with_indices": CONTROL_FLOW,
         "lp_pool2d": PROXY_ITERATED,
         "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
@@ -5182,6 +5208,7 @@ class TestFunctionalTracing(JitTestCase):
         "celu": CONTROL_FLOW,
         "cosine_embedding_loss": CONTROL_FLOW,
         "cross_entropy": CONTROL_FLOW,
+        "linear_cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
         "dropout1d": CONTROL_FLOW,

@@ -221,19 +221,29 @@ class SizeVarAllocator:
 
             for v in base.free_symbols:
                 if v in var_ranges:
-                    # var smaller than divisor can be removed
-                    # if the rest is guaranteed to be multiple of divisor
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
+                        # v can be removed if it doesn't affect the FloorDiv.
+                        # rest is always a multiple of gcd(rest, divisor), so
+                        # rest % divisor is also a multiple of that gcd. The
+                        # worst case is rest % divisor == divisor - gcd, so
+                        # adding v is safe when v < gcd.
                         gcd = sympy.gcd(m[rest], divisor)
-                        if gcd == divisor:
-                            if statically_known(v < divisor):
-                                base = m[rest]
+                        if statically_known(v < gcd):
+                            base = m[rest]
             return base
 
         def visit_indexing_div(base, divisor):
-            return FloorDiv(remove_zero_terms(base, divisor), divisor)
+            base = remove_zero_terms(base, divisor)
+            if statically_known(base >= 0) and statically_known(base < divisor):
+                return sympy.S.Zero
+            # FloorDiv(ModularIndexing(b, d1, m), d2) = ModularIndexing(b, d1*d2, m//d2)
+            if isinstance(base, ModularIndexing) and isinstance(divisor, sympy.Integer):
+                b, d1, m = base.args
+                if m % divisor == 0:
+                    return ModularIndexing(b, d1 * divisor, FloorDiv(m, divisor))
+            return FloorDiv(base, divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -600,6 +610,20 @@ class SizeVarAllocator:
             return left
         if right == gcd:
             return right
+
+        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
+        # sympy doesn't simplify this yet. So, evaluate it here. Same for Max.
+        for lhs, rhs in [(left, right), (right, left)]:
+
+            def le_rhs(a: Expr) -> bool:
+                return self.guard_or_false(sympy.Le(a, rhs))
+
+            # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
+            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+                return lhs
+            # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
+            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+                return lhs
 
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"

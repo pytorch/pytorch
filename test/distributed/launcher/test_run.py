@@ -19,6 +19,7 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest import mock, skipIf
 from unittest.mock import MagicMock, Mock, patch
 
+import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
@@ -254,7 +255,8 @@ class ElasticLaunchTest(TestCase):
     )
     @patch("torch.cuda.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
-        self._test_nproc_launch_configuration("auto", os.cpu_count())
+        expected = torch._utils.cpu_count()
+        self._test_nproc_launch_configuration("auto", expected)
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"

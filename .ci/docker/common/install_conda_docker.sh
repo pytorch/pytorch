@@ -13,8 +13,8 @@ rm $(basename "$MINICONDA_URL")
 export PATH=/opt/conda/bin:$PATH
 # See https://github.com/pytorch/builder/issues/1473
 # Pin conda to 23.5.2 as it's the last one compatible with openssl-1.1.1
-conda install -y conda=23.5.2 conda-build anaconda-client git ninja
+conda install -y conda=23.5.2 conda-build anaconda-client git
 # The cmake version here needs to match with the minimum version of cmake
-# supported by PyTorch (3.18). There is only 3.18.2 on anaconda
-/opt/conda/bin/pip3 install cmake==3.18.2
+# supported by PyTorch (3.18).
+/opt/conda/bin/pip3 install cmake==3.18.4.post1 ninja
 conda remove -y --force patchelf
