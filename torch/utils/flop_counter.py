@@ -53,10 +53,13 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target) -> None:
-            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction))):
+            from torch._ops import HigherOrderOperator
+
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction, HigherOrderOperator))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), JitFunction, "
+                    f"or HigherOrderOperator"
                     f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
@@ -608,6 +611,28 @@ def _efficient_attention_backward_flop(
     )
 
 
+def _register_flex_attention_flops() -> None:
+    from torch._higher_order_ops.flex_attention import (
+        flex_attention,
+        flex_attention_backward,
+    )
+
+    @register_flop_formula(flex_attention, get_raw=True)
+    def flex_attention_forward_flop(
+        query, key, value, *args, out_val=None, **kwargs
+    ) -> int:
+        return sdpa_flop_count(query.shape, key.shape, value.shape)
+
+    @register_flop_formula(flex_attention_backward, get_raw=True)
+    def flex_attention_backward_flop(
+        query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
+    ) -> int:
+        grad_out_shape = grad_out.shape if grad_out is not None else out.shape
+        return sdpa_backward_flop_count(
+            grad_out_shape, query.shape, key.shape, value.shape
+        )
+
+
 def _varlen_attn_forward_flop(
     query,
     key,
@@ -710,6 +735,9 @@ flop_registry = {
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
+
+_register_flex_attention_flops()
+
 
 def normalize_tuple(x):
     if not isinstance(x, tuple):

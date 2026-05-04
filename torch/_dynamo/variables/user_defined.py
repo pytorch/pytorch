@@ -427,15 +427,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         # --- Dynamo-specific pre-checks ---
 
-        # TODO - Revisit if we can use new descriptor VTs here.
-        # Wrap OrderedDict/defaultdict.fromkeys as GetAttrVariable so it's
-        # handled uniformly in call_method().
-        if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
-            return super().var_getattr(tx, name)
-
         # Custom metaclasses that override __getattribute__ replace the entire
         # lookup algorithm; bail out for those. Standard metaclasses (ABCMeta,
         # EnumType, etc.) that don't override __getattribute__ use
