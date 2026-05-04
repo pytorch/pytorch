@@ -125,6 +125,75 @@ kernel void exponential(
   }
 }
 
+// Uniform[from, to). One Philox round per 4 outputs.
+template <typename T>
+kernel void uniform_dist(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float from = params.x;
+  float scale = params.y - params.x;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    output[base + i] = static_cast<T>(from + scale * u);
+  }
+}
+
+// Normal(mean, std) via Box-Muller. One Philox round yields two (u1, u2)
+// pairs and 4 standard normals; we then apply the affine `mean + std * z`.
+template <typename T>
+kernel void normal(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float u1a = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[0]), eps, 1.0f - eps);
+  float u2a = c10::metal::detail::uint32_to_uniform_float(raw[1]);
+  float u1b = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[2]), eps, 1.0f - eps);
+  float u2b = c10::metal::detail::uint32_to_uniform_float(raw[3]);
+  float z[4];
+  box_muller(u1a, u2a, u1b, u2b, z);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    output[base + i] = static_cast<T>(params.x + params.y * z[i]);
+  }
+}
+
+// Random integer in [low, high). `params.x` carries `low`, `params.y` carries
+// the range `(high - low)`. Ranges that exceed 2^24 lose precision through the
+// uniform-float conversion; this is the same simplification the previous
+// `c10::metal::randint64` helper used.
+template <typename T>
+kernel void random_int(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float low = params.x;
+  float range = params.y;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    output[base + i] = static_cast<T>(static_cast<long>(low + range * u));
+  }
+}
+
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
       device DTYPE*, constant float2&, constant long2&, constant uint&, uint)
@@ -145,6 +214,24 @@ REGISTER_OP(geometric, long);
 REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
+
+REGISTER_OP(uniform_dist, float);
+REGISTER_OP(uniform_dist, half);
+REGISTER_OP(uniform_dist, bfloat);
+
+REGISTER_OP(normal, float);
+REGISTER_OP(normal, half);
+REGISTER_OP(normal, bfloat);
+
+REGISTER_OP(random_int, int);
+REGISTER_OP(random_int, long);
+REGISTER_OP(random_int, short);
+REGISTER_OP(random_int, char);
+REGISTER_OP(random_int, uchar);
+REGISTER_OP(random_int, bool);
+REGISTER_OP(random_int, float);
+REGISTER_OP(random_int, half);
+REGISTER_OP(random_int, bfloat);
 
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
