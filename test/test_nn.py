@@ -9274,13 +9274,8 @@ class TestNNDeviceType(NNTestCase):
         if not no_batch_dim:
             size = [3] + size
         t = torch.randn(size)
-        if affine:
-            with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
-                inst_norm(t)
-        else:
-            with warnings.catch_warnings(record=True) as w:
-                inst_norm(t)
-            self.assertIn("which is not used because affine=False", str(w[0].message))
+        with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
+            inst_norm(t)
 
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
