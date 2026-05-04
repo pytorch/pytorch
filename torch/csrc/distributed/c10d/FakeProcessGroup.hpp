@@ -247,7 +247,15 @@ class FakeProcessGroup : public Backend {
 
   // Private constructor used by official APIs
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
-      : Backend(rank, size), options_(std::move(options)) {}
+      : Backend(rank, size), options_(std::move(options)) {
+    TORCH_CHECK(
+        rank >= 0 && rank < size,
+        "Cannot init process group where rank (",
+        rank,
+        ") >= world_size (",
+        size,
+        ")");
+  }
   c10::intrusive_ptr<Options> options_;
 
  private:
