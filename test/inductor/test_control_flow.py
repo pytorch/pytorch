@@ -2,7 +2,6 @@
 
 import itertools
 import unittest
-import uuid
 
 import torch
 import torch._dynamo.testing
@@ -726,24 +725,18 @@ class CondTests(TestCase):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         class PreGradPassCounter(CustomGraphPass):
-            def __init__(self):
-                self._uuid = str(uuid.uuid4())
-
             def __call__(self, graph):
                 counters["pre_grad"] += 1
 
             def uuid(self):
-                return self._uuid
+                return "PreGradPassCounter"
 
         class PostGradPassCounter(CustomGraphPass):
-            def __init__(self):
-                self._uuid = str(uuid.uuid4())
-
             def __call__(self, graph):
                 counters["post_grad"] += 1
 
             def uuid(self):
-                return self._uuid
+                return "PostGradPassCounter"
 
         with torch._inductor.config.patch(
             {
