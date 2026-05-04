@@ -17,13 +17,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 # Linear pointwise ops, split by linearity type.
-unary_linear_ops = [
-    aten.to.device,
-    aten.to.dtype,
-    aten.to.prim_Device,
-    aten.to.prim_dtype,
-    aten.to.prim_other,
-]
+unary_linear_ops = [aten.to.dtype]
 
 
 def _common_pointwise_single_dim_strategy(
@@ -400,11 +394,7 @@ for op in [aten.special_xlog1py.default, aten.special_xlog1py.other_scalar]:
 # All-partial-preserving unary ops: P(x)->P(x) for all x.
 # TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
 all_partial_preserving_unary_ops = [
-    aten.to.device,
     aten.to.dtype,
-    aten.to.prim_Device,
-    aten.to.prim_dtype,
-    aten.to.prim_other,
     aten.positive.default,
 ]
 
@@ -417,7 +407,6 @@ for op in all_partial_preserving_unary_ops:
 
 all_partial_preserving_binary_ops = [
     aten.copy_.default,
-    aten.copy_.Tensor,
     prims.copy_to.default,
 ]
 
@@ -487,57 +476,26 @@ for op in monotonic_min_preserving_binary_ops:
 
 
 # Ops that are pointwise for DTensor purposes but lack torch.Tag.pointwise.
-# Ops that are pointwise but lack torch.Tag.pointwise in native_functions.yaml.
-# Ops already tagged pointwise are auto-discovered by _get_pointwise_ops_from_tag().
+# TODO(pianpwk): add torch.Tag.pointwise to these ops in native_functions.yaml
+# so this list can be removed.
 _extra_pointwise_ops: list[OpOverload] = [
     aten.__irshift__.Scalar,
     aten.__irshift__.Tensor,
     aten._conj.default,
     aten.abs_.default,
-    aten.complex.default,
-    aten.complex.out,
     aten.copysign_.Scalar,
     aten.copysign_.Tensor,
     aten.exponential_.default,
-    aten.fill_.Tensor,
     aten.float_power.Scalar,
     aten.float_power.Scalar_out,
     aten.float_power.Tensor_Scalar,
     aten.float_power.Tensor_Scalar_out,
     aten.float_power.Tensor_Tensor,
     aten.float_power.Tensor_Tensor_out,
-    aten.float_power_.Scalar,
-    aten.float_power_.Tensor,
-    aten.ge_.Scalar,
-    aten.ge_.Tensor,
-    aten.gelu.out,
-    aten.gelu_.default,
-    aten.hardshrink.out,
-    aten.le_.Scalar,
-    aten.le_.Tensor,
-    aten.masked_fill.Tensor,
     aten.masked_fill_.Scalar,
-    aten.masked_fill_.Tensor,
     aten.native_dropout_backward.out,
-    aten.ne_.Scalar,
-    aten.ne_.Tensor,
     aten.polygamma_.default,
     aten.rrelu_with_noise.default,
-    aten.rrelu_with_noise.out,
-    aten.rrelu_with_noise_.default,
-    aten.rsub.Tensor,
-    aten.special_ndtr.default,
-    aten.special_ndtr.out,
-    aten.special_polygamma.default,
-    aten.special_polygamma.out,
-    aten.threshold.out,
-    aten.threshold_.default,
-    # aten.to.other is registered separately — its second tensor arg is a
-    # dtype/device template, not a pointwise operand.
-    aten.true_divide.Scalar,
-    aten.where.Scalar,
-    aten.where.ScalarOther,
-    aten.where.ScalarSelf,
     aten.where.self_out,
     aten.xlogy_.Scalar_Other,
     prims.bessel_i0e.default,
@@ -593,26 +551,6 @@ _extra_pointwise_ops: list[OpOverload] = [
     aten._fused_adamw.tensor_lr,
     aten._fused_adamw_.tensor_lr,
 ]
-
-
-@register_single_dim_strategy(
-    aten.to.other,
-    schema_info=RuntimeSchemaInfo(1),
-    allow_uneven_sharding=True,
-    allow_unbacked_sharding=True,
-)
-def to_other_strategy(
-    op: OpOverload,
-    args_schema: ArgsType,
-    kwargs_schema: KwargsType,
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    self_meta = args_schema[0]
-    if not isinstance(self_meta, TensorMeta):
-        raise AssertionError(f"Expected TensorMeta, got {type(self_meta)}")
-    return [
-        [_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()]
-        for d in range(len(self_meta.shape))
-    ]
 
 
 def _get_pointwise_ops_from_tag() -> list[OpOverload]:

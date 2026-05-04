@@ -155,9 +155,9 @@ static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
   c10::intrusive_ptr<torch::autograd::Node> grad_fn_sp;
   if (THPFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
+    grad_fn_sp = reinterpret_cast<THPFunction*>(grad_fn)->cdata;
   } else if (THPCppFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
+    grad_fn_sp = reinterpret_cast<THPCppFunction*>(grad_fn)->cdata;
   } else {
     TORCH_CHECK(
         false,
