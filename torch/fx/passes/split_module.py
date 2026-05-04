@@ -712,6 +712,9 @@ def _decompose_size_nodes(m: GraphModule) -> None:
     size_nodes = list(m.graph.find_nodes(op="call_method", target="size"))
 
     for node in size_nodes:
+        # Skip size(dim) calls -- only decompose full size() with no dim argument.
+        if len(node.args) > 1 or node.kwargs:
+            continue
         tensor_node = node.args[0]
         ev = tensor_node.meta.get("example_value")
         if ev is None:
@@ -754,6 +757,9 @@ def _make_lite_graph_module(
 
     Only suitable for parameterless graph containers (no parameters, buffers,
     or ``get_attr``/``call_module`` targets to copy from a root module).
+
+    The dict entries below mirror nn.Module.__init__ (torch/nn/modules/module.py).
+    Update in lockstep if nn.Module adds or removes instance attributes.
     """
     cls = type("GraphModuleImpl", (_LazyGraphModule,), {})
     inst = object.__new__(cls)
@@ -857,7 +863,9 @@ def _detect_dependencies(
                 def_val = def_node.meta.get("example_value")
                 if def_val is not None and _sym:
                     for s in sorted(free_symbols(def_val), key=str):
-                        s_node = _sym[s]
+                        s_node = _sym.get(s)
+                        if s_node is None:
+                            continue
                         _inputs[use_pid].setdefault(s_node.name, s_node)
                         if s_node.op != "placeholder":
                             s_pid = getattr(s_node, "_fx_partition", None)
