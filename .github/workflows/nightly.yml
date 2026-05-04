@@ -33,6 +33,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
 
   link-check:
     name: Link checks
@@ -51,6 +52,9 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   docs-push:
@@ -65,6 +69,9 @@ jobs:
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
