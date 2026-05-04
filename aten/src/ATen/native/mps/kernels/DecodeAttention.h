@@ -39,9 +39,9 @@ template <typename T, int D, int V = D, bool is_causal = false>
   const uint v_seq_stride = qkv_seq_strides.z;
   const uint v_batch_stride = qkv_batch_strides_heads.z;
   const uint num_heads = qkv_batch_strides_heads.w;
-  const uint mask_head_stride = mask_strides.x;
-  const uint mask_kv_seq_stride = mask_strides.y;
-  const uint mask_q_seq_stride = mask_strides.z;
+  const uint mask_kv_seq_stride = mask_strides.x;
+  const uint mask_q_seq_stride = mask_strides.y;
+  const uint mask_head_stride = mask_strides.z;
   uint inner_k_stride = BN * int(k_seq_stride);
   uint inner_v_stride = BN * int(v_seq_stride);
 
