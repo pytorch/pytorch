@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_test_lib = torch.library.Library("_TestOutVariant", "DEF")  # noqa: TOR901
+_test_lib = torch.library.Library("_TestOutVariant", "DEF")  # noqa: SCOPED_LIBRARY
 
 _test_lib.define("add(Tensor x, Tensor y) -> Tensor")
 _test_lib.define(
@@ -49,7 +49,7 @@ _test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestOutVariant(TestCase):
     def setUp(self):
-        self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: TOR901
+        self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 
     def tearDown(self):
         self.lib._destroy()
