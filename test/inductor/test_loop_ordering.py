@@ -751,6 +751,48 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    def test_factored_vs_expanded_pw_numel_in_fused_group(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/181563
+
+        Conv2d(kernel=1, stride=4) decomposes its output spatial size as
+        ``1 + (T - 1)//4``, so when those ranges are multiplied together for
+        a node body via ``sympy_product`` the result stays factored
+        (``s*(a+1)*(b+1)``). The fused-group's ``pointwise_numel`` for the
+        same value goes through ``SizeVarAllocator.simplify`` which calls
+        ``sympy.expand`` and yields the expanded form
+        (``s + s*a + s*b + s*a*b``). Sympy's structural ``==`` says these are
+        not equal, so without the fix the early-return guard in
+        ``get_pw_red_splits`` is missed and we fall through to an assert
+        that can never hold for a non-reduction body in a group whose
+        ``red_numel > 1``.
+        """
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Conv2d(8, 8, kernel_size=1, stride=4, bias=False)
+
+            def forward(self, x):
+                a = self.proj(x)
+                # Outer-only pointwise sharing `a`'s sym shape; returning it
+                # forces materialization as its own SchedulerNode rather than
+                # being inlined into the softmax kernel.
+                bias = a[:, 0]
+                bias = bias * 2 + 1
+                a = a.permute(0, 2, 3, 1).contiguous()
+                a = a + bias.unsqueeze(-1)
+                b = a.softmax(dim=-1)  # red_numel = 8 in the fused group
+                return b, bias
+
+        mod = Mod().to(GPU_TYPE)
+        x = torch.randn(2, 8, 17, 19, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(x, 3)
+
+        with torch.no_grad():
+            self.do_acc_test(mod, x)
+
     @inductor_config.patch(
         {
             "max_autotune": True,
