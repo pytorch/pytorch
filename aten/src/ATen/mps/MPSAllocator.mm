@@ -313,10 +313,11 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
 
 BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
   auto it = m_allocated_buffers.find(ptr);
-  if (it == m_allocated_buffers.end()) {
-    return nullptr;
+  if (it != m_allocated_buffers.end()) {
+    return it->second;
   }
-  return it->second;
+  auto cpu_ptr_it = m_allocated_shared_buffers_by_cpu_ptr.find(ptr);
+  return cpu_ptr_it != m_allocated_shared_buffers_by_cpu_ptr.end() ? cpu_ptr_it->second : nullptr;
 }
 
 bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove_empty_heap) {
@@ -325,6 +326,9 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
   m_allocated_buffers.erase(buffer_block->buffer);
+  if (buffer_block->cpu_ptr) {
+    m_allocated_shared_buffers_by_cpu_ptr.erase(buffer_block->cpu_ptr);
+  }
   pool.available_buffers.erase(buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
@@ -523,6 +527,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
     }
     if (!buffer_block->cpu_ptr) {
       buffer_block->cpu_ptr = [buffer_block->buffer contents];
+      m_allocated_shared_buffers_by_cpu_ptr[buffer_block->cpu_ptr] = buffer_block;
     }
   }
   // buffer is out of the pool, so no mutex lock is needed
@@ -540,8 +545,19 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
   }
   if (!buffer_block->cpu_ptr) {
     buffer_block->cpu_ptr = [buffer_block->buffer contents];
+    m_allocated_shared_buffers_by_cpu_ptr[buffer_block->cpu_ptr] = buffer_block;
   }
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
+}
+
+const void* MPSHeapAllocatorImpl::getSharedBuffer(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    return nullptr;
+  }
+  return buffer_block->buffer;
 }
 
 namespace {
@@ -567,6 +583,7 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
 
   if (!buffer_block->cpu_ptr) {
     buffer_block->cpu_ptr = [buffer_block->buffer contents];
+    m_allocated_shared_buffers_by_cpu_ptr[buffer_block->cpu_ptr] = buffer_block;
   }
 
   // Retain the source MPS storage through the DataPtr's context so the
@@ -777,6 +794,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getSharedBufferPtr(ptr);
   }
+  const void* getSharedBuffer(const void* ptr) const override {
+    return _getAllocImpl().getSharedBuffer(ptr);
+  }
   c10::Storage getHostAliasStorage(const c10::Storage& mps_storage) const override {
     return _getAllocImpl().getHostAliasStorage(mps_storage);
   }
@@ -862,12 +882,50 @@ MPSAllocator& _getSharedAllocator() {
   return s_mps_shared_alloc;
 }
 
+struct MPSPinnedAllocator final : public Allocator {
+  DataPtr allocate(const size_t nbytes) override {
+    DataPtr shared = _getSharedAllocator().allocate(nbytes);
+    void* host_ptr = nullptr;
+    if (shared) {
+      const auto [shared_ptr, retain_count] = _getSharedAllocator().getSharedBufferPtr(shared.get());
+      (void)retain_count;
+      TORCH_INTERNAL_ASSERT(shared_ptr);
+      host_ptr = const_cast<void*>(shared_ptr);
+    }
+    return {host_ptr, shared.release_context(), &Delete, at::Device(at::DeviceType::CPU)};
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
+  }
+
+ private:
+  static void Delete(void* ptr) {
+    if (ptr) {
+      _getSharedAllocator().raw_deleter()(ptr);
+    }
+  }
+};
+
+MPSPinnedAllocator& _getPinnedAllocator() {
+  static MPSPinnedAllocator s_mps_pinned_alloc;
+  return s_mps_pinned_alloc;
+}
+
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator() {
   auto& sa = _getSharedAllocator();
   if (sa.isSharedStorageSupported()) {
     return &sa;
+  }
+  return nullptr;
+}
+
+Allocator* getMPSPinnedAllocator() {
+  auto& sa = _getSharedAllocator();
+  if (sa.isSharedStorageSupported()) {
+    return &_getPinnedAllocator();
   }
   return nullptr;
 }

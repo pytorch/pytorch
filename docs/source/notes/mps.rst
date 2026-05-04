@@ -42,3 +42,14 @@ To get started, simply move your Tensor and Module to the ``mps`` device:
 
         # Now every call runs on the GPU
         pred = model(x)
+
+.. _mps-memory-pinning:
+
+Pinned memory
+-------------
+
+On Apple Silicon systems with unified memory, CPU tensors can be placed in
+MPS-pinned memory with :meth:`~torch.Tensor.pin_memory` or by passing
+``pin_memory=True`` to :class:`~torch.utils.data.DataLoader`. Pinned CPU tensors
+are backed by shared Metal buffers, which lets non-blocking transfers to
+``mps`` tensors avoid an extra host staging copy.

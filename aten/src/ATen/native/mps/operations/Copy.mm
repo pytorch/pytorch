@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -13,6 +14,55 @@
 
 namespace at::native {
 namespace mps {
+
+namespace {
+void storageAliasDeleter(void* ctx) {
+  delete static_cast<c10::Storage*>(ctx);
+}
+
+bool try_alias_mps_from_pinned_cpu(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+  if (!non_blocking || !src.is_contiguous() || !dst.is_contiguous() || src.dtype() != dst.dtype() ||
+      !at::mps::isMPSPinnedPtr(src.storage().data())) {
+    return false;
+  }
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  if (!allocator) {
+    return false;
+  }
+  const void* buffer = allocator->getSharedBuffer(src.storage().data());
+  if (!buffer) {
+    return false;
+  }
+
+  auto* ctx = new c10::Storage(src.storage());
+  c10::DataPtr data_ptr(
+      const_cast<void*>(buffer), ctx, &storageAliasDeleter, c10::Device(c10::DeviceType::MPS, 0));
+  c10::Storage storage(
+      c10::Storage::use_byte_size_t(),
+      src.storage().nbytes(),
+      std::move(data_ptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  dst.set_(storage, src.storage_offset(), src.sizes(), src.strides());
+  return true;
+}
+
+bool try_alias_cpu_from_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+  if (!non_blocking || !src.is_contiguous() || !dst.is_contiguous() || src.dtype() != dst.dtype() ||
+      !at::mps::isMPSPinnedPtr(dst.storage().data())) {
+    return false;
+  }
+
+  auto* allocator = at::mps::getIMPSAllocator();
+  if (!allocator || !allocator->getSharedBuffer(src.storage().data())) {
+    return false;
+  }
+  c10::Storage storage = allocator->getHostAliasStorage(src.storage());
+  dst.set_(storage, src.storage_offset(), src.sizes(), src.strides());
+  return true;
+}
+} // namespace
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
@@ -79,6 +129,10 @@ static void copy_cast_mps(at::Tensor& dst,
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
+  if (try_alias_cpu_from_mps(dst_, src_, non_blocking)) {
+    return dst_;
+  }
+
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
 
@@ -219,6 +273,9 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   if (src.strides() != dst_.strides()) {
     needs_copy = true;
     dst = at::empty_like(src, at::device(at::kMPS));
+  }
+  if (!needs_copy && try_alias_mps_from_pinned_cpu(dst_, src, non_blocking)) {
+    return dst_;
   }
   copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy);
   return needs_copy ? dst_.copy_(dst) : dst_;

@@ -39,6 +39,9 @@ class IMPSAllocator : public c10::Allocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
+  // Returns the MTLBuffer backing a shared allocation when `ptr` is either
+  // the MTLBuffer itself or the host-visible contents pointer.
+  virtual const void* getSharedBuffer(const void* ptr) const = 0;
   // Returns a CPU-device c10::Storage that aliases the host-visible contents
   // of the MTLBuffer backing `mps_storage`. The returned storage retains the
   // source MPS storage for its lifetime, so the host pointer remains valid
@@ -71,6 +74,8 @@ TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
   C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
 IMPSAllocator* getIMPSAllocator();
+
+Allocator* getMPSPinnedAllocator();
 
 bool isMPSPinnedPtr(const void* data);
 

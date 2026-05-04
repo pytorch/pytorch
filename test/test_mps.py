@@ -8243,6 +8243,99 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(TypeError, "UntypedStorage"):
             torch.mps._host_alias_storage(torch.empty(4, device="mps"))
 
+    def _pin_memory_or_skip(self, tensor, device=None):
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return tensor.pin_memory(device=device) if device is not None else tensor.pin_memory()
+        except RuntimeError as e:
+            if "MPS pinned memory requires" in str(e):
+                self.skipTest("MPS device does not support shared storage")
+            raise
+
+    def test_pin_memory_basic(self):
+        t = torch.zeros(1024, dtype=torch.float32)
+        self.assertFalse(t.is_pinned())
+        p = self._pin_memory_or_skip(t)
+        self.assertTrue(p.is_pinned())
+        self.assertEqual(p.device.type, "cpu")
+        self.assertEqual(p, t)
+
+    def test_pin_memory_explicit_device(self):
+        p = self._pin_memory_or_skip(torch.zeros(1024), device="mps")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertTrue(p.is_pinned(device="mps"))
+
+    def test_pin_memory_from_constructor(self):
+        try:
+            p = torch.empty(1024, dtype=torch.float32, pin_memory=True)
+        except RuntimeError as e:
+            if "MPS pinned memory requires" in str(e):
+                self.skipTest("MPS device does not support shared storage")
+            raise
+        self.assertTrue(p.is_pinned())
+        self.assertEqual(p.device.type, "cpu")
+
+    def test_pinned_h2d_non_blocking_alias(self):
+        cpu = self._pin_memory_or_skip(torch.arange(1024, dtype=torch.float32))
+        mps = cpu.to("mps", non_blocking=True)
+        torch.mps.synchronize()
+        cpu.add_(1)
+        torch.mps.synchronize()
+        self.assertEqual(mps.cpu(), cpu)
+
+    def test_pinned_h2d_blocking_copy(self):
+        cpu = self._pin_memory_or_skip(torch.arange(1024, dtype=torch.float32))
+        mps = cpu.to("mps", non_blocking=False)
+        torch.mps.synchronize()
+        cpu.add_(1)
+        torch.mps.synchronize()
+        self.assertEqual(mps.cpu(), cpu - 1)
+
+    def test_pinned_d2h_non_blocking_alias(self):
+        mps = torch.arange(1024, dtype=torch.float32, device="mps")
+        torch.mps.synchronize()
+        cpu = self._pin_memory_or_skip(torch.empty(1024, dtype=torch.float32))
+        cpu.copy_(mps, non_blocking=True)
+        torch.mps.synchronize()
+        self.assertEqual(cpu, mps.cpu())
+        mps.add_(1)
+        torch.mps.synchronize()
+        self.assertEqual(cpu, mps.cpu())
+
+    def test_pinned_d2h_blocking_copy(self):
+        mps = torch.arange(1024, dtype=torch.float32, device="mps")
+        torch.mps.synchronize()
+        cpu = self._pin_memory_or_skip(torch.empty(1024, dtype=torch.float32))
+        cpu.copy_(mps, non_blocking=False)
+        torch.mps.synchronize()
+        mps.add_(1)
+        torch.mps.synchronize()
+        self.assertEqual(cpu, mps.cpu() - 1)
+
+    def test_pin_memory_autograd_roundtrip(self):
+        x = self._pin_memory_or_skip(torch.zeros(8, dtype=torch.float32)).requires_grad_()
+        (x * 2).sum().backward()
+        self.assertIsNotNone(x.grad)
+
+    def test_pin_memory_noncontiguous(self):
+        t = torch.arange(16, dtype=torch.float32).view(4, 4)[::2]
+        p = self._pin_memory_or_skip(t)
+        self.assertTrue(p.is_pinned())
+        self.assertEqual(p, t)
+
+    def test_dataloader_pin_memory_mps(self):
+        ds = torch.utils.data.TensorDataset(torch.arange(64, dtype=torch.float32))
+        dl = torch.utils.data.DataLoader(ds, batch_size=8, pin_memory=True)
+        try:
+            for (batch,) in dl:
+                self.assertTrue(batch.is_pinned())
+        except RuntimeError as e:
+            if "MPS pinned memory requires" in str(e):
+                self.skipTest("MPS device does not support shared storage")
+            raise
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged

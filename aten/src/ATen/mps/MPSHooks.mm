@@ -155,7 +155,11 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
-  return at::mps::getIMPSAllocator();
+  auto* allocator = at::mps::getMPSPinnedAllocator();
+  TORCH_CHECK(
+      allocator,
+      "MPS pinned memory requires a device with shared storage support.");
+  return allocator;
 }
 
 using at::MPSHooksRegistry;
