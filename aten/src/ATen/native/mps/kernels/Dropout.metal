@@ -30,8 +30,7 @@ kernel void dropout_fwd(
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     bool m = u < p_comp;
     mask[base + i] = m;
-    output[base + i] = m ? c10::metal::cast_to<T>(input[base + i] * scale)
-                         : c10::metal::cast_to<T>(0);
+    output[base + i] = c10::metal::cast_to<T>(m ? input[base + i] * scale : 0);
   }
 }
 
@@ -43,9 +42,8 @@ kernel void dropout_bwd(
     device const bool* mask [[buffer(2)]],
     constant float& scale [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  grad_input[tid] = mask[tid]
-      ? c10::metal::cast_to<T>(grad_output[tid] * scale)
-      : c10::metal::cast_to<T>(0);
+  grad_input[tid] =
+      c10::metal::cast_to<T>(mask[tid] ? grad_output[tid] * scale : 0);
 }
 
 #define REGISTER_DROPOUT(DTYPE)                             \
