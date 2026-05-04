@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import functools
 import threading
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Concatenate, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from concurrent.futures import Future
 
 
@@ -46,7 +46,8 @@ def prefetchable_cache(func: Callable[[], _T]) -> Callable[[], _T]:
     def set_val(val: _T) -> None:
         nonlocal _cache
         with _lock:
-            assert _cache is _cache_sentinel
+            if _cache is not _cache_sentinel:
+                raise RuntimeError("prefetchable_cache value already set")
             _cache = val
 
     def clear() -> None:
