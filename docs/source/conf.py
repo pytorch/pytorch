@@ -447,9 +447,6 @@ coverage_ignore_functions = [
     "init_dropout_state",
     # torch.backends.xeon.run_cpu
     "create_args",
-    # torch.cuda.amp.autocast_mode
-    "custom_bwd",
-    "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
     # torch.mtia.memory

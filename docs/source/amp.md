@@ -144,6 +144,18 @@ or gradients when running with AMP/fp16, verify your model is compatible.
 ```
 
 ```{eval-rst}
+.. currentmodule:: torch.amp.autocast_mode
+```
+
+```{eval-rst}
+.. autofunction:: custom_fwd
+```
+
+```{eval-rst}
+.. autofunction:: custom_bwd
+```
+
+```{eval-rst}
 .. currentmodule:: torch.cpu.amp
 ```
 
