@@ -1,25 +1,62 @@
 #include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 using namespace metal;
 
 constant constexpr float eps = 1.19209e-07f;
 
+// Box-Muller transform: turn two pairs of uniforms `(u1a, u2a)` and
+// `(u1b, u2b)` from (0, 1) into 4 independent N(0, 1) samples. `sincos` is a
+// fused intrinsic that returns sin and writes cos in one call, avoiding the
+// duplicate angle computation of separate `sin` / `cos`.
+inline void box_muller(
+    float u1a,
+    float u2a,
+    float u1b,
+    float u2b,
+    thread float (&z)[4]) {
+  float ra = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1a));
+  float rb = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1b));
+  float ta = 2.0f * M_PI_F * u2a;
+  float tb = 2.0f * M_PI_F * u2b;
+  float ca, cb;
+  float sa = ::metal::precise::sincos(ta, ca);
+  float sb = ::metal::precise::sincos(tb, cb);
+  z[0] = ra * ca;
+  z[1] = ra * sa;
+  z[2] = rb * cb;
+  z[3] = rb * sb;
+}
+
+// Cauchy, geometric, and log_normal each draw 4 samples per thread from a
+// single Philox-4x32-10 round, matching the existing exponential / bernoulli
+// pattern. This eliminates the bit-level waste that was 75% of the philox
+// output in the old 1-element-per-thread implementations and pairs with the
+// host-side change that advances the generator offset by ceil(N/4) instead
+// of N.
+
 template <typename T>
 kernel void cauchy(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  // Generate uniform random in (0, 1)
-  float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  // Clamp to avoid tan(+- pi / 2) singularities
-  u = clamp(u, eps, 1.0f - eps);
-  // Cauchy inverse CDF: median + sigma * tan(pi * (u - 0.5))
-  float result =
-      params.x + params.y * ::metal::precise::tan(M_PI_F * (u - 0.5f));
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float median = params.x;
+  float sigma = params.y;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    // Clamp to avoid tan(+- pi / 2) singularities.
+    float u = clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] = static_cast<T>(
+        median + sigma * ::metal::precise::tan(M_PI_F * (u - 0.5f)));
+  }
 }
 
 template <typename T>
@@ -27,15 +64,26 @@ kernel void log_normal(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  long offset = seed_base_offset.y + 2 * tid;
-  float u1 =
-      clamp(c10::metal::rand(seed_base_offset.x, offset), eps, 1.0f - eps);
-  float u2 = c10::metal::rand(seed_base_offset.x, offset + 1);
-  float z = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1)) *
-      ::metal::precise::cos(2.0f * M_PI_F * u2);
-  float result = ::metal::precise::exp(params.x + params.y * z);
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  // Box-Muller turns each (u1, u2) pair into two independent N(0,1) samples;
+  // one Philox round therefore yields 4 standard normals from two pairs.
+  float u1a = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[0]), eps, 1.0f - eps);
+  float u2a = c10::metal::detail::uint32_to_uniform_float(raw[1]);
+  float u1b = clamp(
+      c10::metal::detail::uint32_to_uniform_float(raw[2]), eps, 1.0f - eps);
+  float u2b = c10::metal::detail::uint32_to_uniform_float(raw[3]);
+  float z[4];
+  box_muller(u1a, u2a, u1b, u2b, z);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    output[base + i] =
+        static_cast<T>(::metal::precise::exp(params.x + params.y * z[i]));
+  }
 }
 
 template <typename T>
@@ -43,11 +91,18 @@ kernel void geometric(
     device T* output [[buffer(0)]],
     constant float2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  u = clamp(u, eps, 1.0f - eps);
-  float result = ceil(::metal::precise::log(u) / params.x);
-  output[tid] = static_cast<T>(result);
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] =
+        static_cast<T>(ceil(::metal::precise::log(u) / params.x));
+  }
 }
 
 template <typename T>
@@ -72,7 +127,7 @@ kernel void exponential(
 
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
-      device DTYPE*, constant float2&, constant long2&, uint)
+      device DTYPE*, constant float2&, constant long2&, constant uint&, uint)
 
 REGISTER_OP(cauchy, float);
 REGISTER_OP(cauchy, half);
@@ -99,6 +154,76 @@ REGISTER_OP(geometric, uchar);
 REGISTER_EXPONENTIAL(float);
 REGISTER_EXPONENTIAL(half);
 REGISTER_EXPONENTIAL(bfloat);
+
+// Bernoulli with scalar probability p. Each thread processes 4 elements,
+// amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
+// kernel becomes bandwidth-bound rather than RNG-bound. The mask bit is
+// converted to T via `c10::metal::cast_to`, which routes complex destinations
+// to `T(value, 0)` — matching the previous MPSGraph behaviour where bool was
+// cast to complex as "1+0j" / "0+0j".
+template <typename T>
+kernel void bernoulli_scalar(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float p = params.x;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
+  }
+}
+
+// Bernoulli with per-element probability tensor (float). The probability
+// buffer must be flattened and have the same numel as `output`; broadcasting
+// is handled host-side so this kernel is a straight zip over two contiguous
+// buffers plus a single Philox round per thread.
+template <typename T>
+kernel void bernoulli_tensor(
+    device T* output [[buffer(0)]],
+    device const float* probs [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    float p = probs[base + i];
+    output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
+  }
+}
+
+#define REGISTER_BERNOULLI(DTYPE)                                              \
+  template [[host_name("bernoulli_scalar_" #DTYPE)]] kernel void               \
+  bernoulli_scalar<DTYPE>(                                                     \
+      device DTYPE*, constant float2&, constant long2&, constant uint&, uint); \
+  template [[host_name("bernoulli_tensor_" #DTYPE)]] kernel void               \
+  bernoulli_tensor<DTYPE>(                                                     \
+      device DTYPE*,                                                           \
+      device const float*,                                                     \
+      constant long2&,                                                         \
+      constant uint&,                                                          \
+      uint)
+
+REGISTER_BERNOULLI(float);
+REGISTER_BERNOULLI(half);
+REGISTER_BERNOULLI(bfloat);
+REGISTER_BERNOULLI(bool);
+REGISTER_BERNOULLI(uchar);
+REGISTER_BERNOULLI(char);
+REGISTER_BERNOULLI(short);
+REGISTER_BERNOULLI(int);
+REGISTER_BERNOULLI(long);
+REGISTER_BERNOULLI(float2);
+REGISTER_BERNOULLI(half2);
 
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
