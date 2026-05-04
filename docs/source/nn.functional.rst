@@ -222,12 +222,16 @@ DataParallel functions (multi-GPU, distributed)
 Low-Precision functions
 -----------------------
 
+.. autoclass:: torch.nn.functional.ScalingType
+    :members:
+
+.. autoclass:: torch.nn.functional.SwizzleType
+    :members:
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    ScalingType
-    SwizzleType
     grouped_mm
     scaled_mm
     scaled_grouped_mm
