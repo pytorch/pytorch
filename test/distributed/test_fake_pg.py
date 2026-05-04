@@ -20,7 +20,13 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import HAS_ACCELERATOR
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfHpu,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -236,6 +242,39 @@ class TestFakePG(TestCase):
                 loss.backward()
                 optim.step()
 
+    @parametrize("rank", [0, 1])
+    def test_allgather_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        input_tensor = torch.ones(3, 3) * 42
+        output_tensors = [torch.empty(3, 3) for _ in range(2)]
+        dist.all_gather(output_tensors, input_tensor)
+        for out in output_tensors:
+            self.assertEqual(out, input_tensor)
+
+    def test_gather_copy_semantics(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        input_tensor = torch.ones(3, 3) * 42
+        gather_list = [torch.empty(3, 3) for _ in range(2)]
+        dist.gather(input_tensor, gather_list)
+        for out in gather_list:
+            self.assertEqual(out, input_tensor)
+
+    @parametrize("rank", [0, 1])
+    def test_allgather_coalesced_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        inputs = [torch.ones(3, 3) * i for i in range(3)]
+        output_lists = [[torch.empty(3, 3) for _ in range(2)] for _ in range(3)]
+        dist.all_gather_coalesced(output_lists, inputs)
+        for i, output_list in enumerate(output_lists):
+            for out in output_list:
+                self.assertEqual(out, inputs[i])
+
     def test_error_on_collective(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -320,6 +359,8 @@ class TestFakePG(TestCase):
         self.assertIn("aten.lift_fresh.default", op_names)
         self.assertIn("c10d.allreduce_.default", op_names)
 
+
+instantiate_parametrized_tests(TestFakePG)
 
 if __name__ == "__main__":
     run_tests()

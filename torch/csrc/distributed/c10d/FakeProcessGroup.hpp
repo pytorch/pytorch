@@ -82,16 +82,14 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  // NOTE [allgather on FakeProcessGroup]
-  // Assume each rank have the same input tensor so we just copy to the results
-  // since it's not a real allgather, we simply make this copying logic to let
-  // some simple validation works (i.e. calling allgather to see if each rank
-  // have the same tensor or not).
+  // NOTE [FakeProcessGroup collective semantics]
+  // All collectives copy input to output following single-rank semantics
+  // (rank 0 communicating with itself). This avoids returning uninitialized
+  // memory and enables single-process validation of distributed code paths.
   //
-  // NOTE: in general it's not good form to try to make FakeProcessGroup work
-  // with real data, but the reasoning here is that we want FakeProcessGroup to
-  // work with DeviceMesh's init code that have the data validation, which
-  // makes it worth the tradeoff.
+  // Limitation: scatter on non-root rank leaves output uninitialized because
+  // the root's data is unavailable in single-process simulation. This only
+  // triggers when explicitly calling scatter with src != rank.
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -121,10 +119,22 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    TORCH_CHECK(
+        outputTensorLists.size() == inputTensors.size(),
+        "allgather_coalesced: output tensor lists (",
+        outputTensorLists.size(),
+        ") must have the same length as input tensor list (",
+        inputTensors.size(),
+        ")");
+    for (size_t i = 0; i < inputTensors.size(); ++i) {
+      for (auto& tensor : outputTensorLists[i]) {
+        tensor.copy_(inputTensors[i]);
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -145,10 +155,15 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> gather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const GatherOptions& /* opts */ = GatherOptions()) override {
     checkCollectiveError();
+    if (!outputTensors.empty()) {
+      for (auto& tensor : outputTensors[0]) {
+        tensor.copy_(inputTensors[0]);
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
