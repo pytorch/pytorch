@@ -3324,6 +3324,9 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    _prev_torch_function_mode_stack_len: int = 0
+    _prev_torch_function_state: object = None
+
     # Always use difflib to print diffs on multi line equality.
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
@@ -3769,12 +3772,15 @@ class TestCase(expecttest.TestCase):
                 f"length changed from {self._prev_torch_function_mode_stack_len} to {after}"
             )
 
+        prev_tf_state = self._prev_torch_function_state
+        if prev_tf_state is None:
+            prev_tf_state = torch._C._TorchFunctionState.ENABLED
         tf_state = torch._C._get_torch_function_state()
-        if tf_state != self._prev_torch_function_state:
-            torch._C._set_torch_function_state(self._prev_torch_function_state)
+        if tf_state != prev_tf_state:
+            torch._C._set_torch_function_state(prev_tf_state)
             raise AssertionError(
                 f"torch function state was leaked: "
-                f"changed from {self._prev_torch_function_state} to {tf_state}"
+                f"changed from {prev_tf_state} to {tf_state}"
             )
 
     @staticmethod
