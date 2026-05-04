@@ -945,7 +945,7 @@ class CacheabilityValidator:
         from torch._inductor.compiler_bisector import CompilerBisector
 
         if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
+            log.debug("don't cache graph when bisect enabled")
             self.bypass("compiler bisector enabled")
 
     def _check_shape_env(self) -> None:
@@ -1635,6 +1635,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         inductor_meta = autotune_cache.inductor_meta_from_config()
         code = graph.source_code
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+        graph._set_compile_context_for_autotune_cache()
 
         # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
