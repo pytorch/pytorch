@@ -1962,6 +1962,10 @@ _SLOW_FILES_TO_FLOOR = frozenset(
         "test_decomp",
         "test_ops",
         "functorch/test_ops",
+        "inductor/test_control_flow",
+        "inductor/test_aot_inductor",
+        "functorch/test_control_flow",
+        "test_quantization",
     }
 )
 
