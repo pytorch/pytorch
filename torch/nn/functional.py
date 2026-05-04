@@ -1400,6 +1400,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
+    if input.dim() not in (3, 4):
+        raise RuntimeError(
+            f"adaptive_avg_pool2d: Expected 3D or 4D input, but got input of size: {input.shape}"
+        )
     # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
@@ -1416,6 +1420,10 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
+    if input.dim() not in (4, 5):
+        raise RuntimeError(
+            f"adaptive_avg_pool3d: Expected 4D or 5D input, but got input of size: {input.shape}"
+        )
     # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)

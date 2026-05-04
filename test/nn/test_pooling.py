@@ -213,6 +213,18 @@ class TestPoolingNN(NNTestCase):
             ),
         )
 
+    def test_adaptive_avg_pool_invalid_input_dims(self):
+        # adaptive_avg_pool2d requires 3D or 4D input
+        with self.assertRaisesRegex(RuntimeError, "adaptive_avg_pool2d: Expected 3D or 4D input"):
+            F.adaptive_avg_pool2d(torch.randn(2, 3), output_size=(4, 4))
+        with self.assertRaisesRegex(RuntimeError, "adaptive_avg_pool2d: Expected 3D or 4D input"):
+            F.adaptive_avg_pool2d(torch.randn(2, 3, 4, 5, 6), output_size=(4, 4))
+        # adaptive_avg_pool3d requires 4D or 5D input
+        with self.assertRaisesRegex(RuntimeError, "adaptive_avg_pool3d: Expected 4D or 5D input"):
+            F.adaptive_avg_pool3d(torch.randn(2, 3, 4), output_size=(2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, "adaptive_avg_pool3d: Expected 4D or 5D input"):
+            F.adaptive_avg_pool3d(torch.randn(2, 3, 4, 5, 6, 7), output_size=(2, 2, 2))
+
     def test_adaptive_pooling_avg_nhwc(self):
         device_list = ["cpu"]
         if TEST_CUDA:
