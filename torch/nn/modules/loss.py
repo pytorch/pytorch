@@ -5,7 +5,9 @@ from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
-from torch.nn.functional import LinearCrossEntropyOptions
+from torch.nn.functional import (
+    LinearCrossEntropyOptions,  # pyrefly: ignore [missing-module-attribute]
+)
 
 from .distance import PairwiseDistance
 from .linear import Linear
@@ -1559,7 +1561,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
-            options=self.options,
+            options=self.options,  # pyrefly: ignore [unexpected-keyword]
         )
 
     def extra_repr(self) -> str:
