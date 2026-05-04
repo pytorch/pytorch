@@ -918,7 +918,7 @@ loop_reindexing_after_fusion: bool = (
 # so that the nodes can fuse. for more details: https://gist.github.com/eellison/6f9f4a7ec10a860150b15b719f9285a9
 loop_index_inversion_in_fusion: bool = True
 
-# If fusing two nodes only save less then score_fusion_memory_threshold memory,
+# If fusing two nodes only save less than score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.
 #
 # This is especially helpful to resolve https://github.com/pytorch/pytorch/issues/133242
@@ -2088,6 +2088,14 @@ class aot_inductor:
     Settings for Ahead-Of-Time Inductor Compilation
     """
 
+    # When True, each kernel in the autotune code allocates fresh tensors,
+    # runs, then immediately dels all tensors. Shared tensors are re-allocated
+    # for each consumer kernel. This prevents OOM from simultaneous live
+    # tensors in star-shaped graphs at the cost of more allocations during
+    # autotuning. When False (default), tensors are shared across kernels
+    # and del'd at their last consumer (faster but higher peak memory).
+    autotune_per_kernel_alloc: bool = False
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -2800,7 +2808,12 @@ class eager_numerics:
 
     # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
     # Triton bundles its own libdevice.10.bc which may use different polynomial
-    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    # approximations than the installed CUDA toolkit, causing ~1 ULP differences
+    # in transcendental functions such as pow and erf.  The erf difference is
+    # particularly visible in explicit GELU kernels
+    # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
+    # can flip the result of a subsequent ceil(log2(...)) and produce a
+    # different uint8 encoded value (see gh-178045).
     use_pytorch_libdevice: bool = False
 
 

@@ -1212,7 +1212,7 @@ def _register_concat_linear_int8_woq_lowering(
         # Some other pass is making some changes that entails
         # adding a node before it's used, but it can only be found when
         # lint is run. stable_topological_sort() is being run before lint,
-        # so that error was not being being discovered.
+        # so that error was not being discovered.
         # We call stable_topological_sort here as a workaround.
         stable_topological_sort(match.graph)
         with match.graph.inserting_before(user_of_scaling_node):

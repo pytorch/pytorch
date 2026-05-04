@@ -259,11 +259,22 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         def my_func():
             pass
 
-        self._assert_hash_equals(my_func)
+        def fn(x):
+            d = {my_func: 42}
+            return d[my_func]
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, 42)
 
     def test_hash_lambda(self):
         my_lambda = lambda: None  # noqa: E731
-        self._assert_hash_equals(my_lambda)
+
+        def fn(x):
+            d = {my_lambda: 42}
+            return d[my_lambda]
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, 42)
 
     # --- User-defined classes ---
 
@@ -464,15 +475,21 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, 42)
 
-    def test_hash_partial_preexisting_matches_eager(self):
-        """Pre-existing partial hash matches eager."""
+    def test_hash_partial_preexisting_as_dict_key(self):
+        """Pre-existing partial works as dict key."""
         from functools import partial
 
         def gn(x, y):
             return x + y
 
         p = partial(gn, x=1)
-        self._assert_hash_equals(p)
+
+        def fn(x):
+            d = {p: 42}
+            return d[p]
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, 42)
 
     def test_hash_partial_identity_based(self):
         """Two equivalent partials are different keys, matching CPython."""

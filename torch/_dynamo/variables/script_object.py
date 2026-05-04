@@ -111,6 +111,22 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        reverse: bool = False,
+    ) -> "VariableTracker":
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def as_proxy(self) -> Any:
         return self.value
 

@@ -72,24 +72,24 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
-class _RawHash:
+class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
     When building a tuple/frozenset of per-item hashes, using bare ints would
     apply long_hash (mod sys.hash_info.modulus), corrupting the values.
-    Wrapping in _RawHash makes tuplehash/frozenset_hash see the original hash.
+    Wrapping in RawHash makes tuplehash/frozenset_hash see the original hash.
     """
 
-    __slots__ = ("_h",)
+    __slots__ = ("h",)
 
     def __init__(self, h: int) -> None:
-        self._h = h
+        self.h = h
 
     def __hash__(self) -> int:
-        return self._h
+        return self.h
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, _RawHash) and self._h == other._h
+        return isinstance(other, RawHash) and self.h == other.h
 
 
 class HashableTracker:

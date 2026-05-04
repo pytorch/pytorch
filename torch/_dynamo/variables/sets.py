@@ -43,6 +43,10 @@ if TYPE_CHECKING:
 # see steps outlined for ConstDictVariable
 
 
+def pyanyset_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), (set, frozenset))
+
+
 class SetVariable(VariableTracker):
     """Represents a Python set during symbolic execution."""
 
@@ -148,6 +152,12 @@ class SetVariable(VariableTracker):
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
+        from torch._dynamo.variables.base import AttributeMutationNew, ValueMutationNew
+
+        if isinstance(
+            kwargs.get("mutation_type"), (ValueMutationNew, AttributeMutationNew)
+        ):
+            kwargs["source"] = None
         return super().clone(**kwargs)
 
     def is_hashable(self) -> bool:
@@ -396,10 +406,9 @@ class SetVariable(VariableTracker):
             return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
-        elif name in ("__and__", "__or__", "__xor__", "__sub__"):
+        elif name in ("__and__", "__xor__", "__sub__"):
             m = {
                 "__and__": "intersection",
-                "__or__": "union",
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
@@ -421,10 +430,9 @@ class SetVariable(VariableTracker):
                 )
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
-        elif name in ("__rand__", "__ror__", "__rxor__", "__rsub__"):
+        elif name in ("__rand__", "__rxor__", "__rsub__"):
             m = {
                 "__rand__": "__and__",
-                "__ror__": "__or__",
                 "__rxor__": "__xor__",
                 "__rsub__": "__sub__",
             }.get(name)
@@ -575,6 +583,32 @@ class SetVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return SetIterator(self.items)
 
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1318-L1338
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        result = self_.call_method(tx, "copy", [], {})
+        if self_ is other_:
+            return result
+        result.items.update(other_.items)  # type: ignore[missing-attribute]
+        return result
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1340-L1350
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        tx.output.side_effects.mutation(self)
+        self.items.update(other.items)  # type: ignore[missing-attribute]
+        return self
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -677,6 +711,13 @@ class OrderedSetVariable(SetVariable):
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
         codegen.extend_output(create_call_function(1, False))
 
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_or_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "union", [other], {})
+
 
 class FrozensetVariable(SetVariable):
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
@@ -751,7 +792,7 @@ class FrozensetVariable(SetVariable):
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # Overrides SetVariable.hash_impl (which raises TypeError for mutable sets).
         # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
-        from .hashable import _RawHash
+        from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
         if self.is_python_constant():
@@ -761,7 +802,7 @@ class FrozensetVariable(SetVariable):
         for item in self.set_items:
             h, fake = generic_hash_impl(tx, item.vt)
             is_fake = is_fake or fake
-            raw_hashes.append(_RawHash(h))
+            raw_hashes.append(RawHash(h))
         return hash(frozenset(raw_hashes)), is_fake
 
     def is_python_equal(self, other: object) -> bool:
