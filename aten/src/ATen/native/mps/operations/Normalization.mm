@@ -98,8 +98,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& save_var) {
   // Flatten 5D to 4D: MPSGraph normalization is significantly slower for rank-5 tensors.
   // Merging spatial dims is safe since BatchNorm reduces over all dims except channel.
+  // For both contiguous and channels_last_3d inputs the D,H stride pair is compatible
+  // with a single merged dim, so reshape() returns a view (channels_last_3d becomes
+  // a channels_last 4D view, handled by the existing 4D channels-last path). Only
+  // genuinely non-contiguous inputs fall back to a copy.
   if (self.dim() == 5) {
-    auto input_4d = self.contiguous().reshape({self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)});
+    auto input_4d = self.reshape({self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)});
     auto output_4d = output.reshape(input_4d.sizes());
     return batch_norm_mps_out(input_4d,
                               weight_opt,
@@ -566,8 +570,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   // Flatten 5D to 4D (see batch_norm_mps_out for rationale).
   if (input.dim() == 5) {
     auto input_4d =
-        input.contiguous().reshape({input.size(0), input.size(1), input.size(2) * input.size(3), input.size(4)});
-    auto grad_out_4d = grad_out.contiguous().reshape(input_4d.sizes());
+        input.reshape({input.size(0), input.size(1), input.size(2) * input.size(3), input.size(4)});
+    auto grad_out_4d = grad_out.reshape(input_4d.sizes());
     auto [gi, gw, gb] = batch_norm_backward_mps(grad_out_4d,
                                                 input_4d,
                                                 weight_opt,
@@ -678,8 +682,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       int channelsDim = 1;
 
       auto inputTensorOriginal = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
-      // Shape is the ORIGINAL NCHW shape
-      auto gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_out), input_shape_readonly);
+      auto gradOutputTensorOriginal = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_out), input_shape);
       MPSGraphTensor* weightTensor = nil;
       MPSGraphTensor* weightTensorCasted = nil;
       if (has_weight) {
@@ -706,11 +709,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       MPSGraphTensor* gradWeightTensor = nil;
       MPSGraphTensor* gradBiasTensor = nil;
       MPSGraphTensor* inputTensor = nil;
+      MPSGraphTensor* gradOutputTensor = nil;
 
-      if (memory_format == at::MemoryFormat::Contiguous)
+      if (memory_format == at::MemoryFormat::Contiguous) {
         inputTensor = inputTensorOriginal;
-      else {
-        // Reshape/transpose the input as needed
+        gradOutputTensor = gradOutputTensorOriginal;
+      } else {
+        // Reshape+transpose NHWC inputs to NCHW for the graph computation.
+        // The bound tensors at the placeholder boundary are pre-permuted to NHWC
+        // logical layout so the placeholder shape matches the in-memory dim order.
         auto N = input_shape[0];
         auto H = input_shape[1];
         auto W = input_shape[2];
@@ -721,6 +728,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                          name:nil];
         inputTensor = [mpsGraph transposeTensor:inputTensor dimension:1 withDimension:2 name:nil];
         inputTensor = [mpsGraph reshapeTensor:inputTensor withShape:@[ N, C, H, W ] name:nil];
+
+        gradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensorOriginal
+                                         withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
+                                              name:nil];
+        gradOutputTensor = [mpsGraph transposeTensor:gradOutputTensor dimension:1 withDimension:2 name:nil];
+        gradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensor withShape:@[ N, C, H, W ] name:nil];
       }
 
       if (train) {
@@ -844,16 +857,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       }
 
       MPSGraphTensor* gradInputTensorFinal = nil;
-
-      if (memory_format == at::MemoryFormat::Contiguous)
+      if (memory_format == at::MemoryFormat::Contiguous) {
         gradInputTensorFinal = gradInputTensor;
-      else {
-        // Reshape/transpose the input as needed
+      } else if (gradInputTensor) {
+        // Reshape+transpose grad_input back to NHWC layout to match the bound
+        // (permuted) grad_input tensor.
         auto N = input_shape[0];
         auto H = input_shape[1];
         auto W = input_shape[2];
         auto C = input_shape[3];
-
         gradInputTensorFinal = [mpsGraph reshapeTensor:gradInputTensor
                                              withShape:@[ N, C, ([NSNumber numberWithInt:[H intValue] * [W intValue]]) ]
                                                   name:nil];
@@ -861,7 +873,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
         gradInputTensorFinal = [mpsGraph reshapeTensor:gradInputTensorFinal withShape:@[ N, H, W, C ] name:nil];
       }
 
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->gradOutputTensor_ = gradOutputTensorOriginal;
       newCachedGraph->inputTensor_ = inputTensorOriginal;
       newCachedGraph->weightTensor_ = weightTensor;
       newCachedGraph->runningMeanTensor_ = runningMeanTensor;
@@ -873,8 +885,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
+    // For channels-last inputs, view the tensor through a permuted NHWC layout
+    // so the binding sees a default-contiguous tensor. Without this, Placeholder's
+    // .view([N,H,W,C]) on a CL-strided tensor with logical shape (N,C,H,W) fails
+    // because PyTorch's view requires row-major stride compatibility.
+    auto bn_input = (memory_format == at::MemoryFormat::ChannelsLast) ? input.permute({0, 2, 3, 1}) : input;
+    auto bn_grad_out =
+        (memory_format == at::MemoryFormat::ChannelsLast) ? grad_out.permute({0, 2, 3, 1}) : grad_out;
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, bn_input, input_shape);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, bn_grad_out, input_shape);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
@@ -892,8 +911,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     }
 
     auto gradInputPlaceholder = Placeholder();
-    if (grad_input_mask[0])
-      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+    if (grad_input_mask[0]) {
+      auto bn_grad_input =
+          (memory_format == at::MemoryFormat::ChannelsLast) ? grad_input.permute({0, 2, 3, 1}) : grad_input;
+      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, bn_grad_input, input_shape);
+    }
     auto gradWeightPlaceholder = Placeholder();
     if (grad_input_mask[1])
       gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);

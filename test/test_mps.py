@@ -2007,6 +2007,53 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(res_cpu, res_mps)
 
+    def test_batch_norm_channels_last_backward(self):
+        # Regression test for the channels_last batch_norm backward path on MPS.
+        # Covers BatchNorm2d with channels_last 4D inputs (issue #156792) and
+        # BatchNorm3d with channels_last_3d 5D inputs (the path exposed by
+        # issue #178492's PR #180335 5D->4D flatten). The backward used to fail
+        # with a view-stride incompatibility for channels-last inputs; this test
+        # locks in the fixed forward+backward against a contiguous CPU reference.
+        cases = [
+            ((2, 4, 6, 7), torch.channels_last, nn.BatchNorm2d),
+            ((2, 4, 3, 4, 5), torch.channels_last_3d, nn.BatchNorm3d),
+        ]
+        for shape, mem_fmt, bn_cls in cases:
+            for training in (True, False):
+                for affine in (True, False):
+                    x_cpu = torch.randn(*shape, requires_grad=True)
+                    x_mps = (x_cpu.detach().clone()
+                             .to('mps')
+                             .contiguous(memory_format=mem_fmt)
+                             .requires_grad_())
+                    self.assertTrue(x_mps.is_contiguous(memory_format=mem_fmt))
+
+                    bn_cpu = bn_cls(shape[1], affine=affine).cpu()
+                    bn_mps = bn_cls(shape[1], affine=affine).to('mps')
+                    bn_mps.load_state_dict(bn_cpu.state_dict())
+                    if not training:
+                        bn_cpu.eval()
+                        bn_mps.eval()
+
+                    out_cpu = bn_cpu(x_cpu)
+                    out_mps = bn_mps(x_mps)
+                    self.assertEqual(out_cpu, out_mps)
+                    self.assertTrue(
+                        out_mps.is_contiguous(memory_format=mem_fmt),
+                        f"{bn_cls.__name__} output should preserve {mem_fmt} "
+                        f"(training={training}, affine={affine})",
+                    )
+
+                    grad_out_cpu = torch.randn_like(out_cpu)
+                    grad_out_mps = grad_out_cpu.to('mps').contiguous(memory_format=mem_fmt)
+                    out_cpu.backward(grad_out_cpu)
+                    out_mps.backward(grad_out_mps)
+
+                    self.assertEqual(x_cpu.grad, x_mps.grad)
+                    if affine:
+                        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad)
+                        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad)
+
     def test_batch_norm_backward_weight_bias_gradients(self):
         # See issue: https://github.com/pytorch/pytorch/issues/156555
         N, C, L = 4, 3, 5
