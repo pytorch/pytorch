@@ -242,7 +242,7 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     return
 
-            # import the model again (from a the copy we made of the original)
+            # import the model again (from the copy we made of the original)
             buffer2 = io.BytesIO(buffer_copy)
             imported = torch.jit.load(buffer2)
 
