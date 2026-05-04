@@ -923,6 +923,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                 )
 
+    def _write_entry_point_postamble(self):
+        """Emit AOTI-specific post-input setup (inputs.clear, kernels ref)."""
+        if V.graph.aot_mode:
+            if not V.graph.is_const_graph:
+                self.prefix.writeline("inputs.clear();")
+            self.prefix.writeline(
+                "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+            )
+
     def write_wrapper_decl(self):
         self._write_entry_point_signature()
         with self.prefix.indent():
@@ -930,12 +939,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self._write_input_unpacking()
             self._write_constants_unpacking()
             self.codegen_inputs()
-            if V.graph.aot_mode:
-                if not V.graph.is_const_graph:
-                    self.prefix.writeline("inputs.clear();")
-                self.prefix.writeline(
-                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
-                )
+            self._write_entry_point_postamble()
 
     def codegen_tensor_dtype_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"int32_t {name}_dtype;")
@@ -1494,15 +1498,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else:
                 result.writeline("} // inductor_entry_impl")
 
-    def generate_end(self, result):
-        """Generates the end of the code block, and any code needed to call it."""
-        if V.graph.aot_mode:
-            if V.graph.is_const_graph:
-                result.writeline(f"}} // {self.aoti_model_class_name}::_const_run_impl")
-            else:
-                result.writeline("} // namespace torch::aot_inductor\n\n\n")
-            return
+    def _generate_end_aoti(self, result):
+        """Close AOTI namespace (no-op for const_graph, which only has _const_run_impl)."""
+        if V.graph.is_const_graph:
+            result.writeline(f"}} // {self.aoti_model_class_name}::_const_run_impl")
+        else:
+            result.writeline("} // namespace torch::aot_inductor\n\n\n")
 
+    def _generate_end_jit(self, result):
+        """Close JIT C++ block and emit Python wrapper for loading/calling."""
         if config.cpp_wrapper_build_separate:
             # Close the wrapper code block, then write any kernel definitions.
             result.splice('"""\n)')
@@ -1593,6 +1597,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             call = _wrap_func(inductor_entry)
             """
         )
+
+    def generate_end(self, result):
+        """Generates the end of the code block, and any code needed to call it."""
+        if V.graph.aot_mode:
+            self._generate_end_aoti(result)
+        else:
+            self._generate_end_jit(result)
 
     @staticmethod
     def get_c_shim_func_name(kernel: str, device: str) -> str:
@@ -2779,6 +2790,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return
 
+        self._generate_fallback_kernel_jit(
+            buf_name,
+            python_kernel_name,
+            get_args,
+            op_overload,
+            raw_args,
+            output_args,
+            outputs,
+        )
+
+    def _generate_fallback_kernel_jit(
+        self,
+        buf_name,
+        python_kernel_name,
+        get_args,
+        op_overload,
+        raw_args,
+        output_args,
+        outputs,
+    ):
+        """Emit JIT-mode fallback kernel code (no-Python dispatcher or Python callback)."""
         assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
         for output in output_args:
             assert output is None or isinstance(output, str), (
