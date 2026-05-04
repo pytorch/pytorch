@@ -438,7 +438,7 @@ def _load_packed_weight(
     for attr_name in state_dict:
         if attr_name.startswith("_packed_weight") and isinstance(
             state_dict[attr_name], torch._C.ScriptObject
-        ):  # type: ignore[attr-defined] # noqa: B950
+        ):  # type: ignore[attr-defined]
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
@@ -534,9 +534,7 @@ def fold_weight(
     quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
 
     if keep_original_weights:
-        setattr(  # noqa: B010
-            quantized_model, ORIGINAL_WEIGHTS_LOOKUP, original_weights_lookup
-        )
+        setattr(quantized_model, ORIGINAL_WEIGHTS_LOOKUP, original_weights_lookup)
 
     return quantized_model
 

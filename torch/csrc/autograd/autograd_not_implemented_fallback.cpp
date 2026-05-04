@@ -657,13 +657,13 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
          "which does not have a derivative implemented is forbidden.");
     auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
 
-    const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
+    const auto erroring_rev_view_func =
+        [op_name = op_name](const at::Tensor&) -> at::Tensor {
       TORCH_CHECK(
           false,
           "Accessing the reverse view for ",
           op_name,
           " which does not have a derivative implemented is forbidden.");
-      return at::Tensor();
     };
 
     if (aliased_output_iv.isTensorList()) {

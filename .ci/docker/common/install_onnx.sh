@@ -30,4 +30,5 @@ conda_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
 conda_run pip uninstall -y torch
+conda_run pip cache purge
 rm "${IMPORT_SCRIPT_FILENAME}" || true

@@ -29,7 +29,8 @@ bool check_flash_attention_hardware_support(
       c10::array_of<sycl::ext::oneapi::experimental::architecture>(
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
-          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21);
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31);
   auto* device_prop = at::xpu::getCurrentDeviceProperties();
   auto device_architecture = device_prop->architecture;
 
@@ -39,7 +40,7 @@ bool check_flash_attention_hardware_support(
           device_architecture) == supported_architectures.end()) {
     if (debug) {
       TORCH_WARN(
-          "XPU device architecture does not support flash attention. Supported architectures are: intel_gpu_pvc, intel_gpu_pvc_vg, intel_gpu_bmg_g21.");
+          "XPU device architecture does not support flash attention. Supported architectures are: intel_gpu_pvc, intel_gpu_pvc_vg, intel_gpu_bmg_g21, intel_gpu_bmg_g31.");
     }
     return false;
   }
@@ -172,7 +173,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_tensor_shapes,
           check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
           check_nonzero_sequence_lengths_dense,
-          check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
+          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
           check_flash_causal_non_square_seqlens,
           check_flash_attention_datatype,
           check_flash_attention_head_dim_size,

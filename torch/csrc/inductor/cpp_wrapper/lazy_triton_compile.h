@@ -1,20 +1,25 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/cpp_wrapper/common.h>
+#if defined(USE_XPU)
+#include <torch/csrc/inductor/cpp_wrapper/device_internal/xpu.h>
+#else
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
+#endif
 
 struct LazyKernelCompileResult {
   std::string cubin_path;
   std::string mangled_name;
   int num_warps;
   int shared_mem;
-  int xblock;
-  int yblock;
-  int zblock;
-  int r0block;
+  std::vector<int> xblocks;
+  std::vector<int> yblocks;
+  std::vector<int> zblocks;
+  std::vector<int> r0blocks;
   int rsplit;
   int rsplit_size;
   int config_index;
@@ -92,7 +97,19 @@ static inline int getOptionalIntAttr(
     int sentinel = -1) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return (val.get() != Py_None) ? _THPUtils_unpackInt(val) : sentinel;
+  return (!Py_IsNone(val.get())) ? _THPUtils_unpackInt(val) : sentinel;
+}
+
+static inline std::vector<int> getIntListAttr(PyObject* obj, const char* attr) {
+  RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+  AOTI_TORCH_CHECK(val && PyList_Check(val.get()), "Expected list attribute");
+  Py_ssize_t size = PyList_Size(val);
+  std::vector<int> result;
+  result.reserve(size);
+  for (Py_ssize_t i = 0; i < size; i++) {
+    result.push_back(_THPUtils_unpackInt(PyList_GetItem(val, i)));
+  }
+  return result;
 }
 
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
@@ -101,10 +118,10 @@ static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
   compile_result.mangled_name = getStringAttr(result, "mangled_name");
   compile_result.num_warps = getIntAttr(result, "num_warps");
   compile_result.shared_mem = getIntAttr(result, "shared_mem");
-  compile_result.xblock = getIntAttr(result, "xblock");
-  compile_result.yblock = getIntAttr(result, "yblock");
-  compile_result.zblock = getIntAttr(result, "zblock");
-  compile_result.r0block = getIntAttr(result, "r0block");
+  compile_result.xblocks = getIntListAttr(result, "xblocks");
+  compile_result.yblocks = getIntListAttr(result, "yblocks");
+  compile_result.zblocks = getIntListAttr(result, "zblocks");
+  compile_result.r0blocks = getIntListAttr(result, "r0blocks");
   compile_result.rsplit = getIntAttr(result, "rsplit");
   compile_result.rsplit_size = getIntAttr(result, "rsplit_size");
   compile_result.config_index = getOptionalIntAttr(result, "config_index");
@@ -144,7 +161,7 @@ template <typename... Args>
 static inline LazyKernelCompileResult runTritonKernelWithAutotune(
     PyObject* pending_kernels,
     const std::string& kernel_name,
-    cudaStream_t stream,
+    void* stream,
     const Args&... kernel_args) {
   py::gil_scoped_acquire_simple acquire;
 
@@ -157,7 +174,11 @@ static inline LazyKernelCompileResult runTritonKernelWithAutotune(
     AOTI_TORCH_CHECK(py_arg, "Failed to convert argument");
     PyList_SetItem(py_args_list, idx++, py_arg);
   };
-  (add_arg(convertArgToPython(kernel_args)), ...);
+  // Use array pack-expansion instead of a fold expression to avoid
+  // hitting the compiler's expression-nesting limit when there are
+  // hundreds of kernel arguments (e.g. combo kernels).
+  int dummy[] = {0, (add_arg(convertArgToPython(kernel_args)), 0)...};
+  (void)dummy;
 
   RAIIPyObject call_args = PyTuple_Pack(
       4,

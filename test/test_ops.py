@@ -481,7 +481,7 @@ class TestCommon(TestCase):
             and dtype == torch.float64
             and ("cuda" in device or "xpu" in device)
             or "cpu" in device
-        ):  # noqa: E121
+        ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double

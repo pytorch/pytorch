@@ -184,7 +184,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileReader",
             "PyTorchFileWriter",
             "qscheme",
-            "read_vitals",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -211,7 +210,6 @@ class TestPublicBindings(TestCase):
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
-            "set_vital",
             "Size",
             "StaticModule",
             "Stream",
@@ -232,7 +230,6 @@ class TestPublicBindings(TestCase):
             "Value",
             "set_autocast_gpu_dtype",
             "get_autocast_gpu_dtype",
-            "vitals_enabled",
             "wait",
             "Tag",
             "set_autocast_xla_enabled",
@@ -415,9 +412,10 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist:
-                # make sure mod is actually private
-                if not any(t.startswith("_") for t in mod.split(".")):
+            if mod in private_allowlist or (
+                mod.startswith("torch._native.ops.") and "triton" in mod
+            ):
+                if self._is_mod_public(mod):
                     raise AssertionError(
                         f"Expected private module name to include '_' segments: {mod}"
                     )
