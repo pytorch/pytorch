@@ -6854,6 +6854,11 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
                                                                       allow_retain_graph=True)) for reduction in reductions],
         *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=3,
                                                                       allow_retain_graph=True)) for reduction in reductions],
+        *[dict(weight="<to be initialized>", reduction=reduction,
+               options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True))
+          for reduction in reductions],
+        dict(ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
+        dict(weight="<to be initialized>", ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
     ]
     if dtype in {torch.float16, torch.bfloat16}:
         kwargs_list.extend([
