@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import (
@@ -13,6 +14,7 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
+    repro_run,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -133,6 +135,31 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         save_graph_repro(buf, gm, args, "inductor_accuracy")
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
+
+    def test_copy_mod_when_check_accuracy(self):
+        device = "cuda"
+
+        class Repro(torch.nn.Module):
+            def forward(self, arg0, arg1, arg2):
+                _foreach_add = torch.ops.aten._foreach_add.Scalar([arg0, arg1, arg2], 1)
+                getitem = _foreach_add[0]
+                getitem_1 = _foreach_add[1]
+                getitem_2 = _foreach_add[2]
+                copy_0 = torch.ops.aten.copy_.default(arg0, getitem)  # noqa: F841
+                copy_1 = torch.ops.aten.copy_.default(arg1, getitem_1)  # noqa: F841
+                copy_2 = torch.ops.aten.copy_.default(arg2, getitem_2)  # noqa: F841
+                return ()
+
+        def load_args(reader):
+            reader.args = [
+                torch.rand((), dtype=torch.float32, device=device) for _ in range(3)
+            ]
+
+        options = SimpleNamespace(
+            command="run", accuracy="accuracy", save_dir=None, tracing_mode="real"
+        )
+        mod = Repro()
+        repro_run(options, mod, load_args)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_dump_generator(self):

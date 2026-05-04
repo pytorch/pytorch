@@ -1323,7 +1323,7 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
     from torch.cuda import synchronize
 
     compile_args = _get_compile_args(mod, args)
-    compiled = compile_fx_inner(mod, compile_args)
+    compiled = compile_fx_inner(copy.deepcopy(mod), compile_args)
     assert not isinstance(compiled, str)
 
     if options.accuracy != "":
