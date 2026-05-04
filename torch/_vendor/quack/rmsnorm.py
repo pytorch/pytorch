@@ -316,13 +316,6 @@ class RMSNorm(ReductionBase):
             copy(tXrO, tXgO)
 
 
-@torch.library.custom_op(
-    "torch_vendor_quack::_rmsnorm_fwd",
-    mutates_args=("out", "rstd", "mean", "residual_out"),
-    device_types="cuda",
-    # We need to specify the schema manually since we're mutating an optional tensor
-    schema="(Tensor x, Tensor? weight, Tensor(a2!) out, Tensor? bias, Tensor(a4!)? rstd, Tensor(a5!)? mean, Tensor? residual, Tensor(a7!)? residual_out, float eps=1e-6, bool is_layernorm=False) -> ()",
-)
 def _rmsnorm_fwd(
     x: Tensor,
     weight: Optional[Tensor],
@@ -371,58 +364,6 @@ def _rmsnorm_fwd(
         is_layernorm,
         per_head,
     )(x, weight, bias, residual, out, residual_out, rstd, mean, eps)
-
-
-@_rmsnorm_fwd.register_fake
-def _rmsnorm_fwd_fake(
-    x: Tensor,
-    weight: Optional[Tensor],
-    out: Tensor,
-    bias: Optional[Tensor] = None,
-    rstd: Optional[Tensor] = None,
-    mean: Optional[Tensor] = None,
-    residual: Optional[Tensor] = None,
-    residual_out: Optional[Tensor] = None,
-    eps: float = 1e-6,
-    is_layernorm: bool = False,
-) -> None:
-    # See softmax.py _softmax_fwd_fake for why register_fake is needed.
-    from .cache_utils import COMPILE_ONLY
-
-    if COMPILE_ONLY and not isinstance(x.size(-1), torch.SymInt):
-        N = x.size(-1)
-        per_head = (weight is not None and weight.dim() == 2) or (
-            bias is not None and bias.dim() == 2
-        )
-        dtype, out_dtype, weight_dtype, bias_dtype, res_dtype, res_out_dtype = [
-            torch2cute_dtype_map[t.dtype] if t is not None else None
-            for t in [x, out, weight, bias, residual, residual_out]
-        ]
-        _compile_rmsnorm_fwd(
-            dtype,
-            out_dtype,
-            res_dtype,
-            weight_dtype,
-            bias_dtype,
-            res_out_dtype,
-            N,
-            rstd is not None,
-            mean is not None,
-            is_layernorm,
-            per_head,
-        )
-        _compile_rmsnorm_bwd(
-            N,
-            dtype,
-            dtype,
-            dtype,
-            weight_dtype,
-            bias is not None,
-            res_dtype,
-            res_out_dtype,
-            weight is not None,
-            per_head,
-        )
 
 
 @jit_cache
@@ -920,13 +861,6 @@ def _get_sm_count(N: int, device: torch.device) -> int:
     return sm_count
 
 
-@torch.library.custom_op(
-    "torch_vendor_quack::_rmsnorm_bwd",
-    mutates_args={"dx", "dw_partial", "db_partial", "dresidual"},
-    device_types="cuda",
-    # We need to specify the schema manually since we're mutating an optional tensor
-    schema="(Tensor x, Tensor? weight, Tensor dout, Tensor rstd, Tensor(a4!) dx, Tensor(a5!)? dw_partial, Tensor(a6!)? db_partial, Tensor? dresidual_out, Tensor(a8!)? dresidual, int? sm_count) -> ()",
-)
 def _rmsnorm_bwd(
     x: Tensor,
     weight: Optional[Tensor],
@@ -990,45 +924,6 @@ def _rmsnorm_bwd(
         dw_partial is not None,
         per_head,
     )(x, weight, dout, dresidual_out, rstd, dx, dw_partial, dresidual, db_partial, sm_count)
-
-
-@_rmsnorm_bwd.register_fake
-def _rmsnorm_bwd_fake(
-    x: Tensor,
-    weight: Optional[Tensor],
-    dout: Tensor,
-    rstd: Tensor,
-    dx: Tensor,
-    dw_partial: Optional[Tensor],
-    db_partial: Optional[Tensor] = None,
-    dresidual_out: Optional[Tensor] = None,
-    dresidual: Optional[Tensor] = None,
-    sm_count: Optional[int] = None,
-) -> None:
-    # See softmax.py _softmax_fwd_fake for why register_fake is needed.
-    from .cache_utils import COMPILE_ONLY
-
-    if COMPILE_ONLY and not isinstance(x.size(-1), torch.SymInt):
-        N = x.size(-1)
-        per_head = x.dim() == 3
-        if dw_partial is None and db_partial is None and sm_count is None:
-            return
-        dtype, dout_dtype, dx_dtype, weight_dtype, dres_dtype, dres_out_dtype = [
-            torch2cute_dtype_map[t.dtype] if t is not None else None
-            for t in [x, dout, dx, weight, dresidual, dresidual_out]
-        ]
-        _compile_rmsnorm_bwd(
-            N,
-            dtype,
-            dout_dtype,
-            dx_dtype,
-            weight_dtype,
-            db_partial is not None,
-            dres_dtype,
-            dres_out_dtype,
-            dw_partial is not None,
-            per_head,
-        )
 
 
 @jit_cache
