@@ -33,11 +33,14 @@ import enum
 from collections.abc import Iterator
 from typing import Any, ClassVar, TypeAlias
 
+import torch
+
 
 __all__ = [
     "IntSpecType",
     "IntSpec",
     "TensorSpec",
+    "ObjectSpec",
     "ParamsSpec",
     "ShapesSpec",
     "lookup_spec_from_dynamo_source",
@@ -500,18 +503,133 @@ class ShapesSpec:
 
 
 def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Only supports LocalSource with is_input=True (direct function args).
-    Returns TensorSpec, IntSpec, or None.
+    Returns the leaf ``IntSpec`` / ``TensorSpec`` at the corresponding
+    path, or ``None`` if the source isn't covered. Supported source
+    kinds:
+
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec.field(member, ...)``.
+
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
-    from torch._dynamo.source import LocalSource
+    from torch._dynamo.source import AttrSource, LocalSource
 
     if shapes_spec is None or shapes_spec.params is None:
         return None
-    # Only top-level function input args are supported for now.
-    #  Module attributes (self.x), globals, and values computed
-    #  during execution are not covered by shapes_spe yet.
-    if not isinstance(source, LocalSource) or not source.is_input:
+
+    # Walk source.base chain to its root, collecting path entries.
+    path: list[tuple[str, Any]] = []
+    cur = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, AttrSource):
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
+    if not cur.is_input:
         return None
-    return shapes_spec.params._named_args.get(source.local_name)
+    path.reverse()
+
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec.params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
+            return None
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    return spec
+
+
+class ObjectSpec:
+    """Spec for any Python object's attributes.
+
+    Models attribute access on a Python object (e.g., an ``nn.Module``'s
+    parameters / buffers / submodules; ``self`` inside an instance
+    method). Each ``.field`` entry corresponds to a ``GetAttrKey`` on
+    the pytree keypath, matching ``AttrSource`` in the dynamo builder.
+
+    Construct fluently or via dict-form::
+
+        ObjectSpec().field("weight", TensorSpec([IntSpec.backed("h")]))
+        ObjectSpec({"weight": TensorSpec([IntSpec.backed("h")])})
+
+    Recursion is allowed: a value may be another ``ObjectSpec`` or a
+    leaf (``IntSpec`` / ``TensorSpec``).
+    """
+
+    def __init__(self, fields: dict[str, Any] | None = None) -> None:
+        self._fields: dict[str, Any] = dict(fields or {})
+
+    def field(self, name: str, spec: Any) -> "ObjectSpec":
+        """Set the spec at attribute ``name``; returns ``self``."""
+        self._fields[name] = spec
+        return self
+
+    def __getitem__(self, name: str) -> Any:
+        return self._fields[name]
+
+    def __setitem__(self, name: str, spec: Any) -> None:
+        self._fields[name] = spec
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def items(self) -> Any:
+        return self._fields.items()
+
+    def __repr__(self) -> str:
+        entries = ", ".join(f".{name}: {spec!r}" for name, spec in self._fields.items())
+        return f"ObjectSpec({{{entries}}})"
+
+    @classmethod
+    def match(cls, obj: Any) -> Any:
+        """Auto-derive a default spec scaffold mirroring ``obj``'s structure.
+
+        Mapping per input kind:
+
+        - ``torch.Tensor``         → ``TensorSpec(obj.ndim)``
+        - ``int`` (not ``bool``)   → ``IntSpec.static()``
+        - ``dict``                 → native ``dict`` of ``match(v)`` per entry
+        - ``list`` / ``tuple``     → native container of ``match(v)`` per entry
+        - ``torch.nn.Module``      → ``ObjectSpec`` with ``.field`` per
+                                     child module / parameter / buffer
+        - other                    → ``TypeError``
+        """
+        if isinstance(obj, torch.Tensor):
+            return TensorSpec(obj.ndim)
+        if isinstance(obj, bool):
+            raise TypeError(f"ObjectSpec.match cannot derive a spec for bool {obj!r}")
+        if isinstance(obj, int):
+            return IntSpec.static()
+        if isinstance(obj, dict):
+            return {k: cls.match(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(cls.match(v) for v in obj)
+        if isinstance(obj, torch.nn.Module):
+            os = cls()
+            for name, child in obj.named_children():
+                os.field(name, cls.match(child))
+            for name, p in obj.named_parameters(recurse=False):
+                os.field(name, cls.match(p))
+            for name, b in obj.named_buffers(recurse=False):
+                os.field(name, cls.match(b))
+            return os
+        raise TypeError(
+            f"ObjectSpec.match cannot derive a spec for {type(obj).__name__}"
+        )
+
+    # No ``__eq__`` / ``__hash__``: same call as :class:`IntSpec` /
+    # :class:`TensorSpec`.

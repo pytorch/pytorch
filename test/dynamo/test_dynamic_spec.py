@@ -10,6 +10,7 @@ from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dyna
 from torch._dynamo.dynamic_spec import (
     IntSpec,
     IntSpecType,
+    ObjectSpec,
     ParamsSpec,
     ShapesSpec,
     TensorSpec,
@@ -939,9 +940,7 @@ class TestParameterSpecCompile(TestCase):
             fn,
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg(
-                    "p", TensorSpec([IntSpec.backed("h"), None])
-                )
+                params=ParamsSpec().arg("p", TensorSpec([IntSpec.backed("h"), None]))
             ),
         )
 
@@ -952,6 +951,357 @@ class TestParameterSpecCompile(TestCase):
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
         self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+
+
+class TestObjectSpec(TestCase):
+    """Construction, dict-like access, and recursion."""
+
+    def test_empty(self):
+        os = ObjectSpec()
+        self.assertEqual(len(os), 0)
+
+    def test_dict_construction(self):
+        spec = IntSpec.backed("batch")
+        os = ObjectSpec({"x": spec, "n": IntSpec.static()})
+        self.assertEqual(len(os), 2)
+        self.assertIn("x", os)
+        self.assertIs(os["x"], spec)
+
+    def test_fluent_field(self):
+        spec_x = TensorSpec([IntSpec.backed("batch")])
+        spec_n = IntSpec.unbacked("n")
+        os = ObjectSpec().field("x", spec_x).field("n", spec_n)
+        self.assertEqual(len(os), 2)
+        self.assertIs(os["x"], spec_x)
+        self.assertIs(os["n"], spec_n)
+
+    def test_setitem(self):
+        os = ObjectSpec()
+        spec = IntSpec.backed("batch")
+        os["x"] = spec
+        self.assertIs(os["x"], spec)
+
+    def test_iter_and_items(self):
+        spec_x = IntSpec.backed("batch")
+        spec_n = IntSpec.static()
+        os = ObjectSpec({"x": spec_x, "n": spec_n})
+        self.assertEqual(list(os), ["x", "n"])
+        self.assertEqual(list(os.items()), [("x", spec_x), ("n", spec_n)])
+
+    def test_repr(self):
+        # Single entry — pin a name so the repr is deterministic
+        # (anonymous IntSpec auto-generates a process-dependent name).
+        os = ObjectSpec({"x": IntSpec.static("x")})
+        self.assertEqual(
+            repr(os),
+            "ObjectSpec({.x: IntSpec(name='x', type=STATIC)})",
+        )
+
+    def test_repr_multiple_entries(self):
+        # Multiple entries preserve insertion order.
+        os = ObjectSpec({"x": IntSpec.static("x"), "n": IntSpec.backed("n")})
+        self.assertEqual(
+            repr(os),
+            "ObjectSpec({"
+            ".x: IntSpec(name='x', type=STATIC), "
+            ".n: IntSpec(name='n', type=BACKED)"
+            "})",
+        )
+
+    def test_repr_nested_objectspec(self):
+        inner = ObjectSpec().field("weight", TensorSpec([IntSpec.backed("h")]))
+        outer = ObjectSpec().field("model", inner).field("x", IntSpec.static("x"))
+        self.assertEqual(
+            repr(outer),
+            "ObjectSpec({"
+            ".model: ObjectSpec({"
+            ".weight: TensorSpec([IntSpec(name='h', type=BACKED)])}), "
+            ".x: IntSpec(name='x', type=STATIC)"
+            "})",
+        )
+
+    def test_recursive_nesting(self):
+        # Recursion in the data class — nested ``ObjectSpec`` is accepted.
+        # Initial integration only consumes top-level entries; nested
+        # entries remain inert at compile time but the class itself
+        # carries them through.
+        inner = ObjectSpec({"weight": TensorSpec([IntSpec.backed("h")])})
+        outer = ObjectSpec({"model": inner, "n": IntSpec.backed("n")})
+        self.assertIs(outer["model"], inner)
+
+
+class TestObjectSpecLookup(TestCase):
+    """``lookup_spec_from_dynamo_source`` walks a dynamo ``Source`` chain
+    against an ``ObjectSpec`` and returns the leaf at that path."""
+
+    def _local(self, name):
+        from torch._dynamo.source import LocalSource
+
+        return LocalSource(name, is_input=True)
+
+    def _attr(self, base, member):
+        from torch._dynamo.source import AttrSource
+
+        return AttrSource(base, member)
+
+    def test_attr_source_descends_into_objectspec(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        leaf = TensorSpec([IntSpec.backed("h")])
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("model", ObjectSpec().field("weight", leaf))
+        )
+        result = lookup_spec_from_dynamo_source(
+            self._attr(self._local("model"), "weight"), shapes_spec
+        )
+        self.assertIs(result, leaf)
+
+    def test_nested_objectspec_walk(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        leaf = TensorSpec([IntSpec.backed("h")])
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg(
+                "model",
+                ObjectSpec().field("inner", ObjectSpec().field("weight", leaf)),
+            )
+        )
+        # model.inner.weight
+        src = self._attr(self._attr(self._local("model"), "inner"), "weight")
+        self.assertIs(lookup_spec_from_dynamo_source(src, shapes_spec), leaf)
+
+    def test_missing_attr_returns_none(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg(
+                "model", ObjectSpec().field("weight", TensorSpec(2))
+            )
+        )
+        # model.bias is not in the spec → None
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._attr(self._local("model"), "bias"), shapes_spec
+            )
+        )
+
+    def test_attr_against_non_objectspec_returns_none(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        # Top-level spec is a TensorSpec but source asks for an attr — mismatch.
+        shapes_spec = ShapesSpec(params=ParamsSpec().arg("x", TensorSpec(2)))
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._attr(self._local("x"), "weight"), shapes_spec
+            )
+        )
+
+    def test_local_source_root_still_works(self):
+        # v0 behavior preserved: bare LocalSource → top-level spec.
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        spec_obj = ObjectSpec().field("weight", TensorSpec(2))
+        shapes_spec = ShapesSpec(params=ParamsSpec().arg("model", spec_obj))
+        self.assertIs(
+            lookup_spec_from_dynamo_source(self._local("model"), shapes_spec),
+            spec_obj,
+        )
+
+
+@skipIfTorchDynamo()
+class TestObjectSpecCompile(TestCase):
+    """End-to-end: ``shapes_spec`` routes through ``ObjectSpec`` so a
+    ``TensorSpec`` reaches the dynamo builder for an attribute-accessed
+    tensor (``obj.w`` where ``obj`` is a function arg)."""
+
+    def test_attr_tensor_dim_backed(self):
+        # Plain container — avoids nn.Module wrapping subtleties.
+        class Container:
+            def __init__(self, w):
+                self.w = w
+
+        def fn(obj):
+            return obj.w + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec().arg(
+                    "obj",
+                    ObjectSpec().field("w", TensorSpec([IntSpec.backed("h"), None])),
+                )
+            ),
+        )
+
+        compiled(Container(torch.randn(4, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Different dim 0 size — backed absorbs it, no recompile.
+        compiled(Container(torch.randn(8, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Captured weight placeholder has a backed SymInt at dim 0.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+
+
+class TestObjectSpecMatch(TestCase):
+    """``ObjectSpec.match(obj)`` auto-derives a default spec scaffold
+    matching ``obj``'s structure."""
+
+    def test_match_tensor(self):
+        x = torch.randn(2, 3, 4)
+        spec = ObjectSpec.match(x)
+        self.assertIsInstance(spec, TensorSpec)
+        self.assertEqual(spec._dim, 3)
+        # All dims default-policy.
+        for i in range(3):
+            self.assertIsNone(spec[i])
+
+    def test_match_int(self):
+        spec = ObjectSpec.match(5)
+        self.assertIsInstance(spec, IntSpec)
+        self.assertIs(spec._type, IntSpecType.STATIC)
+
+    def test_match_bool_rejected(self):
+        with self.assertRaisesRegex(TypeError, "bool"):
+            ObjectSpec.match(True)
+
+    def test_match_dict(self):
+        result = ObjectSpec.match({"x": torch.randn(2, 3), "n": 4})
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["x"], TensorSpec)
+        self.assertEqual(result["x"]._dim, 2)
+        self.assertIsInstance(result["n"], IntSpec)
+
+    def test_match_list_and_tuple_preserve_type(self):
+        as_list = ObjectSpec.match([torch.randn(2), torch.randn(3, 4)])
+        self.assertIsInstance(as_list, list)
+        self.assertEqual(as_list[0]._dim, 1)
+        self.assertEqual(as_list[1]._dim, 2)
+
+        as_tuple = ObjectSpec.match((torch.randn(2),))
+        self.assertIsInstance(as_tuple, tuple)
+        self.assertEqual(as_tuple[0]._dim, 1)
+
+    def test_match_nn_module(self):
+        # Single-level module: parameters become attr-keyed TensorSpec
+        # entries; the result mirrors the module's attribute layout.
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3))
+                self.bias = torch.nn.Parameter(torch.randn(4))
+
+        spec = ObjectSpec.match(Linear())
+        self.assertIsInstance(spec, ObjectSpec)
+        self.assertIn("weight", spec)
+        self.assertIn("bias", spec)
+        self.assertEqual(spec["weight"]._dim, 2)
+        self.assertEqual(spec["bias"]._dim, 1)
+
+    def test_match_nested_nn_module(self):
+        # Nested module: child modules nest as ObjectSpec under .attr;
+        # parameters of the outer module appear alongside.
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3))
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+                self.bias = torch.nn.Parameter(torch.randn(4))
+
+        spec = ObjectSpec.match(Outer())
+        self.assertIsInstance(spec["inner"], ObjectSpec)
+        self.assertIsInstance(spec["inner"]["weight"], TensorSpec)
+        self.assertIsInstance(spec["bias"], TensorSpec)
+
+    def test_match_nn_module_with_buffer(self):
+        class WithBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(2))
+                self.register_buffer("running_mean", torch.zeros(2))
+
+        spec = ObjectSpec.match(WithBuffer())
+        self.assertIn("weight", spec)
+        self.assertIn("running_mean", spec)
+        self.assertEqual(spec["running_mean"]._dim, 1)
+
+    def test_match_unknown_type_rejected(self):
+        with self.assertRaisesRegex(TypeError, "cannot derive a spec for"):
+            ObjectSpec.match("not a spec source")
+
+    def test_match_tensor_repr(self):
+        spec = ObjectSpec.match(torch.randn(2, 3))
+        self.assertEqual(repr(spec), "TensorSpec([None, None])")
+
+    def test_match_int_repr(self):
+        # ``match`` produces an anonymous ``IntSpec.static()`` whose
+        # auto-generated ``_name`` is process-dependent; check structure
+        # instead of an exact repr.
+        spec = ObjectSpec.match(5)
+        self.assertIsInstance(spec, IntSpec)
+        self.assertIs(spec._type, IntSpecType.STATIC)
+
+    def test_match_dict_repr(self):
+        # Native dict carries through; structural check on the leaves.
+        result = ObjectSpec.match({"x": torch.randn(2), "n": 4})
+        self.assertIsInstance(result, dict)
+        self.assertEqual(repr(result["x"]), "TensorSpec([None])")
+        self.assertIsInstance(result["n"], IntSpec)
+        self.assertIs(result["n"]._type, IntSpecType.STATIC)
+
+    def test_match_list_repr(self):
+        result = ObjectSpec.match([torch.randn(2), torch.randn(3, 4)])
+        self.assertEqual(
+            repr(result),
+            "[TensorSpec([None]), TensorSpec([None, None])]",
+        )
+
+    def test_match_nn_module_repr(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3))
+                self.bias = torch.nn.Parameter(torch.randn(4))
+
+        spec = ObjectSpec.match(Linear())
+        self.assertEqual(
+            repr(spec),
+            "ObjectSpec({"
+            ".weight: TensorSpec([None, None]), "
+            ".bias: TensorSpec([None])"
+            "})",
+        )
+
+    def test_match_nested_nn_module_repr(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3))
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+                self.bias = torch.nn.Parameter(torch.randn(4))
+
+        spec = ObjectSpec.match(Outer())
+        self.assertEqual(
+            repr(spec),
+            "ObjectSpec({"
+            ".inner: ObjectSpec({"
+            ".weight: TensorSpec([None, None])}), "
+            ".bias: TensorSpec([None])"
+            "})",
+        )
 
 
 if __name__ == "__main__":
