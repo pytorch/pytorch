@@ -1,0 +1,404 @@
+--- a/gemm_interface.py
++++ b/gemm_interface.py
+@@ -529,14 +529,6 @@
+     return out
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_out",
+-    mutates_args=("out",),
+-    device_types="cuda",
+-    # We have to split out alpha and alpha_tensor since torch.library requires
+-    # each argument to have a fixed type
+-    # schema="(Tensor A, Tensor B, Tensor(a2!) out, Tensor? bias, float alpha=1.0, Tensor? alpha_tensor=None, bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_out(
+     # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (M, total_K) if varlen_k or (whatever, K) if gather_A with varlen_m or (M, whatever) if gather_A with varlen_k
+     A: Tensor,
+@@ -736,14 +728,6 @@
+     return out
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_add_out",
+-    mutates_args=("out",),
+-    device_types="cuda",
+-    # We have to split out alpha and alpha_tensor since torch.library requires
+-    # each argument to have a fixed type
+-    # schema="(Tensor A, Tensor B, Tensor C, Tensor(a3!) out, float alpha=1.0, float beta=1.0, Tensor? alpha_tensor=None, Tensor? beta_tensor=None, Tensor? cu_seqlens_m=None, bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_add_out(
+     # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (M, total_K) if varlen_k or (whatever, K) if gather_A with varlen_m or (M, whatever) if gather_A with varlen_k
+     A: Tensor,
+@@ -924,14 +908,6 @@
+     )
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_add_inplace",
+-    mutates_args=("out",),
+-    device_types="cuda",
+-    # We have to split out alpha and alpha_tensor since torch.library requires
+-    # each argument to have a fixed type
+-    # schema="(Tensor A, Tensor B, Tensor(a2!) out, float alpha=1.0, float beta=1.0, Tensor? alpha_tensor=None, Tensor? beta_tensor=None, Tensor? cu_seqlens_m=None, bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_add_inplace_op(
+     # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (M, total_K) if varlen_k or (whatever, K) if gather_A with varlen_m or (M, whatever) if gather_A with varlen_k
+     A: Tensor,
+@@ -1050,12 +1026,6 @@
+ gemm_gated = gemm_act
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_act_out",
+-    mutates_args=("preact_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor(a2!)? preact_out, Tensor(a3!) postact_out, Tensor? C=None, Tensor? bias=None, str? activation=None, Tensor? cu_seqlens_m=None, Tensor? A_idx=None, bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_act_out(
+     A: Tensor,  # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (whatever, K) if gather_A with varlen_m
+     B: Tensor,  # (K, N) or (L, K, N)
+@@ -1198,12 +1168,6 @@
+ gemm_dgated = gemm_dact
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_dact_out",
+-    mutates_args=("dx_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor PreAct, Tensor(a3!) dx_out, Tensor(a4!) postact_out, str? activation=None, Tensor? cu_seqlens_m=None, Tensor? A_idx=None, bool dynamic_scheduler=True, bool tuned=True) -> ()",
+-)
+ def gemm_dact_out(
+     A: Tensor,  # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (whatever, K) if gather_A with varlen_m
+     B: Tensor,  # (K, N) or (L, K, N)
+@@ -1279,13 +1243,6 @@
+     return configs[sm]
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_symmetric_out",
+-    mutates_args=("out",),
+-    device_types="cuda",
+-    # alpha/beta split into float + Tensor pair because torch.library requires
+-    # each schema arg to have a fixed type. See gemm_add_out for the pattern.
+-)
+ def gemm_symmetric_out(
+     A: Tensor,  # (M, K) or (L, M, K)
+     B: Tensor,  # (K, M) or (L, K, M)
+@@ -1569,12 +1526,6 @@
+     return colvec_reduce_final
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_gated_out",
+-    mutates_args=("preact_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor(a2!)? preact_out, Tensor(a3!) postact_out, Tensor? C=None, Tensor? bias=None, str activation='swiglu', Tensor? cu_seqlens_m=None, Tensor? A_idx=None, bool dynamic_scheduler=False, bool tuned=True, str? concat_layout=None) -> ()",
+-)
+ def gemm_gated_out(
+     A: Tensor,  # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (whatever, K) if gather_A with varlen_m
+     B: Tensor,  # (K, N) or (L, K, N)
+@@ -1606,12 +1557,6 @@
+     )
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_dgated_out",
+-    mutates_args=("dx_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor PreAct, Tensor(a!) dx_out, Tensor(b!) postact_out, Tensor? colvec_scale=None, str activation='swiglu', bool colvec_reduce=False, Tensor? cu_seqlens_m=None, Tensor? A_idx=None, bool dynamic_scheduler=True, bool tuned=True) -> Tensor",
+-)
+ def gemm_dgated_out(
+     A: Tensor,  # (M, K) or (L, M, K) or (total_M, K) if varlen_m or (whatever, K) if gather_A with varlen_m
+     B: Tensor,  # (K, N) or (L, K, N)
+@@ -1646,48 +1591,6 @@
+     return result
+ 
+ 
+-@torch.library.register_fake("quack::gemm_dgated_out")
+-def gemm_dgated_out_fake(
+-    A: Tensor,
+-    B: Tensor,
+-    PreAct: Tensor,
+-    dx_out: Tensor,
+-    postact_out: Tensor,
+-    colvec_scale: Optional[Tensor] = None,
+-    activation: str = "swiglu",
+-    colvec_reduce: bool = False,
+-    cu_seqlens_m: Optional[Tensor] = None,
+-    A_idx: Optional[Tensor] = None,
+-    dynamic_scheduler: bool = True,
+-    tuned: bool = True,
+-) -> Tensor:
+-    _precompile_default_config(
+-        gemm_dgated_tuned,
+-        A,
+-        B,
+-        PreAct,
+-        dx_out,
+-        postact_out,
+-        colvec_scale=colvec_scale,
+-        activation=activation,
+-        colvec_reduce=colvec_reduce,
+-        cu_seqlens_m=cu_seqlens_m,
+-        A_idx=A_idx,
+-        dynamic_scheduler=dynamic_scheduler,
+-    )
+-    if not colvec_reduce:
+-        return torch.empty(0, dtype=torch.float32, device=A.device)
+-    else:
+-        if cu_seqlens_m is not None:
+-            total_m = A_idx.shape[0] if A_idx is not None else A.shape[0]
+-            out_shape = (total_m,)
+-        elif A.ndim == 2:
+-            out_shape = (A.shape[0],)
+-        else:
+-            out_shape = (A.shape[0], A.shape[-2])
+-        return torch.empty(out_shape, dtype=torch.float32, device=A.device)
+-
+-
+ def _precompile_default_config(autotuned_fn, *args, **kwargs):
+     """Compile the default config in COMPILE_ONLY mode.
+ 
+@@ -1707,131 +1610,6 @@
+         pass
+ 
+ 
+-@gemm_add_inplace_op.register_fake
+-def gemm_add_inplace_fake(
+-    A: Tensor,
+-    B: Tensor,
+-    out: Tensor,
+-    alpha: float = 1.0,
+-    beta: float = 1.0,
+-    alpha_tensor: Optional[Tensor] = None,
+-    beta_tensor: Optional[Tensor] = None,
+-    cu_seqlens_m: Optional[Tensor] = None,
+-    cu_seqlens_k: Optional[Tensor] = None,
+-    A_idx: Optional[Tensor] = None,
+-    batch_idx_permute: Optional[Tensor] = None,
+-    dynamic_scheduler: bool = False,
+-    tuned: bool = True,
+-) -> None:
+-    alpha_val = alpha_tensor if alpha_tensor is not None else alpha
+-    beta_val = beta_tensor if beta_tensor is not None else beta
+-    add_to_output = isinstance(beta_val, float) and beta_val == 1.0 and cu_seqlens_m is None
+-    _precompile_default_config(
+-        gemm_tuned,
+-        A,
+-        B,
+-        out,
+-        out if not add_to_output else None,
+-        alpha=alpha_val,
+-        beta=beta_val,
+-        cu_seqlens_m=cu_seqlens_m,
+-        cu_seqlens_k=cu_seqlens_k,
+-        A_idx=A_idx,
+-        batch_idx_permute=batch_idx_permute,
+-        add_to_output=add_to_output,
+-        dynamic_scheduler=dynamic_scheduler,
+-    )
+-
+-
+-def _register_precompile_fake(custom_op, autotuned_fn, rewrite=None):
+-    """Register a fake that precompiles the default config in COMPILE_ONLY mode.
+-
+-    For custom_ops that forward args to their autotuned fn. Binds all args by name,
+-    strips 'tuned', applies optional rewrite(kw), then calls _precompile_default_config.
+-    PyTorch normalizes all custom_op args to positional, so we use inspect.signature
+-    to recover keyword names.
+-    """
+-    import inspect
+-
+-    sig = inspect.signature(custom_op._init_fn)
+-
+-    @custom_op.register_fake
+-    def _fake(*args, **kwargs):
+-        bound = sig.bind(*args, **kwargs)
+-        bound.apply_defaults()
+-        kw = dict(bound.arguments)
+-        kw.pop("tuned", None)
+-        if rewrite is not None:
+-            rewrite(kw)
+-        _precompile_default_config(autotuned_fn, **kw)
+-
+-
+-def _rewrite_merge_alpha(kwargs):
+-    """Merge alpha_tensor into alpha for gemm_tuned; add C=None."""
+-    at = kwargs.pop("alpha_tensor", None)
+-    if at is not None:
+-        kwargs["alpha"] = at
+-    kwargs.setdefault("C", None)
+-
+-
+-def _rewrite_merge_alpha_beta(kwargs):
+-    """Merge alpha_tensor/beta_tensor into alpha/beta for gemm_tuned."""
+-    at = kwargs.pop("alpha_tensor", None)
+-    if at is not None:
+-        kwargs["alpha"] = at
+-    bt = kwargs.pop("beta_tensor", None)
+-    if bt is not None:
+-        kwargs["beta"] = bt
+-
+-
+-_register_precompile_fake(gemm_out, gemm_tuned, rewrite=_rewrite_merge_alpha)
+-_register_precompile_fake(gemm_add_out, gemm_tuned, rewrite=_rewrite_merge_alpha_beta)
+-_register_precompile_fake(gemm_act_out, gemm_act_tuned)
+-_register_precompile_fake(gemm_dact_out, gemm_dact_tuned)
+-_register_precompile_fake(gemm_gated_out, gemm_gated_tuned)
+-
+-
+-@gemm_symmetric_out.register_fake
+-def gemm_symmetric_out_fake(
+-    A: Tensor,
+-    B: Tensor,
+-    out: Tensor,
+-    C: Optional[Tensor] = None,
+-    dynamic_scheduler: bool = False,
+-    alpha: float = 1.0,
+-    beta: float = 1.0,
+-) -> None:
+-    from quack.cache_utils import COMPILE_ONLY
+-
+-    if not COMPILE_ONLY or isinstance(A.shape[0], torch.SymInt):
+-        return
+-    # gemm_symmetric is not autotuned, compile the single fixed config directly
+-    sm = get_device_capacity(A.device)[0]
+-    try:
+-        tile_m, tile_n, cluster_m, pingpong = _symmetric_gemm_config(sm)
+-    except NotImplementedError:
+-        return
+-    try:
+-        gemm_symmetric_dispatch(
+-            A.unsqueeze(0) if A.ndim == 2 else A,
+-            (B.mT.unsqueeze(0) if B.ndim == 2 else B.mT),
+-            out.unsqueeze(0) if out.ndim == 2 else out,
+-            (C.unsqueeze(0) if C.ndim == 2 else C) if C is not None else None,
+-            torch.zeros(1, dtype=torch.int32, device=A.device) if dynamic_scheduler else None,
+-            tile_M=tile_m,
+-            tile_N=tile_n,
+-            cluster_M=cluster_m,
+-            cluster_N=1,
+-            pingpong=pingpong,
+-            persistent=True,
+-            max_swizzle_size=8,
+-            alpha=alpha,
+-            beta=beta,
+-        )
+-    except Exception:
+-        pass
+-
+-
+ ## ── gemm_rms ────────────────────────────────────────────────────────────────
+ 
+ 
+@@ -1915,12 +1693,6 @@
+     return rstd
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_rms_out",
+-    mutates_args=("out", "premult_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor(a!) out, Tensor? C=None, Tensor? norm_weight=None, Tensor(a2!)? premult_out=None, float eps=1e-6, bool dynamic_scheduler=False, bool tuned=True) -> Tensor",
+-)
+ def _gemm_rms_out(
+     A: Tensor,
+     B: Tensor,
+@@ -1950,33 +1722,6 @@
+     )
+ 
+ 
+-@torch.library.register_fake("quack::gemm_rms_out")
+-def _gemm_rms_out_fake(
+-    A: Tensor,
+-    B: Tensor,
+-    out: Tensor,
+-    C: Optional[Tensor] = None,
+-    norm_weight: Optional[Tensor] = None,
+-    premult_out: Optional[Tensor] = None,
+-    eps: float = 1e-6,
+-    dynamic_scheduler: bool = False,
+-    tuned: bool = True,
+-) -> Tensor:
+-    _precompile_default_config(
+-        _gemm_rms_tuned,
+-        A,
+-        B,
+-        out,
+-        C=C,
+-        norm_weight=norm_weight,
+-        premult_out=premult_out,
+-        eps=eps,
+-        dynamic_scheduler=dynamic_scheduler,
+-    )
+-    rstd_shape = A.shape[:-1]
+-    return torch.empty(rstd_shape, dtype=torch.float32, device=A.device)
+-
+-
+ def gemm_rms_ref(
+     A: Tensor,
+     B: Tensor,
+@@ -2176,12 +1921,6 @@
+     )
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::gemm_norm_act_out",
+-    mutates_args=("preact_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor(a2!)? preact_out, Tensor(a3!) postact_out, Tensor? C=None, Tensor? rstd=None, str? activation=None, bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_norm_act_out(
+     A: Tensor,
+     B: Tensor,
+@@ -2197,27 +1936,6 @@
+     fn(A, B, preact_out, postact_out, C, rstd, activation, dynamic_scheduler)
+ 
+ 
+-@torch.library.register_fake("quack::gemm_norm_act_out")
+-def _gemm_norm_act_out_fake(
+-    A,
+-    B,
+-    preact_out,
+-    postact_out,
+-    C=None,
+-    rstd=None,
+-    activation=None,
+-    dynamic_scheduler=False,
+-    tuned=True,
+-) -> None:
+-    pass
+-
+-
+-@torch.library.custom_op(
+-    "quack::gemm_norm_gated_out",
+-    mutates_args=("preact_out", "postact_out"),
+-    device_types="cuda",
+-    schema="(Tensor A, Tensor B, Tensor(a2!)? preact_out, Tensor(a3!) postact_out, Tensor? C=None, Tensor? rstd=None, str activation='swiglu', bool dynamic_scheduler=False, bool tuned=True) -> ()",
+-)
+ def gemm_norm_gated_out(
+     A: Tensor,
+     B: Tensor,
+@@ -2233,21 +1951,6 @@
+     fn(A, B, preact_out, postact_out, C, rstd, activation, dynamic_scheduler)
+ 
+ 
+-@torch.library.register_fake("quack::gemm_norm_gated_out")
+-def _gemm_norm_gated_out_fake(
+-    A,
+-    B,
+-    preact_out,
+-    postact_out,
+-    C=None,
+-    rstd=None,
+-    activation="swiglu",
+-    dynamic_scheduler=False,
+-    tuned=True,
+-) -> None:
+-    pass
+-
+-
+ def gemm_norm_act(
+     A: Tensor,  # (M, K) or (L, M, K)
+     B: Tensor,  # (K, N) or (L, K, N)

@@ -23,9 +23,11 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 DEST="$REPO_ROOT/torch/_vendor/quack"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 
-# Modules that rmsnorm depends on (transitively). Everything else upstream
-# ships — gemm, softmax, cross-entropy, etc. — is deliberately excluded.
+# Transitive closure of the modules required by rmsnorm and the gemm
+# family. Everything else upstream ships — softmax, cross-entropy, rotary,
+# topk, linear, etc. — is deliberately excluded.
 FILES=(
+    # rmsnorm + shared support
     cache_utils.py
     compile_utils.py
     copy_utils.py
@@ -38,6 +40,40 @@ FILES=(
     rmsnorm.py
     rounding.py
     utils.py
+
+    # gemm family + transitive deps
+    activation.py
+    autotuner.py
+    blockscaled_gemm_utils.py
+    epi_composable.py
+    epi_ops.py
+    epi_utils.py
+    fast_math.py
+    gemm.py
+    gemm_act.py
+    gemm_base.py
+    gemm_blockscaled_interface.py
+    gemm_config.py
+    gemm_dact.py
+    gemm_default_epi.py
+    gemm_interface.py
+    gemm_norm_act.py
+    gemm_sm80.py
+    gemm_sm90.py
+    gemm_sm100.py
+    gemm_sm120.py
+    gemm_sq_reduce.py
+    gemm_symmetric.py
+    gemm_tvm_ffi_utils.py
+    mx_utils.py
+    nvmmh_heuristic.py
+    pipeline.py
+    rms_final_reduce.py
+    sm90_utils.py
+    sm100_utils.py
+    tile_scheduler.py
+    trace.py
+    varlen_utils.py
 )
 
 die()   { echo "vendor_quack: $*" >&2; exit 1; }
@@ -87,9 +123,11 @@ apply_patches() {
     done
 }
 
-# Rewrite the three `quack.*` import forms actually used in the vendored
-# subset. Using [ \t] (not \s) keeps each match on a single line so blank
-# lines aren't eaten by the substitution.
+# Rewrite the four `quack.*` import forms used in the vendored subset.
+# Using [ \t] (not \s) keeps each match on a single line so blank lines
+# aren't eaten by the substitution. The "alias == module" rule comes
+# before the general "alias != module" rule so the redundant alias is
+# collapsed rather than preserved.
 rewrite_imports() {
     for f in "${FILES[@]}"; do
         sed -i -E '
@@ -101,6 +139,9 @@ rewrite_imports() {
 
             # import quack.X as X         -> from . import X   (drop redundant alias)
             s|^([ \t]*)import quack\.([[:alnum:]_]+) as \2[ \t]*$|\1from . import \2|
+
+            # import quack.X as Y         -> from . import X as Y
+            s|^([ \t]*)import quack\.([[:alnum:]_]+) as ([[:alnum:]_]+)[ \t]*$|\1from . import \2 as \3|
         ' "$DEST/$f"
     done
 }
@@ -114,10 +155,16 @@ write_init() {
 
 Upstream SHA: $sha (quack $version)
 
-Only the modules required by torch._native.ops.norm.rmsnorm_impl are vendored.
-Imports are rewritten to be package-relative so this copy is independent of any
-\`\`quack\`\` top-level package that may be installed via pip. Custom op namespaces
-are renamed from \`\`quack::\`\` to \`\`torch_vendor_quack::\`\` for the same reason.
+Only the modules required by torch._native (rmsnorm and the gemm family)
+are vendored. softmax, cross-entropy, rotary, topk, linear, etc. are
+deliberately excluded. Imports within the vendored tree are rewritten to
+be package-relative so this copy is independent of any \`\`quack\`\`
+top-level package that may be installed via pip, and \`\`torch.library\`\`
+op registrations are stripped so the vendored copy does not claim the
+\`\`quack::\`\` namespace at import time.
+
+Gemm entry points live in \`\`torch._vendor.quack.gemm_interface\`\` — they
+are not re-exported here to keep this module's import footprint small.
 """
 __version__ = "$version"
 
