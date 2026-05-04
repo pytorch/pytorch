@@ -15,22 +15,33 @@ name: !{{ build_environment }}
 {%- set xpu_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'xpu') | list %}
 {%- set test_standard_configs = build_configs | rejectattr('gpu_arch_type', 'in', ['rocm', 'xpu']) | list %}
 
-{#- Per-OS values that shape the build/test runner labels. -#}
+{#- Per-OS values that shape the build/test runner labels.
+    s390x runners are self-hosted, register only with the bare `linux.s390x`
+    label (no `lf.` prefix), and lack a host-level `docker` CLI compatible
+    with GHA's native `container:` directive. They share the same reusable
+    workflows but pass `use_container_directive: false` so the build/test
+    container is launched via `docker run` from a step instead. -#}
 {%- if "aarch64" in build_environment %}
   {%- set build_runs_on = "linux.arm64.r7g.12xlarge.memory" %}
   {%- set test_runs_on  = "linux.arm64.2xlarge" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
+  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
   {%- set test_runs_on  = "linux.s390x" %}
   {%- set alpine_image  = "docker.io/s390x/alpine" %}
   {%- set timeout_minutes = 420 %}
+  {%- set runner_prefix = "" %}
+  {%- set use_container_directive = false %}
 {%- else %}
   {%- set build_runs_on = "linux.12xlarge.memory.ephemeral" %}
   {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
+  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set use_container_directive = true %}
 {%- endif %}
 
 on:
@@ -116,8 +127,9 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
+      use_container_directive: !{{ use_container_directive | string | lower }}
       ALPINE_IMAGE: "!{{ alpine_image }}"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
       timeout-minutes: !{{ timeout_minutes }}
@@ -168,8 +180,9 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: !{{ build_environment }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "!{{ runner_prefix }}"
       runs_on: ${{ matrix.runs_on }}
+      use_container_directive: !{{ use_container_directive | string | lower }}
       ALPINE_IMAGE: "!{{ alpine_image }}"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
