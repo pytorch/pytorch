@@ -155,9 +155,27 @@ its type to `common_constant_types`.
     def getitem_const(
         self, tx: InstructionTranslator, arg: VariableTracker
     ) -> VariableTracker:
+        if isinstance(self.value, (str, bytes)):
+            from .object_protocol import validate_sequence_index
+
+            container_name = "string" if isinstance(self.value, str) else "bytes"
+            arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
+
+    def sq_item_impl(
+        self, tx: InstructionTranslator, key: VariableTracker
+    ) -> VariableTracker:
+        # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
+        # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
+        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
+        index = key.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value[index])
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
 
     @staticmethod
     def is_base_literal(obj: object) -> bool:
@@ -396,6 +414,16 @@ its type to `common_constant_types`.
             and self.as_python_constant() == other.as_python_constant()
         )
 
+    def get_id(self, tx: InstructionTranslator) -> int | None:
+        # Singletons have guaranteed stable identity across the process lifetime.
+        if self.value is None or self.value is True or self.value is False:
+            return id(self.value)
+        # Sourceful constants resolve via source like any other sourceful VT.
+        # Sourceless non-singleton constants (e.g. literal 42 in compiled code)
+        # get FakeIdVariable — CPython interning of small ints/strings is an
+        # implementation detail users shouldn't rely on.
+        return super().get_id(tx)
+
     def get_real_python_backed_value(self) -> object:
         return self.value
 
@@ -471,6 +499,23 @@ class FakeIdVariable(VariableTracker):
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
             return self.value == other.as_python_constant()
         return False
+
+    def call_method(
+        self,
+        tx: InstructionTranslator,
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from ..utils import cmp_name_to_op_mapping
+
+        if name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            other = args[0]
+            if isinstance(other, (FakeIdVariable, ConstantVariable)):
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[name](self.value, other.as_python_constant())
+                )
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
