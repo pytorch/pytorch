@@ -155,6 +155,17 @@ void initModule(PyObject* module) {
         stat_array_to_dict(stats.inactive_split_bytes);
     result["oversize_allocations"] = stat_to_dict(stats.oversize_allocations);
     result["oversize_segments"] = stat_to_dict(stats.oversize_segments);
+
+    // Per-component memory attribution
+    {
+      using c10::CachingDeviceAllocator::kComponentNames;
+      py::dict comp_dict;
+      for (const auto i : c10::irange(kComponentNames.size())) {
+        comp_dict[kComponentNames[i]] = stat_to_dict(stats.component_bytes[i]);
+      }
+      result["component_bytes"] = comp_dict;
+    }
+
     return result;
   });
 

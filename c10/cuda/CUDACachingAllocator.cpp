@@ -165,6 +165,7 @@ void decrease_stat_array(
 
 struct Block;
 struct PrivatePool;
+using ComponentType = CachingDeviceAllocator::ComponentType;
 typedef bool (*Comparison)(const Block*, const Block*);
 static bool BlockComparatorRegistrationCounter(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
@@ -221,6 +222,10 @@ struct Block {
   std::shared_ptr<GatheredContext> context_when_segment_allocated;
 
   ExpandableSegment* expandable_segment_{nullptr};
+
+  // Component type for memory attribution tracking
+  ComponentType component_type{
+      ComponentType::OTHER};
 
   Block(
       c10::DeviceIndex device,
@@ -1505,6 +1510,10 @@ class DeviceCachingAllocator {
   // thread local user metadata for annotating allocations
   static thread_local std::string user_metadata;
 
+  // thread local component type for memory attribution
+  static thread_local ComponentType
+      current_component_type;
+
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
@@ -1565,6 +1574,32 @@ class DeviceCachingAllocator {
 
   std::string getUserMetadata() {
     return user_metadata;
+  }
+
+  void setComponentType(ComponentType type) {
+    current_component_type = type;
+  }
+
+  ComponentType getComponentType() {
+    return current_component_type;
+  }
+
+  // Retroactively re-tag an existing allocated block's component type
+  // and adjust the component_bytes counters accordingly.
+  void tagBlock(
+      Block* block,
+      ComponentType new_type) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    if (!block->allocated) {
+      return;
+    }
+    auto old_type = block->component_type;
+    if (old_type == new_type) {
+      return;
+    }
+    stats.component_bytes[static_cast<uint8_t>(old_type)].decrease(block->size);
+    stats.component_bytes[static_cast<uint8_t>(new_type)].increase(block->size);
+    block->component_type = new_type;
   }
 
   bool checkPoolLiveAllocations(
@@ -1966,6 +2001,9 @@ class DeviceCachingAllocator {
     block->allocated = true;
     block->requested_size = orig_size;
 
+    // Stamp the block with the current component type for attribution
+    block->component_type = current_component_type;
+
     block->context_when_allocated = std::move(context);
     record_trace(
         TraceEntry::ALLOC,
@@ -1987,6 +2025,11 @@ class DeviceCachingAllocator {
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
     });
+
+    // Update per-component stats
+    stats
+        .component_bytes[static_cast<uint8_t>(block->component_type)]
+        .increase(block->size);
     if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
 
@@ -3294,6 +3337,7 @@ class DeviceCachingAllocator {
     block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
+    auto freed_component_type = block->component_type;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -3349,6 +3393,11 @@ class DeviceCachingAllocator {
       stats.active_bytes[stat_type].decrease(original_block_size);
       stats.requested_bytes[stat_type].decrease(requested_size);
     });
+
+    // Decrement per-component stats using the saved component type
+    stats
+        .component_bytes[static_cast<uint8_t>(freed_component_type)]
+        .decrease(original_block_size);
   }
 
   /** combine previously split blocks. returns the size of the subsumed block,
@@ -4171,7 +4220,8 @@ class DeviceCachingAllocator {
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
-        user_metadata);
+        user_metadata,
+        static_cast<uint8_t>(current_component_type));
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
@@ -4231,6 +4281,123 @@ static void uncached_delete(void* ptr) {
 static void local_raw_delete(void* ptr);
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
 thread_local std::string DeviceCachingAllocator::user_metadata;
+thread_local ComponentType
+    DeviceCachingAllocator::current_component_type{
+        ComponentType::OTHER};
+
+// Per-module memory tracker registered as an AllocatorTraceTracker callback.
+// Maintains per-(module_fqn, component_type) counters updated on every
+// alloc/free.
+// Thread safety: This tracker is shared across all device allocators.
+// Callbacks fire under each device's mutex, so concurrent calls from
+// different devices would race. enableModuleTracking() asserts that only
+// one device is active to prevent this.
+class ModuleComponentTracker {
+ public:
+  // Per-allocation metadata stored in addr_to_info_ to track which module
+  // and component type each allocation belongs to, so we can decrement the
+  // correct counters on free.
+  struct AllocInfo {
+    std::string fqn;
+    uint8_t component_type;
+    size_t size;
+  };
+
+  void operator()(const TraceEntry& te) {
+    if (!enabled_) {
+      return;
+    }
+    if (te.action_ == TraceEntry::ALLOC) {
+      const auto& fqn = te.user_metadata_;
+      if (fqn.empty()) {
+        return;
+      }
+      addr_to_info_[te.addr_] = {fqn, te.component_type_, te.size_};
+      auto key = makeKey(fqn, te.component_type_);
+      counters_[key].increase(te.size_);
+    } else if (te.action_ == TraceEntry::FREE_COMPLETED) {
+      auto it = addr_to_info_.find(te.addr_);
+      if (it == addr_to_info_.end()) {
+        return;
+      }
+      auto key = makeKey(it->second.fqn, it->second.component_type);
+      auto cit = counters_.find(key);
+      if (cit != counters_.end()) {
+        cit->second.decrease(it->second.size);
+      }
+      addr_to_info_.erase(it);
+    }
+  }
+
+  // Returns a copy of counters for thread-safe reading from Python.
+  // key format: "module_fqn:component_idx"
+  std::unordered_map<std::string, Stat> getCounters() const {
+    return counters_;
+  }
+
+  void enable() {
+    enabled_ = true;
+  }
+
+  void disable() {
+    enabled_ = false;
+  }
+
+  void reset() {
+    addr_to_info_.clear();
+    counters_.clear();
+  }
+
+  void resetPeakStats() {
+    for (auto& [key, stat] : counters_) {
+      stat.reset_peak();
+    }
+  }
+
+  bool isEnabled() const {
+    return enabled_;
+  }
+
+  // Seed an entry for a pre-existing allocation (e.g. parameters allocated
+  // before tracking was enabled). Called from Python via tagModuleBlock().
+  void seedEntry(size_t addr, const std::string& fqn, uint8_t component_type, size_t size) {
+    if (fqn.empty() || size == 0) {
+      return;
+    }
+    addr_to_info_[addr] = {fqn, component_type, size};
+    auto key = makeKey(fqn, component_type);
+    counters_[key].increase(size);
+  }
+
+  // Parse a key back into (fqn, component_type)
+  static std::pair<std::string, uint8_t> parseKey(const std::string& key) {
+    auto pos = key.find(':');
+    if (pos == std::string::npos) {
+      return {key, 0};
+    }
+    return {
+        key.substr(0, pos),
+        static_cast<uint8_t>(std::stoi(key.substr(pos + 1)))};
+  }
+
+ private:
+  static std::string makeKey(const std::string& fqn, uint8_t component_type) {
+    std::string key;
+    // +1 for ':' separator, +3 for max uint8_t digits ("255")
+    key.reserve(fqn.size() + 1 + 3);
+    key.append(fqn);
+    key.push_back(':');
+    key.append(std::to_string(component_type));
+    return key;
+  }
+
+  bool enabled_{false};
+  std::unordered_map<size_t, AllocInfo> addr_to_info_;
+  std::unordered_map<std::string, Stat> counters_;
+};
+
+// Global singleton for module-level tracking.
+static std::unique_ptr<ModuleComponentTracker> g_module_tracker;
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
@@ -4442,6 +4609,92 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->getUserMetadata();
+  }
+
+  void setComponentType(ComponentType type) override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    device_allocator[device]->setComponentType(type);
+  }
+
+  ComponentType getComponentType() override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    return device_allocator[device]->getComponentType();
+  }
+
+  void tagBlock(void* ptr, ComponentType type)
+      override {
+    Block* block = get_allocated_block(ptr);
+    if (!block) {
+      return;
+    }
+    device_allocator[block->device]->tagBlock(block, type);
+  }
+
+  void tagModuleBlock(
+      void* ptr,
+      const std::string& fqn,
+      ComponentType type) override {
+    if (!g_module_tracker || !g_module_tracker->isEnabled()) {
+      return;
+    }
+    Block* block = get_allocated_block(ptr);
+    if (!block || !block->allocated) {
+      return;
+    }
+    g_module_tracker->seedEntry(
+        reinterpret_cast<size_t>(ptr),
+        fqn,
+        static_cast<uint8_t>(type),
+        block->size);
+  }
+
+  void enableModuleTracking() override {
+    if (!g_module_tracker) {
+      // The shared tracker is not thread-safe across devices. Verify that
+      // only one device allocator is active (the normal case under DDP/FSDP
+      // where CUDA_VISIBLE_DEVICES restricts to 1 GPU per process).
+      size_t active_devices = 0;
+      for (auto& da : device_allocator) {
+        if (da) {
+          active_devices++;
+        }
+      }
+      TORCH_CHECK(
+          active_devices <= 1,
+          "Module tracking requires at most 1 active CUDA device per process. "
+          "Found ",
+          active_devices,
+          ". Use CUDA_VISIBLE_DEVICES to restrict to a single GPU.");
+
+      g_module_tracker = std::make_unique<ModuleComponentTracker>();
+      auto* tracker = g_module_tracker.get();
+      for (auto& da : device_allocator) {
+        if (da) {
+          da->attachAllocatorTraceTracker(
+              [tracker](const TraceEntry& te) { (*tracker)(te); });
+        }
+      }
+    }
+    g_module_tracker->enable();
+  }
+
+  void disableModuleTracking() override {
+    if (g_module_tracker) {
+      g_module_tracker->disable();
+    }
+  }
+
+  std::unordered_map<std::string, Stat> getModuleCounters() override {
+    if (g_module_tracker) {
+      return g_module_tracker->getCounters();
+    }
+    return {};
+  }
+
+  bool isModuleTrackingEnabled() override {
+    return g_module_tracker && g_module_tracker->isEnabled();
   }
 
   bool isHistoryEnabled() override {
@@ -4693,6 +4946,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   void resetPeakStats(c10::DeviceIndex device) override {
     assertValidDevice(device);
     device_allocator[device]->resetPeakStats();
+    if (g_module_tracker && g_module_tracker->isEnabled()) {
+      g_module_tracker->resetPeakStats();
+    }
   }
 
   void createOrIncrefPool(

@@ -4,9 +4,39 @@
 #include <c10/core/Stream.h>
 #include <c10/util/ApproximateClock.h>
 
+#include <array>
+
 namespace c10::CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
+
+// Component type for memory attribution.
+// Each allocation can be tagged with a component type to track what the memory
+// is used for (parameter, gradient, activation, optimizer state, etc.).
+enum struct ComponentType : uint8_t {
+  OTHER = 0,
+  PARAMETER = 1,
+  GRADIENT = 2,
+  ACTIVATION = 3,
+  OPTIMIZER_STATE = 4,
+  TEMP = 5,
+  BUFFER = 6,
+  COLLECTIVE_BUFFER = 7,
+  NUM_TYPES = 8
+};
+
+constexpr size_t kNumComponentTypes = static_cast<size_t>(ComponentType::NUM_TYPES);
+
+constexpr std::array<const char*, kNumComponentTypes>
+    kComponentNames = {
+        "other",
+        "parameter",
+        "gradient",
+        "activation",
+        "optimizer_state",
+        "temp",
+        "buffer",
+        "collective_buffer"};
 
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
@@ -61,6 +91,11 @@ struct DeviceStats {
 
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
+
+  // SUM: bytes attributed to each component type.
+  // Indexed by ComponentType enum value.
+  std::array<Stat, kNumComponentTypes>
+      component_bytes;
 };
 
 using CreateContextFn = std::shared_ptr<GatheredContext> (*)();
@@ -134,7 +169,8 @@ struct TraceEntry {
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr,
       std::string compile_context = "",
-      std::string user_metadata = "")
+      std::string user_metadata = "",
+      uint8_t component_type = 0)
       : action_(action),
         device_(device),
         addr_(addr),
@@ -143,7 +179,8 @@ struct TraceEntry {
         size_(size),
         mempool_(std::move(mempool)),
         compile_context_(std::move(compile_context)),
-        user_metadata_(std::move(user_metadata)) {
+        user_metadata_(std::move(user_metadata)),
+        component_type_(component_type) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -159,6 +196,7 @@ struct TraceEntry {
   trace_time_ time_{};
   std::string compile_context_;
   std::string user_metadata_;
+  uint8_t component_type_{0};
 };
 
 inline TraceEntry::Action parseTraceEntryAction(std::string_view action) {

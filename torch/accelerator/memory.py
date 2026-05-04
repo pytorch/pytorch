@@ -94,6 +94,17 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     - ``"num_device_alloc"``: number of device memory allocation calls.
     - ``"num_device_free"``: number of device memory free calls.
 
+    When memory component tracking is enabled via
+    ``torch.accelerator.memory.component_tracking.enable()``, the
+    following per-component keys are also present:
+
+    - ``"component_bytes.{other,parameter,gradient,activation,optimizer_state,temp,buffer}.{current,peak,allocated,freed}"``:
+      amount of allocated memory attributed to each component type.
+
+    These 28 keys (7 components × 4 metrics) are always available in the
+    returned dict once ``enable_component_tracking`` has been called. Without
+    tracking, the component keys are still present but all values will be zero.
+
     Args:
         device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
             If not given, use :func:`torch.accelerator.current_device_index` by default.
@@ -107,6 +118,14 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
         return OrderedDict()
     device_index = _get_device_index(device_index, optional=True)
     stats = torch._C._accelerator_getDeviceStats(device_index)
+
+    # Merge per-module breakdown if module tracking is active (CUDA only)
+    try:
+        if torch._C._cuda_isModuleTrackingEnabled():  # pyrefly: ignore [missing-attribute]
+            stats["module_bytes"] = torch._C._cuda_getModuleCounters()  # pyrefly: ignore [missing-attribute]
+    except AttributeError:
+        pass  # Non-CUDA backend or bindings not available
+
     flat_stats = []
 
     def flatten(prefix: str, value: Any) -> None:
