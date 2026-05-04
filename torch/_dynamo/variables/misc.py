@@ -31,7 +31,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import Any, Literal, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -839,9 +839,6 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
-_KwargsT = TypeVar("_KwargsT", bound=dict[str, VariableTracker])
-
-
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
@@ -860,8 +857,8 @@ class AutogradFunctionVariable(VariableTracker):
     def _resolve_kwargs(
         self,
         args: list[VariableTracker],
-        kwargs: _KwargsT,
-    ) -> tuple[list[VariableTracker], _KwargsT]:
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
         """Resolve kwargs to positional args using forward().__code__.
 
         Uses co_varnames/co_argcount directly to match the C++
@@ -897,8 +894,7 @@ class AutogradFunctionVariable(VariableTracker):
                 raise TypeError(
                     f"forward() missing required argument: '{name}' (position {i})"
                 )
-        empty: _KwargsT = {}  # type: ignore[assignment]
-        return result, empty
+        return result, {}
 
     def call_apply(
         self,
