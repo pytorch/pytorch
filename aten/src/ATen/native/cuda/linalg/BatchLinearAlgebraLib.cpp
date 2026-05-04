@@ -957,7 +957,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   size_t worksize_host; // workspaceInBytesOnHost
   cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(),
+      at::cuda::getCurrentCUDASolverDnHandle(true),
       params,
       m,
       n,
@@ -978,7 +978,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
 
 #ifdef USE_CUSOLVER_64_BIT
     // allocate workspace storage on device and host
