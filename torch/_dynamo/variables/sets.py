@@ -27,7 +27,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch
+from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
@@ -77,6 +77,8 @@ class SetVariable(VariableTracker):
                 # VariableTracker - realize to install guards, then wrap
                 # pyrefly: ignore [bad-argument-type]
                 hashable_items.append(HashableTracker(item.realize()))
+        # Internal representation as dict allows for simple integration with
+        # OrderedSet, notably polyfills. Using set moves complexity to OrderedSet
         self.items = dict.fromkeys(hashable_items, SetVariable._default_value())
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
@@ -123,14 +125,7 @@ class SetVariable(VariableTracker):
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
-        return key in self.items and not isinstance(
-            self.items[key], variables.DeletedVariable
-        )
-
-    def len(self) -> int:
-        return sum(
-            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
-        )
+        return key in self.items
 
     def has_new_items(self) -> bool:
         return self.should_reconstruct_all or any(
@@ -564,6 +559,13 @@ class SetVariable(VariableTracker):
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
 
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import SetIterator
+
+        if self.source and not is_constant_source(self.source):
+            tx.output.guard_on_key_order.add(self.source)
+        return SetIterator(self.items)
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -596,8 +598,6 @@ class OrderedSetClassVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builtin import set_methods
-
         if name == "__new__":
             if len(args) != 2 or kwargs:
                 raise_args_mismatch(

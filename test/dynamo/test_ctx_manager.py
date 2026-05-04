@@ -1631,9 +1631,13 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
     def test_graph_break_inlining_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in ["cuda", "cpu", "xpu"]:
             if device == "cuda" and not (
                 torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            ):
+                continue
+            if device == "xpu" and not (
+                torch.xpu.is_available() and torch.xpu.is_bf16_supported()
             ):
                 continue
             self._graph_break_inlining_autocast_test_helper(device)

@@ -45,6 +45,7 @@ from torch._library.opaque_object import (
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
@@ -53,6 +54,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._import_utils import import_dill
 
 
 class Color(OpaqueBase):
@@ -3268,6 +3270,7 @@ def forward(self, L_x_ : torch.Tensor):
         result.backward(grad_o)
         self.assertEqual(x2.grad, grad_o * 1.5)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_invoke_subgraph(self):
         @torch.compiler.nested_compile_region
         def fn(scale_obj, x):
@@ -3973,8 +3976,147 @@ class GraphModule(torch.nn.Module):
             "Forward graph should have opaque placeholder nodes",
         )
 
+    def test_hoisted_opaque_with_graphpickler(self):
+        if import_dill() is None:
+            self.skipTest("dill not available")
+
+        backend = EagerAndRecordGraphs()
+
+        def fn(x):
+            return torch.ops.mylib.op_with_string(x, HoistedString("double"))
+
+        compiled = torch.compile(fn, fullgraph=True, backend=backend)
+        compiled(torch.randn(3, 4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        captured_gm = backend.graphs[0]
+
+        placeholders = [n for n in captured_gm.graph.nodes if n.op == "placeholder"]
+        opaque_ph = None
+        for ph in placeholders:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                opaque_ph = ph
+                break
+        self.assertIsNotNone(opaque_ph, "no placeholder with FakeScriptObject found")
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        options = Options(ops_filter=None, node_metadata_key_filter=None)
+        data = GraphPickler.dumps(captured_gm, options)
+        restored_gm = GraphPickler.loads(data, fake_mode)
+
+        restored_phs = [n for n in restored_gm.graph.nodes if n.op == "placeholder"]
+        restored_opaque = None
+        for ph in restored_phs:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                restored_opaque = ph
+                break
+        restored_real = restored_opaque.meta["example_value"].real_obj
+        self.assertIsInstance(restored_real, HoistedString)
+        self.assertEqual(restored_real.val, "double")
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class TestOpaqueGenerator(TestCase):
+    def test_make_fx_with_generator(self):
+        """make_fx should trace through Generator inputs as opaque values."""
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        class M(torch.nn.Module):
+            def forward(self, q, k, v, rng_state):
+                out = graphsafe_run_with_rng_state(
+                    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+                    q,
+                    k,
+                    v,
+                    None,
+                    True,
+                    0.1,
+                    True,
+                    rng_state=rng_state,
+                )
+                return out[0]
+
+        q = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
+        k = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
+        v = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
+        gen = torch.cuda.default_generators[0].clone_state()
+
+        gm = make_fx(M(), tracing_mode="real")(q, k, v, gen)
+
+        # The last placeholder (generator) should be used by graphsafe_run_with_rng_state
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        gen_placeholder = placeholders[-1]
+        self.assertEqual(len(gen_placeholder.users), 1)
+        user = next(iter(gen_placeholder.users))
+        self.assertIs(user.target, graphsafe_run_with_rng_state)
+
+        # Verify the traced graph produces the same result as eager.
+        # Use dropout_p=0.0 so the result is deterministic.
+        class M0(torch.nn.Module):
+            def forward(self, q, k, v, rng_state):
+                out = graphsafe_run_with_rng_state(
+                    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+                    q,
+                    k,
+                    v,
+                    None,
+                    False,
+                    0.0,
+                    True,
+                    rng_state=rng_state,
+                )
+                return out[0]
+
+        gen1 = torch.cuda.default_generators[0].clone_state()
+        gen2 = torch.cuda.default_generators[0].clone_state()
+        gm0 = make_fx(M0(), tracing_mode="real")(q, k, v, gen1)
+        expected = M0()(q, k, v, gen2)
+        gen3 = torch.cuda.default_generators[0].clone_state()
+        actual = gm0(q, k, v, gen3)
+        self.assertEqual(actual, expected)
+
+    def test_make_fx_randn_with_generator(self):
+        """make_fx should trace torch.randn with a Generator input."""
+
+        def fn(a, generator):
+            return torch.randn([20, 20], generator=generator, device=a.device)
+
+        gen = torch.Generator("cuda")
+        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device="cuda"), gen)
+
+        # Generator is baked in as a get_attr constant (not a placeholder input)
+        # because torch.randn passes it directly to C++ without going through
+        # proxy dispatch. The generator placeholder has 0 users.
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(False)),
+            """\
+class fn(torch.nn.Module):
+    def forward(self, a_1: "f32[4]", generator_1):
+        _opaque_obj0 = self._opaque_obj0
+        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='cuda', index=0), pin_memory = False);  _opaque_obj0 = None
+        return randn
+""",
+        )
+
+    def test_set_generator_metaclass_is_idempotent(self):
+        """Calling _set_generator_metaclass twice is a no-op, not an error"""
+        from torch._opaque_base import OpaqueBaseMeta
+
+        # Already called during import; second call should be a no-op.
+        torch._C._set_generator_metaclass(OpaqueBaseMeta)
+        self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
+
+    def test_generator_metaclass_is_set(self):
+        """Generator's metaclass should be OpaqueBaseMeta after import"""
+        from torch._opaque_base import OpaqueBaseMeta
+
+        self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
+        self.assertEqual(torch._C.Generator.__module__, "torch._C")
 
 
 if __name__ == "__main__":

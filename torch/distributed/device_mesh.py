@@ -248,7 +248,7 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            if not _layout.collapse().check_non_overlap():
+            if not _layout.collapse().check_orthogonal():
                 raise AssertionError(
                     "Please use a non-overlapping layout when creating a DeviceMesh."
                 )
@@ -283,7 +283,7 @@ else:
                     tuple(self.mesh.size()), tuple(self.mesh.stride())
                 )
             )
-            if not self._layout.collapse().check_non_overlap():
+            if not self._layout.collapse().check_orthogonal():
                 raise AssertionError(
                     "Please use a non-overlapping layout when creating a DeviceMesh."
                 )
@@ -576,6 +576,10 @@ else:
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
+            # When torchcomms is enabled with a fake backend (e.g. disabled mesh dimensions), use hashed PG names so they
+            # stay consistent with the hash-based names produced by split_group for real backends. Sequential integer names
+            # from new_group are not resolvable from compiled code when mixed with split_group hash names.
+            use_hashed = dist_config.use_torchcomms and backend == "fake"
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
@@ -585,6 +589,7 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    use_local_synchronization=use_hashed,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
@@ -1011,7 +1016,7 @@ else:
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
-            if not result_layout.collapse().check_non_overlap():
+            if not result_layout.collapse().check_orthogonal():
                 raise RuntimeError(
                     f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
@@ -1438,7 +1443,7 @@ else:
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
-            if not concat_mesh_layout.collapse().check_non_overlap():
+            if not concat_mesh_layout.collapse().check_orthogonal():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
                 )

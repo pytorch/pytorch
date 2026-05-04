@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -45,6 +46,7 @@ def _add_mul_out_impl(
 _test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
 
 
+@skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestOutVariant(TestCase):
     def setUp(self):
         self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: TOR901
@@ -450,43 +452,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
             self.assertIs(r1, add_out)
             self.assertIs(r2, mul_out)
-
-    def test_warn_manual_meta_kernel_for_out_op(self):
-        import warnings
-
-        self.lib.define(
-            "warn_meta(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=[torch.Tag.out],
-        )
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            self.lib.impl("warn_meta", lambda x, *, out: out, "Meta")
-
-        out_warnings = [x for x in w if "torch.Tag.out" in str(x.message)]
-        self.assertEqual(len(out_warnings), 1)
-        self.assertIn("automatically", str(out_warnings[0].message))
-
-    def test_warn_register_fake_for_out_op(self):
-        import warnings
-
-        self.lib.define(
-            "warn_fake(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=[torch.Tag.out],
-        )
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            torch.library.register_fake(
-                "_TestOutVariant::warn_fake",
-                lambda x, *, out: out,
-                lib=self.lib,
-            )
-
-        # register_fake goes through Library.impl("Meta") internally
-        out_warnings = [x for x in w if "torch.Tag.out" in str(x.message)]
-        self.assertGreater(len(out_warnings), 0)
-        self.assertIn("automatically", str(out_warnings[0].message))
 
 
 instantiate_parametrized_tests(TestOutVariant)
