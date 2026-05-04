@@ -51,7 +51,7 @@ jobs:
   manywheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_binary-build-linux-s390x.yml
     needs: get-label-type
     strategy:
       fail-fast: false
@@ -61,7 +61,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_10-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -69,7 +69,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_11-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -77,7 +77,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_12-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -85,7 +85,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -93,7 +93,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13t-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -101,7 +101,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -109,7 +109,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14t-cpu-s390x"
             pytorch_extra_install_requirements: ""
@@ -122,7 +122,7 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: ""
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
@@ -136,7 +136,7 @@ jobs:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: [get-label-type, manywheel-build]
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_binary-test-linux-s390x.yml
     strategy:
       fail-fast: false
       matrix:
@@ -145,7 +145,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_10-cpu-s390x"
             runs_on: "linux.s390x"
@@ -153,7 +153,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_11-cpu-s390x"
             runs_on: "linux.s390x"
@@ -161,7 +161,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_12-cpu-s390x"
             runs_on: "linux.s390x"
@@ -169,7 +169,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13-cpu-s390x"
             runs_on: "linux.s390x"
@@ -177,7 +177,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13t-cpu-s390x"
             runs_on: "linux.s390x"
@@ -185,7 +185,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14-cpu-s390x"
             runs_on: "linux.s390x"
@@ -193,7 +193,7 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14t-cpu-s390x"
             runs_on: "linux.s390x"
@@ -208,7 +208,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-s390x-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: ""
       runs_on: ${{ matrix.runs_on }}
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
@@ -230,49 +230,49 @@ jobs:
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_10-cpu-s390x"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_11-cpu-s390x"
           - desired_python: "3.12"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_12-cpu-s390x"
           - desired_python: "3.13"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13-cpu-s390x"
           - desired_python: "3.13t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13t-cpu-s390x"
           - desired_python: "3.14"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14-cpu-s390x"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-s390x"
-            docker_image: "pytorch/manylinuxs390x-builder"
+            docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14t-cpu-s390x"
     with:
