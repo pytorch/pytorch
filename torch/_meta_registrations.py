@@ -4208,6 +4208,14 @@ def meta__weight_int8pack_mm(x, w, q_scales):
         w.dtype is torch.int8,
         lambda: f"expected w to be int8, got {w.dtype}",
     )
+    torch._check(
+        w.size(1) == x.size(1),
+        lambda: f"expected w.size(1) ({w.size(1)}) == x.size(1) ({x.size(1)})",
+    )
+    torch._check(
+        q_scales.dim() == 1 and q_scales.size(0) == w.size(0),
+        lambda: f"expected q_scales to be 1D with size {w.size(0)}, got shape {q_scales.shape}",
+    )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 

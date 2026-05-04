@@ -2172,6 +2172,32 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(cpu_result.shape, meta_result.shape)
         self.assertEqual(cpu_result.dtype, meta_result.dtype)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_weight_int8pack_mm_inner_dim_mismatch(self):
+        A_cpu = torch.randn(4, 8)
+        B_cpu = torch.randint(-128, 127, (3, 16), dtype=torch.int8)
+        scales_cpu = torch.randn(3)
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten._weight_int8pack_mm(A_cpu, B_cpu, scales_cpu)
+        A_meta = torch.randn(4, 8, device="meta")
+        B_meta = torch.randint(-128, 127, (3, 16), device="meta", dtype=torch.int8)
+        scales_meta = torch.randn(3, device="meta")
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten._weight_int8pack_mm(A_meta, B_meta, scales_meta)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_weight_int8pack_mm_scales_mismatch(self):
+        A_cpu = torch.randn(4, 8)
+        B_cpu = torch.randint(-128, 127, (3, 8), dtype=torch.int8)
+        scales_cpu = torch.randn(5)
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten._weight_int8pack_mm(A_cpu, B_cpu, scales_cpu)
+        A_meta = torch.randn(4, 8, device="meta")
+        B_meta = torch.randint(-128, 127, (3, 8), device="meta", dtype=torch.int8)
+        scales_meta = torch.randn(5, device="meta")
+        with self.assertRaises(RuntimeError):
+            torch.ops.aten._weight_int8pack_mm(A_meta, B_meta, scales_meta)
+
 instantiate_device_type_tests(TestMeta, globals())
 
 
