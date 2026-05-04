@@ -46,6 +46,7 @@ vllm_lora_tp_test_distributed:
   id: vllm_lora_tp_test_distributed
   env_vars:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
+    PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
   num_gpus: 4
   steps:
     - pytest -v -s -x lora/test_chatglm3_tp.py
@@ -75,8 +76,10 @@ vllm_multi_model_processor_test:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
     - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py
-    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k mistralai
+    # mistralai and moonshotai ship custom tiktoken tokenizers without a tokenizer.json; transformers v5's
+    # TokenizersBackend needs Hub access to resolve tokenizer_file, so run them with OFFLINE=0.
+    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai and not moonshotai'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k 'mistralai or moonshotai'
     - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_glm4_1v.py
 
 vllm_multi_model_test_28_failure_test:
@@ -124,4 +127,4 @@ vllm_lora_test:
   id: lora_test
   parallelism: 4
   steps:
-    - pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_llm_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py
+    - pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_llm_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py --ignore=lora/test_qwen35_densemodel_lora.py

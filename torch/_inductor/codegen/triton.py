@@ -307,8 +307,15 @@ class TritonSymbols:
                 ]
                 assert len(tree_match) == 1, "# of Match expected to 1"
 
-                shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
-                var_shape = tuple(shape)
+                if tree_match[0].tensor_dim is None:
+                    # tree has no tensor dimension (e.g. no_x_dim mode),
+                    # treat as scalar
+                    var_shape = ()
+                else:
+                    shape[tree_match[0].tensor_dim] = str(
+                        cls.get_block_size(tree_match[0])
+                    )
+                    var_shape = tuple(shape)
 
             # Union current variable shape
             expr_shape = get_broadcasted_shape(expr_shape, var_shape)
@@ -1287,6 +1294,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def abs(x):
         return f"tl_math.abs({x})"
 
@@ -1349,6 +1357,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def exp(x):
         """
         When use_fast_math, use the ftz (flushing to zero) variant
@@ -1374,6 +1383,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sqrt(x):
         return f"tl.sqrt_rn({x})"
 
@@ -1396,6 +1406,7 @@ class TritonOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a, b):
         if torch.version.hip:
             return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
@@ -1403,6 +1414,7 @@ class TritonOverrides(OpOverrides):
             return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a, b):
         if torch.version.hip:
             return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
@@ -1410,10 +1422,12 @@ class TritonOverrides(OpOverrides):
             return f"triton_helpers.maximum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def dot(a, b):
         """
         Triton code generation for lowering ops.dot to tl.dot.
@@ -1633,9 +1647,24 @@ class TritonOverrides(OpOverrides):
             else:
                 cast_inputs.append(str(inp))
 
+        if torch.version.hip:
+            # AMDGCN asm strings may contain real newlines (instructions are
+            # newline-separated, unlike PTX which uses semicolons).  The
+            # generated code is nested inside two Python string layers:
+            #   Layer 1 : the cached wrapper .py file
+            #   Layer 2 : the Triton kernel source (a triple-quoted string
+            #             inside that wrapper, exec'd / JIT-compiled)
+            # repr() escapes \n -> \\n, then we double the backslashes so
+            # they survive both layers: \\\\n -> (L1 parse) \\n -> (L2 parse) \n.
+            asm_literal = repr(asm).replace("\\", "\\\\")
+            constraints_literal = repr(constraints).replace("\\", "\\\\")
+        else:
+            asm_literal = f"'{asm}'"
+            constraints_literal = f"'{constraints}'"
+
         def asm_call(args):
             return (
-                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
+                f"tl.inline_asm_elementwise({asm_literal}, {constraints_literal}, "
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 
@@ -1657,11 +1686,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def cos(x):
         return f"tl_math.cos({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sin(x):
         return f"tl_math.sin({x})"
 
@@ -1675,61 +1706,73 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def lgamma(x):
         return f"libdevice.lgamma({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def erf(x):
         return f"libdevice.erf({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def cosh(x):
         return f"libdevice.cosh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sinh(x):
         return f"libdevice.sinh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def acos(x):
         return f"libdevice.acos({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def acosh(x):
         return f"libdevice.acosh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def asin(x):
         return f"libdevice.asin({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def asinh(x):
         return f"libdevice.asinh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atan2(x, y):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atan(x):
         return f"libdevice.atan({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atanh(x):
         return f"libdevice.atanh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def copysign(x, y):
         return f"libdevice.copysign({x}, {y})"
 
@@ -1740,11 +1783,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def erfinv(x):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def hypot(x, y):
         return f"libdevice.hypot({x}, {y})"
 
@@ -1759,15 +1804,18 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.log2({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(x, n):
         return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def nextafter(x, y):
         return f"libdevice.nextafter({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -1776,10 +1824,12 @@ class TritonOverrides(OpOverrides):
         return f"{a} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a, b):
         return f"{a} | {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a, b):
         return f"({a} ^ {b})"
 
@@ -1838,6 +1888,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def rsqrt(x):
         if torch.version.hip:
             return f"tl.rsqrt({x})"
@@ -1851,11 +1902,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def tan(x):
         return f"libdevice.tan({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def tanh(x):
         cse_var = V.kernel.cse.varname_map.get(x)
         if cse_var and hasattr(cse_var, "dtype"):
@@ -1881,6 +1934,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return (
@@ -1889,6 +1943,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
@@ -1929,26 +1984,31 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def log(x):
         return f"tl_math.log({x})"
 
     @staticmethod
     @maybe_upcast_float32(convert_output=False)
+    # pyrefly: ignore [bad-override]
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
 
     @staticmethod
     @maybe_upcast_float32(convert_output=False)
+    # pyrefly: ignore [bad-override]
     def isnan(x):
         return f"libdevice.isnan({x}).to(tl.int1)"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def round(x):
         return f"libdevice.nearbyint({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def floor(x):
         return f"libdevice.floor({x})"
 
@@ -1964,15 +2024,24 @@ class TritonOverrides(OpOverrides):
         #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
         # For negative b we negate both operands first.
         zero = ops.constant(0, torch.int32)
+        one = ops.constant(1, torch.int32)
+        # Guard against integer division by zero before the division to
+        # avoid undefined behavior (LLVM may optimize away a post-division
+        # check assuming UB doesn't happen). Replace b with 1 when b is 0
+        # so the division is safe, then select 0 as the final result.
+        b_zero = ops.eq(b, zero)
+        b = ops.where(b_zero, one, b)
         b_neg = ops.lt(b, zero)
         a = ops.where(b_neg, ops.sub(zero, a), a)
         b = ops.where(b_neg, ops.sub(zero, b), b)
         a_neg = ops.lt(a, zero)
         a = ops.where(a_neg, ops.bitwise_not(a), a)
         quot = ops.truncdiv(a, b)
-        return ops.where(a_neg, ops.bitwise_not(quot), quot)
+        quot = ops.where(a_neg, ops.bitwise_not(quot), quot)
+        return ops.where(b_zero, zero, quot)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x):
         z = ops.constant(0, torch.int32)
         left = ops.to_dtype((ops.lt(z, x)), torch.int8)
@@ -1982,10 +2051,12 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def trunc(x):
         return f"libdevice.trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
         # Notice that // in triton behaves as truncdiv instead of floordiv
@@ -1993,6 +2064,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def ceil(x):
         return f"libdevice.ceil({x})"
 
@@ -2183,6 +2255,7 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         cache_key = f"frexp({x})"
         if cse_val := V.kernel.cse.try_get(cache_key):
@@ -2821,7 +2894,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def should_use_cooperative_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
-            self.features
+            V.graph.get_current_device_or_throw(),
+            self.features.numel,
+            self.features.reduction_numel,
         )
 
     def init_cooperative_reduction(self):
@@ -2942,6 +3017,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         override_mask=None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
+        mask_constant_index=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -3317,7 +3393,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config or self.is_combo_kernel:
+            if self.fixed_config or self.is_combo_kernel or mask_constant_index:
                 mask_vars = OrderedSet(
                     f"{tree.prefix}mask"
                     for tree in self.range_trees
@@ -3900,6 +3976,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dense_indexing=True,
             block_ptr=mode is None,
             tma_compatibility_checker=tma_compatibility_checker,
+            mask_constant_index=mode == "atomic_add",
         )
 
         if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
@@ -5335,7 +5412,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
@@ -5349,7 +5426,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint_with_override(
@@ -5415,7 +5492,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5510,9 +5587,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
-            "deterministic": config.deterministic,
+            "deterministic": config.deterministic or config.batch_invariant,
+            "batch_invariant": config.batch_invariant,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
+            "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -5542,6 +5621,101 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 config.coordinate_descent_check_all_directions
             )
         return inductor_meta
+
+    def inductor_meta_per_kernel(self) -> dict[str, Any]:
+        """
+        Used by both standalone codegen_kernel() and ComboKernel.combo_grid_meta()
+        (which calls this on each sub_kernel).
+        """
+        out: dict[str, Any] = {
+            "no_x_dim": self.no_x_dim,
+            "atomic_add_found": self.atomic_add_found,
+            "num_load": self.num_load,
+            "num_store": self.num_store,
+            "num_reduction": self.num_reduction,
+            # Triton will not accept an OrderedSet for autotune_hints
+            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+        }
+        if self.mix_order_reduction:
+            out["RSPLIT_SIZE"] = self.rsplit_size
+        if config.deterministic or config.test_configs.force_filter_reduction_configs:
+            out["has_loadstore_with_contiguous_rdim"] = (
+                self.has_load_with_contiguous_rdim
+                or self.has_store_with_contiguous_rdim
+            )
+        if self.tma_min_block_sizes:
+            out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.tiling_scores:
+            out["tiling_scores"] = self.tiling_scores
+        if self.cooperative_reduction:
+            out["persistent_reduction"] = self.persistent_reduction
+        if self.add_persistent_rblock:
+            out["add_persistent_rblock"] = True
+        if (
+            config.benchmark_kernel
+            or config.profile_bandwidth
+            or config.benchmark_combo_kernel
+        ):
+            num_gb = self.estimate_kernel_num_bytes() / 1e9
+            if num_gb is not None:
+                out["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel or config.benchmark_combo_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                out["kernel_flop"] = flops
+        return out
+
+    @functools.cached_property
+    def add_persistent_rblock(self) -> bool:
+        # Bail on 3d tiling, which has more complicated coalesce patterns
+        looped_red = self.features.is_reduction() and not self.persistent_reduction
+        tiling_scores = self.tiling_scores
+        two_d_red = len(self.tiling) == 2
+        if looped_red and two_d_red:
+            memory_stats = self.features.memory_stats(self.tiling)
+            dim_stats = memory_stats.persistent.memory.dim[0]
+            mem_ops_per_thread = dim_stats.count_per_thread
+
+            if (
+                tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
+                # reads coalesced by xblock
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+            else:
+                contiguous_red = (
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
+                )
+
+            looped_mem = memory_stats.looped.memory.bytes
+            persistent_mem = memory_stats.persistent.memory.bytes
+            # check that we save significant memory by doing persistent
+            saved_bytes_ratio = V.graph.sizevars.optimization_hint(looped_mem) / max(
+                V.graph.sizevars.optimization_hint(persistent_mem),
+                1,
+            )
+
+            # TODO - rnumel should be reasonably close to power of 2
+            if (
+                # significant memory bandwidth savings
+                saved_bytes_ratio >= 1.3
+                and contiguous_red
+                # TODO - need more detailed register analysis
+                and V.graph.sizevars.statically_known_leq(
+                    self.features.reduction_numel, 32768
+                )
+                # We will already generate a persistent config in this case
+                and V.graph.sizevars.statically_known_gt(
+                    self.features.reduction_numel, 2048
+                )
+                and mem_ops_per_thread <= 10
+            ):
+                return True
+        return False
 
     def codegen_kernel(self, name=None) -> str:
         """
@@ -5680,95 +5854,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
-            # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
-            "no_x_dim": self.no_x_dim,
-            "atomic_add_found": self.atomic_add_found,
-            "num_load": self.num_load,
-            "num_store": self.num_store,
-            "num_reduction": self.num_reduction,
+            **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
-
-        if self.mix_order_reduction:
-            inductor_meta["RSPLIT_SIZE"] = self.rsplit_size
-
-        if config.deterministic or config.test_configs.force_filter_reduction_configs:
-            inductor_meta["has_loadstore_with_contiguous_rdim"] = (
-                self.has_load_with_contiguous_rdim
-                or self.has_store_with_contiguous_rdim
-            )
-
-        # Bail on 3d tiling, which has more complicated coalesce patterns
-        looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
-        tiling_scores = self.tiling_scores
-        two_d_red = len(self.tiling) == 2
-        if looped_red and two_d_red:
-            memory_stats = self.features.memory_stats(self.tiling)
-            dim_stats = memory_stats.persistent.memory.dim[0]
-            mem_ops_per_thread = dim_stats.count_per_thread
-
-            if (
-                tiling_scores is not None
-                and "x" in tiling_scores
-                and "r0_" in tiling_scores
-            ):
-                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
-                # reads coalesced by xblock
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
-            else:
-                contiguous_red = (
-                    self.features.get_reduction_hint(tiling_scores)
-                    == ReductionHint.INNER
-                )
-
-            looped_mem = memory_stats.looped.memory.bytes
-            persistent_mem = memory_stats.persistent.memory.bytes
-            # check that we save significant memory by doing persistent
-            saved_bytes_ratio = V.graph.sizevars.optimization_hint(looped_mem) / max(
-                V.graph.sizevars.optimization_hint(persistent_mem),
-                1,
-            )
-
-            # TODO - rnumel should be reasonably close to power of 2
-            if (
-                # significant memory bandwidth savings
-                saved_bytes_ratio >= 1.3
-                and contiguous_red
-                # TODO - need more detailed register analysis
-                and V.graph.sizevars.statically_known_leq(
-                    self.features.reduction_numel, 32768
-                )
-                # We will already generate a persistent config in this case
-                and V.graph.sizevars.statically_known_gt(
-                    self.features.reduction_numel, 2048
-                )
-                and mem_ops_per_thread <= 10
-            ):
-                inductor_meta["add_persistent_rblock"] = True
-
-        if self.tiling_scores:
-            inductor_meta["tiling_scores"] = self.tiling_scores
-
-        if self.tma_min_block_sizes:
-            inductor_meta["tma_min_block_sizes"] = self.tma_min_block_sizes
-
-        if self.cooperative_reduction:
-            inductor_meta["persistent_reduction"] = self.persistent_reduction
-
-        num_gb = None
-        if config.benchmark_kernel or config.profile_bandwidth:
-            num_gb = self.estimate_kernel_num_bytes() / 1e9
-            if num_gb is not None:
-                inductor_meta["kernel_num_gb"] = num_gb
-        if config.benchmark_kernel:
-            flops = self.estimate_flops()
-            if flops is not None:
-                inductor_meta["kernel_flop"] = flops
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
@@ -5788,7 +5879,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
         # we must not tag any args with pointer_range_32 in that case.
-        if torch.version.hip is not None and self.atomic_add_found:
+        # Also disable pointer_range_32 when the config flag is off.
+        if torch.version.hip is not None and (
+            self.atomic_add_found or not config.triton.emit_pointer_range_32
+        ):
             triton_meta["configs"] = [config_of(signature, pointer_range_override=())]
         else:
             triton_meta["configs"] = [config_of(signature)]
@@ -5854,7 +5948,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb))
+            code.splice(
+                self.codegen_kernel_benchmark(
+                    inductor_meta.get("kernel_num_gb")  # type: ignore[arg-type]
+                )
+            )
 
         return code.getvalue()
 
@@ -6302,7 +6400,11 @@ class FusedUserDefinedTritonKernel(TritonKernel):
             )
             return result_var
         else:
-            return super().load(name, index)
+            # The scheduler should prevent this.
+            raise AssertionError(
+                f"Epilogue attempted to load from '{name}'. "
+                "Inductor indexing variables are not defined in user kernel scope. "
+            )
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -6325,9 +6427,13 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 
         # Generate a new AST where the store value expr is replaced with the new value
         new_ast = copy.deepcopy(self.ir_node.kernel_ast)
-        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            identify_triton_stores,
+            identify_triton_stores_from_ast,
+        )
 
-        kernel_stores = identify_triton_stores(new_ast)
+        # avoid redundant cache entry of new_ast
+        kernel_stores = identify_triton_stores_from_ast(new_ast)
         assert len(kernel_stores.stores) == 1
 
         new_store_value_node = ast.Name(self.new_store_cse_var.name)
@@ -6357,7 +6463,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         src_lines = src_with_store_replaced.splitlines()
 
         # identify the store again, because the previous parse-modify-unparse could've change its location
-        kernel_stores = identify_triton_stores(ast.parse(src_with_store_replaced))
+        kernel_stores = identify_triton_stores(src_with_store_replaced)
         # python ast lineno is 1-indexed
         store_line_index = kernel_stores.stores[0].store_node.lineno - 1
 
@@ -6600,7 +6706,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(  # noqa: G200
+                log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,
@@ -6857,11 +6963,16 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
+        from torch._inductor.codegen.xpu.xpu_combined_scheduling import (
+            XPUCombinedScheduling,
+        )
 
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling)
+        ), (
             f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
         )
 

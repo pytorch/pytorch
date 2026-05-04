@@ -44,6 +44,7 @@ struct MPSScalar {
     float f; // MPS doesn't support 'double'
     at::Half h;
     int64_t i;
+    uint64_t u;
     bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
@@ -386,6 +387,15 @@ struct MPSGraphCache {
   template <typename T>
   inline T* LookUpAs(const std::string& key) const {
     return static_cast<T*>(LookUp(key));
+  }
+
+  void clear() {
+    dispatch_sync(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedGraph_;
+      }
+      cache_.clear();
+    });
   }
 
  private:

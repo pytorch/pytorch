@@ -174,12 +174,22 @@ def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | 
 
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
+    # CPython: PySequence_Contains → _PySequence_IterSearch → PyObject_GetIter
+    # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
-        # use __iter__ if __contains__ is not available
         for x in b:
             if x == a:
                 return True
         return False
+    if hasattr(b, "__getitem__"):
+        i = 0
+        while True:
+            try:
+                if b.__getitem__(i) == a:
+                    return True
+                i += 1
+            except IndexError:
+                return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
@@ -327,7 +337,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 

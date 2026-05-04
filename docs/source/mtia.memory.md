@@ -15,6 +15,7 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
     :toctree: generated
     :nosignatures:
 
+    max_memory_allocated
     memory_stats
     memory_allocated
 ```

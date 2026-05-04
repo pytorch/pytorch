@@ -201,7 +201,7 @@ class _DynamoCodeCacheEntry:
          multiple function objects pointing to the same code such as recursive functions.
       4. A list of guarded code that eval frame dispatches to.
       5. A list of imported module objects unioned from all compiled branches.
-      6. A list of "backends" (compiled fx graph) unioned from all compield branches.
+      6. A list of "backends" (compiled fx graph) unioned from all compiled branches.
       7. A string path used to access the original code object users defined.
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
@@ -469,7 +469,7 @@ class _DynamoCacheEntry:
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 
 
@@ -555,6 +555,7 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
+    # pyrefly: ignore [deprecated]
     @contextlib.contextmanager
     def _ctx() -> Iterator[None]:
         increment_frame()
@@ -1115,8 +1116,8 @@ class DiskDynamoStore(DynamoStore):
         """
         try:
             pickled_content: bytes = pickle.dumps(cache_entry)
-            CacheArtifactManager.record_artifact(
-                PrecompileCacheArtifact.type(), path, pickled_content
+            CacheArtifactRecorder(PrecompileCacheArtifact.type(), path).record(
+                pickled_content
             )
             self._write_to_local_cache(pickled_content, path)
         except Exception as e:

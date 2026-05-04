@@ -23,6 +23,7 @@ from .utils import (
     cache_on_self,
     reduction_num_outputs,
     sympy_index_symbol_with_prefix,
+    sympy_product,
     sympy_subs,
 )
 from .virtualized import ops, V
@@ -162,8 +163,10 @@ class LoopBody:
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
-        self.has_partial_accumulate = self.root_block.graph.find_nodes(
-            op="call_method", target="partial_accumulate"
+        self.has_partial_accumulate = bool(
+            self.root_block.graph.find_nodes(
+                op="call_method", target="partial_accumulate"
+            )
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
@@ -286,6 +289,58 @@ class LoopBody:
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
         )
         return new_body
+
+    def reindex_iter_loops(self, new_iter_sizes: Sequence[sympy.Expr]) -> LoopBody:
+        """
+        Reindex iteration loops into a different factorization of the same
+        total numel. For example, [1024, 8192] -> [65536, 128].
+
+        The old iteration vars are expressed as functions of the new vars via
+        FloorDiv and ModularIndexing on the flat index.
+        """
+        from torch.utils._sympy.functions import ModularIndexing
+
+        old_body = self
+        old_iter_sizes = self.sizes[0]
+        reduce_sizes = self.sizes[1]
+
+        new_sizes = (list(new_iter_sizes), list(reduce_sizes))
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
+        )
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = [*itertools.chain.from_iterable(indices)]
+            new_iter_idx = index[: len(new_iter_sizes)]
+            reduce_idx = index[len(new_iter_sizes) :]
+            # Build flat index from new iter vars
+            flat = sympy.S.Zero
+            for v, s in zip(new_iter_idx, new_iter_sizes):
+                flat = flat * s + v
+            # Express old iter vars from flat index
+            old_iter_idx: list[sympy.Expr] = []
+            for i, old_size in enumerate(old_iter_sizes):
+                tail = sympy_product(old_iter_sizes[i + 1 :])
+                old_iter_idx.append(ModularIndexing(flat, tail, old_size))
+            return old_body(old_iter_idx, list(reduce_idx))
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        return LoopBody(
+            loop_body,
+            (iter_vars2, reduce_vars2),
+            var_ranges2,
+            iter_vars2,
+            reduce_vars2,
+        )
 
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
@@ -533,7 +588,12 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
 
         handler: Any = CountOps(
-            CaptureIndexing(proxy_ops, body, tracer),
+            CaptureIndexing(
+                # pyrefly: ignore[bad-argument-type]
+                proxy_ops,
+                body,
+                tracer,
+            ),
             body.op_counts,
         )
         if config.constant_and_index_propagation:

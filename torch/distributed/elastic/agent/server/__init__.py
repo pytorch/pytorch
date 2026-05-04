@@ -29,7 +29,7 @@ Or can be coordinated, communicating to other agents (that manage workers
 in the same job) to make a collective decision.
 """
 
-from .api import (  # noqa: F401
+from .api import (
     ElasticAgent,
     RunResult,
     SimpleElasticAgent,

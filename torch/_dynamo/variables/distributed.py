@@ -129,6 +129,9 @@ class WorldMetaClassVariable(DistributedVariable):
 
         return type(value) is _WorldMeta
 
+    def python_type(self) -> type:
+        return type(self.value)
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
             from .builder import SourcelessBuilder

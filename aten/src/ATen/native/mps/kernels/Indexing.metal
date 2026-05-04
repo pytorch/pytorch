@@ -970,12 +970,15 @@ kernel void scatter_nonzero_indices(
     constant int& ndim [[buffer(3)]],
     constant int64_t* sizes [[buffer(4)]],
     constant int* block_offsets [[buffer(5)]],
+    constant int& max_entries [[buffer(6)]],
     uint tid [[thread_position_in_grid]],
     uint tgid [[threadgroup_position_in_grid]]) {
   if (!is_nonzero(input[tid]))
     return;
 
   int pos = block_offsets[tgid] + prefix[tid];
+  if (pos >= max_entries)
+    return;
 
   uint flat = tid;
   for (int d = ndim - 1; d >= 0; d--) {
@@ -1007,6 +1010,7 @@ kernel void scatter_nonzero_indices(
       constant int& ndim [[buffer(3)]],                                      \
       constant int64_t* sizes [[buffer(4)]],                                 \
       constant int* block_offsets [[buffer(5)]],                             \
+      constant int& max_entries [[buffer(6)]],                               \
       uint tid [[thread_position_in_grid]],                                  \
       uint tgid [[threadgroup_position_in_grid]])
 

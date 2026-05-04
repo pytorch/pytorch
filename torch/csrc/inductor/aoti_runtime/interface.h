@@ -35,6 +35,52 @@ struct AOTInductorConstantMapEntry {
   AtenTensorHandle handle;
 };
 
+// ---------------------------------------------------------------------------
+// C-compatible tensor descriptor for crossing the DSO boundary.
+//
+// This struct carries the same information as ArrayRefTensor<T> but uses only
+// C-compatible types so the host process and DSO can be built with different
+// C++ standard libraries (e.g. libc++ vs libstdc++).  All pointer fields
+// reference memory owned by the caller; no copies are made.
+//
+// Maximum supported number of dimensions.  8 covers all practical AOTI
+// models; tensors with more dims should fall back to the AtenTensorHandle
+// interface.
+// ---------------------------------------------------------------------------
+#define AOTI_ARRAYREF_TENSOR_MAX_DIMS 8
+
+struct AOTInductorArrayRefTensor {
+  // Pointer to the raw data buffer.  Not owned.
+  void* data;
+
+  // Number of elements in the data buffer (product of sizes for contiguous
+  // tensors).
+  int64_t numel;
+
+  // Static-size arrays for shape metadata.  Only the first `ndim` entries
+  // are meaningful.
+  int64_t sizes[AOTI_ARRAYREF_TENSOR_MAX_DIMS];
+  int64_t strides[AOTI_ARRAYREF_TENSOR_MAX_DIMS];
+
+  // Number of dimensions (0 <= ndim <= AOTI_ARRAYREF_TENSOR_MAX_DIMS).
+  int32_t ndim;
+
+  // Torch dtype encoded as int32_t (same encoding as aoti_torch_dtype_*()).
+  int32_t dtype;
+
+  // Device information.
+  int32_t device_type;
+  int32_t device_idx;
+
+  // Reserved for future extension.  Zero-initialize and do not read — a
+  // newer reader must tolerate zeros, and an older reader must ignore them.
+  int64_t reserved[4];
+};
+
+static_assert(
+    sizeof(AOTInductorArrayRefTensor) == 192,
+    "changing the size of AOTInductorArrayRefTensor breaks ABI compatibility!");
+
 // TODO: Deprecate this API. This was kept for BC compatibility.
 // Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -264,5 +310,26 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,
     const char** in_spec,
     const char** out_spec);
+
+// ---------------------------------------------------------------------------
+// C-ABI-safe variant of AOTInductorModelRunMinimalArrayrefInterface.
+//
+// Instead of passing std::tuple<ArrayRefTensor<T>...>& (which encodes C++
+// standard library types into the ABI), this function accepts flat C arrays
+// of AOTInductorArrayRefTensor descriptors.  The descriptors reference the
+// same underlying data buffers -- no copies are made.
+//
+// The host process marshals its ArrayRefTensor<T> objects into
+// AOTInductorArrayRefTensor descriptors, calls into the DSO through this
+// pure-C interface, and then unmarshals the output descriptors back.
+// Because only C types cross the DSO boundary, the host and DSO can be
+// built with different C++ standard libraries (e.g. libc++ vs libstdc++).
+// ---------------------------------------------------------------------------
+AOTI_API AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterfaceV2(
+    AOTInductorModelHandle model_handle,
+    int32_t num_inputs,
+    const AOTInductorArrayRefTensor* inputs,
+    int32_t num_outputs,
+    AOTInductorArrayRefTensor* outputs);
 
 } // extern "C"

@@ -425,7 +425,7 @@ jobs:
 
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
-        uses: seemethere/upload-artifact-s3@v5
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5
         with:
           s3-prefix: |
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
@@ -471,13 +471,13 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch' && inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
-      image: ${{ inputs.docker-image-name }}
+      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480
     outputs:
-      docker-image: ${{ inputs.docker-image-name }}
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
+      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -511,7 +511,18 @@ jobs:
           selected-test-configs: ${{ inputs.selected-test-configs }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
 
+      - name: Map EC2 runners to ARC runners
+        id: map-runners
+        env:
+          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
+        shell: bash
+        run: |
+          python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+
       - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
         with:
           role-to-assume: arn:aws:iam::308535385114:role/arc
@@ -529,6 +540,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
+          SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
@@ -551,7 +563,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ${{ inputs.docker-image-name }}
+          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
@@ -570,18 +582,16 @@ jobs:
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
-      - name: Store build artifacts on S3
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+      - name: Store build artifacts
         if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true')
+        uses: pytorch/pytorch/.github/actions/upload-build-artifacts@main
         with:
           name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
 
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped'
+        if: steps.build.outcome != 'skipped' && steps.aws-creds.outcome == 'success'
         uses: pytorch/pytorch/.github/actions/upload-sccache-stats@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
