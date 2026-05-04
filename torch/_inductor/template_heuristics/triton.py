@@ -2738,6 +2738,10 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         )
         tile_size_a = get_tile_size(scale_option_a)
         tile_size_b = get_tile_size(scale_option_b)
+        if mat_a.get_dtype() == torch.float4_e2m1fn_x2:
+            tile_size_a //= 2
+        if mat_b.get_dtype() == torch.float4_e2m1fn_x2:
+            tile_size_b //= 2
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
