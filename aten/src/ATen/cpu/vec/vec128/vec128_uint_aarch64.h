@@ -262,7 +262,7 @@ Vectorized<uint8_t> Vectorized<uint8_t>::blend(
       std::memcpy(                                                             \
           tmp_values,                                                          \
           reinterpret_cast<const uint##bit##_t*>(ptr),                         \
-          std::min<int64_t>(count, size()) * sizeof(uint##bit##_t));           \
+          count * sizeof(uint##bit##_t));                                      \
       return vld1q_u##bit(reinterpret_cast<const uint##bit##_t*>(tmp_values)); \
     }                                                                          \
   }                                                                            \
@@ -273,10 +273,7 @@ Vectorized<uint8_t> Vectorized<uint8_t>::blend(
     } else {                                                                   \
       uint##bit##_t tmp_values[size()];                                        \
       vst1q_u##bit(reinterpret_cast<uint##bit##_t*>(tmp_values), values);      \
-      std::memcpy(                                                             \
-          ptr,                                                                 \
-          tmp_values,                                                          \
-          std::min<int64_t>(count, size()) * sizeof(uint##bit##_t));           \
+      std::memcpy(ptr, tmp_values, count * sizeof(uint##bit##_t));             \
     }                                                                          \
   }
 

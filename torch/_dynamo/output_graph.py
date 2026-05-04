@@ -228,7 +228,6 @@ class AliasingInfo:
 class MutationInfo:
     has_mutation: bool
     msg: str
-    mutated_input_indices: tuple[int, ...] = ()
 
 
 def collect_reachable_grad_fns(
@@ -1549,7 +1548,7 @@ class OutputGraph(OutputGraphCommon):
             # HACKY CODE REGION BEGIN
             # WE ARE PIGGYBACKING ON EXISTING INFRA TO REGISTER ATTRS
             # This ultimately gets written to self.nn_modules, which is unfortunate
-            # Attrs that are tensors and symints and such need to be migrated to have their
+            # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
 
@@ -2725,7 +2724,6 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
-            gm.graph.lint()
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
@@ -2941,15 +2939,12 @@ class OutputGraph(OutputGraphCommon):
             if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
-        from torch._higher_order_ops.passes.inline_invoke_subgraph import (
-            inline_invoke_subgraph,
-            inline_single_use_invoke_subgraph,
-        )
-
         if config.inline_invoke_subgraph:
+            from torch._higher_order_ops.passes.inline_invoke_subgraph import (
+                inline_invoke_subgraph,
+            )
+
             gm = inline_invoke_subgraph(gm)
-        elif config.inline_single_use_invoke_subgraph:
-            gm = inline_single_use_invoke_subgraph(gm)
 
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
@@ -3996,7 +3991,7 @@ class SubgraphTracer(fx.Tracer):
             #
             #  1. When create_graph_input for a tensor that has symbolic shapes,
             #     we look for basic symbols in its size and stride, we check if the symbol is bound
-            #     in current graph (i.e. bound_symbols), if it's not bound, we'll create a placeholder
+            #     in current graph (i.e. bound_symbols), it it's not bound, we'll create a placeholder
             #     for it then recursively check its parent, creates ph if not bound at parent until.
             #     reachting the top-level, where we require a source is attached to the proxy.
             #
@@ -4077,16 +4072,6 @@ class SubgraphTracer(fx.Tracer):
         # would already be lifted as inputs to parent graph.
         if proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
-
-        # Wrapper subclasses (e.g. DTensor) from dynamo-disabled regions may not
-        # have had track_produced_symints called, causing _lift_basic_symbols to
-        # hit "Source of 'sN' is None" when lifting inner tensor symbols.
-        if (
-            isinstance(example_value, torch.Tensor)
-            and is_traceable_wrapper_subclass(example_value)
-            and proxy.tracer is self.parent
-        ):
-            self.parent.track_produced_symints(example_value, proxy)
 
         example_value = proxy.node.meta["example_value"]
         type_expr = (
@@ -4408,16 +4393,14 @@ class SubgraphTracer(fx.Tracer):
     def has_input_mutation(self) -> MutationInfo:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
-        tensor_placeholder_indices = []
 
         input_versions_at_end = []
-        for placeholder_idx, node in enumerate(self.graph.nodes):
+        for node in self.graph.nodes:
             if node.op == "placeholder":
                 example_value = node.meta["example_value"]
                 if isinstance(example_value, torch.Tensor):
                     input_versions_at_end.append(example_value._version)
                     input_nodes.append(node)
-                    tensor_placeholder_indices.append(placeholder_idx)
             else:
                 break
 
@@ -4431,13 +4414,10 @@ class SubgraphTracer(fx.Tracer):
 
         if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
-            mutated_input_indices = tuple(
-                tensor_placeholder_indices[i] for i in mutated_inputs
-            )
             msg = f"Input mutation detected at {mutated_nodes}"
-            return MutationInfo(True, msg, mutated_input_indices)
+            return MutationInfo(True, msg)
 
-        return MutationInfo(False, "", ())
+        return MutationInfo(False, "")
 
     def has_aliasing(self) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages

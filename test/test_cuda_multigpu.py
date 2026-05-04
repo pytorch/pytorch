@@ -42,7 +42,7 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest
+    TestCase = NoTest  # noqa: F811
 
 
 class TestCudaMultiGPU(TestCase):

@@ -255,7 +255,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
       nullptr));
   TORCH_INTERNAL_ASSERT(
-      result.ptr() != nullptr && !Py_IsNone(result.ptr()),
+      result.ptr() != nullptr && result.ptr() != Py_None,
       "Failed to load AOTI kernel. Operator Name is ",
       op_name_with_overload_);
 
@@ -327,15 +327,14 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
             py::isinstance<py::list>(metadata["tensor_list"]));
         auto tensor_list = metadata["tensor_list"].cast<py::list>();
         std::vector<TensorMetadata> test_list_metadata;
-        test_list_metadata.reserve(tensor_list.size());
-        for (const auto& item_tensor : tensor_list) {
+        for (auto item_tensor : tensor_list) {
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
               py::isinstance<py::dict>(item_tensor));
           auto metadata = item_tensor.cast<py::dict>();
-          test_list_metadata.push_back(build_tensor_metadata(metadata));
+          auto tensor_metadata = build_tensor_metadata(metadata);
+          test_list_metadata.push_back(tensor_metadata);
         }
-        parameter_metadata_list.emplace_back(
-            std::move(test_list_metadata), arg_idx);
+        parameter_metadata_list.emplace_back(test_list_metadata, arg_idx);
       } else if (is_scalar) {
         // Scalar
         auto metadata = item_metadata.cast<py::dict>();
@@ -363,7 +362,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         // String
         auto metadata = item_metadata.cast<py::dict>();
         auto str_value = metadata["string_value"].cast<std::string>();
-        parameter_metadata_list.emplace_back(std::move(str_value), arg_idx);
+        parameter_metadata_list.emplace_back(str_value, arg_idx);
       } else if (is_dtype) {
         // Dtype
         auto metadata = item_metadata.cast<py::dict>();
@@ -379,7 +378,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         auto device_type_value =
             metadata["device_type_value"].cast<std::string>();
         auto device = c10::Device(device_type_value);
-        if (!Py_IsNone(metadata["device_index_value"].ptr())) {
+        if (metadata["device_index_value"].ptr() != Py_None) {
           auto device_index_value =
               metadata["device_index_value"].cast<c10::DeviceIndex>();
           device.set_index(device_index_value);
@@ -396,8 +395,8 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();
-        parameter_metadata_list.emplace_back(
-            build_tensor_metadata(metadata), arg_idx);
+        auto tensor_metadata = build_tensor_metadata(metadata);
+        parameter_metadata_list.emplace_back(tensor_metadata, arg_idx);
       }
     }
 
@@ -405,7 +404,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     aoti_kernel_metadata.parameter_metadata_list_ =
         std::move(parameter_metadata_list);
     aoti_kernel_metadata.kernel_runner_ = load_aoti_model_runner(kernel_path);
-    aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
+    aoti_kernel_cache_.push_back(aoti_kernel_metadata);
   }
 }
 
@@ -502,7 +501,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       qualified_name.end());
 
   py::gil_scoped_acquire gil;
-  py::handle op_py_func = op.getPythonOp([&]() -> PyObject* {
+  py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {
     py::handle torch_api_function = py::module::import("torch")
                                         .attr("ops")
                                         .attr(ns_str.c_str())
@@ -515,7 +514,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
   });
 
   TORCH_INTERNAL_ASSERT(
-      op_py_func.ptr() != nullptr && !Py_IsNone(op_py_func.ptr()),
+      op_py_func.ptr() != nullptr && op_py_func.ptr() != Py_None,
       "Failed to get python operation. Operator Name is ",
       op.operator_name().name,
       ", Overload Name is ",
@@ -526,7 +525,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
           .attr("aoti_compile_with_persistent_cache");
   TORCH_INTERNAL_ASSERT(
       aot_compile_function.ptr() != nullptr &&
-          !Py_IsNone(aot_compile_function.ptr()),
+          aot_compile_function.ptr() != Py_None,
       "Failed to import - torch._inductor.aoti_eager.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
@@ -542,7 +541,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
       nullptr));
-  TORCH_INTERNAL_ASSERT(result.ptr() != nullptr && !Py_IsNone(result.ptr()));
+  TORCH_INTERNAL_ASSERT(result.ptr() != nullptr && result.ptr() != Py_None);
 
   auto kernel_lib_path = py::cast<std::string>(result);
   TORCH_CHECK(

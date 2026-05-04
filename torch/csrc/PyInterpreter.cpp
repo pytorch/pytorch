@@ -967,7 +967,7 @@ PyInterpreterHolder self_interpreter;
 } // anonymous namespace
 
 py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp([&]() -> PyObject* {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
     // Parse the name into namespace and name (no overload_name)
     // TODO: put this into the library
     const auto& schema = op.schema();

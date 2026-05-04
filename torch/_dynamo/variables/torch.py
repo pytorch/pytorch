@@ -91,11 +91,7 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .distributed import DistributedVariable
-from .functions import (
-    bind_args_cached,
-    ClosureConversionError,
-    NestedUserFunctionVariable,
-)
+from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, TupleVariable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
@@ -477,25 +473,6 @@ class BaseTorchVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
-
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        dunder = "__ror__" if reverse else "__or__"
-        method = getattr(type(self.value), dunder, None)
-        if method is None:
-            return VariableTracker.build(tx, NotImplemented)
-        try:
-            other_val = other.as_python_constant()
-        except NotImplementedError:
-            return VariableTracker.build(tx, NotImplemented)
-        result = method(self.value, other_val)
-        if result is NotImplemented:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, result)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1013,24 +990,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.use_deterministic_algorithms)
         def handle_use_deterministic_algorithms(
-            self,
-            tx: "InstructionTranslator",
-            mode: Any,
-            warn_only: VariableTracker | bool = False,
+            self, tx: "InstructionTranslator", mode: Any, warn_only: bool = False
         ) -> VariableTracker:
+            # pyrefly: ignore [missing-attribute]
+            if warn_only and warn_only.as_python_constant():
+                unimplemented(
+                    gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
+                    context=f"mode={mode}, warn_only={warn_only}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Remove param warn_only in function call torch.use_deterministic_algorithms.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
             value = mode.as_python_constant()
-            warn_only_value = (
-                warn_only.as_python_constant()
-                if isinstance(warn_only, VariableTracker)
-                else warn_only
-            )
             tx.output.create_node(
-                "call_function",
-                torch._C._set_deterministic_algorithms,
-                (value,),
-                {"warn_only": warn_only_value},
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
             )
-            torch._C._set_deterministic_algorithms(value, warn_only=warn_only_value)
+            torch._C._set_deterministic_algorithms(value)
             return ConstantVariable.create(None)
 
         @register(torch.autocast_increment_nesting)
@@ -2078,64 +2056,72 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return SourcelessBuilder.create(tx, result)
 
-        def check_impl(
+        @register(torch._check)
+        def handle_check(
             self,
             tx: "InstructionTranslator",
-            predicate_vt: VariableTracker | None,
-            message_vt: VariableTracker | None,
-            error_type: type[Exception] = RuntimeError,
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
         ) -> VariableTracker:
+            predicate_vt = None
+            message_vt = None
+
+            if args:
+                predicate_vt = args[0]
+                rest_args = args[1:]
+            else:
+                rest_args = ()
+
+            if predicate_vt is None and "cond" in kwargs:
+                predicate_vt = kwargs.pop("cond")
+
+            if rest_args:
+                message_vt = rest_args[0]
+            elif "message" in kwargs:
+                message_vt = kwargs.pop("message")
+
             if predicate_vt is None:
-                raise_type_error(
-                    tx,
-                    f"{self.value.__name__}() missing 1 required positional argument: 'cond'",
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        (),
+                        {},
+                    ),
                 )
 
             message_eager = None
             message_graph_proxy = None
             if message_vt is not None:
-                if not isinstance(message_vt, NestedUserFunctionVariable):
+                if (
+                    not isinstance(message_vt, NestedUserFunctionVariable)
+                    or message_vt.has_closure()
+                ):
                     unimplemented(
-                        gb_type="Can't extract message from torch._check*()",
+                        gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "defined within the torch.compile region."
+                            "The second argument of torch._check() must be a function "
+                            "defined within the torch.compile region "
+                            "that does not reference a non-local variable."
                         ),
                         hints=[
+                            "Make sure the message function is defined in the torch.compile region.",
+                            "Remove any closure variables, e.g. "
+                            "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                try:
-                    message_eager = message_vt.get_function()
-                except ClosureConversionError:
-                    unimplemented(
-                        gb_type="Can't convert torch._check*() message closure",
-                        context=str(message_vt),
-                        explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "whose closure variables are Python constants."
-                        ),
-                        hints=[
-                            "Remove closure variables that reference non-constant values, e.g. "
-                            "remove references to tensor `x` in `lambda: f'{x} failed check'`",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                message_eager = message_vt.get_function()
 
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
                     "_check_message", message_eager
                 )
 
             if predicate_vt.is_python_constant():
-                if predicate_vt.as_python_constant():
-                    return ConstantVariable.create(None)
-                msg = (
-                    message_eager()
-                    if message_eager is not None
-                    else ("Expected cond to be True, but got False.")
-                )
-                raise_observed_exception(error_type, tx, args=[msg])
+                self.value(predicate_vt.as_python_constant(), message_eager)
+                return ConstantVariable.create(None)
 
             predicate_proxy = predicate_vt.as_proxy()
 
@@ -2149,96 +2135,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    torch._check,
+                    self.value,
                     proxy_args,
                     {},
                 ),
             )
-
-        @register(torch._check)
-        def handle_check(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            predicate_vt = args[0] if args else kwargs.get("cond")
-            rest_args = args[1:] if args else ()
-            message_vt = rest_args[0] if rest_args else kwargs.get("message")
-            return check_impl(self, tx, predicate_vt, message_vt)
-
-        @register(
-            torch._check_with,
-            torch._check_index,
-            torch._check_value,
-            torch._check_type,
-            torch._check_not_implemented,
-        )
-        def handle_check_with(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            if self.value is torch._check_with:
-                error_type_vt = args[0] if args else kwargs.get("error_type")
-                rest_args = args[1:] if args else ()
-            else:
-                error_type_vt = None
-                rest_args = args
-
-            _CHECK_ERROR_TYPES: dict[object, type[Exception]] = {
-                torch._check_index: IndexError,
-                torch._check_value: ValueError,
-                torch._check_type: TypeError,
-                torch._check_not_implemented: NotImplementedError,
-            }
-
-            error_type = (
-                error_type_vt.as_python_constant()
-                if error_type_vt is not None
-                else _CHECK_ERROR_TYPES.get(self.value, RuntimeError)
-            )
-
-            predicate_vt = rest_args[0] if rest_args else kwargs.get("cond")
-            rest_args = rest_args[1:] if rest_args else ()
-            message_vt = rest_args[0] if rest_args else kwargs.get("message")
-            return check_impl(self, tx, predicate_vt, message_vt, error_type)
-
-        @register(
-            torch._check_tensor_all_with,
-            torch._check_tensor_all,
-        )
-        def handle_check_tensor_all(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            if self.value is torch._check_tensor_all_with:
-                error_type_vt = args[0] if args else kwargs.get("error_type")
-                rest_args = args[1:] if args else ()
-                error_type = (
-                    error_type_vt.as_python_constant()
-                    if error_type_vt is not None
-                    else RuntimeError
-                )
-            else:
-                rest_args = args
-                error_type = RuntimeError
-
-            cond_vt = rest_args[0] if rest_args else kwargs.get("cond")
-            rest_args = rest_args[1:] if rest_args else ()
-            message_vt = rest_args[0] if rest_args else kwargs.get("message")
-
-            if cond_vt is None:
-                return check_impl(self, tx, None, message_vt, error_type)
-
-            scalar_vt = cond_vt.call_method(tx, "_is_all_true", [], {}).call_method(
-                tx, "item", [], {}
-            )
-
-            return check_impl(self, tx, scalar_vt, message_vt, error_type)
 
         def exchange_device_helper(
             tx: "InstructionTranslator",
@@ -2284,36 +2185,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             return exchange_device_helper(
                 tx, args, kwargs, torch.cuda._maybe_exchange_device
-            )
-
-        @register(torch._dynamo.decorators.override_optimization_hint)
-        def handle_override_optimization_hint(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            from .constant import ConstantVariable
-            from .tensor import SymNodeVariable
-
-            x_vt = args[0]
-            val_vt = args[1]
-            val = val_vt.as_python_constant()
-
-            if x_vt.is_python_constant():
-                torch._dynamo.decorators.override_optimization_hint(
-                    x_vt.as_python_constant(), val
-                )
-                return ConstantVariable.create(None)
-
-            if isinstance(x_vt, SymNodeVariable):
-                torch._dynamo.decorators.override_optimization_hint(x_vt.sym_num, val)
-                return ConstantVariable.create(None)
-
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                "override_optimization_hint expects a SymInt or int argument, "
-                f"got {type(x_vt).__name__}",
             )
 
         @register(torch.autograd.grad)
@@ -3263,11 +3134,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_callable = _LeafCallable(wrapped_real_impl)
         fake_impl_callable = _LeafCallable(wrapped_fake_impl)
-        hook_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fn", None)
-        if hook_fn is not None:
-            hook_fake_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fake_fn", None)
-            real_impl_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
-            real_impl_callable._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
 
         def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)

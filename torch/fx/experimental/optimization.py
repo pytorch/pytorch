@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import copy
 import logging
 import operator
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any, cast
 
@@ -44,11 +45,11 @@ def _parent_name(target: str) -> tuple[str, str]:
 
 # Works for length 2 patterns with 2 modules
 def matches_module_pattern(
-    pattern: Iterable[type], node: fx.Node, modules: dict[str, torch.nn.Module]
-) -> bool:
+    pattern: Iterable[type], node: fx.Node, modules: dict[str, Any]
+):
     if len(node.args) == 0:
         return False
-    nodes: tuple[Argument, fx.Node] = (node.args[0], node)
+    nodes: tuple[Any, fx.Node] = (node.args[0], node)
     for expected_type, current_node in zip(pattern, nodes):
         if not isinstance(current_node, fx.Node):
             return False
@@ -64,8 +65,8 @@ def matches_module_pattern(
 
 
 def replace_node_module(
-    node: fx.Node, modules: dict[str, torch.nn.Module], new_module: torch.nn.Module
-) -> None:
+    node: fx.Node, modules: dict[str, Any], new_module: torch.nn.Module
+):
     if not isinstance(node.target, str):
         raise AssertionError(f"Expected str target, got {type(node.target)}")
     parent_name, name = _parent_name(node.target)
@@ -73,9 +74,7 @@ def replace_node_module(
     setattr(modules[parent_name], name, new_module)
 
 
-def fuse(
-    model: torch.nn.Module, inplace: bool = False, no_trace: bool = False
-) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Module:
     """
     Fuses convolution/BN and linear/BN layers for inference purposes.
     Will deepcopy your model by default, but can modify the model inplace as well.
@@ -140,7 +139,7 @@ def extract_subgraph(
     nodes: list[fx.Node],
     inputs: list[fx.Node],
     outputs: list[fx.Node],
-) -> fx.GraphModule:
+):
     """
     Given lists of nodes from an existing graph that represent a subgraph, returns a submodule that executes that subgraph.
     """
@@ -184,9 +183,7 @@ mkldnn_map = {
 }
 
 
-def modules_to_mkldnn(
-    nodes: list[fx.Node], modules: dict[str, nn.Module]
-) -> dict[nn.Module, nn.Module]:
+def modules_to_mkldnn(nodes: list[fx.Node], modules: dict[str, nn.Module]):
     """
     For each node, if it's a module that can be preconverted into MKLDNN,
     then we do so and create a mapping to allow us to convert from the MKLDNN
@@ -209,10 +206,10 @@ def modules_to_mkldnn(
 
 
 def reset_modules(
-    nodes: Iterable[fx.Node],
+    nodes: list[fx.Node],
     modules: dict[str, nn.Module],
     old_modules: dict[nn.Module, nn.Module],
-) -> None:
+):
     """
     Maps each module that's been changed with `modules_to_mkldnn` back to its
     original.
@@ -227,16 +224,14 @@ def reset_modules(
 
 
 class MklSubgraph:
-    def __init__(self, fx_graph: fx.Graph) -> None:
+    def __init__(self, fx_graph: fx.Graph):
         self.fx_graph = fx_graph
         self.nodes: list[fx.Node] = []
         self.start_nodes: list[fx.Node] = []
         self.end_nodes: list[fx.Node] = []
 
 
-def gen_mkl_autotuner(
-    example_inputs: list[torch.Tensor], iters: int = 10, warmup: int = 1
-) -> Callable[[MklSubgraph], bool]:
+def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
     """
     This generates a heuristic that can be passed into `optimize_for_inference` that
     determines whether a subgraph should be run in MKL by running it with the example_inputs.
@@ -253,17 +248,13 @@ def gen_mkl_autotuner(
         input_nodes = graph.start_nodes
         if fx_model is None:
             fx_model = graph.fx_graph.owning_module
-            if fx_model is None:
-                raise AssertionError("fx_graph.owning_module must not be None")
             old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
         sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
         output_args = cast(list[fx.Node], [node.args[0] for node in graph.end_nodes])
-        if fx_model is None:
-            raise AssertionError("fx_model must not be None")
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
-        def benchmark(f: Callable[[], object]) -> float:
+        def benchmark(f):
             for _ in range(warmup):
                 f()
             begin = time.time()
@@ -280,7 +271,7 @@ def gen_mkl_autotuner(
         reset_modules(
             submodule.graph.nodes,
             dict(submodule.named_modules()),
-            # pyrefly: ignore [bad-argument-type]  # old_modules is set before this point
+            # pyrefly: ignore [bad-argument-type]
             old_modules,
         )
         no_mkl_time = benchmark(lambda: submodule(*sample_inputs))
@@ -299,11 +290,11 @@ def use_mkl_length(graph: MklSubgraph) -> bool:
 
 
 class UnionFind:
-    def __init__(self, n: int) -> None:
+    def __init__(self, n):
         self.parent: list[int | None] = [None] * n
         self.size: list[int] = [0] * n
 
-    def make_set(self, v: int) -> None:
+    def make_set(self, v: int):
         self.parent[v] = v
         self.size[v] = 1
 
@@ -316,7 +307,7 @@ class UnionFind:
         self.parent[v] = self.find(par)
         return cast(int, self.parent[v])
 
-    def join(self, a: int, b: int) -> int | None:
+    def join(self, a: int, b: int):
         a, b = self.find(a), self.find(b)
         if a == b:
             return a
@@ -434,7 +425,7 @@ def optimize_for_inference(
     num_nodes = len(fx_graph.nodes)
     uf = UnionFind(num_nodes)
 
-    def get_color(n: fx.Node) -> int | None:
+    def get_color(n):
         if hasattr(n, "color"):  # Current node is part of a MKL subgraph
             return uf.find(n.color)
         if hasattr(n, "start_color"):  # Current node is input to MKL subgraph
@@ -472,10 +463,10 @@ def optimize_for_inference(
                 continue
             if any(i is None for i in cur_colors):
                 raise AssertionError("Found None in cur_colors")
-            sorted_colors: list[int] = sorted(cur_colors)  # type: ignore[arg-type]
-            node.color = sorted_colors[0]
-            for other_color in sorted_colors[1:]:
-                uf.join(sorted_colors[0], other_color)
+            cur_colors = sorted(cur_colors)
+            node.color = cur_colors[0]
+            for other_color in cur_colors[1:]:
+                uf.join(cur_colors[0], other_color)
 
     mkldnn_graphs: dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
     for node in fx_graph.nodes:

@@ -49,7 +49,7 @@ struct Vectorized<c10::qint8> {
   } __attribute__((__may_alias__));
 
  public:
-  Vectorized() = default;
+  Vectorized() {}
   using size_type = int;
   static constexpr size_type size() {
     return 32;

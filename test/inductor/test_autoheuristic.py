@@ -5,12 +5,13 @@ from unittest.mock import patch
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
 from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
@@ -69,6 +70,7 @@ class AutoHeuristicTest(TestCase):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
+    @skipIfRocm(msg="AutoHeuristic doesn't currently work on the ROCm stack")
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
     def test_autoheuristic(self):
@@ -106,14 +108,16 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 5)
 
         shared_memory = get_gpu_shared_memory()
-        device_capa = list(torch.cuda.get_device_capability())
+        compute_cap = get_interface_for_device(GPU_TYPE).get_compute_capability()
+        # Convert single int compute capability (e.g., 90) to tuple (e.g., (9, 0))
+        fst, snd = compute_cap // 10, compute_cap % 10
 
         with open(path) as file:
             lines = file.readlines()
             self.assertTrue('"numerical_features": ["fa"]' in lines[0])
             self.assertTrue('"categorical_features": []' in lines[0])
             self.assertTrue(f'"shared_memory": {shared_memory}' in lines[0])
-            self.assertTrue(f'"device_capa": {device_capa}' in lines[0])
+            self.assertTrue(f'"device_capa": [{fst}, {snd}]' in lines[0])
             self.assertTrue('"name": "test"' in lines[0])
             self.assertEqual("fa,choice,feedback", lines[1].rstrip())
             self.assertEqual("5,a,1", lines[2].rstrip())
@@ -205,29 +209,6 @@ class AutoHeuristicTest(TestCase):
         # we should not do any benchmarking (pad_mm_bench should stay 0)
         # because AutoHeuristics makes the decision without benchmarking
         self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
-
-    @inductor_config.patch(deterministic=True)
-    def test_use_autoheuristic_pad_mm_enabled_in_deterministic_mode(self):
-        inductor_config.autoheuristic_use.pad_mm = None
-        """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
-        self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
-
-    def test_autoheuristic_init_device_capa(self):
-        """AutoHeuristic.__init__ must not crash regardless of CUDA availability."""
-
-        def fallback():
-            return "fallback"
-
-        context = AHContext()
-        context.add_feature("x", 1)
-        ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_device_capa")
-
-        if torch.cuda.is_available():
-            self.assertEqual(
-                ah.metadata.device_capa, torch.cuda.get_device_capability()
-            )
-        else:
-            self.assertEqual(ah.metadata.device_capa, (0, 0))
 
 
 if __name__ == "__main__":

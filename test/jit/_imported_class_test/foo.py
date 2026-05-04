@@ -7,7 +7,7 @@ from . import bar
 # They are used by test_jit.py to test ScriptClass imports
 
 
-@torch.jit.script
+@torch.jit.script  # noqa: B903
 class FooSameName:
     def __init__(self, x):
         self.x = x

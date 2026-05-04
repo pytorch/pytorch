@@ -1,3 +1,4 @@
+# flake8: noqa: F401
 r"""
 This file is in the process of migration to `torch/ao/quantization`, and
 is kept here for compatibility while the migration process is ongoing.

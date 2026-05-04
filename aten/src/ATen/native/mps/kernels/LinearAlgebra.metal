@@ -15,27 +15,26 @@ inline c10::metal::opmath_t<T> matmul_inner(
     constant T* mat2Data,
     constant array<ulong2, 3>& strides,
     constant uint3& sizes,
-    threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM],
-    threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM],
+    threadgroup T A_tile[TILE_DIM][TILE_DIM],
+    threadgroup T B_tile[TILE_DIM][TILE_DIM],
     uint2 tid,
     uint2 thread_id) {
-  using TA = c10::metal::opmath_t<T>;
-  TA sum = 0;
+  c10::metal::opmath_t<T> sum = 0;
 
   uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
   for (uint t = 0; t < numTiles; t++) {
     uint tiledCol = t * TILE_DIM + tid.x;
     if (thread_id.y < sizes.x && tiledCol < sizes.y) {
-      A_tile[tid.y][tid.x] = static_cast<TA>(
-          mat1Data[thread_id.y * strides[0].x + tiledCol * strides[0].y]);
+      A_tile[tid.y][tid.x] =
+          mat1Data[thread_id.y * strides[0].x + tiledCol * strides[0].y];
     } else {
       A_tile[tid.y][tid.x] = 0;
     }
 
     uint tiledRow = t * TILE_DIM + tid.y;
     if (tiledRow < sizes.y && thread_id.x < sizes.z) {
-      B_tile[tid.y][tid.x] = static_cast<TA>(
-          mat2Data[tiledRow * strides[1].x + thread_id.x * strides[1].y]);
+      B_tile[tid.y][tid.x] =
+          mat2Data[tiledRow * strides[1].x + thread_id.x * strides[1].y];
     } else {
       B_tile[tid.y][tid.x] = 0;
     }
@@ -59,13 +58,12 @@ inline c10::metal::opmath_t<T> batched_matmul_inner(
     uint batch,
     constant array<ulong, N>& strides,
     constant uint4& sizes,
-    threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM],
-    threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM],
+    threadgroup T A_tile[TILE_DIM][TILE_DIM],
+    threadgroup T B_tile[TILE_DIM][TILE_DIM],
     uint3 tid,
     uint row,
     uint col) {
-  using TA = c10::metal::opmath_t<T>;
-  TA sum = 0;
+  c10::metal::opmath_t<T> sum = 0;
 
   // Compute batch offsets
   uint batch1Offset = batch * strides[2];
@@ -75,16 +73,16 @@ inline c10::metal::opmath_t<T> batched_matmul_inner(
   for (uint t = 0; t < numTiles; t++) {
     uint tiledCol = t * TILE_DIM + tid.x;
     if (row < sizes.x && tiledCol < sizes.y) {
-      A_tile[tid.y][tid.x] = static_cast<TA>(
-          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]]);
+      A_tile[tid.y][tid.x] =
+          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
     } else {
       A_tile[tid.y][tid.x] = 0;
     }
 
     uint tiledRow = t * TILE_DIM + tid.y;
     if (tiledRow < sizes.y && col < sizes.z) {
-      B_tile[tid.y][tid.x] = static_cast<TA>(
-          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]]);
+      B_tile[tid.y][tid.x] =
+          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
     } else {
       B_tile[tid.y][tid.x] = 0;
     }
@@ -110,8 +108,8 @@ kernel void matmul(
     constant uint3& sizes [[buffer(4)]],
     uint2 tid [[thread_position_in_threadgroup]],
     uint2 thread_id [[thread_position_in_grid]]) {
-  threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM];
-  threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM];
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   auto sum = matmul_inner(
       mat1Data, mat2Data, strides, sizes, A_tile, B_tile, tid, thread_id);
@@ -132,8 +130,8 @@ kernel void addmm(
     constant uint3& sizes [[buffer(6)]],
     uint2 tid [[thread_position_in_threadgroup]],
     uint2 thread_id [[thread_position_in_grid]]) {
-  threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM];
-  threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM];
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   auto sum = matmul_inner<T>(
       mat1Data,
@@ -145,9 +143,8 @@ kernel void addmm(
       tid,
       thread_id);
   if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
-    using TA = c10::metal::opmath_t<T>;
-    auto bias = static_cast<TA>(
-        biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y]);
+    auto bias =
+        biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
         static_cast<T>(
             c10::metal::mul(alpha_beta[0], sum) +
@@ -168,8 +165,8 @@ kernel void naive_bmm(
   uint col = group_id.x * TILE_DIM + tid.x;
   uint row = group_id.y * TILE_DIM + tid.y;
 
-  threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM];
-  threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM];
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   auto sum = batched_matmul_inner<T, 9>(
       mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
@@ -195,17 +192,15 @@ kernel void naive_baddbmm(
   uint col = group_id.x * TILE_DIM + tid.x;
   uint row = group_id.y * TILE_DIM + tid.y;
 
-  threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM];
-  threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM];
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   auto sum = batched_matmul_inner<T, 12>(
       mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
 
   if (row < sizes.x && col < sizes.z) {
-    using TA = c10::metal::opmath_t<T>;
     uint biasOffset = batch * strides[11];
-    auto bias = static_cast<TA>(
-        biasData[biasOffset + row * strides[10] + col * strides[9]]);
+    auto bias = biasData[biasOffset + row * strides[10] + col * strides[9]];
     outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
         static_cast<T>(
             c10::metal::mul(alpha_beta[0], sum) +
@@ -229,8 +224,8 @@ kernel void naive_addbmm(
 
   c10::metal::opmath_t<T> sum = 0;
 
-  threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM];
-  threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM];
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   // Iterate through all batches and accumulate
   for (uint batch = 0; batch < sizes.w; batch++) {
@@ -248,8 +243,7 @@ kernel void naive_addbmm(
   }
 
   if (row < sizes.x && col < sizes.z) {
-    using TA = c10::metal::opmath_t<T>;
-    auto bias = static_cast<TA>(biasData[row * strides[10] + col * strides[9]]);
+    auto bias = biasData[row * strides[10] + col * strides[9]];
     outputData[row * strides[7] + col * strides[6]] = static_cast<T>(
         c10::metal::mul(alpha_beta[0], sum) +
         c10::metal::mul(alpha_beta[1], bias));

@@ -11,10 +11,11 @@
 
 ## API Reference
 ```{eval-rst}
+.. autoclass:: torch.profiler._KinetoProfile
+  :members:
 
 .. autoclass:: torch.profiler.profile
   :members:
-  :inherited-members:
 
 .. autoclass:: torch.profiler.ProfilerAction
   :members:

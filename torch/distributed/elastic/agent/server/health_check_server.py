@@ -53,10 +53,6 @@ class HealthCheckServer:
         """
         log.info("Stopping noop health check server.")
 
-    @property
-    def alive_callback(self) -> Callable[[], int]:
-        return self._alive_callback
-
 
 def create_healthcheck_server(
     alive_callback: Callable[[], int],

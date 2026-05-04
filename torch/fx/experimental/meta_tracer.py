@@ -1,55 +1,31 @@
+# mypy: allow-untyped-defs
 import builtins
 import functools
 import warnings
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 import torch
 import torch.fx
-from torch.fx.node import Node
-from torch.fx.proxy import Proxy
 
 
-_C = TypeVar("_C", bound=Callable[..., Any])
-
-__all__ = [
-    "embedding_override",
-    "functional_relu_override",
-    "gen_constructor_wrapper",
-    "manual_meta_overrides",
-    "MetaAttribute",
-    "MetaDeviceAttribute",
-    "MetaProxy",
-    "MetaTracer",
-    "nn_layernorm_override",
-    "proxys_to_metas",
-    "symbolic_trace",
-    "torch_abs_override",
-    "torch_nn_relu_override",
-    "torch_relu_override",
-    "torch_where_override",
-]
-
-
-def embedding_override(self: torch.nn.Embedding, input: torch.Tensor) -> torch.Tensor:
+def embedding_override(self, input):
     return torch.empty(*input.shape, self.weight.shape[-1], device="meta")
 
 
-def nn_layernorm_override(
-    self: torch.nn.LayerNorm, input: torch.Tensor
-) -> torch.Tensor:
+def nn_layernorm_override(self, input):
     return input
 
 
-def torch_relu_override(x: torch.Tensor) -> torch.Tensor:
+def torch_relu_override(x):
     return x
 
 
-def torch_nn_relu_override(self: torch.nn.ReLU, x: torch.Tensor) -> torch.Tensor:
+def torch_nn_relu_override(self, x):
     return x
 
 
-def functional_relu_override(x: torch.Tensor, inplace: bool = False) -> torch.Tensor:
+def functional_relu_override(x, inplace=False):
     if inplace:
         raise AssertionError(
             "dont support inplace functional.relu for metatensor analysis"
@@ -57,23 +33,19 @@ def functional_relu_override(x: torch.Tensor, inplace: bool = False) -> torch.Te
     return x
 
 
-def torch_where_override(
-    condition: torch.Tensor, x: torch.Tensor, y: torch.Tensor
-) -> torch.Tensor:
+def torch_where_override(condition, x, y):
     # torch.where returns the broadcasted tensor of condition, x, and y,
     # so hack it by using addition
     return condition.to(device="meta") + x.to(device="meta") + y.to(device="meta")
 
 
-def torch_abs_override(
-    input: torch.Tensor, *, out: torch.Tensor | None = None
-) -> torch.Tensor:
+def torch_abs_override(input, *, out=None):
     if out is not None:
         raise AssertionError("Dont support in-place abs for MetaTensor analysis")
     return input
 
 
-manual_meta_overrides: dict[Callable[..., Any], Callable[..., Any]] = {
+manual_meta_overrides: dict[Callable, Callable] = {
     torch.nn.Embedding: embedding_override,
     torch.nn.LayerNorm: nn_layernorm_override,
     torch.relu: torch_relu_override,
@@ -84,14 +56,12 @@ manual_meta_overrides: dict[Callable[..., Any], Callable[..., Any]] = {
 }
 
 
-def gen_constructor_wrapper(
-    target: _C,
-) -> tuple[Callable[..., Any], _C]:
+def gen_constructor_wrapper(target):
     @functools.wraps(target)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args, **kwargs):
         proxy = None
 
-        def check_has_proxy(v: Any) -> None:
+        def check_has_proxy(v):
             if isinstance(v, torch.fx.Proxy):
                 nonlocal proxy
                 proxy = v
@@ -108,23 +78,23 @@ def gen_constructor_wrapper(
 
 
 class MetaProxy(torch.fx.Proxy):
-    def install_tensor_meta(self, tensor_meta: torch.Tensor) -> None:
+    def install_tensor_meta(self, tensor_meta):
         self._tensor_meta = tensor_meta
 
-    def size(self, dim: int | None = None) -> Any:
+    def size(self, dim=None):
         if hasattr(self, "_tensor_meta") and self._tensor_meta is not None:
             return self._tensor_meta.size(*[dim] if dim else [])
         return self.tracer.create_proxy(
             "call_method", "size", (self, dim) if dim else (self,), {}
         )
 
-    def dim(self) -> Any:
+    def dim(self):
         if hasattr(self, "_tensor_meta") and self._tensor_meta is not None:
             return self._tensor_meta.dim()
         return self.tracer.create_proxy("call_method", "dim", (self,), {})
 
     @property
-    def shape(self) -> Any:
+    def shape(self):
         if hasattr(self, "_tensor_meta") and self._tensor_meta is not None:
             return self._tensor_meta.shape
         return self.tracer.create_proxy(
@@ -132,7 +102,7 @@ class MetaProxy(torch.fx.Proxy):
         )
 
     @property
-    def dtype(self) -> Any:
+    def dtype(self):
         if hasattr(self, "_tensor_meta") and self._tensor_meta is not None:
             return self._tensor_meta.dtype
         return self.tracer.create_proxy(
@@ -140,12 +110,12 @@ class MetaProxy(torch.fx.Proxy):
         )
 
     @property
-    def device(self) -> "MetaDeviceAttribute":
+    def device(self):
         # Hack so we can track when devices are used. During meta-tensor propagation,
         # replace these values with a constant 'meta'
         return MetaDeviceAttribute(self, "device")
 
-    def __getattr__(self, k: str) -> Any:
+    def __getattr__(self, k):
         if k == "_tensor_meta":
             return self.__getattribute__(k)
         # note: not added to the graph yet, if this is a method call
@@ -154,11 +124,11 @@ class MetaProxy(torch.fx.Proxy):
 
 
 class MetaAttribute(MetaProxy):
-    def __init__(self, root: MetaProxy, attr: str) -> None:
+    def __init__(self, root, attr: str):
         self.root = root
         self.attr = attr
         self.tracer = root.tracer
-        self._node: Node | None = None
+        self._node = None
 
     @property
     def node(self):  # type: ignore[override]
@@ -170,7 +140,7 @@ class MetaAttribute(MetaProxy):
             ).node
         return self._node
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy(
             "call_method", self.attr, (self.root,) + args, kwargs
         )
@@ -180,7 +150,7 @@ class MetaDeviceAttribute(MetaAttribute):
     pass
 
 
-def proxys_to_metas(v: Any) -> Any:
+def proxys_to_metas(v):
     if isinstance(v, MetaDeviceAttribute):
         return "meta"
     if isinstance(v, torch.fx.Proxy):
@@ -199,14 +169,14 @@ class MetaTracer(torch.fx.Tracer):
 
     def create_proxy(
         self,
-        kind: str,
-        target: torch.fx.node.Target,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        name: str | None = None,
-        type_expr: Any = None,
-        proxy_factory_fn: Callable[[Node], Proxy] | None = None,
-    ) -> MetaProxy:
+        kind,
+        target,
+        args,
+        kwargs,
+        name=None,
+        type_expr=None,
+        proxy_factory_fn=None,
+    ):
         rv = super().create_proxy(
             kind,
             target,
@@ -220,7 +190,7 @@ class MetaTracer(torch.fx.Tracer):
 
         if kind == "placeholder" and target in self.meta_args:
             rv.install_tensor_meta(self.meta_args[target])
-            return rv  # pyrefly: ignore [bad-return]
+            return rv
 
         if target in self.orig_fns:
             # NOTE: tensor constructors in PyTorch define the `device` argument as
@@ -236,7 +206,6 @@ class MetaTracer(torch.fx.Tracer):
             kwargs_metas = torch.fx.node.map_aggregate(kwargs, proxys_to_metas)
 
             if kind == "call_function":
-                # pyrefly: ignore [no-matching-overload]
                 meta_target = manual_meta_overrides.get(target, target)
 
                 meta_out = meta_target(*args_metas, **kwargs_metas)
@@ -248,7 +217,6 @@ class MetaTracer(torch.fx.Tracer):
                     raise AssertionError("orig_forward not set for call_module")
                 self._disable_module_getattr = True
                 try:
-                    # pyrefly: ignore [bad-argument-type]
                     mod = self.root.get_submodule(target)
                     mod_type = type(mod)
                     if mod_type in manual_meta_overrides:
@@ -263,7 +231,7 @@ class MetaTracer(torch.fx.Tracer):
                 self._disable_module_getattr = True
                 try:
                     attr_itr = self.root
-                    atoms = target.split(".")  # pyrefly: ignore [missing-attribute]
+                    atoms = target.split(".")
                     for atom in atoms:
                         attr_itr = getattr(attr_itr, atom)
                     if not isinstance(attr_itr, torch.Tensor):
@@ -272,7 +240,7 @@ class MetaTracer(torch.fx.Tracer):
                 finally:
                     self._disable_module_getattr = False
             else:
-                return rv  # pyrefly: ignore [bad-return]
+                return rv
 
             # TODO
             if not isinstance(rv, torch.fx.Proxy):
@@ -281,23 +249,15 @@ class MetaTracer(torch.fx.Tracer):
         except Exception as e:
             warnings.warn(f"Could not compute metadata for {kind} target {target}: {e}")
 
-        return rv  # pyrefly: ignore [bad-return]
+        return rv
 
-    def getattr(
-        self, attr: str, attr_val: Any, parameter_proxy_cache: dict[str, Proxy]
-    ) -> Any:
+    def getattr(self, attr, attr_val, parameter_proxy_cache):
         if getattr(self, "_disable_module_getattr", False):
             return attr_val
         else:
             return super().getattr(attr, attr_val, parameter_proxy_cache)
 
-    def call_module(
-        self,
-        m: torch.nn.Module,
-        forward: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
+    def call_module(self, m, forward, args, kwargs):
         self.orig_forward = forward
         return super().call_module(m, forward, args, kwargs)
 
@@ -329,7 +289,7 @@ class MetaTracer(torch.fx.Tracer):
                 return path
             raise
 
-    def proxy(self, node: torch.fx.Node) -> MetaProxy:
+    def proxy(self, node):
         return MetaProxy(node, self)
 
     def trace(self, root, meta_args: dict[str, torch.Tensor], concrete_args=None):  # type: ignore[override]

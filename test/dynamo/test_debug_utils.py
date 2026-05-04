@@ -43,7 +43,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,
+    """,  # NOQA: B950
         )
 
         _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
@@ -58,7 +58,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,
+    """,  # NOQA: B950
         )
 
     @patch.dict(
@@ -190,7 +190,7 @@ class TestDebugUtilsDevice(TestCase):
     def test_sym_aot_graph_parser(self, device):
         def forward(
             self,
-            primals_1: "f32[1001, 6]",
+            primals_1: "f32[1001, 6]",  # noqa: F821
             primals_2: "f32[s0]",  # noqa: F821
             primals_3: "Sym(s0)",  # noqa: F821,
             primals_4: "f32[s1]",  # noqa: F821,
@@ -211,7 +211,8 @@ class TestDebugUtilsDevice(TestCase):
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), except_for="mps")
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
 
 
 class TestBackendOverrideIntegration(TestCase):
@@ -375,7 +376,7 @@ class TestBackendOverrideIntegration(TestCase):
 
 
 instantiate_device_type_tests(
-    TestBackendOverrideIntegration, globals(), except_for="mps"
+    TestBackendOverrideIntegration, globals(), only_for=["cpu", "cuda"]
 )
 
 

@@ -204,13 +204,8 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   f_bits ^= sign;
 
   if (f_bits >= fp8_max) {
-    if (f_bits > UINT32_C(0x7F800000)) {
-      // NaN input → NaN output
-      result = 0x7f;
-    } else {
-      // Finite overflow or inf → saturate to max finite value
-      result = 0x7e;
-    }
+    // NaN - all exponent and mantissa bits set to 1
+    result = 0x7f;
   } else {
     if (f_bits < (UINT32_C(121) << 23)) {
       // Input number is smaller than 2^(-6), which is the smallest
@@ -230,11 +225,6 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
 
       // take the bits!
       result = static_cast<uint8_t>(f_bits >> 20);
-
-      // Rounding may carry into the NaN bit pattern (0x7f); saturate to max
-      if (result == 0x7f) {
-        result = 0x7e;
-      }
     }
   }
 

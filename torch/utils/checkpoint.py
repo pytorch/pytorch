@@ -1225,12 +1225,15 @@ class _VersionWrapper:
         return self.val
 
 
-def _detach_helper(x):
+def _maybe_detach(x, any_ret_has_alias_info):
     # We detach for two separate reasons:
     # - For view ops, we need to ensure that when the tensor is returned from
     #   CachedDispatchMode, as_view sees that the AutogradMeta is nullptr
     # - Avoid reference cycles
-    if isinstance(x, torch.Tensor):
+    # For case 1, it is not enough to check whether x has differentiable dtype
+    # because non-differentiable dtype can have non-nullptr AutogradMeta, e.g.
+    # when the tensor is a view.
+    if isinstance(x, torch.Tensor) and (x.is_floating_point() or x.is_complex() or any_ret_has_alias_info):
         with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
             # Ensure that view performed beneath autograd properly propagates
             # version counter. TODO: Use reentrant_dispatch instead of
@@ -1246,17 +1249,14 @@ class SelectiveCheckpointContext:
     Context passed to policy function during selective checkpointing.
 
     This class is used to pass relevant metadata to the policy function during
-    selective checkpointing.
-
-    The policy function is only called during the forward pass. During
-    recomputation, cached values are retrieved by index, so ``is_recompute``
-    is deprecated and always ``False``.
+    selective checkpointing. The metadata includes whether the current invocation
+    of the policy function is during recomputation or not.
 
     Example:
         >>> # xdoctest: +SKIP(stub)
         >>>
         >>> def policy_fn(ctx, op, *args, **kwargs):
-        >>>    print(ctx.op_output)
+        >>>    print(ctx.is_recompute)
         >>>
         >>> context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         >>>
@@ -1329,7 +1329,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.policy_fn = policy_fn
         self.storage = storage
         self.ac_graph_id = ac_graph_id
-        self.func_counter: Dict[Any, int] = defaultdict(int)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1352,8 +1351,13 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        # HOPs don't support func._schema
+        # HOPs don't alias -> this is always true today and will be always true for a long time
+        # TODO HOPs don't mutate -> this is always true today but will not be true forever
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            any_ret_has_alias_info = False
+        else:
+            any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
                                 func, *args, **kwargs)
@@ -1368,68 +1372,45 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                     node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
-        else:
-            self.storage[func][idx] = _RECOMPUTE
+            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
         return out
-
-_RECOMPUTE = object()
-_CONSUMED = object()
-
-_SAC_MISMATCH_MSG = (
-    "This can happen if the operations in the checkpointed region are "
-    "nondeterministic or depend on global state that changed between "
-    "forward and backward."
-)
-
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
         return True
 
-    # Used together with _CachingTorchDispatchMode to implement SAC.
-    # policy_fn is accepted but ignored for BC (xformers subclasses this).
-    def __init__(self, policy_fn, storage, allow_cache_entry_mutation=False) -> None:
+    # Used together with _CachedTorchDispatchMode to implement SAC.
+    def __init__(self, policy_fn, storage, allow_cache_entry_mutation) -> None:
+        self.policy_fn = policy_fn
         self.storage = storage
         self.allow_cache_entry_mutation = allow_cache_entry_mutation
-        self.func_counter: Dict[Any, int] = defaultdict(int)
-
-    def __enter__(self):
-        # Reset so retain_graph=True hits "backward an extra time" not "index not found".
-        self.func_counter.clear()
-        return super().__enter__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        kwargs = {} if kwargs is None else kwargs
+        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=True),
+                                func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
 
-        func_storage = self.storage.get(func)
-        if func_storage is None:
-            raise RuntimeError(
-                f"{func} encountered during backward but not found in "
-                f"storage. {_SAC_MISMATCH_MSG}"
-            )
-        entry = func_storage.get(idx)
-        if entry is None:
-            raise RuntimeError(
-                f"{func} invocation index {idx} encountered during backward "
-                f"but not found in storage. {_SAC_MISMATCH_MSG}"
-            )
-        elif entry is _CONSUMED:
-            raise RuntimeError(
-                "Trying to backward an extra time. You are only allowed to backward once "
-                "on any region computed under selective activation checkpoint."
-            )
-        elif entry is _RECOMPUTE:
-            kwargs = {} if kwargs is None else kwargs
-            return func(*args, **kwargs)
+        is_compiling = _is_compiling(func, args, kwargs)
+
+        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+            storage = self.storage.get(func)
+            if storage is None:
+                raise RuntimeError(f"{func} encountered during backward, but not found in storage")
+            if len(storage) == 0:
+                raise RuntimeError(
+                    "Trying to backward an extra time. You are only allowed to backward once "
+                    "on any region computed under selective activation checkpoint."
+                )
+            out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), storage.pop(0))
         else:
-            func_storage[idx] = _CONSUMED
-            return tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), entry)
+            out = func(*args, **kwargs)
+        return out
 
 
 def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False):
@@ -1511,10 +1492,10 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     else:
         raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
 
-    storage: Dict[Any, Dict[int, Any]] = defaultdict(dict)
+    storage: Dict[Any, List[Any]] = defaultdict(list)
     return (
         _CachingTorchDispatchMode(policy_fn, storage),
-        _CachedTorchDispatchMode(None, storage, allow_cache_entry_mutation),
+        _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
     )
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and

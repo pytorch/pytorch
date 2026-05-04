@@ -226,7 +226,8 @@ TypeKind DynamicType::dynamicKind() const {
     // resolve to integers
 #undef CASE_TYPE
     default:
-      TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(TypeKind::AnyType);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+      return TypeKind::AnyType;
   }
 }
 
@@ -309,7 +310,8 @@ TypePtr DynamicType::fallback() const {
     case Tag::Any:
       return AnyType::get();
   }
-  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+  return nullptr;
 }
 
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
@@ -370,7 +372,8 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
     const Type& /*unused*/) {
-  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
+  return nullptr;
 }
 
 TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(

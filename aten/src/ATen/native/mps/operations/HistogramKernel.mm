@@ -172,10 +172,9 @@ static void histogramdd_out_mps_template(const Tensor& self,
                    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
                        hist, bin_edges_contig, reshaped_input, reshaped_weight);
                  }),
-                 AT_EXPAND(AT_ALL_TYPES),
-                 kBFloat16,
+                 kFloat,
                  kHalf,
-                 AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+                 kBFloat16);
 
   /* Divides each bin's value by the total count/weight in all bins,
    * and by the bin's volume.

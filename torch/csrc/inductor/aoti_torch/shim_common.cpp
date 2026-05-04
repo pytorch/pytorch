@@ -7,7 +7,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
@@ -65,8 +64,6 @@
 using namespace torch::aot_inductor;
 
 namespace {
-thread_local std::string last_error_msg;
-
 static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   if (device_type == aoti_torch_device_type_cpu()) {
     return c10::Device(static_cast<c10::DeviceType>(device_type));
@@ -77,16 +74,6 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   }
 }
 } // namespace
-
-namespace torch::aot_inductor {
-const char* get_last_error() {
-  return last_error_msg.empty() ? nullptr : last_error_msg.c_str();
-}
-
-void set_last_error(const char* msg) {
-  last_error_msg = msg ? msg : "";
-}
-} // namespace torch::aot_inductor
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
@@ -265,11 +252,10 @@ AOTITorchError aoti_torch_strlist_to_ivalue(
     C10IValueHandle* ivalue) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::string> vec;
-    vec.reserve(len);
-    for (const auto i : c10::irange(len)) {
-      vec.emplace_back(val[i]);
+    for (int64_t i = 0; i < len; i++) {
+      vec.push_back(std::string(val[i]));
     }
-    c10::IValue* t = new c10::IValue(std::move(vec));
+    c10::IValue* t = new c10::IValue(vec);
     *ivalue = reinterpret_cast<C10IValueHandle>(t);
   });
 }
@@ -1137,7 +1123,7 @@ AOTITorchError aoti_record_function_start(
     }
 
     std::vector<c10::IValue> recordInputs(n_inputs);
-    for (const auto i : c10::irange(n_inputs)) {
+    for (size_t i = 0; i < n_inputs; i++) {
       recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
@@ -1204,7 +1190,7 @@ AOTITorchError aoti_torch_index_put_out(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
-    for (const auto i : c10::irange(num_indices)) {
+    for (size_t i = 0; i < num_indices; i++) {
       indices_.emplace_back(
           pointer_to_optional(tensor_handle_to_tensor_pointer(indices[i])));
     }

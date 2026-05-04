@@ -175,7 +175,7 @@ class Vectorized<c10::complex<float>> {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
+        count * sizeof(c10::complex<float>));
     return _mm256_load_ps(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -184,10 +184,7 @@ class Vectorized<c10::complex<float>> {
     } else if (count > 0) {
       float tmp_values[2 * size()];
       _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(
-          ptr,
-          tmp_values,
-          std::min<int64_t>(count, size()) * sizeof(c10::complex<float>));
+      std::memcpy(ptr, tmp_values, count * sizeof(c10::complex<float>));
     }
   }
   const c10::complex<float>& operator[](int idx) const = delete;

@@ -2,7 +2,6 @@
 import logging
 import os
 import shutil
-import subprocess
 
 from torch._inductor import config
 from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch
@@ -89,12 +88,7 @@ def _sycl_compiler_options() -> list[str]:
         "-fno-sycl-instrument-device-code",
         "-DMKL_ILP64",
         "-MD",
-        "-Xs",
-        (
-            "-options \"-igc_opts 'VISAOptions=-perfmodel,VectorAliasBBThreshold=100000000000,"
-            "ExtraOCLOptions=-cl-intel-256-GRF-per-thread'\" "
-            "-options -ze-opt-large-register-file"
-        ),
+        "-MT",
     ]
     if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
@@ -113,24 +107,24 @@ def xpu_compile_command(
     sycl_lib_options = _sycl_lib_options()
     sycl_compiler_options = _sycl_compiler_options()
 
-    # Build command as a list to preserve arguments with spaces
-    cmd_parts = (
-        [_sycl_compiler()]
-        + extra_args
+    options = (
+        extra_args
         + ["-I" + path for path in include_paths]
         + ["-isystem", "/include"]
         + sycl_compiler_options
         + sycl_lib_options
     )
+    src_file = " ".join(src_files)
+    res = ""
     if dst_file_ext == "o":
-        cmd_parts.extend(["-c", "-o", dst_file] + src_files)
+        res = f"{_sycl_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
-        cmd_parts.extend(["-shared", "-o", dst_file] + src_files)
+        options.append("-shared")
+        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     elif dst_file_ext == "exe":
-        cmd_parts.extend(["-o", dst_file] + src_files)
+        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
 
-    res = subprocess.list2cmdline(cmd_parts)
     log.debug("XPU command: %s", res)
     return res

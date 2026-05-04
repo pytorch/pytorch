@@ -194,7 +194,7 @@ class TestAwait(JitTestCase):
         def C_wait_impl(self: C) -> C:
             return C(self._a * 2, self._b * 3)
 
-        def fn_arg_C(x: C) -> Tensor:
+        def fn_arg_C(x: C) -> Tensor:  # noqa: F841
             return x._a + x._b
 
         def fn(x: Tensor):

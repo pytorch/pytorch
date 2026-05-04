@@ -59,7 +59,6 @@ num_auto_chunking: int = 0
 parallel_reduction_count = 0
 
 codegen_mix_order_reduction = 0
-rejected_mix_order_reduction_fusion = 0
 
 
 # reset all counters
@@ -75,7 +74,6 @@ def reset() -> None:
     global num_loop_reordering
     global parallel_reduction_count
     global codegen_mix_order_reduction
-    global rejected_mix_order_reduction_fusion
     global num_auto_chunking
 
     generated_kernel_count = 0
@@ -91,7 +89,6 @@ def reset() -> None:
     num_loop_reordering = 0
     parallel_reduction_count = 0
     codegen_mix_order_reduction = 0
-    rejected_mix_order_reduction_fusion = 0
     num_auto_chunking = 0
 
 

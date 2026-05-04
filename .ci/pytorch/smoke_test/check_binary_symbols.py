@@ -471,7 +471,7 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
 
 def main() -> None:
     if "install_root" in os.environ:
-        install_root = Path(os.getenv("install_root"))
+        install_root = Path(os.getenv("install_root"))  # noqa: SIM112
     else:
         if os.getenv("PACKAGE_TYPE") == "libtorch":
             install_root = Path(os.getcwd())

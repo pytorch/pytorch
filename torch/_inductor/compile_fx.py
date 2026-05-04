@@ -806,15 +806,6 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
-        # When cpp_wrapper is enabled, ensure the required triton config
-        # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
-        # needed because lazy backward compilation may run after the
-        # config.patch context from compile_fx has already exited.
-        # Suppress cudagraph skip logging here; compile_fx already logged it.
-        if kwargs["cpp_wrapper"]:
-            stack.enter_context(
-                config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
-            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
@@ -1331,7 +1322,7 @@ class _InProcessFxCompile(FxCompile):
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
             #
-            # It's needed because when we do layout optimization, a contiguous tensor
+            # It's needed because when we do layout optimization, an contiguous tensor
             # in eager mode may becomes a channels last tensor. A view op previously
             # can be applied to the contiguous tensor may not be able to be applied
             # on the channels tensor any more. An error like
@@ -2217,8 +2208,8 @@ def fw_compiler_freezing(
     return wrapper
 
 
-def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
-    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
+def get_cpp_wrapper_config() -> dict[str, object]:
+    if config.triton.cudagraphs and config.graph_partition:
         log_cudagraph_skip_and_bump_counter(
             format_default_skip_message(
                 "cpp-wrapper does not support graph partition yet"
@@ -2264,13 +2255,6 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
-    *,
-    # When set, replaces the default partitioner (`config.custom_partitioner_fn`
-    # or `min_cut_rematerialization_partition`) while still running Inductor's
-    # joint-graph passes first. Used by `_get_partition_fn` so HOP subgraphs
-    # go through the same joint-pass + raw-partitioner pipeline as the outer
-    # Inductor compile.
-    partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2288,14 +2272,6 @@ def partition_fn(
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
     )
-
-    if partitioner_fn_override is not None:
-        return partitioner_fn_override(
-            gm,
-            joint_inputs,
-            static_lifetime_input_indices=static_lifetime_input_indices,
-            **kwargs,
-        )
 
     if config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
@@ -3213,7 +3189,7 @@ def _aoti_flatten_inputs(
     ]
 
     if in_spec is not None and received_spec != in_spec:
-        raise ValueError(
+        raise ValueError(  # noqa: B904
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"

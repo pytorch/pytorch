@@ -262,9 +262,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch(
-        {"cpp.enable_concat_linear": True, "shape_padding": False}
-    )
+    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
     def test_mm_concat(self):
         class MM(torch.nn.Module):
             def __init__(self) -> None:

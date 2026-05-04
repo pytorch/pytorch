@@ -492,43 +492,19 @@ struct TORCH_API Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    TORCH_CHECK(
-        inputs_.size() == 1,
-        "Tried to access a single input on node '",
-        kind().toDisplayString(),
-        "' which has ",
-        inputs_.size(),
-        " outputs. You may consider using node.inputs() instead.");
+    AT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   Value* output() {
-    TORCH_CHECK(
-        outputs_.size() == 1,
-        "Tried to access a single output on node '",
-        kind().toDisplayString(),
-        "' which has ",
-        outputs_.size(),
-        " outputs. You may consider using node.outputs() instead.");
+    AT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* output() const {
-    TORCH_CHECK(
-        outputs_.size() == 1,
-        "Tried to access a single output on node '",
-        kind().toDisplayString(),
-        "' which has ",
-        outputs_.size(),
-        " outputs. You may consider using node.outputs() instead.");
+    AT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* input() const {
-    TORCH_CHECK(
-        inputs_.size() == 1,
-        "Tried to access a single input on node '",
-        kind().toDisplayString(),
-        "' which has ",
-        inputs_.size(),
-        " outputs. You may consider using node.inputs() instead.");
+    AT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.

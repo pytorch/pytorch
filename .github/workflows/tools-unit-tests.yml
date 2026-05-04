@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
         with:
           submodules: true
           fetch-depth: 0
@@ -41,7 +41,7 @@ jobs:
           set -ex
           python3 -m venv /tmp/venv
           source /tmp/venv/bin/activate
-          pip install -e '.ci/lumen_cli/[test]'
+          pip install -e .ci/lumen_cli/
           pytest -v -s .ci/lumen_cli/tests/*
 
   lumen-cli-compatible-python39:
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pytorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
         with:
           submodules: true
           fetch-depth: 0

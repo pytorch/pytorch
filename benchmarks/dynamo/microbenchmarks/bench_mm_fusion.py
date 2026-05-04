@@ -1,3 +1,5 @@
+# flake8: noqa: B902
+
 from prettytable import PrettyTable
 
 import torch

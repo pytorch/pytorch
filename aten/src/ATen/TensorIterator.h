@@ -734,7 +734,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 };
 
 struct TORCH_API TensorIterator final : public TensorIteratorBase {
-  TensorIterator() = default;
+  TensorIterator() : TensorIteratorBase() {}
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 

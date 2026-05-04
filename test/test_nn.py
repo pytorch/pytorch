@@ -6740,21 +6740,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             groups = 2
             torch.native_channel_shuffle(input_tensor, groups)
 
-        # Regression test for #173500: the CompositeImplicitAutograd fallback
-        # (used by non-CPU backends like CUDA/MPS) used to skip validation and
-        # crash with a floating-point exception on groups=0. The meta device
-        # also routes through this fallback.
-        meta_tensor = torch.empty([1, 3, 2, 2], device="meta")
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Number of groups to divide channels in must be positive.*"):
-            torch.native_channel_shuffle(meta_tensor, 0)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Number of channels must be divisible by groups.*"):
-            torch.native_channel_shuffle(meta_tensor, 2)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "channel_shuffle expects input with > 2 dims,.*"):
-            torch.native_channel_shuffle(torch.empty([1, 2], device="meta"), 2)
-
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
@@ -9190,26 +9175,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, re.escape("2D padding expected")):
             torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
                                      weight=torch.rand([1, 1]))
-
-    @onlyCPU
-    @dtypes(torch.float)
-    def test_slow_conv3d_empty_stride(self, device, dtype):
-        # https://github.com/pytorch/pytorch/issues/121095
-        inp = torch.rand([9], device=device, dtype=dtype)
-        weight = torch.rand([4], device=device, dtype=dtype)
-        bias = torch.rand([1, 1], device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "It is expected stride equals to 3"):
-            torch._C._nn.slow_conv3d(
-                inp, weight=weight, bias=bias,
-                kernel_size=[1, 1, 1], padding=[1, 1, 1], stride=[])
-        with self.assertRaisesRegex(RuntimeError, "It is expected kernel_size equals to 3"):
-            torch._C._nn.slow_conv3d(
-                inp, weight=weight, bias=bias,
-                kernel_size=[1], padding=[1, 1, 1], stride=[1, 1, 1])
-        with self.assertRaisesRegex(RuntimeError, "It is expected padding equals to 3"):
-            torch._C._nn.slow_conv3d(
-                inp, weight=weight, bias=bias,
-                kernel_size=[1, 1, 1], padding=[1], stride=[1, 1, 1])
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)

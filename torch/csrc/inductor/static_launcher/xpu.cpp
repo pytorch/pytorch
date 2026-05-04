@@ -61,7 +61,7 @@ syclDevicePtr_t getPointer(
 
     return data_ptr;
   }
-  if (Py_IsNone(obj)) {
+  if (obj == Py_None) {
     // valid nullptr
     return data_ptr;
   }

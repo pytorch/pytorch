@@ -14,7 +14,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 import torch
-from torchfuzz.codegen import convert_graph_to_python_code, make_template
+from torchfuzz.codegen import convert_graph_to_python_code, StreamFuzzTemplate
 from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
 
 
@@ -29,17 +29,15 @@ class TestStreamsFuzzTemplate(unittest.TestCase):
         return convert_graph_to_python_code(graph, seed=seed, template="streams")
 
     def test_template_inherits_default_ops(self):
-        template = make_template("streams")
+        template = StreamFuzzTemplate()
         self.assertGreater(len(template.supported_ops), 0)
         self.assertIn("torch.add", template.supported_ops)
         self.assertIn("torch.matmul", template.supported_ops)
 
     def test_template_uses_backward_check(self):
-        from torchfuzz.cuda._checks import (
-            EagerVsFullGraphDynamicCompileWithBackwardCheck,
-        )
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileWithBackwardCheck
 
-        template = make_template("streams")
+        template = StreamFuzzTemplate()
         self.assertIsInstance(
             template.check, EagerVsFullGraphDynamicCompileWithBackwardCheck
         )

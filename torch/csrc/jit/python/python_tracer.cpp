@@ -113,7 +113,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
         // We just leave the inputs_dict as it was and pass it to forward
         // method.
         auto out = func(**inputs_dict);
-        if (Py_IsNone(out.ptr())) {
+        if (out.ptr() == Py_None) {
           TORCH_CHECK(
               false,
               "The traced function didn't return any values! Side-effects are not "
@@ -154,7 +154,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);
-        if (Py_IsNone(out.ptr())) {
+        if (out.ptr() == Py_None) {
           TORCH_CHECK(
               false,
               "The traced function didn't return any values! Side-effects are not "

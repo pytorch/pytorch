@@ -74,7 +74,7 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
     THPObjectPtr res(PyObject_CallObject(hook, args));
     if (!res)
       throw python_error();
-    if (Py_IsNone(res))
+    if (res == Py_None)
       continue;
 
     PyObject* args0 = PyTuple_GetItem(args, 0);
@@ -283,7 +283,7 @@ static variable_list unwrap_variables(PyObject* py_variables) {
   variable_list results(PyTuple_GET_SIZE(py_variables));
   for (const auto i : c10::irange(results.size())) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
-    if (Py_IsNone(item)) {
+    if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
       results[i] = THPVariable_Unpack(item);
@@ -327,11 +327,11 @@ static void check_single_result(
     PyObject* _original,
     PyObject* _result,
     PyObject* hook) {
-  if (Py_IsNone(_result))
+  if (_result == Py_None)
     return;
 
   TORCH_CHECK(
-      !Py_IsNone(_original),
+      _original != Py_None,
       "can't replace a None gradient with a non-None value");
 
   if (!PyObject_IsInstance(_result, THPVariableClass)) {

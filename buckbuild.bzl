@@ -11,6 +11,7 @@ load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
+load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
 load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
 load(
     ":build_variables.bzl",
@@ -681,11 +682,6 @@ def pt_operator_query_codegen(
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_3.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_4.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_5.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_6.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_7.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_8.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_9.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_1.cpp]".format(unboxing_and_autograd_genrule),
     ] if train else []) + ([
@@ -975,70 +971,31 @@ def define_buck_targets(
         labels = labels,
     )
 
-    _torch_headers_exclude = [
-        # Don't need on mobile.
-        "torch/csrc/Exceptions.h",
-        "torch/csrc/python_headers.h",
-        "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
-    ]
-
-    # On Windows/MSVC, the ("", "torch/csrc/**/*.h") glob creates duplicate
-    # header map entries for files under torch/csrc/api/include/ (e.g.
-    # torch/ordered_dict.h AND torch/csrc/api/include/torch/ordered_dict.h).
-    # MSVC's #pragma once uses the symlink path, not the target, so it sees
-    # these as separate files and produces C2953 redefinition errors.
-    # Fix: on Windows, exclude torch/csrc/api/include/ from the torch/csrc/**
-    # glob so each header has exactly one entry, and add include_directories
-    # so long-path includes (torch/csrc/api/include/torch/X.h) still resolve.
-    _torch_headers_common_globs = [
-        ("torch/csrc/api/include", "torch/**/*.h"),
-        ("", "torch/nativert/**/*.h"),
-        ("", "torch/headeronly/**/*.h"),
-        ("", "torch/script.h"),
-        ("", "torch/library.h"),
-        ("", "torch/custom_class.h"),
-        ("", "torch/custom_class_detail.h"),
-        # Add again due to namespace difference from aten_header.
-        ("", "aten/src/ATen/*.h"),
-        ("", "aten/src/ATen/functorch/**/*.h"),
-        ("", "aten/src/ATen/quantized/*.h"),
-    ]
-
-    _torch_headers_all = subdir_glob(
-        _torch_headers_common_globs + [
-            ("", "torch/csrc/**/*.h"),
-        ],
-        exclude = _torch_headers_exclude,
-    )
-
     fb_xplat_cxx_library(
         name = "torch_headers",
         header_namespace = "",
-        exported_headers = select({
-            "DEFAULT": _torch_headers_all,
-            # On Windows, use raw_headers instead of exported_headers to
-            # avoid duplicate header map entries that break MSVC #pragma once.
-            "ovr_config//os:windows": {},
-        }),
-        raw_headers = select({
-            "DEFAULT": [],
-            "ovr_config//os:windows": glob([
-                "torch/csrc/**/*.h",
-                "torch/nativert/**/*.h",
-                "torch/headeronly/**/*.h",
-                "torch/script.h",
-                "torch/library.h",
-                "torch/custom_class.h",
-                "torch/custom_class_detail.h",
-                "aten/src/ATen/*.h",
-                "aten/src/ATen/functorch/**/*.h",
-                "aten/src/ATen/quantized/*.h",
-            ], exclude = _torch_headers_exclude),
-        }),
-        public_include_directories = select({
-            "DEFAULT": [],
-            "ovr_config//os:windows": ["torch/csrc/api/include", "."],
-        }),
+        exported_headers = subdir_glob(
+            [
+                ("torch/csrc/api/include", "torch/**/*.h"),
+                ("", "torch/csrc/**/*.h"),
+                ("", "torch/nativert/**/*.h"),
+                ("", "torch/headeronly/**/*.h"),
+                ("", "torch/script.h"),
+                ("", "torch/library.h"),
+                ("", "torch/custom_class.h"),
+                ("", "torch/custom_class_detail.h"),
+                # Add again due to namespace difference from aten_header.
+                ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
+                ("", "aten/src/ATen/quantized/*.h"),
+            ],
+            exclude = [
+                # Don't need on mobile.
+                "torch/csrc/Exceptions.h",
+                "torch/csrc/python_headers.h",
+                "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
+            ],
+        ),
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [

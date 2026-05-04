@@ -1097,10 +1097,10 @@ inline bool PythonArgs::toBool(int i) {
   if (!args[i]) {
     return signature.params[i].default_bool;
   }
-  if (Py_IsTrue(args[i])) {
+  if (args[i] == Py_True) {
     return true;
   }
-  if (Py_IsFalse(args[i])) {
+  if (args[i] == Py_False) {
     return false;
   }
   if (torch::is_symbool(py::handle(args[i]))) {

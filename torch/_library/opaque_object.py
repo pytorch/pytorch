@@ -44,7 +44,7 @@ from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -273,13 +273,7 @@ register_opaque_type(Enum, typ="value")
 
 
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
-    if is_opaque_type(type(value)):
-        return True
-    from torch._library.fake_class_registry import FakeScriptObject
-
-    if isinstance(value, FakeScriptObject):
-        return is_opaque_type(type(value.real_obj))
-    return False
+    return is_opaque_type(type(value))
 
 
 def should_hoist(cls: Any) -> bool:
