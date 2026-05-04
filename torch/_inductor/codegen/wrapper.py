@@ -2683,10 +2683,10 @@ class PythonWrapperCodegen(CodeGen):
         )
         with output.indent():
             output.splice(
-                """
+                f"""
                 from torch._inductor.utils import print_performance
                 fn = lambda: call(list(args))
-                return print_performance(fn, times=times, repeat=repeat)
+                return print_performance(fn, times=times, repeat=repeat, device='{V.graph.device_type}')
                 """,
                 strip=True,
             )
