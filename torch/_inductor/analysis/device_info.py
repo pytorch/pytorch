@@ -194,7 +194,7 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
       name (str): name of the device to lookup. Should map onto torch.cuda.get_device_name().
     """
-    return _device_mapping.get(name)
+    return _device_mapping.get(name.upper())
 
 
 def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
