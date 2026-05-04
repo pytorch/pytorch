@@ -149,6 +149,13 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
+.. note::
+   When using elastic training (``--nnodes=min:max``) with a dynamic rendezvous backend like
+   ``c10d``, the ``--node-rank`` argument is ignored. Global rank assignment is determined by the
+   rendezvous process and is not guaranteed to correspond to the ``--node-rank`` value. The
+   ``--node-rank`` argument only controls rank assignment when using ``--rdzv-backend=static``.
+   See important notice #6 below regarding rank stability.
+
 Note on rendezvous backend
 --------------------------
 
@@ -622,7 +629,9 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training.",
+        help="Rank of the node for multi-node distributed training. Only used for static "
+        "rendezvous (--rdzv-backend=static). For dynamic rendezvous backends (e.g. c10d), "
+        "the rank assignment is determined by the rendezvous and this value is ignored.",
     )
     parser.add_argument(
         "--master-addr",
