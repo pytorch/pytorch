@@ -3141,9 +3141,6 @@ class RedistributeBackwardDtypeTest(TestCase):
                 forward_dtype=torch.bfloat16,
                 backward_dtype=torch.bfloat16,
             )
-            # Feed a Partial gradient on the Replicate output so backward is
-            # forced to emit a reduce_scatter (vs. the default Replicate->Shard
-            # which would be a local chunk with no collective).
             grad_d = DTensor.from_local(
                 torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
             )
@@ -3151,7 +3148,28 @@ class RedistributeBackwardDtypeTest(TestCase):
 
         self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
         self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.bfloat16])
-        # param.grad should match param's storage dtype.
+        self.assertEqual(local.grad.dtype, torch.float32)
+
+    def test_forward_and_backward_dtype_differ(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.float32,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
         self.assertEqual(local.grad.dtype, torch.float32)
 
 
