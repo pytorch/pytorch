@@ -7,13 +7,16 @@
 #
 # Pipeline:
 #   1. fetch upstream at <sha>
-#   2. copy whitelisted modules into torch/_vendor/quack/
+#   2. copy whitelisted modules + LICENSE into torch/_vendor/quack/
 #   3. apply tools/vendoring/quack/patches/*.patch
 #          (strip torch.library decorators, rename branded strings)
 #   4. rewrite `quack.*` imports to package-relative
-#   5. write a fresh __init__.py recording the SHA and upstream version
+#   5. verify copyright/license notices still match upstream
+#   6. write a fresh __init__.py recording the SHA and upstream version
 #
 # If a patch fails, upstream has drifted — inspect the .rej and re-roll.
+# If notice verification fails, a patch moved or removed an attribution
+# line — fix the patch rather than the check.
 
 set -euo pipefail
 
@@ -79,6 +82,9 @@ copy_pristine() {
     for f in "${FILES[@]}"; do
         cp "$upstream/quack/$f" "$DEST/$f"
     done
+    # Apache-2.0 attribution: quack is redistributed under its upstream
+    # license, which must accompany the vendored source.
+    cp "$upstream/LICENSE" "$DEST/LICENSE"
 }
 
 apply_patches() {
@@ -103,6 +109,30 @@ rewrite_imports() {
             s|^([ \t]*)import quack\.([[:alnum:]_]+) as \2[ \t]*$|\1from . import \2|
         ' "$DEST/$f"
     done
+}
+
+# Guard against patches or import rewrites accidentally dropping or
+# relocating a copyright/license/SPDX line. Each vendored .py must carry
+# the same notice lines on the same line numbers as its upstream source.
+# Bails on the first mismatch so the operator can inspect before the
+# commit lands.
+verify_notices() {
+    local upstream=$1
+    local pattern='[Cc]opyright|[Ll]icense|SPDX|[Aa]ll [Rr]ights [Rr]eserved'
+    for f in "${FILES[@]}"; do
+        if ! diff -u \
+                <(grep -nE "$pattern" "$upstream/quack/$f" || true) \
+                <(grep -nE "$pattern" "$DEST/$f" || true) \
+                > /dev/null; then
+            echo "vendor_quack: notice drift in $f:" >&2
+            diff -u \
+                <(grep -nE "$pattern" "$upstream/quack/$f" || true) \
+                <(grep -nE "$pattern" "$DEST/$f" || true) >&2 || true
+            die "attribution must match upstream byte-for-byte; fix the patch"
+        fi
+    done
+    cmp -s "$upstream/LICENSE" "$DEST/LICENSE" \
+        || die "LICENSE differs from upstream"
 }
 
 write_init() {
@@ -149,11 +179,12 @@ main() {
     version=$(extract_version "$upstream/quack/__init__.py")
 
     mkdir -p "$DEST"
-    rm -f "$DEST"/*.py
+    rm -f "$DEST"/*.py "$DEST/LICENSE"
 
     copy_pristine "$upstream"
     apply_patches
     rewrite_imports
+    verify_notices "$upstream"
     write_init "$sha" "$version"
 
     echo "Vendored quack @ $sha (quack $version) into torch/_vendor/quack"
