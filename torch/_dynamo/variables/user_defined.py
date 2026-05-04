@@ -427,6 +427,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         # --- Dynamo-specific pre-checks ---
 
+        # TODO - Revisit if we can use new descriptor VTs here.
         # Wrap OrderedDict/defaultdict.fromkeys as GetAttrVariable so it's
         # handled uniformly in call_method().
         if (
@@ -475,6 +476,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Step 5: Plain attribute.
             return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
+        # TODO - Revisit if we can use new descriptor VTs here.
         # Step 6: Metaclass non-data descriptor or plain attr.
         # These are non-data descriptors on the metaclass (e.g. type.__call__,
         # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
@@ -556,6 +558,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return sm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, classmethod):
+            # TODO - Why are we not using ClassMethod VT here?
             if isinstance(cls_attr.__func__, property):
                 fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
                 return fget_vt.call_function(tx, [self], {})
@@ -628,6 +631,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
+        # TODO - Claude tells me this is related to instancemethod. Investigate
+        # if we need a separate VT.
         # Build directly when the attribute lives in the class's own __dict__
         # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
         # OrderedDict's C-level methods are handled at runtime.
@@ -2017,6 +2022,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
+            if trace_rules.is_polyfilled_callable(method):  # type: ignore[arg-type]
+                from .functions import PolyfilledFunctionVariable
+
+                polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+                wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
+                if wrapped is not None:
+                    traceable_fn = wrapped.__torch_dynamo_polyfill__
+                    return variables.UserMethodVariable(
+                        traceable_fn, self
+                    ).call_function(tx, args, kwargs)
+
+
         return super().call_method(tx, name, args, kwargs)
 
     def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -2657,6 +2674,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
+        # C-level data descriptors -- resolve via __get__ which routes to
+        # tp_descr_get_impl.
+
+        # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
         if isinstance(type_attr, property) and not self._is_c_defined_property(
             type_attr
         ):
@@ -2667,16 +2688,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
             return prop_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
-
-        get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
-        if isinstance(get_fn, types.FunctionType):
-            # User-defined data descriptor with a Python __get__.
-            return self.invoke_descriptor_get(tx, name, type_attr, source)
-
-        # C-level data descriptors -- resolve via __get__ which routes to
-        # tp_descr_get_impl. Uninitialized slots raise AttributeError which
-        # is surfaced as ObservedAttributeError so dynamo's try/except
-        # tracing works.
         if isinstance(type_attr, types.MemberDescriptorType):
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
             return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
@@ -2685,8 +2696,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
             return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
-        # Remaining C-level data descriptors (C-defined property, Cython
-        # attrs, _tuplegetter, etc.) -- resolve via __getattribute__.
+        get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
+        if isinstance(get_fn, types.FunctionType):
+            # User-defined data descriptor with a Python __get__.
+            return self.invoke_descriptor_get(tx, name, type_attr, source)
+
+        # TODO - Check when are these called - and if we need to create new VTs.
+        # Remaining C-level data descriptors (Cython attrs, _tuplegetter, etc.)
+        # -- resolve via __getattribute__.
         try:
             resolved = type(self.value).__getattribute__(self.value, name)
         except AttributeError:
@@ -2736,6 +2753,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
             cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
             return cmd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+        elif isinstance(type_attr, types.WrapperDescriptorType):
+            wd_vt = variables.WrapperDescriptorVariable(type_attr, source=source)
+            return wd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+        elif isinstance(type_attr, types.MethodDescriptorType):
+            md_vt = variables.MethodDescriptorVariable(type_attr, source=source)
+            return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
                 type_attr, "__wrapped__", self, source=source
@@ -2756,43 +2779,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # C-level non-data descriptors / opaque callables — defer to runtime.
-        # MethodDescriptorType: e.g. list.append (PyMethodDef)
-        # WrapperDescriptorType: e.g. list.__add__ (slot wrappers)
-        # MethodWrapperType: e.g. [].__add__ (bound slot wrappers)
-        #
-        # Exception: if the descriptor has a registered polyfill, return the
-        # polyfill as a bound method so Dynamo can trace through it.
+        # TODO - Investigate if we need a separater descriptor for these
         if (
-            isinstance(
-                type_attr,
-                (
-                    types.MethodDescriptorType,
-                    types.WrapperDescriptorType,
-                    types.MethodWrapperType,
-                ),
-            )
-            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
-            from .. import trace_rules
-
-            if trace_rules.is_polyfilled_callable(type_attr):  # type: ignore[arg-type]
-                from .functions import PolyfilledFunctionVariable
-
-                polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
-                wrapped: Any = polyfill_handlers.get(type_attr)  # type: ignore[arg-type]
-                if wrapped is not None:
-                    traceable_fn = wrapped.__torch_dynamo_polyfill__
-                    return variables.UserMethodVariable(traceable_fn, self)
-            if isinstance(type_attr, types.WrapperDescriptorType):
-                wd_vt = variables.WrapperDescriptorVariable(type_attr, source=source)
-                return wd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
-            if isinstance(type_attr, types.MethodDescriptorType):
-                md_vt = variables.MethodDescriptorVariable(type_attr, source=source)
-                return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
+        # TODO - Investigate if we need these now - its unclear why __get__ is
+        # not called for these.
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
         if can_use_mro_source:
