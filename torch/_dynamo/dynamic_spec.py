@@ -34,7 +34,6 @@ from collections.abc import Iterator
 from typing import Any, ClassVar, TypeAlias
 
 import torch
-import torch.utils._pytree as pytree
 
 
 __all__ = [
@@ -574,8 +573,8 @@ class ObjectSpec:
 
     Models attribute access on a Python object (e.g., an ``nn.Module``'s
     parameters / buffers / submodules; ``self`` inside an instance
-    method). Each ``.field`` entry corresponds to a ``GetAttrKey`` on
-    the pytree keypath, matching ``AttrSource`` in the dynamo builder.
+    method). Each ``.field`` entry corresponds to an ``AttrSource`` in
+    the dynamo builder.
 
     Construct fluently or via dict-form::
 
@@ -667,9 +666,9 @@ class DictSpec:
     structural identifiers and cannot be dynamic. Only the values can
     carry dynamic specs.
 
-    Each ``.entry`` corresponds to a ``MappingKey`` on the pytree
-    keypath, matching ``LocalSource`` / ``GetItemSource`` shapes in the
-    dynamo builder.
+    Each ``.entry`` corresponds to a ``MappingKey`` on the keypath,
+    matching ``LocalSource`` / ``GetItemSource`` shapes in the dynamo
+    builder.
 
     Construct fluently or via dict-form::
 
@@ -713,8 +712,8 @@ class DictSpec:
 class ListSpec:
     """Spec for a Python ``list`` / ``tuple`` argument.
 
-    Each ``.index`` corresponds to a ``SequenceKey`` on the pytree
-    keypath. Construction mirrors :class:`TensorSpec`:
+    Each ``.index`` corresponds to a ``SequenceKey`` (positional access)
+    in the dynamo source chain. Construction mirrors :class:`TensorSpec`:
 
     - ``int`` — length; all entries start as ``None``.
     - ``list`` / ``tuple`` — length and entries inferred from input.
@@ -770,126 +769,3 @@ class ListSpec:
         return f"ListSpec([{entries}])"
 
     # No ``__eq__`` / ``__hash__``: matches the rest of the spec types.
-
-
-# -- pytree registration -----------------------------------------------------
-#
-# ``TensorSpec`` is a list-like container of per-dim ``IntSpec | None`` —
-# register it so ``tree_flatten_with_path`` exposes each per-dim entry as a
-# leaf with a ``SequenceKey(i)`` path entry.
-#
-# ``IntSpec`` is intentionally *not* registered: pytree treats unregistered
-# classes as opaque leaves, which is the correct behavior — flattening should
-# stop at ``IntSpec``.
-
-
-def _tensorspec_flatten(ts: TensorSpec) -> tuple[list[Any], None]:
-    return list(ts), None
-
-
-def _tensorspec_unflatten(children: Any, _context: Any) -> TensorSpec:
-    return TensorSpec(list(children))
-
-
-def _tensorspec_flatten_with_keys(
-    ts: TensorSpec,
-) -> tuple[list[tuple[Any, Any]], None]:
-    return [(pytree.SequenceKey(i), spec) for i, spec in enumerate(ts)], None
-
-
-pytree.register_pytree_node(
-    TensorSpec,
-    _tensorspec_flatten,
-    _tensorspec_unflatten,
-    flatten_with_keys_fn=_tensorspec_flatten_with_keys,
-)
-
-
-# ``ObjectSpec`` flattens to its field values; the field names are the
-# context, and each entry becomes a ``GetAttrKey`` on the keypath when
-# ``tree_flatten_with_path`` is used.
-
-
-def _objectspec_flatten(os: ObjectSpec) -> tuple[list[Any], list[str]]:
-    return list(os._fields.values()), list(os._fields.keys())
-
-
-def _objectspec_unflatten(values: Any, keys: Any) -> ObjectSpec:
-    return ObjectSpec(dict(zip(keys, values)))
-
-
-def _objectspec_flatten_with_keys(
-    os: ObjectSpec,
-) -> tuple[list[tuple[Any, Any]], list[str]]:
-    return (
-        [(pytree.GetAttrKey(name), spec) for name, spec in os._fields.items()],
-        list(os._fields.keys()),
-    )
-
-
-pytree.register_pytree_node(
-    ObjectSpec,
-    _objectspec_flatten,
-    _objectspec_unflatten,
-    flatten_with_keys_fn=_objectspec_flatten_with_keys,
-)
-
-
-# ``DictSpec`` flattens to its entry values; the keys are the context
-# and each entry becomes a ``MappingKey`` on the keypath when
-# ``tree_flatten_with_path`` is used.
-
-
-def _dictspec_flatten(ds: DictSpec) -> tuple[list[Any], list[str]]:
-    return list(ds._entries.values()), list(ds._entries.keys())
-
-
-def _dictspec_unflatten(values: Any, keys: Any) -> DictSpec:
-    return DictSpec(dict(zip(keys, values)))
-
-
-def _dictspec_flatten_with_keys(
-    ds: DictSpec,
-) -> tuple[list[tuple[Any, Any]], list[str]]:
-    return (
-        [(pytree.MappingKey(key), spec) for key, spec in ds._entries.items()],
-        list(ds._entries.keys()),
-    )
-
-
-pytree.register_pytree_node(
-    DictSpec,
-    _dictspec_flatten,
-    _dictspec_unflatten,
-    flatten_with_keys_fn=_dictspec_flatten_with_keys,
-)
-
-
-# ``ListSpec`` flattens to its positional entries; each becomes a
-# ``SequenceKey(idx)`` on the keypath when ``tree_flatten_with_path`` is
-# used. Length is preserved in the context.
-
-
-def _listspec_flatten(ls: ListSpec) -> tuple[list[Any], int]:
-    return list(ls._entries), ls._length
-
-
-def _listspec_unflatten(values: Any, _length: Any) -> ListSpec:
-    return ListSpec(list(values))
-
-
-def _listspec_flatten_with_keys(
-    ls: ListSpec,
-) -> tuple[list[tuple[Any, Any]], int]:
-    return (
-        [(pytree.SequenceKey(i), spec) for i, spec in enumerate(ls._entries)],
-        ls._length,
-    )
-
-
-pytree.register_pytree_node(
-    ListSpec,
-    _listspec_flatten,
-    _listspec_unflatten,
-    flatten_with_keys_fn=_listspec_flatten_with_keys,
-)
