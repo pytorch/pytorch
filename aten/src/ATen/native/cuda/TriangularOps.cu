@@ -125,6 +125,60 @@ __global__ void triu_tril_kernel(
 #endif // !defined(USE_ROCM)
 }
 
+// Helper extracted from the AT_DISPATCH lambda below. The USE_ROCM
+// preprocessor branches must live outside the AT_DISPATCH macro expansion;
+// MSVC's traditional preprocessor does not accept #if/#else/#endif inside a
+// macro argument and the Windows build would otherwise fail.
+template <bool upper, typename scalar_t>
+void launch_triu_tril_kernel(const Tensor& result, const Tensor& self, int64_t k) {
+#if !defined(USE_ROCM)
+  constexpr int elements_per_thread = sizeof(scalar_t) < 8 ? 8 / sizeof(scalar_t) : 1;
+#else
+  // Pair smaller scalars with more elements per thread so the bounded grid
+  // (see dim_grid below) still covers the full output via the kernel's
+  // strided loop.
+  constexpr int elements_per_thread =
+    sizeof(scalar_t) <= 2 ? 4 :
+    sizeof(scalar_t) <= 8 ? 2 : 1;
+#endif
+  auto sizes = self.sizes();
+  int64_t last_dim_padded = round_up<int64_t>(sizes.back(), elements_per_thread);
+  int64_t N_padded = c10::multiply_integers(sizes.begin(), sizes.end() - 1) * last_dim_padded;
+  dim3 dim_block = block_size;
+
+#if !defined(USE_ROCM)
+  dim3 dim_grid((N_padded / elements_per_thread + dim_block.x - 1) / dim_block.x);
+#else
+  // ROCm caps total threads (grid * block) at 2^32; bound the grid here and
+  // let the kernel walk the remainder via a strided loop so large matrices
+  // with 64-bit indexing produce correct results instead of silently
+  // truncating.
+  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  constexpr int grid_multiplier = sizeof(scalar_t) <= 2 ? 16 : 32;
+  dim3 dim_grid(num_mp * grid_multiplier);
+#endif
+
+  if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
+    auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
+    auto self_info = cuda::detail::getTensorInfo<const scalar_t, int32_t>(self);
+    BOOL_SWITCH(self.is_same(result), inplace, [&] {
+      triu_tril_kernel<scalar_t, int32_t, upper, elements_per_thread, inplace>
+        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          result_info, self_info, k, N_padded, last_dim_padded);
+    });
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
+    auto self_info = cuda::detail::getTensorInfo<const scalar_t, int64_t>(self);
+    BOOL_SWITCH(self.is_same(result), inplace, [&] {
+      triu_tril_kernel<scalar_t, int64_t, upper, elements_per_thread, inplace>
+        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          result_info, self_info, k, N_padded, last_dim_padded);
+    });
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+}
+
 template <bool upper>
 void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
@@ -133,47 +187,7 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
       at::ScalarType::BFloat16,
       at::ScalarType::Bool,
       self.scalar_type(), "triu_tril_cuda_template", [&] {
-#if !defined(USE_ROCM)
-    constexpr int elements_per_thread = sizeof(scalar_t) < 8 ? 8 / sizeof(scalar_t) : 1;
-#else
-    // Tune elements_per_thread for optimal performance on MI300X
-    constexpr int elements_per_thread =
-      sizeof(scalar_t) <= 2 ? 4 :    // 4 elements per thread for 16-bit and 8-bit scalars
-      sizeof(scalar_t) <= 8 ? 2 : 1; // 2 elements per thread for 32-bit scalars and 1 for larger
-#endif // !defined(USE_ROCM)
-    auto sizes = self.sizes();
-    int64_t last_dim_padded = round_up<int64_t>(sizes.back(), elements_per_thread);
-    int64_t N_padded = c10::multiply_integers(sizes.begin(), sizes.end() - 1) * last_dim_padded;
-    dim3 dim_block = block_size;
-
-#if !defined(USE_ROCM)
-    dim3 dim_grid((N_padded / elements_per_thread + dim_block.x - 1) / dim_block.x);
-#else
-    // calculate optimal grid size for maximum performance on MI300X
-    const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-    constexpr int grid_multiplier = sizeof(scalar_t) <= 2 ? 16 : 32;
-    dim3 dim_grid(num_mp * grid_multiplier);
-#endif // !defined(USE_ROCM)
-
-    if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<const scalar_t, int32_t>(self);
-      BOOL_SWITCH(self.is_same(result), inplace, [&] {
-        triu_tril_kernel<scalar_t, int32_t, upper, elements_per_thread, inplace>
-          <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            result_info, self_info, k, N_padded, last_dim_padded);
-      });
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<const scalar_t, int64_t>(self);
-      BOOL_SWITCH(self.is_same(result), inplace, [&] {
-        triu_tril_kernel<scalar_t, int64_t, upper, elements_per_thread, inplace>
-          <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            result_info, self_info, k, N_padded, last_dim_padded);
-      });
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
+    launch_triu_tril_kernel<upper, scalar_t>(result, self, k);
   });
 }
 
