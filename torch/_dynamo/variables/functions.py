@@ -3347,7 +3347,6 @@ class TritonKernelVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # Triton kernel[grid] — triton-specific, not a CPython slot.
-        # TODO(follow-up): add test for invalid key type
         return dynamo_triton_hopifier_singleton.call_getitem(self, [key])
 
     def call_method(
