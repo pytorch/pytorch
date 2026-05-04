@@ -285,7 +285,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 reasons = get_and_maybe_log_recompilation_reasons(
                     cache_entries,
                     frame,
-                    innermost_fn(callback),  # pyrefly: ignore [bad-argument-type]
+                    innermost_backend(callback),  # pyrefly: ignore [bad-argument-type]
                     skip_logging=True,
                 )
                 if reasons:
