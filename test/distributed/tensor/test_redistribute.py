@@ -859,9 +859,12 @@ class RedistributeTest(DTensorContinuousTestBase):
                     replica_tensor,
                     device_mesh,
                     [partial_spec],
-                    op_dtype=dt,
-                    out_dtype=dt,
-                    backward_options={"op_dtype": dt, "out_dtype": dt},
+                    False,
+                    {
+                        "op_dtype": dt,
+                        "out_dtype": dt,
+                        "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                    },
                 )
 
             self.assertEqual(partial_tensor.size(), local_tensor.size())
