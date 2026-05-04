@@ -572,6 +572,33 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+// Convert module counter map (key "fqn:component_idx") to nested Python dict
+// {fqn: {component_name: {current, peak, allocated, freed}}}
+static py::dict moduleCountersToPyDict(
+    const std::unordered_map<std::string, c10::CachingAllocator::Stat>& counters) {
+  using c10::CachingDeviceAllocator::kComponentNames;
+  py::dict mod_dict;
+  for (const auto& [key, stat] : counters) {
+    auto pos = key.find(':');
+    std::string fqn = (pos != std::string::npos) ? key.substr(0, pos) : key;
+    uint8_t comp_idx = (pos != std::string::npos)
+        ? static_cast<uint8_t>(std::stoi(key.substr(pos + 1)))
+        : 0;
+    const char* comp_name =
+        comp_idx < kComponentNames.size() ? kComponentNames[comp_idx] : "other";
+    py::dict stat_dict;
+    stat_dict["current"] = stat.current;
+    stat_dict["peak"] = stat.peak;
+    stat_dict["allocated"] = stat.allocated;
+    stat_dict["freed"] = stat.freed;
+    if (!mod_dict.contains(fqn.c_str())) {
+      mod_dict[fqn.c_str()] = py::dict();
+    }
+    mod_dict[fqn.c_str()][comp_name] = stat_dict;
+  }
+  return mod_dict;
+}
+
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
@@ -624,6 +651,22 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["requested_bytes"] = statArrayToDict(stats.requested_bytes);
   result["oversize_allocations"] = statToDict(stats.oversize_allocations);
   result["oversize_segments"] = statToDict(stats.oversize_segments);
+
+  // Per-component memory attribution
+  {
+    using c10::CachingDeviceAllocator::kComponentNames;
+    py::dict comp_dict;
+    for (const auto i : c10::irange(kComponentNames.size())) {
+      comp_dict[kComponentNames[i]] = statToDict(stats.component_bytes[i]);
+    }
+    result["component_bytes"] = comp_dict;
+  }
+
+  // Per-module breakdown (when module tracking is enabled)
+  if (c10::cuda::CUDACachingAllocator::isModuleTrackingEnabled()) {
+    result["module_bytes"] = moduleCountersToPyDict(
+        c10::cuda::CUDACachingAllocator::getModuleCounters());
+  }
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -1191,6 +1234,47 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_getMemoryMetadata", []() {
     return c10::cuda::CUDACachingAllocator::getUserMetadata();
+  });
+
+  m.def("_cuda_setComponentType", [](int type) {
+    c10::cuda::CUDACachingAllocator::setComponentType(
+        static_cast<c10::CachingDeviceAllocator::ComponentType>(type));
+  });
+
+  m.def("_cuda_getComponentType", []() {
+    return static_cast<int>(
+        c10::cuda::CUDACachingAllocator::getComponentType());
+  });
+
+  m.def("_cuda_tagBlock", [](size_t ptr, int type) {
+    c10::cuda::CUDACachingAllocator::tagBlock(
+        reinterpret_cast<void*>(ptr),
+        static_cast<c10::CachingDeviceAllocator::ComponentType>(type));
+  });
+
+  m.def(
+      "_cuda_tagModuleBlock", [](size_t ptr, const std::string& fqn, int type) {
+        c10::cuda::CUDACachingAllocator::tagModuleBlock(
+            reinterpret_cast<void*>(ptr),
+            fqn,
+            static_cast<c10::CachingDeviceAllocator::ComponentType>(type));
+      });
+
+  m.def("_cuda_enableModuleTracking", []() {
+    c10::cuda::CUDACachingAllocator::enableModuleTracking();
+  });
+
+  m.def("_cuda_disableModuleTracking", []() {
+    c10::cuda::CUDACachingAllocator::disableModuleTracking();
+  });
+
+  m.def("_cuda_isModuleTrackingEnabled", []() {
+    return c10::cuda::CUDACachingAllocator::isModuleTrackingEnabled();
+  });
+
+  m.def("_cuda_getModuleCounters", []() {
+    return moduleCountersToPyDict(
+        c10::cuda::CUDACachingAllocator::getModuleCounters());
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {

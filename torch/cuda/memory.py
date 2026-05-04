@@ -1160,6 +1160,120 @@ def _get_memory_metadata() -> str:
     return torch._C._cuda_getMemoryMetadata()
 
 
+class ComponentType:
+    """Component types for memory attribution.
+
+    Used with :func:`_set_component_type` and :func:`_tag_block` to attribute
+    GPU memory allocations to specific training components (parameters, gradients,
+    activations, optimizer state, etc.).
+
+    The values match the ``c10::CachingDeviceAllocator::ComponentType`` enum in C++.
+    """
+
+    OTHER = 0
+    PARAMETER = 1
+    GRADIENT = 2
+    ACTIVATION = 3
+    OPTIMIZER_STATE = 4
+    TEMP = 5
+    BUFFER = 6
+    COLLECTIVE_BUFFER = 7
+
+
+def _set_component_type(component_type: int) -> None:
+    """Set the component type for subsequent CUDA memory allocations.
+
+    All allocations made after this call on the current thread will be tagged
+    with the specified component type until it is changed or reset.
+
+    Args:
+        component_type: One of the ``ComponentType`` constants
+            (e.g., ``ComponentType.PARAMETER``, ``ComponentType.ACTIVATION``).
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_setComponentType(component_type)
+
+
+def _get_component_type() -> int:
+    """Get the current component type for CUDA memory allocations.
+
+    Returns:
+        int: The current component type value (one of ``ComponentType`` constants).
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_getComponentType()
+
+
+def _tag_block(data_ptr: int, component_type: int) -> None:
+    """Retroactively re-tag an existing CUDA allocation's component type.
+
+    Looks up the Block by pointer, swaps the component type, and adjusts
+    the ``component_bytes`` counters in ``DeviceStats``.
+
+    This is used by the component tracker to re-tag:
+    - Parameters and buffers (allocated before tracking was enabled)
+    - Gradients (initially allocated as OTHER during backward, re-tagged after accumulation)
+
+    Args:
+        data_ptr: The data pointer (``tensor.data_ptr()``) of the allocation.
+        component_type: The new component type (one of ``ComponentType`` constants).
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_tagBlock(data_ptr, component_type)
+
+
+def _tag_module_block(data_ptr: int, fqn: str, component_type: int) -> None:
+    """Seed a pre-existing allocation into the per-module tracker.
+
+    This inserts an entry into the ``ModuleComponentTracker``'s internal map
+    and increments the per-(module, component) counters. Used for parameters
+    and buffers that were allocated before module tracking was enabled.
+
+    Args:
+        data_ptr: The data pointer (``tensor.data_ptr()``) of the allocation.
+        fqn: The fully-qualified module name (e.g., ``"layers.0.attn"``).
+        component_type: The component type (one of ``ComponentType`` constants).
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_tagModuleBlock(data_ptr, fqn, component_type)
+
+
+def _enable_module_tracking() -> None:
+    """Enable per-module memory tracking.
+
+    Registers an ``AllocatorTraceTracker`` callback in the CUDA caching
+    allocator that maintains per-(module_fqn, component_type) counters.
+    Module FQNs are read from the ``user_metadata`` that module forward hooks
+    set via :func:`_set_memory_metadata`.
+
+    After this call, :func:`_get_module_counters` returns per-module breakdown.
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_enableModuleTracking()
+
+
+def _disable_module_tracking() -> None:
+    """Disable per-module memory tracking."""
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_disableModuleTracking()
+
+
+def _is_module_tracking_enabled() -> bool:
+    """Return True if per-module memory tracking is enabled."""
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_isModuleTrackingEnabled()
+
+
+def _get_module_counters() -> dict:
+    """Return per-(module, component) memory counters.
+
+    Returns:
+        dict: Nested dict ``{module_fqn: {component_name: {current, peak, allocated, freed}}}``
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_getModuleCounters()
+
+
 def _save_segment_usage(filename="output.svg", snapshot=None):
     if snapshot is None:
         snapshot = _snapshot()

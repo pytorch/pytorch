@@ -229,6 +229,27 @@ class CUDAAllocator : public DeviceAllocator {
   virtual std::string getUserMetadata() {
     return "";
   }
+  virtual void setComponentType(
+      CachingDeviceAllocator::ComponentType /*type*/) {}
+  virtual CachingDeviceAllocator::ComponentType getComponentType() {
+    return CachingDeviceAllocator::ComponentType::OTHER;
+  }
+  virtual void tagBlock(
+      void* /*ptr*/,
+      CachingDeviceAllocator::ComponentType /*type*/) {}
+  virtual void tagModuleBlock(
+      void* /*ptr*/,
+      const std::string& /*fqn*/,
+      CachingDeviceAllocator::ComponentType /*type*/) {}
+  virtual void enableModuleTracking() {}
+  virtual void disableModuleTracking() {}
+  virtual std::unordered_map<std::string, c10::CachingAllocator::Stat>
+  getModuleCounters() {
+    return {};
+  }
+  virtual bool isModuleTrackingEnabled() {
+    return false;
+  }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
 
@@ -503,6 +524,42 @@ inline void setUserMetadata(const std::string& metadata) {
 
 inline std::string getUserMetadata() {
   return get()->getUserMetadata();
+}
+
+inline void setComponentType(CachingDeviceAllocator::ComponentType type) {
+  get()->setComponentType(type);
+}
+
+inline CachingDeviceAllocator::ComponentType getComponentType() {
+  return get()->getComponentType();
+}
+
+inline void tagBlock(void* ptr, CachingDeviceAllocator::ComponentType type) {
+  get()->tagBlock(ptr, type);
+}
+
+inline void tagModuleBlock(
+    void* ptr,
+    const std::string& fqn,
+    CachingDeviceAllocator::ComponentType type) {
+  get()->tagModuleBlock(ptr, fqn, type);
+}
+
+inline void enableModuleTracking() {
+  get()->enableModuleTracking();
+}
+
+inline void disableModuleTracking() {
+  get()->disableModuleTracking();
+}
+
+inline std::unordered_map<std::string, c10::CachingAllocator::Stat>
+getModuleCounters() {
+  return get()->getModuleCounters();
+}
+
+inline bool isModuleTrackingEnabled() {
+  return get()->isModuleTrackingEnabled();
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
