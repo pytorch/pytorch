@@ -176,6 +176,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
   ErrorType getError() override;
+  std::optional<at::Device> getBoundDeviceId() const override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
 
   c10::intrusive_ptr<Backend> getWrappedPg() const;
