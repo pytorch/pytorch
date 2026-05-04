@@ -351,7 +351,7 @@ def bmm(
 ) -> torch.Tensor:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
-    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
         return (self * batch2).contiguous()

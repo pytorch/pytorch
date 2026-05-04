@@ -91,9 +91,13 @@ jobs:
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          submodules: "false"
+          fetch-depth: "1"
+          sparse-checkout: |
+            .ci/pytorch/binary_upload.sh
 
       - name: Configure AWS credentials(PyTorch account) for nightly
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}

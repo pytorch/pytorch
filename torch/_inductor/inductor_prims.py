@@ -318,14 +318,14 @@ def _low_memory_max_pool_offsets_to_indices_aten(
 
 
 _low_memory_max_pool_with_offsets = make_prim(
-    "_low_memory_max_pool_with_offsets(Tensor self, SymInt[] kernel_size, SymInt[] stride,  SymInt[] padding, SymInt[] dilation, bool ceil_mode) -> (Tensor, Tensor)",  # noqa: B950
+    "_low_memory_max_pool_with_offsets(Tensor self, SymInt[] kernel_size, SymInt[] stride,  SymInt[] padding, SymInt[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
     _low_memory_max_pool_with_offsets_aten,
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
     doc="Instead of returning indices, returns indices offsets.",
 )
 
 _low_memory_max_pool_offsets_to_indices = make_prim(
-    "_low_memory_max_pool_offsets_to_indices(Tensor self, SymInt[] kernel_size, SymInt[] input_size, SymInt[] stride, SymInt[] padding, SymInt[] dilation) -> Tensor",  # noqa: B950
+    "_low_memory_max_pool_offsets_to_indices(Tensor self, SymInt[] kernel_size, SymInt[] input_size, SymInt[] stride, SymInt[] padding, SymInt[] dilation) -> Tensor",
     _low_memory_max_pool_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

@@ -3697,7 +3697,7 @@ Tensor svd_backward(
   // canonical (real) inner product in C^{n x k} we get that the function is
   // invariant under action of U(1)^k iff Im(diag(U^H gU + V^H gV)) = 0
   //
-  // Using this in the derviaton for the forward AD, one sees that, with the
+  // Using this in the derivation for the forward AD, one sees that, with the
   // notation from those notes Using this and writing sym(X) = X + X^H, we get
   // that the forward AD for SVD in the complex case is given by dU = U (sym(dX
   // S) / E + i Im(diag(dX)) / (2S)) if m > n
@@ -7238,7 +7238,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled; this also avoids having the item() call in the usual case.
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});
@@ -7335,7 +7335,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled this also avoids having the item() call in the usual case
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});

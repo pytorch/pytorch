@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-# flake8: noqa: B950 We do not need flake8 as it complains line length
+
 from __future__ import annotations
 
 import ctypes

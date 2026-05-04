@@ -327,7 +327,7 @@ class NodeSplitGetter:
                 continue
 
             # if we can't split the pw ranges into a (pw, red) split,
-            # dont add as a split option, but do make sure we check that this size
+            # don't add as a split option, but do make sure we check that this size
             # is splittable
             maybe_splits = get_pw_red_splits(
                 n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
@@ -791,7 +791,7 @@ def analyze_memory_coalescing(
                 continue
 
             # TODO - if a var is in the middle, such as [n0, n1, n2]
-            # n1 can can be split beyond range
+            # n1 can be split beyond range
 
             MIN_TILING_BLOCK = 8
             if not all(

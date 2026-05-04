@@ -38,7 +38,7 @@ if is_available():
 
     import torch.distributed.autograd as dist_autograd
     from torch._C._distributed_c10d import Store
-    from torch._C._distributed_rpc import (  # noqa: F401
+    from torch._C._distributed_rpc import (
         _cleanup_python_rpc_handler,
         _DEFAULT_INIT_METHOD,
         _DEFAULT_RPC_TIMEOUT_SEC,
@@ -72,23 +72,23 @@ if is_available():
     )
 
     if _is_tensorpipe_available:
-        from torch._C._distributed_rpc import (  # noqa: F401
+        from torch._C._distributed_rpc import (
             _DEFAULT_NUM_WORKER_THREADS,
             _TensorPipeRpcBackendOptionsBase,
             TensorPipeAgent,
         )
 
     from . import api, backend_registry, functions
-    from .api import *  # noqa: F401,F403
+    from .api import *  # noqa: F403
     from .backend_registry import BackendType
-    from .options import TensorPipeRpcBackendOptions  # noqa: F401
+    from .options import TensorPipeRpcBackendOptions
     from .server_process_global_profiler import _server_process_global_profile
 
     rendezvous_iterator: Generator[tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
     # pyrefly: ignore [unresolvable-dunder-all]
-    __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605
+    __all__ = __all__ + api.__all__ + backend_registry.__all__
 
     def init_rpc(
         name,

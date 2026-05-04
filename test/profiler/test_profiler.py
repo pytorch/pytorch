@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -3676,6 +3677,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
@@ -3778,6 +3780,526 @@ class TestPrivateUse1ProfilerState(TestCase):
                     use_device="custom_backend",
                     use_kineto=False,
                 )
+
+
+@instantiate_parametrized_tests
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestProfilerDeviceStopped(TestCase):
+    """Tests for the DEVICE_STOPPED transition: when Kineto signals that
+    device collection has stopped (e.g. CUPTI buffer overflow), the profiler
+    saves any collected trace, sits in DEVICE_STOPPED for the rest of the
+    cycle, and resumes normal scheduling on the next cycle. The Kineto signal
+    is mocked so no actual overflow is needed.
+
+    Note that we don't actually depend on any CUDA specific behavior. But the
+    DEVICE_STOPPED logic does behave different if the user has only requested
+    CPU-only profiling. Explicitly specifying a GPU device seems cleaner than
+    patching the `use_device` attributes in the profiler."""
+
+    PATCH_TARGET = "torch.autograd._is_kineto_stopped"
+
+    def _make_profiler(self, **schedule_kwargs):
+        return profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(**schedule_kwargs),
+        )
+
+    def test_enters_device_stopped_from_warmup(self):
+        p = self._make_profiler(wait=0, warmup=2, active=2)
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()
+            # step 0 -> 1: WARMUP -> WARMUP per schedule, but _is_kineto_stopped
+            # returns True so we override to DEVICE_STOPPED.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+
+    def test_enters_device_stopped_from_record(self):
+        p = self._make_profiler(wait=0, warmup=1, active=3)
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            # step 0 -> 1: WARMUP -> RECORD (normal)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD -> RECORD per schedule, but _is_kineto_stopped
+            # -> True overrides to DEVICE_STOPPED.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+
+    def test_does_not_enter_device_stopped_from_record_and_save(self):
+        """When prev_action is RECORD_AND_SAVE, the natural action_map
+        transition (e.g. R&S -> WARMUP) already fires stop_trace +
+        _trace_ready + prepare_trace, which resets Kineto. We do NOT
+        override to DEVICE_STOPPED — doing so would skip the reset and
+        waste the next cycle in DEVICE_STOPPED. If Kineto recovers,
+        profiling continues normally; if not, the entry guard fires on
+        the next step (prev=WARMUP or RECORD)."""
+        callback_count = [0]
+
+        def handler(prof):
+            callback_count[0] += 1
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=2, repeat=2),
+            on_trace_ready=handler,
+        )
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 2 -> 3: prev=R&S, schedule=WARMUP. Despite kineto_stopped,
+            # we do NOT override; the natural (R&S, WARMUP) transition fires
+            # stop_trace + _trace_ready + prepare_trace.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            self.assertEqual(
+                callback_count[0],
+                1,
+                "(R&S, WARMUP) natural transition must fire on_trace_ready",
+            )
+
+        # Simulate Kineto recovering after prepare_trace: cycle 2 records
+        # normally rather than being wasted in DEVICE_STOPPED.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 3 -> 4: WARMUP -> RECORD
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()  # step 4 -> 5: RECORD -> RECORD_AND_SAVE
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            p.stop()
+            # cycle 2 R&S -> stop fires on_trace_ready a second time
+            self.assertEqual(callback_count[0], 2)
+
+    def test_device_stopped_persists_through_cycle(self):
+        """Once in DEVICE_STOPPED, the profiler stays there until the schedule
+        moves to WARMUP (new cycle) or NONE (end)."""
+        p = self._make_profiler(wait=0, warmup=1, active=4, repeat=2)
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD -> DEVICE_STOPPED
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 2 -> 3: schedule says RECORD, stays DEVICE_STOPPED
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 3 -> 4: schedule says RECORD_AND_SAVE, stays DEVICE_STOPPED
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 4 -> 5: schedule rolls over to WARMUP (new cycle), exits
+            # DEVICE_STOPPED.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.stop()
+
+    def test_device_stopped_recovers_without_warmup(self):
+        """With warmup=0 (and wait=0), the schedule never produces WARMUP or
+        NONE between cycles. DEVICE_STOPPED must still exit at cycle
+        boundaries (RECORD_AND_SAVE -> next), otherwise the profiler would
+        be stuck in DEVICE_STOPPED forever."""
+        # The normal schedule for wait=0, warmup=0, active=3, repeat=2:
+        # step 0..1: RECORD
+        # step 2:    RECORD_AND_SAVE
+        # step 3..4: RECORD
+        # step 5:    RECORD_AND_SAVE
+        # step 6+:   NONE
+        p = self._make_profiler(wait=0, warmup=0, active=3, repeat=2)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 2 -> 3: prev raw schedule output was RECORD_AND_SAVE, so
+            # this step is a cycle boundary. Exit DEVICE_STOPPED into
+            # current_action (RECORD)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.stop()
+
+    def test_device_stopped_exits_via_wait_phase(self):
+        """With wait > 0, the NONE phase between cycles is the natural
+        exit path out of DEVICE_STOPPED. After the wait, profiling resumes
+        normally through WARMUP and RECORD."""
+        # The normal schedule for wait=2, warmup=1, active=2, repeat=2 (cycle length 5):
+        # step 0..1: NONE
+        # step 2:    WARMUP
+        # step 3:    RECORD
+        # step 4:    R&S
+        # step 5..6: NONE
+        # step 7:    WARMUP
+        # step 8:    RECORD
+        # step 9:    R&S
+        # step 10+:  NONE
+        p = self._make_profiler(wait=2, warmup=1, active=2, repeat=2)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            # step 4 -> 5: schedule rolls into cycle 2's wait phase. NONE is
+            # in the exit set, so DEVICE_STOPPED exits.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            # step 5 -> 6: still in wait phase
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            # step 6 -> 7: WARMUP (cycle 2 begins)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            # step 7 -> 8: RECORD (cycle 2 active begins)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.stop()
+
+    def test_device_stopped_persists_through_multistep_warmup(self):
+        """With warmup >= 2, consecutive WARMUP steps are mid-cycle, not
+        cycle boundaries. DEVICE_STOPPED must persist through the entire
+        warmup phase rather than oscillating WARMUP -> DEVICE_STOPPED ->
+        WARMUP -> DEVICE_STOPPED on every step."""
+        # The normal schedule for wait=0, warmup=3, active=2, repeat=1 (cycle length 5):
+        # step 0..2: WARMUP
+        # step 3:    RECORD
+        # step 4:    R&S
+        # step 5+:   NONE
+        p = self._make_profiler(wait=0, warmup=3, active=2, repeat=1)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 1 -> 2: schedule still WARMUP (same warmup phase, NOT a
+            # cycle boundary). Must stay in DEVICE_STOPPED.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 2 -> 3: schedule moves to RECORD. Still mid-cycle
+            # (prev_schedule_action is WARMUP, not RECORD_AND_SAVE). Stay.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 3 -> 4: schedule moves to R&S. Still mid-cycle. Stay.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            # step 4 -> 5: prev_schedule_action == R&S marks the cycle
+            # boundary (here also end-of-profiling since repeat=1). Exit
+            # DEVICE_STOPPED into NONE.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_warmup_to_device_stopped_fires_trace_ready(self):
+        """When DEVICE_STOPPED is entered from WARMUP (e.g. active=1
+        schedule where every R&S step gets converted to DS), the
+        (WARMUP, DEVICE_STOPPED) transition must fire on_trace_ready so
+        the user's callback is invoked exactly once per cycle. Without
+        this, active=1 schedules with persistent kineto_stopped would
+        silently drop all callbacks; with double-firing we'd produce
+        spurious callbacks."""
+        callback_count = [0]
+
+        def handler(prof):
+            callback_count[0] += 1
+
+        # Schedule active=1, warmup=1, repeat=3 cycles W, R&S; with kineto_stopped
+        # on every step the entry guard converts each cycle's R&S to DS via
+        # (W, DS), and DS exits at cycle boundary via (DS, W).
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=3),
+            on_trace_ready=handler,
+        )
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # Cycle 1: step 0 -> 1: (W, DS) fires _trace_ready. callback=1.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(callback_count[0], 1)
+            # step 1 -> 2: (DS, W) fires prepare_trace, no callback. callback=1.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            self.assertEqual(callback_count[0], 1)
+            # Cycle 2: step 2 -> 3: (W, DS) fires _trace_ready. callback=2.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(callback_count[0], 2)
+            p.stop()
+
+    def test_start_after_stop_in_device_stopped(self):
+        """A user may call start() after a stop() that left current_action
+        in DEVICE_STOPPED. The second start() must re-derive state from
+        the schedule (not trust the stale DS), so a real (NONE, X)
+        transition fires prepare_trace and the second run actually records."""
+        callback_count = [0]
+
+        def handler(prof):
+            callback_count[0] += 1
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1),
+            on_trace_ready=handler,
+        )
+
+        # Run 1: enter DEVICE_STOPPED, stop while in it.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            p.stop()
+        # (W, DS) fired _trace_ready during run 1.
+        self.assertEqual(callback_count[0], 1)
+
+        # Run 2: must actually profile, not be a silent no-op. step_num is
+        # carried over, so schedule(step_num=1) is the active step (R&S).
+        # start() re-derives current_action from the schedule, so we get
+        # (NONE, R&S) -> prepare_trace + start_trace.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            p.stop()
+        # (R&S, None) fires _trace_ready -> callback_count increments.
+        self.assertEqual(
+            callback_count[0],
+            2,
+            "second run must produce a trace, not silently no-op",
+        )
+
+    def test_user_schedule_returning_device_stopped_raises_at_init(self):
+        """ProfilerAction.DEVICE_STOPPED is internal; user-provided
+        schedules must not return it. __init__ catches schedules that
+        return it at step 0 — without this check, start() would silently
+        no-op the (NONE, DS) transition and leave the profiler dead."""
+        with self.assertRaisesRegex(ValueError, "DEVICE_STOPPED is set internally"):
+            profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=lambda step: ProfilerAction.DEVICE_STOPPED,
+            )
+
+    def test_user_schedule_returning_device_stopped_raises_at_step(self):
+        """If the user schedule returns DEVICE_STOPPED on a later step,
+        step() raises ValueError and leaves the profiler state untouched
+        so the user can stop() cleanly after catching the error."""
+
+        def bad_schedule(step):
+            if step == 0:
+                return ProfilerAction.WARMUP
+            return ProfilerAction.DEVICE_STOPPED
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=bad_schedule,
+        )
+        p.start()
+        step_num_before = p.step_num
+        current_action_before = p.current_action
+        with self.assertRaisesRegex(ValueError, "DEVICE_STOPPED is set internally"):
+            p.step()
+        # Profiler state must be unchanged so stop() can finalize cleanly.
+        self.assertEqual(p.step_num, step_num_before)
+        self.assertEqual(p.current_action, current_action_before)
+        # step_rec_fn was exited at the top of step() before the raise; it
+        # must have been cleared so stop() doesn't double-exit it.
+        self.assertIsNone(p.step_rec_fn)
+        # stop() runs without re-exiting an already-exited record_function.
+        p.stop()
+
+    def test_device_stopped_recovers_across_infinite_cycles(self):
+        """With repeat=0 (infinite cycles), DEVICE_STOPPED entry and
+        recovery must work across multiple cycles, not just one."""
+        # Normal schedule for wait=0, warmup=1, active=2, repeat=0 (cycle length 3, infinite):
+        # step 0: WARMUP
+        # step 1: RECORD
+        # step 2: RECORD_AND_SAVE
+        # step 3: WARMUP
+        # step 4: RECORD
+        # step 5: RECORD_AND_SAVE
+        # step 6: WARMUP
+        # ...
+        p = self._make_profiler(wait=0, warmup=1, active=2, repeat=0)
+
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Cycle 1: enter DS at the R&S step.
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()  # step 2: prev=R, schedule=R&S -> DS
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        # Cycle 1 -> Cycle 2: exit DS at the R&S boundary.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 3: prev=DS, prev_schedule=R&S -> WARMUP
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()  # step 4: WARMUP -> RECORD
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Cycle 2: enter DS again.
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.step()  # step 5: prev=R, schedule=R&S -> DS
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        # Cycle 2 -> Cycle 3: exit again. Confirms recovery is not a
+        # one-shot — it works across arbitrary cycles.
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.step()  # step 6: prev=DS, prev_schedule=R&S -> WARMUP
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.stop()
+
+    def test_skips_device_stopped_when_prev_is_none(self):
+        p = self._make_profiler(wait=2, warmup=1, active=1)
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            # prev_action is NONE so the entry guard for DEVICE_STOPPED does not
+            # fire.
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    def test_skips_device_stopped_when_already_stopping(self):
+        p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
+        with patch(self.PATCH_TARGET, return_value=False):
+            p.start()
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        with patch(self.PATCH_TARGET, return_value=True):
+            # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_kineto_stopped is True,
+            # but the schedule already transitions to NONE, so the entry guard
+            # for DEVICE_STOPPED does not fire (current_action != NONE).
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.NONE)
+            p.stop()
+
+    @parametrize(
+        "prev",
+        [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
+    )
+    def test_unreachable_transition_raises(self, prev):
+        """Transitions into DEVICE_STOPPED that step() / start() / __init__
+        all exclude should raise if invoked directly via _transit_action.
+
+        - prev=NONE: step()'s entry guard excludes it, and start() /
+          __init__ reject DEVICE_STOPPED from user schedules, so
+          current_action is never DEVICE_STOPPED at _transit_action(NONE, ...).
+        - prev=RECORD_AND_SAVE: entry guard excludes it because the
+          natural (R&S, *) transitions handle cycle-boundary cleanup.
+        """
+        p = self._make_profiler(wait=0, warmup=1, active=1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"Profiler internal error: {prev.name} -> DEVICE_STOPPED should be unreachable",
+        ):
+            p._transit_action(prev, ProfilerAction.DEVICE_STOPPED)
+
+    def test_cpu_only_profiler_ignores_stale_is_kineto_stopped(self):
+        """A CPU-only profiler should not enter DEVICE_STOPPED even if
+        _is_kineto_stopped returns True (e.g. stale flag from a previous
+        device profiler)."""
+        p = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=2),
+        )
+        with patch(self.PATCH_TARGET, return_value=True):
+            p.start()
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            p.stop()
+
+    def test_device_stopped_with_real_kineto(self):
+        """Integration test: when _is_kineto_stopped flips True mid-run
+        against a live Kineto session, the DEVICE_STOPPED transition must
+        actually fire stop_trace + _trace_ready (not just flip the action
+        enum) — and produce a non-empty partial trace. After the schedule
+        rolls over, the next cycle must run cleanly."""
+        event_counts: list[int] = []
+
+        def handler(prof):
+            event_counts.append(len(list(prof.events())))
+
+        p = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=4, repeat=2),
+            on_trace_ready=handler,
+        )
+
+        p.start()
+        self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
+        # Cycle 1: two RECORD steps with real workload (steps 1 and 2).
+        for _ in range(2):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+        self.assertEqual(p.current_action, ProfilerAction.RECORD)
+
+        # Step 3: under the patch, RECORD -> DEVICE_STOPPED fires stop_trace +
+        # _trace_ready against the live Kineto session, so handler() runs with
+        # whatever Kineto collected during steps 1-2.
+        with patch(self.PATCH_TARGET, return_value=True):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+
+        self.assertEqual(len(event_counts), 1)
+        self.assertGreater(
+            event_counts[0], 0, "Partial cycle 1 trace should contain events"
+        )
+
+        # Walk through DEVICE_STOPPED until the schedule rolls over to WARMUP.
+        # Patch is removed; persistence guard alone keeps us in DEVICE_STOPPED
+        # because it only checks prev_action, not _is_kineto_stopped.
+        p.step()  # step 4: schedule says RECORD_AND_SAVE, persists DEVICE_STOPPED
+        self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+        p.step()  # step 5: schedule says WARMUP, exits DEVICE_STOPPED via prepare_trace
+        self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+
+        # Cycle 2: full active phase against a freshly prepared Kineto session.
+        for _ in range(4):
+            torch.add(torch.ones(2, 2), torch.ones(2, 2))
+            p.step()
+        self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+
+        # p.stop() transits RECORD_AND_SAVE -> None, firing _trace_ready #2.
+        p.stop()
+
+        self.assertEqual(len(event_counts), 2)
+        self.assertGreater(event_counts[1], 0, "Cycle 2 trace should contain events")
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -4082,7 +4604,52 @@ class TestProfilerEventsParity(TestCase):
                 )
 
     def test_structured_metadata_matches_chrome_trace(self):
+        # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
+        # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
+        # 2. Parse each event instance in the json and events() to create a key->value mapping
+        #      - The key is a tuple of metadata fields that should be unique for each event
+        #      - The value is a dict of metadata fields for that event
+        # 3. Ensure that the keys and values match between the json and events() outputs
+
         from torch.autograd.profiler_util import _EVENT_METADATA_KEYS
+
+        target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
+        allowed_non_structured_trace_keys = {
+            "External id",
+            "correlation",
+            "cbid",
+            "cid",
+            "device",
+            "kind",
+            "kernel",
+            "ptr",
+            "src",
+            "dst",
+        }
+        supported_trace_keys = set(_EVENT_METADATA_KEYS).union(
+            allowed_non_structured_trace_keys
+        )
+
+        def metadata_dict_from_trace_args(args):
+            out = {}
+            for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
+                if kineto_key in args:
+                    raw_value = args[kineto_key]
+                    out[field_name] = (
+                        convert(raw_value) if isinstance(raw_value, str) else raw_value
+                    )
+            return out
+
+        def metadata_dict_from_function_event(fe):
+            if fe.event_metadata is None:
+                return {}
+
+            out = {}
+            for field_name, _ in _EVENT_METADATA_KEYS.values():
+                val = getattr(fe.event_metadata, field_name)
+                if val is not None:
+                    out[field_name] = val
+            return out
 
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -4095,47 +4662,96 @@ class TestProfilerEventsParity(TestCase):
             z = x + y
             z.cpu()
 
-        # Build lookup from External id -> FunctionEvent
-        fe_by_ext_id = {}
+        # Build a mapping from key to events() FunctionEvent metadata
+        event_records = {}
         for fe in prof.events():
-            if fe.external_id != 0:
-                fe_by_ext_id[fe.external_id] = fe
+            if fe.external_id == 0 or fe.id == 0 or fe.activity_type not in target_cats:
+                continue
+            # Using just one of these keys could result in collisions, so try to uniquely identify the event with all of them
+            key = (fe.name, fe.activity_type, fe.external_id, fe.id)
+            self.assertNotIn(
+                key,
+                event_records,
+                f"Duplicate FunctionEvent record key encountered: {key}",
+            )
+            event_records[key] = metadata_dict_from_function_event(fe)
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 trace = json.load(f)
 
-            checked_kernel = 0
-            checked_memcpy = 0
-            for te in trace["traceEvents"]:
-                cat = te.get("cat", "")
-                args = te.get("args", {})
-                ext_id = args.get("External id")
-                if ext_id is None or ext_id not in fe_by_ext_id:
-                    continue
-                fe = fe_by_ext_id[ext_id]
+        json_records = {}
+        # Track unexpected (event_name, cat, key) combos, deduplicated
+        unexpected_combos: set[tuple[str, str, str]] = set()
 
-                if cat in ("kernel", "gpu_memcpy") and fe.event_metadata is not None:
-                    em = fe.event_metadata
-                    for kineto_key, (field_name, _) in _EVENT_METADATA_KEYS.items():
-                        if kineto_key in args:
-                            val = getattr(em, field_name)
-                            self.assertIsNotNone(
-                                val,
-                                f"'{fe.name}': {field_name} is None "
-                                f"but JSON has '{kineto_key}': {args[kineto_key]}",
-                            )
-                    if cat == "kernel":
-                        self.assertIsInstance(em.registers_per_thread, int)
-                        self.assertGreater(em.registers_per_thread, 0)
-                        checked_kernel += 1
-                    elif cat == "gpu_memcpy":
-                        if em.bytes is not None:
-                            self.assertGreater(em.bytes, 0)
-                        checked_memcpy += 1
+        # Loop through the trace events to perform a comparison
+        for te in trace["traceEvents"]:
+            cat = te.get("cat", "")
+            args = te.get("args", {})
+            ext_id = args.get("External id")
+            correlation = args.get("correlation")
 
-            self.assertGreater(checked_kernel, 0, "No kernel events were cross-checked")
+            if ext_id is None or correlation is None:
+                continue
+            if cat not in target_cats:
+                continue
+
+            # Any metadata keys that show up in JSON should show up in events()
+            for k in set(args) - supported_trace_keys:
+                unexpected_combos.add((te["name"][:100], cat, k))
+
+            # Build the same key from JSON to try to match with a FunctionEvent
+            key = (te["name"], te["cat"], ext_id, correlation)
+            self.assertNotIn(
+                key,
+                json_records,
+                f"Duplicate Chrome trace record key encountered: {key}",
+            )
+            json_records[key] = metadata_dict_from_trace_args(args)
+
+        failure_msg = """\
+====================================================================================
+IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
+submodule hash and seeing this message?
+
+New metadata keys (see below) were found in the Chrome trace JSON that are not
+yet exposed through the profiler's events() API (i.e. EventMetadata in
+torch/autograd/profiler_util.py).
+
+To fix this properly, you need to make sure the new Kineto data makes its way
+to the events() property. The steps are:
+
+1. Add the new key(s) to _EVENT_METADATA_KEYS in torch/autograd/profiler_util.py
+   with the appropriate field name and type converter.
+2. Add corresponding field(s) to the EventMetadata dataclass in the same file.
+3. If the key should NOT be mapped (e.g. it duplicates an existing FunctionEvent
+   attribute), add it to allowed_non_structured_trace_keys in this test instead.
+
+For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
+===================================================================================="""
+        if unexpected_combos:
+            summary = "\n".join(
+                f"  {name} ({cat}): {key!r}"
+                for name, cat, key in sorted(unexpected_combos)
+            )
+            raise AssertionError(f"\n{failure_msg}\n\nUnmapped keys:\n{summary}")
+
+        self.assertGreater(len(json_records), 0, "No device-side records were compared")
+        self.assertEqual(
+            set(event_records),
+            set(json_records),
+            "Device event identities differ between events() and Chrome trace JSON",
+        )
+
+        for key in json_records:
+            expected_meta = json_records[key]
+            actual_meta = event_records[key]
+            self.assertEqual(
+                actual_meta,
+                expected_meta,
+                f"{key}: structured metadata differs between events() and Chrome trace JSON",
+            )
 
 
 if __name__ == "__main__":

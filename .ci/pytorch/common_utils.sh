@@ -153,7 +153,7 @@ function detect_cuda_arch() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
+  retry pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -161,8 +161,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
-  pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
+  retry pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  retry pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -181,7 +181,7 @@ function install_torchvision() {
     export FORCE_CUDA=1
     export WITH_CUDA=1
   fi
-  pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+  retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
@@ -279,7 +279,7 @@ function install_torchrec_and_fbgemm() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive -b r2.12 https://github.com/pytorch/xla.git
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
@@ -293,6 +293,20 @@ function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
+}
+
+function install_torchcomms() {
+  local commit
+  commit=$(get_pinned_commit torchcomms)
+  export USE_GLOO=1
+  export USE_NCCLX=0
+  export USE_TRANSPORT=0
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    export USE_NCCL=1
+  else
+    export USE_NCCL=0
+  fi
+  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
 function install_flash_attn_cute() {

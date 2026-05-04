@@ -32,7 +32,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -48,13 +48,10 @@ jobs:
         include: [
           { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "cuda12.8",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "rocm7.0",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
@@ -65,7 +62,7 @@ jobs:
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
       - name: Build docker image
-        uses: pytorch/pytorch/.github/actions/binary-docker-build@release/2.12
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}

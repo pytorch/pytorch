@@ -27,7 +27,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
@@ -1195,7 +1195,7 @@ class TritonTemplateKernel(TritonKernel):
                     V.kernel.cse.store_cache[name] = value
                     if name in V.kernel.prologue_fused_inputs:
                         # We load masked out values with 0, then apply a prologue.
-                        # The masked out values may not necessariliy be 0 any more
+                        # The masked out values may not necessarily be 0 any more
                         # so we need to reapply the mask.
                         value_dtype = value.dtype
                         value_str = str(value)
@@ -1372,9 +1372,8 @@ class TritonTemplateKernel(TritonKernel):
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
         """
-        subgraph_name = self._get_store_output_subgraph_name(
-            next(self.store_output_ctr)
-        )
+        subgraph_idx = next(self.store_output_ctr)
+        subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
         with self.create_subgraph_body(subgraph_name, clear_cse=True):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
@@ -1505,9 +1504,19 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
+            output_dtype = self.output_node.get_dtype()
+
             epilogue_args = [
                 V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
             ]
+            epilogue_nodes_by_subgraph = getattr(
+                self, "_epilogue_nodes_by_subgraph", None
+            )
+            has_epilogue_fusion = bool(
+                epilogue_nodes_by_subgraph[subgraph_idx]
+                if epilogue_nodes_by_subgraph is not None
+                else False
+            )
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1523,10 +1532,27 @@ class TritonTemplateKernel(TritonKernel):
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
+            # Apply the template's manual epilogue (e.g., bias add for addmm)
+            epilogue_result = self.epilogue_fn(*epilogue_args)
+
+            # When acc_dtype differs from output_dtype and there are fused
+            # epilogue ops, emulate unfused numerics by truncating AFTER the
+            # manual epilogue (so bias add happens in full precision)
+            if acc_dtype != output_dtype and has_epilogue_fusion:
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result,
+                    output_dtype,
+                    src_dtype=acc_dtype,
+                    use_compute_types=False,
+                )
+                epilogue_result = V.ops.to_dtype(
+                    epilogue_result, acc_dtype, src_dtype=output_dtype
+                )
+
             V.ops.store(
                 self.output_node.get_name(),
                 output_index,
-                self.epilogue_fn(*epilogue_args),
+                epilogue_result,
                 mode="tma" if self.tma_store else None,
             )
             self.codegen_body()
@@ -1631,6 +1657,7 @@ class TritonTemplateKernel(TritonKernel):
         override_mask=None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
+        mask_constant_index=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1645,6 +1672,7 @@ class TritonTemplateKernel(TritonKernel):
             override_mask=self.template_mask,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
+            mask_constant_index=mask_constant_index,
         )
 
     def codegen_range_tree(self):
@@ -2524,7 +2552,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -4469,7 +4497,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.exception(  # noqa: G202
+                        log.exception(
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
@@ -4899,7 +4927,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)  # noqa: G200
+                        log.warning(e)
                         timing = float("inf")
                     else:
                         raise e

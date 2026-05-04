@@ -15,6 +15,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     _StridedShardNotDecodableError,
@@ -275,9 +276,7 @@ def _get_flattened_mesh_by_layout_impl(
     # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
     # _get_slice_mesh_layout does pure layout math, no tensor operations
     sliced_layout = mesh._get_slice_mesh_layout(dim_names)
-    expected_layout = sliced_layout.coalesce()
-    if len(expected_layout) > 1:
-        expected_layout = expected_layout.nest()
+    expected_layout = _MeshLayout([sliced_layout.collapse()])
 
     # Search existing flattened meshes by comparing layouts
     for flattened_mesh in root_mesh._flatten_mapping.values():
@@ -1312,7 +1311,7 @@ class DTensorRedistributePlanner:
         This would detect if there're mis-aligned/nested shardings between src/dst placements.
         E.g. Suppose the redistribution to perform is (Shard(0), Shard(0)) -> (Replicate(), Shard(0)),
         in this case Shard(0) -> Shard(0) for mesh dimension 1 actually needs resharding, because in
-        the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
+        the former is a nested-sharding of a tensor already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
         # logical shape records the logic tensor shape on the mesh dimension

@@ -21,7 +21,7 @@ permissions:
 jobs:
   get-default-label-prefix:
     name: get-default-label-prefix
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
@@ -36,8 +36,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       cuda-arch-list: '8.9'
       test-matrix: |
         { include: [

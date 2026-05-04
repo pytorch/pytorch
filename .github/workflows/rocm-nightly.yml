@@ -28,7 +28,7 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.12
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
@@ -53,6 +53,11 @@ jobs:
           { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
           { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
         ]}
     secrets: inherit
 
