@@ -83,7 +83,7 @@ from ..utils import (
     has_torch_function,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
-    is_wrapper_or_member_descriptor,
+    is_torch_class,
     istype,
     list_methods,
     namedtuple_fields,
@@ -360,9 +360,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     dict_source = TypeDictSource(klass_source)
                     install_guard(
                         dict_source.make_guard(
-                            functools.partial(
-                                GuardBuilder.DICT_NOT_CONTAINS, key=name
-                            )
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
                         )
                     )
 
@@ -381,9 +379,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 cache[cache_key] = out_source
                 return out_source
 
-        raise AssertionError(
-            f"Attribute {name} not found in MRO of {self.value}"
-        )
+        raise AssertionError(f"Attribute {name} not found in MRO of {self.value}")
 
     def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
@@ -543,9 +539,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            sm_vt = variables.StaticMethodVariable(
-                cls_attr, source=descriptor_source
-            )
+            sm_vt = variables.StaticMethodVariable(cls_attr, source=descriptor_source)
             return sm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, classmethod):
@@ -561,9 +555,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            cm_vt = variables.ClassMethodVariable(
-                cls_attr, source=descriptor_source
-            )
+            cm_vt = variables.ClassMethodVariable(cls_attr, source=descriptor_source)
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
@@ -583,21 +575,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
-        if isinstance(cls_attr, types.WrapperDescriptorType):
+        if isinstance(cls_attr, types.WrapperDescriptorType) and not is_torch_class(
+            self.value
+        ):
             return variables.WrapperDescriptorVariable(cls_attr, source=source)
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
-        if isinstance(cls_attr, types.MethodDescriptorType):
+        if isinstance(cls_attr, types.MethodDescriptorType) and not is_torch_class(
+            self.value
+        ):
             return variables.MethodDescriptorVariable(cls_attr, source=source)
 
-        # TODO - investigate why we need to specicl case _tuplegetter and cant
-        # rely on existing descriptor VTs.
-        # _tuplegetter accessed on the class return the descriptor itself
-        # (descriptor.__get__(None, cls) is descriptor).
         if isinstance(cls_attr, _collections._tuplegetter):
-            if source:
-                return VariableTracker.build(tx, cls_attr, source)
-            return UserDefinedObjectVariable(cls_attr)
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
+            return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # Comparison dunders inherited from object — defer to runtime.
         if name in cmp_name_to_op_mapping and not isinstance(
@@ -2024,7 +2020,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         traceable_fn, self
                     ).call_function(tx, args, kwargs)
 
-
         return super().call_method(tx, name, args, kwargs)
 
     def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -2678,7 +2673,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
-            return prop_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return prop_vt.tp_descr_get_impl(
+                tx, self, self.var_getattr(tx, "__class__")
+            )
         if isinstance(type_attr, types.MemberDescriptorType):
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
             return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
@@ -2687,13 +2684,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
             return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
+        if isinstance(type_attr, _collections._tuplegetter):
+            tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+            return tg_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
             # User-defined data descriptor with a Python __get__.
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # TODO - Check when are these called - and if we need to create new VTs.
-        # Remaining C-level data descriptors (Cython attrs, _tuplegetter, etc.)
+        # Remaining C-level data descriptors (Cython attrs, etc.)
         # -- resolve via __getattribute__.
         try:
             resolved = type(self.value).__getattribute__(self.value, name)
@@ -2770,7 +2771,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # TODO - Investigate if we need a separater descriptor for these
+        # TODO - Investigate if we need a separate descriptor for these
         if (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
