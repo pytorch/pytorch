@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import logging
 from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
 from torch._library.utils import Kernel, RegistrationHandle
+
+
+log = logging.getLogger(__name__)
 
 
 class FakeImplHolder:
@@ -82,6 +86,10 @@ class FakeImplHolder:
         try:
             lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
         except Exception:
+            log.info(
+                "Failed to register fake_impl '%s':",
+                self.qualname,
+            )
             self.kernels.remove(kernel)
             raise
 
