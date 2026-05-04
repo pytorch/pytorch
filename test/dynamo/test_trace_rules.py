@@ -496,7 +496,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")

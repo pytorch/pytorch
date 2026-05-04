@@ -260,7 +260,7 @@ class TestCustomOpAutoTune(TestCase):
         return a, b, bias
 
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
-        """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
+        """Test decompose_k autotuning with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
 
         Validates that the custom op encapsulates the entire fused operation (matmul + bias

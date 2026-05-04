@@ -1790,7 +1790,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",  # noqa: B950
+                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
@@ -1805,7 +1805,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)[0]S(0)[1]_S(1, 5)->S(0)R_S(1, 5)->S(0)RR->S(0)_S(1, 5)R->S(0)_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)R->R_S(1, 5)S(0)""",  # noqa: B950
+                    """S(0)[0]S(0)[1]R->S(0)[0]S(0)[1]_S(1, 5)->S(0)R_S(1, 5)->S(0)RR->S(0)_S(1, 5)R->S(0)_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)R->R_S(1, 5)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(),

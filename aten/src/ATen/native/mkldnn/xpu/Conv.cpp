@@ -28,21 +28,11 @@ struct ConvParams {
   bool transposed{};
   std::vector<int64_t> output_padding;
   int64_t groups{};
-  bool benchmark{};
-  bool deterministic{};
 
-  bool is_strided() const;
-  bool is_dilated() const;
-  bool is_padded() const;
   bool is_output_padding_neg() const;
-  bool is_output_padding_big() const;
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(
-      const at::Tensor& input,
-      const at::Tensor& weight) const;
-  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
 std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
@@ -52,33 +42,8 @@ std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
       << "  dilation = " << IntArrayRef{params.dilation}
       << "  transposed = " << params.transposed
       << "  output_padding = " << IntArrayRef{params.output_padding}
-      << "  groups = " << params.groups << "  benchmark = " << params.benchmark
-      << "  deterministic = " << params.deterministic << '}';
+      << "  groups = " << params.groups << '}';
   return out;
-}
-
-bool ConvParams::is_strided() const {
-  bool is_strided = false;
-  for (auto s : stride) {
-    is_strided |= (s != 1);
-  }
-  return is_strided;
-}
-
-bool ConvParams::is_dilated() const {
-  bool is_dilated = false;
-  for (auto d : dilation) {
-    is_dilated |= (d != 1);
-  }
-  return is_dilated;
-}
-
-bool ConvParams::is_padded() const {
-  bool is_padded = false;
-  for (auto p : padding) {
-    is_padded |= (p != 0);
-  }
-  return is_padded;
 }
 
 bool ConvParams::is_output_padding_neg() const {
@@ -87,15 +52,6 @@ bool ConvParams::is_output_padding_neg() const {
     is_non_neg |= (p < 0);
   }
   return is_non_neg;
-}
-
-bool ConvParams::is_output_padding_big() const {
-  bool is_big = false;
-  for (size_t i = 0; i < output_padding.size(); i++) {
-    is_big |=
-        (output_padding[i] >= stride[i] || output_padding[i] >= dilation[i]);
-  }
-  return is_big;
 }
 
 bool ConvParams::is_padding_neg() const {
@@ -123,30 +79,15 @@ void ConvParams::view1d_as_2d() {
   }
 }
 
-bool ConvParams::use_cpu_depthwise3x3_winograd(
-    const at::Tensor& input,
-    const at::Tensor& weight) const {
-  return false;
-}
-
-bool ConvParams::is_depthwise(const at::Tensor& input, const at::Tensor& weight)
-    const {
-  return !transposed && input.ndimension() == 4 && input.size(1) == groups &&
-      groups > 1 && // no point if there is only a single group
-      weight.size(0) % input.size(1) ==
-      0; // output channels must be a multiple of input channels
-}
-
 static void check_shape_forward(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    const ConvParams& params,
-    bool input_is_mkldnn) {
+    const ConvParams& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
   std::vector<int64_t> weight_sizes(weight_dim);
-  if ((weight_dim == k + 1) && input_is_mkldnn) {
+  if (weight_dim == k + 1) {
     weight_sizes[0] = weight.size(0) * weight.size(1);
     std::copy_n(weight.sizes().cbegin() + 2, k - 1, weight_sizes.begin() + 1);
     weight_dim = k;
@@ -388,7 +329,7 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
-  check_shape_forward(input, weight, bias, params, true);
+  check_shape_forward(input, weight, bias, params);
 
   Tensor output;
   if (transposed_) {

@@ -21,6 +21,10 @@ from torch._utils_internal import justknobs_check
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
+# Immutable scalar types that don't need deepcopy when returned from configs.
+# Everything else is defensively copied to prevent accidental mutation.
+_IMMUTABLE_CONFIG_TYPES = (int, float, bool, type(None), str, tuple)
+
 
 # Duplicated, because mypy needs these types statically
 T = TypeVar("T", bound=int | float | bool | str | list | set | tuple | dict | None)
@@ -433,10 +437,9 @@ class ConfigModule(ModuleType):
                 # JK only supports bools and ints
                 return justknobs_check(name=config.justknob, default=config.default)
 
-            # Note that reference types can still be modified, so we
-            # copy them to user_overrides in case the user overrides
-            # them
-            if isinstance(config.default, (list, set, dict)):
+            # Reference types can still be modified, so copy them to
+            # user_overrides to prevent accidental mutation of defaults.
+            if not isinstance(config.default, _IMMUTABLE_CONFIG_TYPES):
                 config.user_override.set(copy.deepcopy(config.default))
                 return config.user_override.get()
             return config.default
@@ -502,7 +505,7 @@ class ConfigModule(ModuleType):
 
         unset = config_val.user_override.get() is _UNSET_SENTINEL
         # Handle reference types specially to avoid spammy warnings
-        if isinstance(config_val.default, (list, set, dict)):
+        if not isinstance(config_val.default, _IMMUTABLE_CONFIG_TYPES):
             unset = unset or config_val.user_override.get() == config_val.default
         return unset and not_set_env_default and not_set_env_force
 
@@ -529,7 +532,9 @@ class ConfigModule(ModuleType):
                 it skips it.
         """
         config: dict[str, Any] = {}
-        for key in self._config:
+        for key, entry in self._config.items():
+            if entry.alias is not None:
+                continue
             if ignored_keys and key in ignored_keys:
                 continue
             if ignored_prefixes:
@@ -537,14 +542,23 @@ class ConfigModule(ModuleType):
                     continue
             if skip_default and self._is_default(key):
                 continue
-            if self._config[key].alias is not None:
-                continue
 
-            curr_entry = self._config[key]
-            has_been_warned = curr_entry._deprecation_warned
-            curr_entry._deprecation_warned = True
-            config[key] = copy.deepcopy(getattr(self, key))
-            curr_entry._deprecation_warned = has_been_warned
+            # Read value directly, bypassing __getattr__ overhead
+            # (deprecation warnings, alias resolution).
+            user_override = entry.user_override.get()
+            if entry.env_value_force is not _UNSET_SENTINEL:
+                val = entry.env_value_force
+            elif user_override is not _UNSET_SENTINEL:
+                val = user_override
+            elif entry.env_value_default is not _UNSET_SENTINEL:
+                val = entry.env_value_default
+            elif entry.justknob is not None:
+                val = justknobs_check(name=entry.justknob, default=entry.default)
+            else:
+                val = entry.default
+            if not isinstance(val, _IMMUTABLE_CONFIG_TYPES):
+                val = copy.deepcopy(val)
+            config[key] = val
 
         return config
 

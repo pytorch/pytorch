@@ -162,7 +162,7 @@ jobs:
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} --exclude libtriton.so //artifacts/*.whl"
           else
             docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
             docker exec -t "${container_name}"  bash -c "mv //artifacts/*.whl //artifacts/wheelhouse/"

@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.types import IntLikeType
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
@@ -439,7 +440,7 @@ class MetaTensorDescriber:
             stride=stride,
             # pyrefly: ignore [bad-argument-type]
             storage_offset=storage_offset,
-            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
+            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", ())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
@@ -867,7 +868,7 @@ def _grad_context_compatible(
 # one of these, and then call it repeatedly on all the tensors you want to
 # convert.  It's important to use the same object for tensors you want to
 # share storage because this is how we correlate shared storages to the same
-# meta storages. This class will hold weak references to cached tenosrs
+# meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
     def __init__(self, *, copy_data: bool = False) -> None:
@@ -1094,7 +1095,7 @@ class MetaConverter(Generic[_TensorT]):
             src: torch._guards.Source,
             symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             | None = symbolic_context,
-        ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+        ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType]:
             # local import to prevent circular import
             from torch.fx.experimental.symbolic_shapes import is_symbolic
 
@@ -1165,8 +1166,8 @@ class MetaConverter(Generic[_TensorT]):
         # symbolic context.
         def empty_create_subclass(
             t: MetaTensorDesc[Any],
-            outer_size: tuple[int, ...],
-            outer_stride: tuple[int, ...],
+            outer_size: tuple[IntLikeType, ...],
+            outer_stride: tuple[IntLikeType, ...],
             symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             | None = symbolic_context,
             source: torch._guards.Source | None = source,
@@ -1204,7 +1205,9 @@ class MetaConverter(Generic[_TensorT]):
                 raise AssertionError("source must not be None")
             sub = self._empty_create_subclass(
                 t,
+                # pyrefly: ignore[bad-argument-type]
                 outer_size,
+                # pyrefly: ignore[bad-argument-type]
                 outer_stride,
                 shape_env,
                 symbolic_context,
@@ -1345,7 +1348,7 @@ class MetaConverter(Generic[_TensorT]):
                     sym_eq,
                 )
 
-                def symint_visitor_fn(s: int) -> int:
+                def symint_visitor_fn(s: int) -> IntLikeType:
                     nonlocal symbolic_context
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
@@ -1452,7 +1455,11 @@ class MetaConverter(Generic[_TensorT]):
                 # NB: we do NOT suppress guards here, we need to remove ephemeral
                 # sources
                 fake_t = t.view_func.apply(
-                    t, base, symint_visitor_fn, tensor_visitor_fn
+                    t,
+                    base,
+                    # pyrefly: ignore[bad-argument-type]
+                    symint_visitor_fn,
+                    tensor_visitor_fn,
                 )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.

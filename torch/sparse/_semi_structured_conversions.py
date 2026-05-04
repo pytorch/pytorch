@@ -216,7 +216,7 @@ def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
     meta_nrows, meta_ncols = meta_reordered.shape
     if meta_nrows != m:
         raise RuntimeError(
-            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of spase matrix {m}"
+            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of sparse matrix {m}"
         )
     if meta_ncols * ksparse * quadbits_per_meta_elem != 2 * k:
         raise RuntimeError(

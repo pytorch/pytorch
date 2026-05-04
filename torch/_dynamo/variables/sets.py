@@ -27,9 +27,9 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch
+from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
 from .base import ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 
 
@@ -77,6 +77,8 @@ class SetVariable(VariableTracker):
                 # VariableTracker - realize to install guards, then wrap
                 # pyrefly: ignore [bad-argument-type]
                 hashable_items.append(HashableTracker(item.realize()))
+        # Internal representation as dict allows for simple integration with
+        # OrderedSet, notably polyfills. Using set moves complexity to OrderedSet
         self.items = dict.fromkeys(hashable_items, SetVariable._default_value())
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
@@ -103,7 +105,7 @@ class SetVariable(VariableTracker):
     @staticmethod
     def _default_value() -> VariableTracker:
         # Variable to fill in the keys of the dictionary
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
@@ -123,14 +125,7 @@ class SetVariable(VariableTracker):
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
-        return key in self.items and not isinstance(
-            self.items[key], variables.DeletedVariable
-        )
-
-    def len(self) -> int:
-        return sum(
-            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
-        )
+        return key in self.items
 
     def has_new_items(self) -> bool:
         return self.should_reconstruct_all or any(
@@ -238,7 +233,7 @@ class SetVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -252,7 +247,7 @@ class SetVariable(VariableTracker):
                 raise_unhashable(args[0], tx)
             tx.output.side_effects.mutation(self)
             self.items[HashableTracker(args[0])] = SetVariable._default_value()
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "pop":
             if kwargs or args:
                 raise_args_mismatch(
@@ -366,7 +361,7 @@ class SetVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.pop(HashableTracker(args[0]))
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -379,7 +374,7 @@ class SetVariable(VariableTracker):
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
                 self.items.pop(HashableTracker(args[0]))
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
@@ -480,7 +475,7 @@ class SetVariable(VariableTracker):
                     DictKeysVariable,
                 ),
             ):
-                return CONSTANT_VARIABLE_FALSE
+                return ConstantVariable.create(False)
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name == "__ne__":
@@ -545,7 +540,7 @@ class SetVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 
@@ -563,6 +558,13 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .iter import SetIterator
+
+        if self.source and not is_constant_source(self.source):
+            tx.output.guard_on_key_order.add(self.source)
+        return SetIterator(self.items)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
@@ -596,8 +598,6 @@ class OrderedSetClassVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builtin import set_methods
-
         if name == "__new__":
             if len(args) != 2 or kwargs:
                 raise_args_mismatch(
@@ -725,7 +725,7 @@ class FrozensetVariable(SetVariable):
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name in (
             "copy",
             "difference",

@@ -2,7 +2,7 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (
     distribute_module,
     distribute_tensor,

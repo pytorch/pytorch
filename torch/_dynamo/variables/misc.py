@@ -68,7 +68,7 @@ from ..utils import (
     raise_args_mismatch,
 )
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
-from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -339,7 +339,7 @@ class SuperVariable(VariableTracker):
             tx.output.side_effects.store_attr(
                 self.objvar, attr, variables.DeletedVariable()
             )
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
             and self.objvar._base_vt is not None
@@ -348,30 +348,24 @@ class SuperVariable(VariableTracker):
         ):
             return self.objvar._base_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
-            # object.__getattribute__ has no side-effects. We can directly call
-            # __getattribute__ to access the attribute.
             attr_name = args[0].value  # type: ignore[attr-defined]
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                self.objvar, attr_name
-            ):
-                result = tx.output.side_effects.load_attr(
-                    self.objvar, attr_name, deleted_ok=True
-                )
-                if isinstance(result, variables.DeletedVariable):
-                    raise_observed_exception(AttributeError, tx)
-                return result
+            # object.__getattribute__ IS PyObject_GenericGetAttr.  Delegate
+            # to the shared implementation so that __dict__, __class__,
+            # polyfilled C descriptors, etc. are all handled consistently.
+            if isinstance(self.objvar, UserDefinedObjectVariable):
+                return self.objvar.generic_getattr(tx, attr_name)
 
             attr_value = None
             try:
-                # NB - use object.__getattribute__ to prevent running any user code
-                # type: ignore[attr-defined]
-                attr_value = object.__getattribute__(self.objvar.value, attr_name)
+                attr_value = object.__getattribute__(
+                    self.objvar.value,  # pyrefly: ignore[missing-attribute]
+                    attr_name,
+                )
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
             attr_source = None
             if self.objvar.source is not None:
-                # setup a object.__getattribute__(self.objvar, name) source
                 attr_source = GenericAttrSource(self.objvar.source, attr_name)
             return VariableTracker.build(tx, attr_value, attr_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
@@ -502,7 +496,7 @@ class TracebackVariable(VariableTracker):
             ):
                 raise_observed_exception(ValueError, tx)
             self.tb_next = val
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "tb_next":
@@ -561,14 +555,14 @@ class ExceptionVariable(VariableTracker):
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.
-        self.__context__: VariableTracker = CONSTANT_VARIABLE_NONE
+        self.__context__: VariableTracker = ConstantVariable.create(None)
         # Set when user raised an exception from another:
         # raise ... from ...
-        self.__cause__: VariableTracker = CONSTANT_VARIABLE_NONE
+        self.__cause__: VariableTracker = ConstantVariable.create(None)
         # Boolean flag that controls whether the __context__ attribute is set
-        self.__suppress_context__: VariableTracker = CONSTANT_VARIABLE_FALSE
+        self.__suppress_context__: VariableTracker = ConstantVariable.create(False)
         # Contains the call stack where the exception was raised.
-        self.__traceback__: VariableTracker = CONSTANT_VARIABLE_NONE
+        self.__traceback__: VariableTracker = ConstantVariable.create(None)
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
@@ -629,7 +623,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.CONSTANT_VARIABLE_TRUE
+                self.__suppress_context__ = variables.ConstantVariable.create(True)
             else:
                 raise_type_error(
                     tx, "exception cause must be None or derive from BaseException"
@@ -654,7 +648,7 @@ class ExceptionVariable(VariableTracker):
                 "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
     def call_method(
         self,
@@ -802,7 +796,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
 
 class CellVariable(VariableTracker):
@@ -1157,7 +1151,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
             unimplemented(
@@ -1195,7 +1189,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in ["save_for_backward", "mark_non_differentiable"]:
@@ -2021,7 +2015,7 @@ class DebuggingVariable(VariableTracker):
     ) -> VariableTracker:
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
 
         if not self.can_reorder_logs(self.value, args, kwargs):
             unimplemented(
@@ -2035,7 +2029,7 @@ class DebuggingVariable(VariableTracker):
             )
 
         tx.debug_locals.append((self, list(args)))
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert self.source is not None
@@ -2083,7 +2077,7 @@ class IgnoredFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
 
 class LoggingLoggerVariable(VariableTracker):
@@ -2110,7 +2104,7 @@ class LoggingLoggerVariable(VariableTracker):
     ) -> VariableTracker:
         if tx.export:
             # For export cases, we can just make logging functions no-ops.
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
@@ -2119,7 +2113,7 @@ class LoggingLoggerVariable(VariableTracker):
         ignore_set = torch._dynamo.config.ignore_logging_functions
 
         if method in ignore_set or function in ignore_set:
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
@@ -2267,7 +2261,7 @@ class RandomClassVariable(VariableTracker):
                     *graph_break_hints.USER_ERROR,
                 ],
             )
-        seed = variables.CONSTANT_VARIABLE_NONE if len(args) == 0 else args[0]
+        seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
@@ -2377,13 +2371,13 @@ class RandomVariable(VariableTracker):
                 *[x.as_python_constant() for x in args],
                 **{key: val.as_python_constant() for key, val in kwargs.items()},
             )
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         elif name == "getstate":
             return self.wrap_state(self.random.getstate())
         elif name == "setstate":
             tx.output.side_effects.mutation(self)
             self.random.setstate(self.unwrap_state(args[0]))
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         elif name in self._supported_fn_names:
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()

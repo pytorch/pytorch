@@ -40,6 +40,7 @@ from .decorators import (
     maybe_mark_dynamic,
     nonstrict_trace,
     override_cudagraphs,
+    override_optimization_hint,
     patch_dynamo_config,
     run,
     set_stance,
@@ -75,7 +76,7 @@ from .utils import (
 
 
 # Register polyfill functions
-from .polyfills import loader as _  # usort: skip # noqa: F401
+from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
@@ -100,6 +101,7 @@ __all__ = [
     "mark_static",
     "mark_static_address",
     "nonstrict_trace",
+    "override_optimization_hint",
     "optimize",
     "optimize_assert",
     "OptimizedModule",

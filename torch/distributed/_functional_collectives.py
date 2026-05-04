@@ -101,7 +101,7 @@ RANK_TYPES = (
 )
 
 
-from torch._utils import _chunk_or_narrow_cat  # noqa: F401
+from torch._utils import _chunk_or_narrow_cat
 
 
 """
@@ -1594,7 +1594,7 @@ ops_defs = [
     "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
     "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
     "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",
 ]
 
 my_module = sys.modules[__name__]
