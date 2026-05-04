@@ -444,8 +444,8 @@ def propagate_general_copy_metadata(
             and first_meta.chunk_dim is not None
             and _chunk_broadcasted_tensor(first_meta.chunk_dim)
         ):
-            # We don't chunking a broadcasted tensor for now.
-            # Can add the rule if such a use case come up
+            # We don't chunk a broadcasted tensor for now.
+            # Can add the rule if such a use case comes up
             return PropagateStatus.FAIL
 
         changed = set_chunking_meta_if_none(

@@ -172,11 +172,7 @@ class PreprocessorTracker:
 
 def get_current_version() -> tuple[int, int, int]:
     """
-    Get the current PyTorch version from version.txt.
-    This uses the same logic as tools/setup_helpers/gen_version_header.py
-    which is used to generate torch/headeronly/version.h from version.h.in.
-
-    Returns (major, minor, patch) tuple.
+    Get the current PyTorch version from version.txt. Returns (major, minor, patch) tuple.
     """
     version_file = REPO_ROOT / "version.txt"
 

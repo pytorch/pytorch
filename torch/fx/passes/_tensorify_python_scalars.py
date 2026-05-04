@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import operator
 import os
 from typing import Any, TYPE_CHECKING
 
@@ -85,12 +86,31 @@ SUPPORTED_OPS = {
     torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
     torch.ops.aten.div.Tensor: torch.ops.aten.div.Tensor,
+    torch.ops.aten.pow.Tensor_Tensor: torch.ops.aten.pow.Tensor_Tensor,
+    operator.mul: torch.ops.aten.mul.Tensor,
+    operator.add: torch.ops.aten.add.Tensor,
+    operator.sub: torch.ops.aten.sub.Tensor,
+    operator.truediv: torch.ops.aten.div.Tensor,
+    operator.pow: torch.ops.aten.pow.Tensor_Tensor,
     torch.ops.aten.gt.Scalar: torch.ops.aten.gt.Tensor,
     torch.ops.aten.lt.Scalar: torch.ops.aten.lt.Tensor,
     torch.ops.aten.ge.Scalar: torch.ops.aten.ge.Tensor,
     torch.ops.aten.le.Scalar: torch.ops.aten.le.Tensor,
     torch.ops.aten.eq.Scalar: torch.ops.aten.eq.Tensor,
     torch.ops.aten.ne.Scalar: torch.ops.aten.ne.Tensor,
+    operator.gt: torch.ops.aten.gt.Tensor,
+    operator.lt: torch.ops.aten.lt.Tensor,
+    operator.ge: torch.ops.aten.ge.Tensor,
+    operator.le: torch.ops.aten.le.Tensor,
+    operator.eq: torch.ops.aten.eq.Tensor,
+    operator.ne: torch.ops.aten.ne.Tensor,
+}
+
+SUPPORTED_METHOD_OPS = {
+    "mul_": torch.ops.aten.mul_.Tensor,
+    "add_": torch.ops.aten.add_.Tensor,
+    "sub_": torch.ops.aten.sub_.Tensor,
+    "div_": torch.ops.aten.div_.Tensor,
 }
 
 
@@ -293,9 +313,22 @@ def _tensorify_impl(
 
             # Look for functions to convert
 
-            if node.op == "call_function" and (
-                replacement_op := SUPPORTED_OPS.get(node.target)
-            ):
+            replacement_op = None
+            is_inplace_method = False
+            if node.op == "call_function":
+                replacement_op = SUPPORTED_OPS.get(node.target)
+            elif node.op == "call_method":
+                replacement_op = SUPPORTED_METHOD_OPS.get(node.target)
+                is_inplace_method = replacement_op is not None
+
+            if replacement_op is not None:
+                # Pure SymFloat/SymBool expression nodes are scalar intermediates,
+                # not tensor-valued ops. Let later tensor uses consume their
+                # symbolic expression instead of treating them as a tensorify
+                # failure here.
+                if not hasattr(node.meta.get("val"), "dtype"):
+                    continue
+
                 args: list[Any] = []
                 transform = False
 
@@ -314,8 +347,14 @@ def _tensorify_impl(
                             transform = False
                             break
 
-                        # We use _expr instead of expr b/c we want the symbol not the replacement
-                        tensorified_symbols.add(a.meta["val"].node._expr)
+                        # Track the original backed float symbols that flowed into
+                        # this tensorified expression so the later specialization
+                        # sweep does not incorrectly restart analysis for them.
+                        tensorified_symbols.update(
+                            s
+                            for s in a.meta["val"].node._expr.free_symbols
+                            if symbol_is_type(s, SymT.FLOAT)
+                        )
 
                         # The upcasting is irrelevant when the compute dtype is bool. This happens
                         # in cases where we are tensorifying a comparison operator such as
@@ -337,7 +376,10 @@ def _tensorify_impl(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
-                    if compute_dtype != node.meta["val"].dtype:
+                    if (
+                        compute_dtype != node.meta["val"].dtype
+                        and not is_inplace_method
+                    ):
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
                                 replacement_proxy,
