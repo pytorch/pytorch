@@ -139,6 +139,84 @@ at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
           .scopes({at::RecordScope::USER_SCOPE}));
 }
 
+// Global state for the collective buffer callback, protected by mutex
+static std::mutex g_collective_mutex;
+static at::CallbackHandle g_collective_callback_handle{0};
+static bool g_collective_callback_active{false};
+
+// Observer context to save/restore component type around collective ops
+struct ComponentTypeContext : public at::ObserverContext {
+  uint8_t prev_type;
+  explicit ComponentTypeContext(uint8_t prev) : prev_type(prev) {}
+};
+
+// Check if a RecordFunction name corresponds to a collective operation scope
+// where buffer allocations should be tagged as COLLECTIVE_BUFFER.
+static bool isCollectiveScope(const std::string& name) {
+  // ProcessGroupNCCL collective ops (allreduce, allgather, etc.)
+  if (name == at::kParamCommsCallName) return true;
+  // DDP gradient bucket initialization
+  if (name.compare(0, strlen(kDDPBucketInitAnnotation), kDDPBucketInitAnnotation) == 0) return true;
+  // FSDP2 all-gather phases (copy_in allocates the buffer)
+  constexpr const char* kFSDPAllGather = "FSDP::all_gather";
+  if (name.compare(0, strlen(kFSDPAllGather), kFSDPAllGather) == 0) return true;
+  // FSDP2 reduce-scatter phases
+  constexpr const char* kFSDPReduceScatter = "FSDP::reduce_scatter";
+  if (name.compare(0, strlen(kFSDPReduceScatter), kFSDPReduceScatter) == 0) return true;
+  return false;
+}
+
+// Register a RecordFunctionCallback that intercepts collective operation
+// scopes (NCCL allreduce/allgather, DDP bucket init, FSDP all-gather/
+// reduce-scatter). When a collective scope is entered, the callback saves
+// the current component type and switches to COLLECTIVE_BUFFER. When the
+// scope exits, it restores the previous type. This way, any CUDA memory
+// allocated inside a collective operation is automatically attributed as
+// COLLECTIVE_BUFFER in the allocator's component_bytes stats.
+//
+// The callback is idempotent — calling enable when already active is a no-op.
+// Scopes: FUNCTION (for NCCL ops via record_param_comms) and USER_SCOPE
+// (for RECORD_FUNCTION annotations in DDP/FSDP).
+void enableCollectiveBufferTrackingImpl() {
+  std::lock_guard<std::mutex> lock(g_collective_mutex);
+  if (g_collective_callback_active) {
+    return;
+  }
+  g_collective_callback_handle = at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            if (!isCollectiveScope(fn.name())) {
+              return nullptr;
+            }
+            auto prev = static_cast<uint8_t>(
+                c10::cuda::CUDACachingAllocator::getComponentType());
+            c10::cuda::CUDACachingAllocator::setComponentType(
+                c10::CachingDeviceAllocator::ComponentType::COLLECTIVE_BUFFER);
+            return std::make_unique<ComponentTypeContext>(prev);
+          },
+          [](const at::RecordFunction& /*fn*/,
+             at::ObserverContext* ctx_ptr) {
+            if (auto* ctx = dynamic_cast<ComponentTypeContext*>(ctx_ptr)) {
+              c10::cuda::CUDACachingAllocator::setComponentType(
+                  static_cast<c10::CachingDeviceAllocator::ComponentType>(
+                      ctx->prev_type));
+            }
+          })
+          .scopes({at::RecordScope::FUNCTION, at::RecordScope::USER_SCOPE}));
+  g_collective_callback_active = true;
+}
+
+void disableCollectiveBufferTrackingImpl() {
+  std::lock_guard<std::mutex> lock(g_collective_mutex);
+  if (!g_collective_callback_active) {
+    return;
+  }
+  at::removeCallback(g_collective_callback_handle);
+  g_collective_callback_handle = 0;
+  g_collective_callback_active = false;
+}
+
 at::CallbackHandle _initCompileContexts() {
   return at::addGlobalCallback(
       at::RecordFunctionCallback(
@@ -190,6 +268,14 @@ void setRecordFunctionCallbacks(
 }
 
 } // namespace
+
+void _enableCollectiveBufferTracking() {
+  enableCollectiveBufferTrackingImpl();
+}
+
+void _disableCollectiveBufferTracking() {
+  disableCollectiveBufferTrackingImpl();
+}
 
 void _record_memory_history(
     bool enabled,

@@ -15,7 +15,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.cuda.memory import (
+    _disable_collective_buffer_tracking,
     _disable_module_tracking,
+    _enable_collective_buffer_tracking,
     _enable_module_tracking,
     _set_component_type,
     _set_memory_metadata,
@@ -51,6 +53,7 @@ class ComponentTracker:
         _set_component_type(ComponentType.OTHER)
         _set_memory_metadata("")
         _disable_module_tracking()
+        _disable_collective_buffer_tracking()
         self._enabled = False
         self._depth = 0
         self._current_root = None
@@ -216,5 +219,8 @@ def _enable_auto() -> ComponentTracker:
 
     # --- (d) Enable per-module tracking via AllocatorTraceTracker ---
     _enable_module_tracking()
+
+    # --- (e) Enable collective buffer tracking via RecordFunctionCallback ---
+    _enable_collective_buffer_tracking()
 
     return tracker

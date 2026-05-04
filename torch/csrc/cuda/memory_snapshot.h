@@ -33,4 +33,13 @@ TORCH_CUDA_CU_API void _record_memory_history(
 
 TORCH_CUDA_CU_API std::string _memory_snapshot_pickled();
 
+TORCH_CUDA_CU_API void _enableCollectiveBufferTracking();
+TORCH_CUDA_CU_API void _disableCollectiveBufferTracking();
+
+// Annotation name used by DDP's reducer to tag bucket gradient allocations.
+// Used in reducer.cpp as RECORD_FUNCTION name and matched by
+// isCollectiveScope() in memory_snapshot.cpp.
+constexpr const char* kDDPBucketInitAnnotation =
+    "torch.distributed.ddp.reducer::initialize_bucket_gradients";
+
 } // namespace torch::cuda

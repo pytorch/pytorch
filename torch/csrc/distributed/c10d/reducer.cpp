@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
+#include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
@@ -1216,11 +1217,15 @@ void Reducer::initialize_buckets(
         LOG(INFO)
             << "Reducer: default comm backend not found, skipping bucket memory optimization";
       }
-      if (ddpDisableCommMem == 0 && backend != nullptr &&
+      if (!ddpDisableCommMem && backend != nullptr &&
           backend->supportsTensorAlloc(options.device().index())) {
         // Comm-optimized memory pool is available, use it to allocate tensor
         LOG(INFO)
             << "Reducer: found comm-optimized memory allocator, using it to create bucket";
+        // Tag bucket gradient allocations for memory component tracking
+        RECORD_FUNCTION(
+            torch::cuda::kDDPBucketInitAnnotation,
+            std::vector<c10::IValue>());
         bucket.gradients = backend->allocateTensor(bucketSize, options);
       } else {
         // Plain creation of tensor
