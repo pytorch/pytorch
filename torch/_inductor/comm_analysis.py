@@ -399,10 +399,18 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 
     output_val = fx_node.meta.get("val", None)
 
-    if input_bytes is None or not isinstance(output_val, torch.Tensor):
+    if input_bytes is None or output_val is None:
         return 0
 
-    output_bytes = tensor_bytes(output_val)
+    # Coalesced collectives return a list of tensors
+    if isinstance(output_val, (list, tuple)):
+        output_bytes = sum(
+            tensor_bytes(t) for t in output_val if isinstance(t, torch.Tensor)
+        )
+    elif isinstance(output_val, torch.Tensor):
+        output_bytes = tensor_bytes(output_val)
+    else:
+        return 0
 
     return input_bytes + output_bytes
 
@@ -460,7 +468,9 @@ def estimate_nccl_collective_runtime_from_fx_node(
     assert opt_args_kwargs is not None
     args, kwargs = opt_args_kwargs
 
-    group_name = kwargs["group_name"]
+    from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+    group_name = _resolve_group_name(kwargs["group_name"])
     group_size = _get_group_size_by_name(group_name)
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
@@ -507,7 +517,12 @@ def estimate_nccl_collective_runtime_from_fx_node(
             group=pg, device=device
         ) as time_estimator:
             w = fn(*real_args, **real_kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
+            # Coalesced collectives return a list of tensors
+            if isinstance(w, (list, tuple)):
+                for t in w:
+                    torch.ops._c10d_functional.wait_tensor.default(t)
+            else:
+                torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time
         # -1000 constant is NCCL return in case of error during estimations.
         # Observed it for all_to_all estimations.

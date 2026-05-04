@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import traceback
 from typing import Any, NamedTuple
 
@@ -18,8 +16,7 @@ __all__ = ["TensorMetadata", "ShapeProp"]
 
 @compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
-    # TensorMetadata is a structure containing pertinent information
-    # about a tensor within a PyTorch program.
+    """A structure containing pertinent information about a tensor within a PyTorch program."""
 
     # General Tensor metadata
     shape: torch.Size
@@ -38,7 +35,7 @@ class TensorMetadata(NamedTuple):
 # In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
 # def_not_contiguous and unknown).
 def _extract_tensor_metadata(
-    result: torch.Tensor, include_contiguity=True
+    result: torch.Tensor, include_contiguity: bool = True
 ) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
@@ -136,7 +133,7 @@ class ShapeProp(torch.fx.Interpreter):
 
     """
 
-    def __init__(self, gm, fake_mode=None):
+    def __init__(self, gm: torch.fx.GraphModule, fake_mode: Any = None) -> None:
         super().__init__(gm)
         if fake_mode is None:
             fake_mode = detect_fake_mode()
@@ -188,7 +185,7 @@ class ShapeProp(torch.fx.Interpreter):
 
         found_tensor = False
 
-        def extract_tensor_meta(obj):
+        def extract_tensor_meta(obj: Any) -> Any:
             if isinstance(obj, torch.Tensor):
                 nonlocal found_tensor
                 found_tensor = True
@@ -209,7 +206,7 @@ class ShapeProp(torch.fx.Interpreter):
         n.meta["type"] = type(result)
         return result
 
-    def propagate(self, *args):
+    def propagate(self, *args: Any) -> Any:
         """
         Run `module` via interpretation and return the result and
         record the shape and type of each node.

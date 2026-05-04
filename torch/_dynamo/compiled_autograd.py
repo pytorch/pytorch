@@ -52,7 +52,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
-    decompose,
     disable_autocast_cache,
     disable_proxy_modes_tracing,
     fetch_object_proxy,
@@ -310,7 +309,7 @@ class AutogradCompilerInstance:
         self,
         inputs: list[torch.Tensor],
         sizes: list[int],
-        scalars: list[int | float],
+        scalars: list[IntLikeType | FloatLikeType],
         origins: list[list[tuple[int, str]]],
         accumulate_grad: bool,
         check_nans: bool,
@@ -382,7 +381,8 @@ class AutogradCompilerInstance:
                 (proxies[i],),
                 {},
             )
-            self.symnode_proxy_lookup[symint.node] = proxies[i]
+            if not isinstance(symint, int):
+                self.symnode_proxy_lookup[symint.node] = proxies[i]
         proxies = self.bind_objects_to_proxies(sym_sizes, proxies, sizes_origins)
 
         for idx, val in enumerate(scalars):
@@ -410,7 +410,6 @@ class AutogradCompilerInstance:
             self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
         # TODO(jansel): are all these modes needed?
-        self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
@@ -490,7 +489,7 @@ class AutogradCompilerInstance:
             ctx_saved_tensors: Sequence[torch.Tensor],
             ctx_symints: Sequence[IntLikeType],
             ctx_opaque_objs: Sequence[Any],
-            *flat_args: Sequence[Any],
+            flat_args: Sequence[Any],
         ) -> Any:
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
@@ -498,18 +497,19 @@ class AutogradCompilerInstance:
                 ctx_opaque_objs,
                 metadata,
                 maybe_subclass_metadata,
-                *flat_args,
+                flat_args,
             )
             return out
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
+            # pyrefly: ignore [bad-argument-type]
             target=call_aot_bwd_prologue,
             args=(
                 psaved_tensors,
                 psymints,
                 popaque_objects,
-                *pinputs,
+                pinputs,
             ),
             kwargs={},
         )
@@ -634,6 +634,7 @@ class AutogradCompilerInstance:
 
             poutput = self.fx_tracer.create_proxy(
                 kind="call_function",
+                # pyrefly: ignore [bad-argument-type]
                 target=make_subclass,
                 args=tuple(punwrapped_args),
                 kwargs={},
@@ -678,6 +679,11 @@ class AutogradCompilerInstance:
                 opaque_object_indices,
             )
         else:
+            if getattr(ctx._forward_cls, "boxed_grads_call", False):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"boxed_grads_call=True on {ctx._forward_cls.__name__} "  # type: ignore[attr-defined]
+                    "is not supported with compiled autograd. "
+                )
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
                 target=call_backward,
@@ -983,7 +989,7 @@ class AutogradCompilerInstance:
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
         i: int | None = None
-        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 

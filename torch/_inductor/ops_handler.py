@@ -853,6 +853,7 @@ class NoopHandler(DefaultHandler):
         return None
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x) -> tuple[None, None]:
         return (None, None)
 
@@ -865,6 +866,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.S.Zero
 
@@ -962,6 +964,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
@@ -980,6 +983,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
