@@ -8,6 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -33,10 +34,52 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> FakifiedFlatArgs:
+) -> tuple[FakifiedFlatArgs, list[int]]:
+    """Convert real tensor inputs into fake tensors for AOT autograd tracing.
+
+    Called at compile time (not runtime) to produce the fake inputs that AOT
+    autograd traces through. Each real tensor is converted to a FakeTensor
+    via ``fake_mode.from_tensor``, preserving shape, dtype, device, and
+    symbolic shape information from the ShapeEnv. Non-tensor inputs (ints,
+    SymInts, ScriptObjects) are converted or passed through as appropriate.
+
+    Tensor subclass inputs (DTensor, etc.) are fakified recursively by
+    walking their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are
+    resolved via ``trigger_wait()`` before fakification so they don't appear
+    in the traced metadata (see below).
+
+    Called from ``aot_function``, ``aot_module_simplified``, and
+    ``aot_export_module`` — anywhere AOT autograd needs fake inputs before
+    graph capture.
+
+    Returns:
+        A tuple of (fakified_args, act_input_indices) where act_input_indices
+        records which positions held AsyncCollectiveTensors. These indices are
+        stored on ViewAndMutationMeta so that the runtime wrapper can emit
+        direct trigger_wait() calls on those positions.
+    """
+    # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
+    # eager-mode wrappers for async collective overlap; if they leak into the
+    # traced graph as input types, AOT autograd records them in
+    # SubclassCreationMeta for output tangent metadata. At runtime, autograd
+    # produces plain tensor tangents, causing a type mismatch. Unwrapping
+    # here prevents ACT from appearing in the traced metadata.
+    try:
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+    except ImportError:
+        AsyncCollectiveTensor = None
+
+    act_input_indices: list[int] = []
+    if AsyncCollectiveTensor is not None:
+        for i, a in enumerate(flat_args):
+            if isinstance(a, AsyncCollectiveTensor):
+                act_input_indices.append(i)
+                flat_args[i] = a.trigger_wait()
+
     with fake_mode:
 
         def convert(idx: int, x: Any) -> Any:
+            nonlocal ignore_shape_env
             if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
@@ -66,11 +109,28 @@ def process_inputs(
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
-                        return x
-                    # FakeTensor subclass from a different mode.
-                    # Fall through to refakify.
+                # See if all inner tensors are FakeTensors from this mode
+                all_this_fake = True
+                for a in attrs:
+                    match getattr(x, a):
+                        case FakeTensor() as v:
+                            if v.fake_mode is not fake_mode:
+                                # FakeTensor subclass from a different mode.
+                                # Fall through to refakify.
+                                all_this_fake = False
+                                break
+                        case torch.Tensor():
+                            all_this_fake = False
+                            break
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
+
+                if all_this_fake:
+                    return x
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
@@ -101,7 +161,9 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
+        return FakifiedFlatArgs(
+            [convert(idx, x) for idx, x in enumerate(flat_args)]
+        ), act_input_indices
 
 
 def construct_fake_mode(

@@ -50,16 +50,7 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 RUN git config --global --add safe.directory "*"
 
 
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-ENV SSL_CERT_FILE=/opt/_internal/certs.pem
-
-FROM openssl as final
+FROM base as final
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION

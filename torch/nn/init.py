@@ -91,6 +91,10 @@ def _no_grad_trunc_normal_(
     b: float,
     generator: torch.Generator | None = None,
 ) -> Tensor:
+    # Meta tensors have no storage, so sampling is a no-op.
+    if tensor.is_meta:
+        return tensor
+
     def norm_cdf(x: float) -> float:
         return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
 
@@ -420,6 +424,9 @@ def dirac_(tensor: Tensor, groups: int = 1) -> Tensor:
     if sizes[0] % groups != 0:
         raise ValueError("dim 0 must be divisible by groups")
 
+    if tensor.is_meta:
+        return tensor
+
     out_chans_per_grp = sizes[0] // groups
     min_dim = min(out_chans_per_grp, sizes[1])
 
@@ -687,7 +694,7 @@ def orthogonal_(
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
-    if tensor.numel() == 0:
+    if tensor.numel() == 0 or tensor.is_meta:
         # no-op
         return tensor
     rows = tensor.size(0)
@@ -738,6 +745,9 @@ def sparse_(
     """
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
+
+    if tensor.is_meta:
+        return tensor
 
     rows, cols = tensor.shape
     num_zeros = math.ceil(sparsity * rows)

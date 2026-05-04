@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, cast, no_type_check, Union
+from typing import Any, cast, no_type_check
 
 import torch
 import torch.distributed as dist
@@ -66,10 +66,10 @@ _PARAMS = "params"
 _STATE = "state"
 
 FQNS_T = set[str]
-PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
-ValueType = Union[
-    PrimitiveType, list[PrimitiveType], tuple[PrimitiveType], dict[str, "ValueType"]
-]
+PrimitiveType = DTensor | ShardedTensor | torch.Tensor | int | float | str
+ValueType = (
+    PrimitiveType | list[PrimitiveType] | tuple[PrimitiveType] | dict[str, "ValueType"]
+)
 DictValueType = dict[str, ValueType]
 ListDictValueType = list[DictValueType]
 OptimizerStateType = dict[str, DictValueType | ListDictValueType]
@@ -844,6 +844,7 @@ def _unflatten_optim_state_dict(
                     continue
 
                 # Reconstruct state for this parameter
+                # pyrefly: ignore [unsupported-operation]
                 state[fqn] = {}
                 for state_name in optim.state[param]:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
@@ -853,11 +854,13 @@ def _unflatten_optim_state_dict(
                         reconstructed_value = _reconstruct_nested_dict(
                             flattened_state_key, state_dict
                         )
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = (
                             reconstructed_value
                         )
                     else:
                         # Existing keys mean no nesting, directly use the value.
+                        # pyrefly: ignore [bad-index]
                         cast(DictValueType, state[fqn])[state_name] = state_dict[
                             flattened_state_key
                         ]

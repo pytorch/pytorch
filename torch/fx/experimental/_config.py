@@ -1,7 +1,6 @@
 import enum
 import os
 import sys
-from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -31,7 +30,7 @@ translation_validation_no_bisect = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
 )
 # Checks whether replaying ShapeEnv events on a freshly constructed one yields
-# the a ShapeEnv with the same state. This should be used only in testing.
+# a ShapeEnv with the same state. This should be used only in testing.
 check_shape_env_recorded_events = False
 
 # TODO: Perhaps consider allowing unions for the configs below (so you can hit
@@ -84,7 +83,7 @@ validate_shape_env_version_key = False
 # issued (as we test if we've hit the limit on-the-fly, whereas we may
 # do further simplifications at final guard issuance time that make guards
 # irrelevant.)
-symbol_guard_limit_before_specialize: Optional[int] = None
+symbol_guard_limit_before_specialize: int | None = None
 
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True

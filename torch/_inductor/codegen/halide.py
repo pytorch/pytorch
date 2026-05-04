@@ -289,20 +289,24 @@ class HalideOverrides(OpOverrides):
         return cls.to_dtype(halide_constant(value), dtype)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x):
         return f"hl.abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x):
         if not hasattr(x, "name"):
             return f"hl.exp({x})"
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x):
         return f"hl.sqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
         if not hasattr(a, "name"):
@@ -311,6 +315,7 @@ class HalideOverrides(OpOverrides):
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
         if not hasattr(a, "name"):
@@ -319,80 +324,99 @@ class HalideOverrides(OpOverrides):
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         if hasattr(b, "name"):
             c = f"hl.cast({b.name}.type(), {c})"
         return f"hl.select({a}, {b}, {c})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x):
         return f"hl.cos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x):
         return f"hl.sin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def lgamma(x):
         raise Unsupported("lgamma")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erf(x):
         return f"hl.erf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cosh(x):
         return f"hl.cosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sinh(x):
         return f"hl.sinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x):
         return f"hl.acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acosh(x):
         return f"hl.acosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x):
         return f"hl.asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asinh(x):
         return f"hl.asinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x, y):
         return f"hl.atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x):
         return f"hl.atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x):
         return f"hl.atanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def copysign(x, y):
         raise Unsupported("copysign")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erfinv(x):
         raise Unsupported("erfinv")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hypot(x, y):
         return f"hl.hypot({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def nextafter(x, y):
         raise Unsupported("nextafter")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -401,10 +425,12 @@ class HalideOverrides(OpOverrides):
         return f"{a} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a, b):
         return f"{a} | {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a, b):
         return f"({a} ^ {b})"
 
@@ -441,6 +467,10 @@ class HalideOverrides(OpOverrides):
         return f"halide_helpers.randn({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(seed, base_offset, threads_per_round, tid, vec):
+        return f"halide_helpers.rand_eager_kernel({seed}, {base_offset}, {threads_per_round}, {tid}, {vec})"
+
+    @staticmethod
     def randint64(seed, offset, low, high):
         return f"halide_helpers.randint64({seed}, {offset}, {low}, {high})"
 
@@ -449,23 +479,28 @@ class HalideOverrides(OpOverrides):
         return f"{ops.load(name, 0)} + {V.kernel.args.seed_offset('load_seed_offset', offset)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x):
         # return f"hl.fast_inverse_sqrt({x})"  <== accuracy issues
         return f"1./hl.sqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x):
         return f"hl.tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x):
         return f"hl.tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x):
         return f"(hl.reinterpret(hl.UInt(32), hl.cast(hl.Float(32), {x})) >> 31) != 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a, b):
         # TODO(jansel): find a better way to do this, builtin % has wrong sign
         return f"{a} - hl.trunc({a}/{b})*{b}"
@@ -475,10 +510,12 @@ class HalideOverrides(OpOverrides):
         return f"hl.pow({a}, {b})"  # hl.fast_pow fails accuracy
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(x, n):
         raise Unsupported("ldexp")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x):
         return f"hl.log({x})"  # hl.fast_log fails accuracy
 
@@ -487,20 +524,24 @@ class HalideOverrides(OpOverrides):
         raise NotImplementedError("log2")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x):
         # workaround https://github.com/halide/Halide/issues/8309
         return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x):
         # workaround https://github.com/halide/Halide/issues/8309
         return f"hl.is_nan(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x):
         return f"hl.round({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x):
         return f"hl.floor({x})"
 
@@ -523,10 +564,12 @@ class HalideOverrides(OpOverrides):
         return f"hl.cast({x.name}.type(), {sub})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x):
         return f"hl.trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # this causes crashes with floating point exception, see test_div_zero_dim_cpu
         # return f"hl.div_round_to_zero({a}, {b})"
@@ -535,6 +578,7 @@ class HalideOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x):
         return f"hl.ceil({x})"
 
@@ -590,6 +634,7 @@ class HalideOverrides(OpOverrides):
         return ops.where(new_mask, result, other)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         raise NotImplementedError("frexp")
 
