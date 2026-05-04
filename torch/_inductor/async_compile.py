@@ -50,6 +50,7 @@ from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_libdevice_path,
     _set_triton_ptxas_path,
+    _worker_compile_pycodecache_kernel,
     _worker_compile_triton,
 )
 from torch._inductor.utils import clear_on_fresh_cache
@@ -584,13 +585,21 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cutedsl(self, kernel_name: str, source_code: str):
+    def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
+        """Reload a kernel module from PyCodeCache and wrap the entry point."""
+        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+        main_func_name = f"{kernel_name}_{main_suffix}"
+        return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
+
+    def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
         """
         Compile CuteDSL (CUTLASS Python DSL) kernels.
 
         Args:
             kernel_name: Name of the kernel to be defined
             source_code: Source code of the CuteDSL kernel, as a string
+            precompile_metadata: Optional dict with shapes/dtypes for triggering
+                real CuTe DSL compilation in the subprocess worker.
 
         Note:
             CuteDSL currently requires source files to do its compilation, there we
@@ -602,12 +611,42 @@ class AsyncCompile:
         )
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
+        _compile_start()
 
-        def task():
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> CuteDSLKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "CuteDSL kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name, MAIN_SUFFIX, CuteDSLKernelWrapper, key, path
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
-            # Find our special entry point named function
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
@@ -616,12 +655,6 @@ class AsyncCompile:
                 )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
-
-        if get_compile_threads() <= 1:
-            return task()
-        else:
-            future = self.submit(task)
-            return LambdaFuture(lambda: future.result())
 
     def pallas(self, kernel_name: str, source_code: str):
         """
@@ -659,13 +692,17 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
-    def nv_universal_gemm(self, kernel_name: str, source_code: str):
+    def nv_universal_gemm(
+        self, kernel_name: str, source_code: str, precompile_metadata=None
+    ):
         """
         Compile NVIDIA Universal GEMM kernels.
 
         Args:
             kernel_name: Name of the kernel to be defined
             source_code: Source code of the kernel, as a string
+            precompile_metadata: Optional dict with shapes/dtypes for triggering
+                real CuTe DSL compilation in the subprocess worker.
 
         Note:
             NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
@@ -679,12 +716,42 @@ class AsyncCompile:
         )
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
+        _compile_start()
 
-        def task():
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> NVUniversalGemmKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "NV Universal GEMM kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name, MAIN_SUFFIX, NVUniversalGemmKernelWrapper, key, path
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
             mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
 
-            # Find our special entry point named function
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
@@ -696,12 +763,6 @@ class AsyncCompile:
             return NVUniversalGemmKernelWrapper(
                 getattr(mod, main_func_name), kernel_path=path
             )
-
-        if get_compile_threads() <= 1:
-            return task()
-        else:
-            future = self.submit(task)
-            return LambdaFuture(lambda: future.result())
 
     def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
         """Register a Metal kernel body; wait() compiles all registered kernels into one library."""

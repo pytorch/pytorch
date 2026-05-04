@@ -70,7 +70,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         # NVIDIA Universal GEMM templates don't support horizontal fusion yet
         return False
 
-    def define_kernel(self, src_code: str, node_schedule) -> str:
+    def define_kernel(
+        self, src_code: str, node_schedule, precompile_metadata=None
+    ) -> str:
         """
         Define a NVIDIA Universal GEMM kernel by writing source code and generating wrapper.
 
@@ -101,11 +103,20 @@ class NVUniversalGemmScheduling(BaseScheduling):
         _, _, kernel_path = get_path(code_hash(src_code), "py")
 
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(
-            f"async_compile.nv_universal_gemm({kernel_name!r}, r'''"
-        )
-        compile_wrapper.splice(src_code, strip=True)
-        compile_wrapper.writeline("''')")
+        if precompile_metadata is not None:
+            compile_wrapper.writeline(
+                f"async_compile.nv_universal_gemm({kernel_name!r}, r'''"
+            )
+            compile_wrapper.splice(src_code, strip=True)
+            compile_wrapper.writeline(
+                f"''', precompile_metadata={precompile_metadata!r})"
+            )
+        else:
+            compile_wrapper.writeline(
+                f"async_compile.nv_universal_gemm({kernel_name!r}, r'''"
+            )
+            compile_wrapper.splice(src_code, strip=True)
+            compile_wrapper.writeline("''')")
 
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -143,11 +154,54 @@ class NVUniversalGemmScheduling(BaseScheduling):
         template_node.mark_run()
         src_code = render()
 
+        precompile_metadata = self._build_precompile_metadata(kernel, ctb)
+
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
-            kernel_name = self.define_kernel(src_code, node_schedule)
+            kernel_name = self.define_kernel(
+                src_code, node_schedule, precompile_metadata
+            )
 
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
+
+    def _build_precompile_metadata(self, kernel, ctb):
+        """Extract shapes and dtypes from kernel inputs/output for subprocess precompilation.
+
+        Returns None if shapes are symbolic (dynamic shapes), in which case the
+        subprocess will skip precompilation and the kernel compiles lazily on first call.
+        """
+        if not hasattr(kernel, "_template_input_args"):
+            return None
+
+        precompile_shapes = {}
+        precompile_dtypes = {}
+
+        try:
+            for param_name, input_node in kernel._template_input_args:
+                size = input_node.get_size()
+                precompile_shapes[param_name] = [int(s) for s in size]
+                precompile_dtypes[param_name] = str(
+                    input_node.get_dtype()
+                ).removeprefix("torch.")
+
+            output_size = ctb.layout.size
+            precompile_shapes["output"] = [int(s) for s in output_size]
+            precompile_dtypes["output"] = str(ctb.layout.dtype).removeprefix("torch.")
+        except TypeError:
+            log.debug(
+                "Skipping NV Universal GEMM precompile metadata: symbolic sizes "
+                "cannot be resolved to concrete values"
+            )
+            return None
+
+        device = ctb.layout.device
+        device_index = device.index if device.index is not None else 0
+
+        return {
+            "precompile_shapes": precompile_shapes,
+            "precompile_dtypes": precompile_dtypes,
+            "device_index": device_index,
+        }

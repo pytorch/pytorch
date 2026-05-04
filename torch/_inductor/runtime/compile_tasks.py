@@ -114,6 +114,61 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
+def _worker_compile_pycodecache_kernel(
+    kernel_name: str,
+    source_code: str,
+    main_suffix: str,
+    extra_env: dict[str, str],
+    precompile_metadata: dict[str, Any] | None = None,
+) -> tuple[str, str, int]:
+    """
+    Subprocess worker for PyCodeCache-based kernel compilation.
+
+    Writes source to PyCodeCache, loads the module, validates the entry point,
+    and optionally triggers real GPU compilation (MLIR -> PTX -> CUBIN) via a
+    _precompile entry point. Compiled artifacts are persisted to disk cache so
+    the parent process can load them without recompilation.
+
+    Used by both CuteDSL and NV Universal GEMM backends.
+    """
+    os.environ.update(extra_env)
+
+    start_ns = time.time_ns()
+
+    import torch._inductor.codecache as codecache
+
+    key, path = codecache.PyCodeCache.write(source_code)
+    mod = codecache.PyCodeCache.load_by_key_path(key, path)
+
+    main_func_name = f"{kernel_name}_{main_suffix}"
+    if not hasattr(mod, main_func_name):
+        available = [name for name in dir(mod) if callable(getattr(mod, name))]
+        raise RuntimeError(
+            f"Could not find kernel function '{main_func_name}'. "
+            f"Available callables: {available}"
+        )
+
+    if precompile_metadata is not None:
+        precompile_fn_name = f"{kernel_name}_precompile"
+        precompile_fn = getattr(mod, precompile_fn_name, None)
+        if precompile_fn is not None:
+            precompile_fn(**precompile_metadata)
+        else:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Precompile metadata was provided but module has no %s "
+                "— the scheduling layer expected this template to support "
+                "subprocess precompilation. Kernel will compile lazily on "
+                "first call instead.",
+                precompile_fn_name,
+            )
+
+    elapsed_ns = time.time_ns() - start_ns
+    linecache.clearcache()
+    return key, path, elapsed_ns // 1000
+
+
 def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
     extra_env: dict[str, str],
