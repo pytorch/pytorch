@@ -19,7 +19,7 @@ from torch._dynamo.dynamic_spec import (
     ShapesSpec,
     TensorSpec,
 )
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -28,7 +28,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
     skipIfTorchDynamo,
 )
 
@@ -499,7 +498,6 @@ class TestTensorSpecConstruction(TestCase):
         self.assertIsNotNone(ts[3])
 
 
-@skipIfTorchDynamo()
 class TestTensorSpecCompile(TestCase):
     """TensorSpec + compile integration via torch.compile(shapes_spec=...)."""
 
@@ -569,7 +567,6 @@ class TestTensorSpecCompile(TestCase):
         self.assertEqual(len(backend.graphs), 2)
 
 
-@skipIfTorchDynamo()
 class TestIntSpecCompile(TestCase):
     """IntSpec + torch.compile integration via shapes_spec parameter."""
 
@@ -925,6 +922,43 @@ class TestIntSpecMinMax(TestCase):
                     break
 
 
+@skipIfTorchDynamo()
+class TestParameterSpecCompile(TestCase):
+    """End-to-end: ``nn.Parameter`` as a top-level arg honors the spec.
+
+    Parameters are normally force-marked static in ``wrap_tensor`` and
+    routed to ``register_attr_or_module`` (graph attribute), bypassing
+    ``_automatic_dynamic`` where the spec is consulted. The integration
+    consults ``lookup_spec_from_dynamo_source`` first and bypasses the
+    static-mark / graph-attribute paths when a ``TensorSpec`` is
+    provided, letting the Parameter flow through the dynamic-shape
+    path.
+    """
+
+    def test_parameter_top_level_dim_backed(self):
+        def fn(p):
+            return p + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec().arg(
+                    "p", TensorSpec([IntSpec.backed("h"), None])
+                )
+            ),
+        )
+
+        compiled(torch.nn.Parameter(torch.randn(4, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Spec drove ``_automatic_dynamic`` — dim 0 is a backed SymInt.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+
+
 class TestObjectSpec(TestCase):
     """Construction, dict-like access, and recursion."""
 
@@ -1160,12 +1194,95 @@ class TestObjectSpecCompile(TestCase):
 
 
 class TestAnySpec(TestCase):
-    """``AnySpec`` placeholder. ``match`` / ``resolve`` land with the
-    integration layer that consumes them; for now this only smoke-tests
-    construction and ``repr``."""
+    """``AnySpec`` placeholder + ``AnySpec.match`` dispatch."""
 
     def test_repr(self):
         self.assertEqual(repr(AnySpec()), "AnySpec()")
+
+    def test_match_tensor(self):
+        spec = AnySpec.match(torch.randn(2, 3, 4))
+        self.assertIsInstance(spec, TensorSpec)
+        self.assertEqual(spec._dim, 3)
+
+    def test_match_int(self):
+        spec = AnySpec.match(5)
+        self.assertIsInstance(spec, IntSpec)
+        self.assertIs(spec._type, IntSpecType.STATIC)
+
+    def test_match_bool_returns_none(self):
+        # ``bool`` is not a useful spec source — caller proceeds without one.
+        self.assertIsNone(AnySpec.match(True))
+
+    def test_match_unknown_type_returns_none(self):
+        self.assertIsNone(AnySpec.match("not a spec source"))
+
+
+class TestAnySpecLookup(TestCase):
+    """``lookup_spec_from_dynamo_source`` resolves an ``AnySpec()`` leaf
+    against the example value at the matching source path."""
+
+    def _local(self, name):
+        from torch._dynamo.source import LocalSource
+
+        return LocalSource(name, is_input=True)
+
+    def test_anyspec_at_top_level_resolves_against_tensor(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(params=ParamsSpec().arg("x", AnySpec()))
+        result = lookup_spec_from_dynamo_source(
+            self._local("x"), shapes_spec, example_value=torch.randn(2, 3)
+        )
+        self.assertIsInstance(result, TensorSpec)
+        self.assertEqual(result._dim, 2)
+
+    def test_anyspec_at_nested_attr_resolves(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+        from torch._dynamo.source import AttrSource
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("obj", ObjectSpec().field("w", AnySpec()))
+        )
+        result = lookup_spec_from_dynamo_source(
+            AttrSource(self._local("obj"), "w"),
+            shapes_spec,
+            example_value=torch.randn(4),
+        )
+        self.assertIsInstance(result, TensorSpec)
+        self.assertEqual(result._dim, 1)
+
+    def test_anyspec_without_example_returns_anyspec_unresolved(self):
+        # When example_value is None, the placeholder returns as-is —
+        # the caller's isinstance check filters it out.
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        any_spec = AnySpec()
+        shapes_spec = ShapesSpec(params=ParamsSpec().arg("x", any_spec))
+        result = lookup_spec_from_dynamo_source(self._local("x"), shapes_spec)
+        self.assertIs(result, any_spec)
+
+
+@skipIfTorchDynamo()
+class TestAnySpecCompile(TestCase):
+    """End-to-end: ``AnySpec()`` placeholder resolves against the
+    runtime tensor and produces a ``TensorSpec`` that reaches
+    ``_automatic_dynamic`` (default-policy, no per-dim marking)."""
+
+    def test_anyspec_against_tensor_arg_compiles(self):
+        # AnySpec resolves to TensorSpec(ndim) with all-None dim entries.
+        # Behavior matches "no spec given" — verifies the lookup path
+        # didn't error out and produced a usable TensorSpec.
+        def fn(x):
+            return x + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(params=ParamsSpec().arg("x", AnySpec())),
+        )
+        compiled(torch.randn(4, 3))
+        self.assertEqual(len(backend.graphs), 1)
 
 
 class TestDictSpec(TestCase):

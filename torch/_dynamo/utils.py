@@ -2801,21 +2801,25 @@ def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
-    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
-        # Find if the arg would be realized as SymNodeVariable later on. If yes,
-        # realize it and specialize. Else return the arg.
+    if isinstance(arg, LazyVariableTracker):
+        if not arg.is_realized():
+            # Find if the arg would be realized as SymNodeVariable later on. If yes,
+            # realize it and specialize. Else return the arg.
 
-        source = arg.original_source()
-        value = arg.original_value()
+            source = arg.original_source()
+            value = arg.original_value()
 
-        is_symnode_vt = is_torch_sym(value) or (
-            not config.specialize_int
-            and type(value) is int
-            and not is_int_specialization_case(value, source)
-        )
+            is_symnode_vt = is_torch_sym(value) or (
+                not config.specialize_int
+                and type(value) is int
+                and not is_int_specialization_case(value, source)
+            )
 
-        if not is_symnode_vt:
-            return arg
+            if not is_symnode_vt:
+                return arg
+
+        # Realize to get the underlying variable (handles both realized and unrealized)
+        arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
@@ -3475,8 +3479,8 @@ def same(
 
                 def get_multiplier() -> float:
                     # In some particular cases, we expect high difference in results.
-                    # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
-                    # In case of it the res_error is at least one order of magnitude higher.
+                    # At the moment one of these cases is inductor freezing bfloat16 convolution const folding.
+                    # In this case, the res_error is at least one order of magnitude higher.
                     if force_max_multiplier:
                         return 10.0
                     # In the case of using AMP (Automatic Mixed Precision), certain models have
