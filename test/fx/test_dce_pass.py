@@ -381,6 +381,85 @@ class TestDCE(TestCase):
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
         torch.distributed.destroy_process_group()
 
+    def test_side_effectful_op_overload_packet(self):
+        """Test that OpOverloadPacket targets survive DCE when the default
+        overload is registered as effectful via _register_effectful_op.
+        is_impure() delegates from OpOverloadPacket to the default overload."""
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        lib = torch.library.Library("dce_test", "DEF")
+        lib.define("check_op(Tensor x) -> Tensor")
+        lib.impl("check_op", lambda x: x.clone(), "CPU")
+        lib.impl("check_op", lambda x: x.clone(), "Meta")
+
+        handle = _register_effectful_op(
+            torch.ops.dce_test.check_op.default, EffectType.ORDERED
+        )
+        try:
+
+            class M(torch.nn.Module):
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    torch.ops.dce_test.check_op(x)
+                    return x
+
+            traced = torch.fx.symbolic_trace(M())
+            check_nodes = [
+                n
+                for n in traced.graph.nodes
+                if n.op == "call_function" and "check_op" in str(n.target)
+            ]
+            self.assertTrue(len(check_nodes) > 0)
+            self.assertIsInstance(check_nodes[0].target, torch._ops.OpOverloadPacket)
+            self.assertEqual(len(check_nodes[0].users), 0)
+            traced.graph.eliminate_dead_code()
+            check_nodes_after = [
+                n
+                for n in traced.graph.nodes
+                if n.op == "call_function" and "check_op" in str(n.target)
+            ]
+            self.assertTrue(
+                len(check_nodes_after) > 0,
+                "OpOverloadPacket node DCE'd despite effectful default overload",
+            )
+        finally:
+            handle.destroy()
+            del lib
+
+    @torch._dynamo.config.patch(disable=True)
+    def test_side_effectful_packet_only_registration(self):
+        """Test that OpOverloadPacket in _side_effectful_functions is respected
+        even when the default overload is NOT registered via _register_effectful_op."""
+        from torch.fx.node import _side_effectful_functions
+
+        lib = torch.library.Library("dce_test", "DEF")
+        lib.define("packet_only_op(Tensor x) -> Tensor")
+        lib.impl("packet_only_op", lambda x: x.clone(), "CPU")
+        lib.impl("packet_only_op", lambda x: x.clone(), "Meta")
+
+        _side_effectful_functions.add(torch.ops.dce_test.packet_only_op)
+        try:
+
+            class M(torch.nn.Module):
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    torch.ops.dce_test.packet_only_op(x)
+                    return x
+
+            traced = torch.fx.symbolic_trace(M())
+            traced.graph.eliminate_dead_code()
+            check_nodes = [
+                n
+                for n in traced.graph.nodes
+                if n.op == "call_function" and "packet_only_op" in str(n.target)
+            ]
+            self.assertTrue(
+                len(check_nodes) > 0,
+                "OpOverloadPacket DCE'd despite packet-only registration",
+            )
+        finally:
+            _side_effectful_functions.discard(torch.ops.dce_test.packet_only_op)
+            del lib
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_fx.py")
