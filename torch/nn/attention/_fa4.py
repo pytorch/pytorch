@@ -70,7 +70,7 @@ def _fa4_import_module(module_path: str) -> ModuleType:
 
 
 def _fa4_register_kernels() -> Library:
-    lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
+    lib = Library("aten", "IMPL", "CUDA")
     lib.impl(
         "_flash_attention_forward_no_dropout_inplace",
         _fa4_flash_attention_forward_no_dropout_inplace_impl,
@@ -215,6 +215,11 @@ def _fa4_backward_support_error(
         return (
             "FA4 backward does not support fp8 - use inference only (torch.no_grad())"
         )
+    supported_dtypes = (torch.float16, torch.bfloat16)
+    if not all(t.dtype in supported_dtypes for t in (grad_out, query, key, value, out)):
+        return f"inputs must be one of {supported_dtypes}"
+    if len({t.dtype for t in (grad_out, query, key, value, out)}) != 1:
+        return "all inputs must have the same dtype"
     if dropout_p != 0.0:
         return "dropout_p must be 0"
     error = _fa4_common_support_error(
