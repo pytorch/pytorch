@@ -3777,13 +3777,13 @@ class WrapperDescriptorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> "MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
-        return MethodWrapperVariable(self.descriptor, obj, name, source=self.source)
+        return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -3796,7 +3796,6 @@ class MethodWrapperVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
-        "name",
         *VariableTracker._nonvar_fields,
     }
 
@@ -3804,7 +3803,6 @@ class MethodWrapperVariable(VariableTracker):
         self,
         descriptor: types.WrapperDescriptorType,
         obj: VariableTracker,
-        name: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -3812,10 +3810,9 @@ class MethodWrapperVariable(VariableTracker):
         assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
-        self.name = name
 
     def __repr__(self) -> str:
-        return f"MethodWrapperVariable({self.descriptor}, {self.obj}, {self.name})"
+        return f"MethodWrapperVariable({self.descriptor}, {self.obj})"
 
     def python_type(self) -> type:
         return types.MethodWrapperType
@@ -3826,11 +3823,13 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(
+            tx, self.descriptor.__name__, list(args), kwargs
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.name))
+        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
 
 class MethodDescriptorVariable(VariableTracker):
@@ -3916,14 +3915,14 @@ class MethodDescriptorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> "BoundBuiltinMethodVariable":
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
         return BoundBuiltinMethodVariable(
-            self.descriptor, obj, name, source=self.source
+            self.descriptor, obj, source=self.source
         )
 
 
@@ -3938,7 +3937,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
-        "name",
         *VariableTracker._nonvar_fields,
     }
 
@@ -3946,7 +3944,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
         self,
         descriptor: types.MethodDescriptorType,
         obj: VariableTracker,
-        name: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -3954,7 +3951,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
         assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
-        self.name = name
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -3969,7 +3965,9 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(
+            tx, self.descriptor.__name__, list(args), kwargs
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
@@ -4028,7 +4026,7 @@ class ClassMethodDescriptorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
         # classmethod_get binds to the class, producing a
         # builtin_function_or_method.  It ignores obj and uses type.
@@ -4076,11 +4074,12 @@ class StaticMethodVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker | None,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
         # sm_descr_get returns sm->sm_callable unconditionally.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
-        return VariableTracker.build(tx, self.descriptor.__func__, self.source)
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        return VariableTracker.build(tx, self.descriptor.__func__, func_source)
 
 
 class ClassMethodVariable(VariableTracker):
@@ -4095,20 +4094,17 @@ class ClassMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
-        "source_fn",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
         self,
         descriptor: classmethod,  # type: ignore[type-arg]
-        source_fn: "Source | None" = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         assert isinstance(descriptor, classmethod)
         self.descriptor = descriptor
-        self.source_fn = source_fn
 
     def __repr__(self) -> str:
         func_name = getattr(self.descriptor.__func__, "__name__", "?")
@@ -4121,17 +4117,15 @@ class ClassMethodVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
-        # cm_descr_get calls PyMethod_New(cm->cm_callable, type) to bind
-        # the wrapped function to the class.
+        # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
-        cls_vt = obj.var_getattr(tx, "__class__")
+        func_source = AttrSource(self.source, "__func__") if self.source else None
         return UserMethodVariable(
             self.descriptor.__func__,
-            cls_vt,
-            source_fn=self.source_fn,
-            source=self.source,
+            owner,
+            source_fn=func_source,
         )
 
 
@@ -4183,10 +4177,9 @@ class MemberDescriptorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
-        # C struct field value.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
         try:
             resolved = self.descriptor.__get__(obj.value)  # type: ignore[attr-defined]
@@ -4194,9 +4187,9 @@ class MemberDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
+                args=[f"'{type(obj.value).__name__}' object has no attribute '{self.descriptor.__name__}'"],  # type: ignore[attr-defined]
             )
-        result_source = obj.source and AttrSource(obj.source, name)
+        result_source = obj.source and AttrSource(obj.source, self.descriptor.__name__)
         return VariableTracker.build(tx, resolved, result_source)
 
 
@@ -4240,7 +4233,7 @@ class GetSetDescriptorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
@@ -4301,11 +4294,12 @@ class PropertyVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker,
-        name: str,
+        owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors property_descr_get which calls fget(obj).
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
+        fget_source = AttrSource(self.source, "fget") if self.source else None
         fget_vt = VariableTracker.build(
-            tx, self.descriptor.fget, source=self.source, realize=True
+            tx, self.descriptor.fget, source=fget_source, realize=True
         )
         return fget_vt.call_function(tx, [obj], {})
