@@ -578,13 +578,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(cls_attr, types.WrapperDescriptorType) and not is_torch_class(
             self.value
         ):
-            return variables.WrapperDescriptorVariable(cls_attr, source=source)
+            return variables.WrapperDescriptorVariable(
+                cls_attr, owner=self, source=source
+            )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
         if isinstance(cls_attr, types.MethodDescriptorType) and not is_torch_class(
             self.value
         ):
-            return variables.MethodDescriptorVariable(cls_attr, source=source)
+            return variables.MethodDescriptorVariable(
+                cls_attr, owner=self, source=source
+            )
 
         if isinstance(cls_attr, _collections._tuplegetter):
             descriptor_source = (
@@ -2746,11 +2750,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
             return cmd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
         elif isinstance(type_attr, types.WrapperDescriptorType):
-            wd_vt = variables.WrapperDescriptorVariable(type_attr, source=source)
-            return wd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            class_vt = self.var_getattr(tx, "__class__")
+            wd_vt = variables.WrapperDescriptorVariable(
+                type_attr, owner=class_vt, source=source
+            )
+            return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
-            md_vt = variables.MethodDescriptorVariable(type_attr, source=source)
-            return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            class_vt = self.var_getattr(tx, "__class__")
+            md_vt = variables.MethodDescriptorVariable(
+                type_attr, owner=class_vt, source=source
+            )
+            return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
                 type_attr, "__wrapped__", self, source=source
