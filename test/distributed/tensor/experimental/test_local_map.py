@@ -16,6 +16,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -432,7 +433,271 @@ class TestLocalMap(DTensorTestBase):
         # output lives in mesh_2d
         self.assertEqual(Y_dt.device_mesh, mesh_2d)
 
-    @unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+
+@unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+class TestLocalMapSpmdTypes(TestCase):
+    """Single-process tests for local_map with spmd_types type checking."""
+
+    WORLD_SIZE = 2
+
+    @classmethod
+    def setUpClass(cls):
+        from spmd_types._mesh_axis import _reset
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        _reset()
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=cls.WORLD_SIZE, store=store
+        )
+        cls.mesh = init_device_mesh("cpu", (cls.WORLD_SIZE,), mesh_dim_names=("tp",))
+        cls.tp_axis = spmd.MeshAxis.of(cls.mesh.get_group("tp"))
+
+    @classmethod
+    def tearDownClass(cls):
+        from spmd_types._mesh_axis import _reset
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        _reset()
+
+    def setUp(self):
+        from torch.distributed.spmd_types import _reset
+
+        _reset()
+        self.mode = LocalTensorMode(self.WORLD_SIZE)
+        self.mode.__enter__()
+
+    def tearDown(self):
+        self.mode.__exit__(None, None, None)
+
+    def test_local_spmd_types(self):
+        """Verify local spmd types inside the local_map region."""
+        tp_axis = self.tp_axis
+
+        # S -> V
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
+        )
+        W_dt = DTensor.from_local(
+            torch.randn(8, 4), self.mesh, [Shard(1)], run_check=False
+        )
+
+        def mm_fn(X, W):
+            self.assertIs(spmd.get_local_type(X)[tp_axis], spmd.V)
+            self.assertIs(spmd.get_local_type(W)[tp_axis], spmd.V)
+            out = torch.mm(X, W)
+            self.assertIs(spmd.get_local_type(out)[tp_axis], spmd.V)
+            return out
+
+        wrapped = local_map(
+            mm_fn,
+            out_placements=[Shard(0)],
+            in_placements=([Shard(0)], [Shard(1)]),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+        wrapped(X_dt, W_dt)
+
+        # P -> P
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Partial()], run_check=False
+        )
+
+        def check_p(X):
+            self.assertIs(spmd.get_local_type(X)[tp_axis], spmd.P)
+            return X
+
+        wrapped = local_map(
+            check_p,
+            out_placements=[Partial()],
+            in_placements=([Partial()],),
+            in_grad_placements=([Replicate()],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+        wrapped(X_dt)
+
+    def test_replicate_grad_typing(self):
+        """
+        Replicate + grad Partial -> R (backward needs all-reduce).
+        Replicate + grad Replicate -> I (backward is identity).
+        """
+        tp_axis = self.tp_axis
+
+        # Partial grad
+        W_dt = DTensor.from_local(
+            torch.randn(8, 4), self.mesh, [Replicate()], run_check=False
+        )
+
+        def check_fn(W):
+            self.assertIs(spmd.get_local_type(W)[tp_axis], spmd.R)
+            return W
+
+        wrapped = local_map(
+            check_fn,
+            out_placements=[Replicate()],
+            in_placements=([Replicate()],),
+            in_grad_placements=([Partial()],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+        wrapped(W_dt)
+
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Replicate()], run_check=False
+        )
+
+        # Replicate grad
+        def check_fn(X):
+            self.assertIs(spmd.get_local_type(X)[tp_axis], spmd.I)
+            return X
+
+        wrapped = local_map(
+            check_fn,
+            out_placements=[Replicate()],
+            in_placements=([Replicate()],),
+            in_grad_placements=([Replicate()],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+        wrapped(X_dt)
+
+    def test_incompatible_in_grad_placements(self):
+        """Replicate fwd expects Partial or Replicate grad, not Shard."""
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Replicate()], run_check=False
+        )
+
+        wrapped = local_map(
+            lambda X: X,
+            out_placements=[Replicate()],
+            in_placements=([Replicate()],),
+            in_grad_placements=([Shard(0)],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+
+        self.assertExpectedRaisesInline(
+            ValueError,
+            lambda: wrapped(X_dt),
+            """in_grad_placements=S(0) is incompatible with in_placements=R: backward requires P, which is not compatible with S(0)""",
+        )
+
+    def test_output_spmd_type_mismatch(self):
+        """Output spmd type must be compatible with out_placements."""
+
+        def check_mismatch(in_p, out_p, msg, in_grad_p=None):
+            X_dt = DTensor.from_local(
+                torch.randn(4, 8), self.mesh, in_p, run_check=False
+            )
+            kw = dict(
+                out_placements=out_p,
+                in_placements=(in_p,),
+                device_mesh=self.mesh,
+                spmd_types=True,
+            )
+            if in_grad_p is not None:
+                kw["in_grad_placements"] = (in_grad_p,)
+            wrapped = local_map(lambda X: X, **kw)
+            self.assertExpectedRaisesInline(ValueError, lambda: wrapped(X_dt), msg)
+
+        # V output vs Replicate
+        check_mismatch(
+            [Shard(0)],
+            [Replicate()],
+            """Output tensor placement mismatch on default_pg: out_placements=R but spmd_types inferred V""",
+        )
+        # R output vs Shard
+        check_mismatch(
+            [Replicate()],
+            [Shard(0)],
+            """Output tensor placement mismatch on default_pg: out_placements=S(0) but spmd_types inferred R""",
+            in_grad_p=[Partial()],
+        )
+        # I output vs Shard
+        check_mismatch(
+            [Replicate()],
+            [Shard(0)],
+            """Output tensor placement mismatch on default_pg: out_placements=S(0) but spmd_types inferred I""",
+            in_grad_p=[Replicate()],
+        )
+        # P output vs Replicate
+        check_mismatch(
+            [Partial()],
+            [Replicate()],
+            """Output tensor placement mismatch on default_pg: out_placements=R but spmd_types inferred P""",
+            in_grad_p=[Replicate()],
+        )
+        # R output vs Partial
+        check_mismatch(
+            [Replicate()],
+            [Partial()],
+            """Output tensor placement mismatch on default_pg: out_placements=P(sum) but spmd_types inferred R""",
+            in_grad_p=[Partial()],
+        )
+        # I output vs Partial
+        check_mismatch(
+            [Replicate()],
+            [Partial()],
+            """Output tensor placement mismatch on default_pg: out_placements=P(sum) but spmd_types inferred I""",
+            in_grad_p=[Replicate()],
+        )
+
+    def test_output_missing_spmd_type(self):
+        """Output tensor with no spmd_types annotation should raise."""
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
+        )
+        unannotated = torch.randn(4, 4)
+
+        def fn(X):
+            return unannotated
+
+        wrapped = local_map(
+            fn,
+            out_placements=[Shard(0)],
+            in_placements=([Shard(0)],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+
+        self.assertExpectedRaisesInline(
+            ValueError,
+            lambda: wrapped(X_dt),
+            """Output tensor has no spmd_types annotation but out_placements expects one. Ensure the function's output is derived from annotated inputs or is explicitly annotated.""",
+        )
+
+    def test_output_non_tensor_with_placements(self):
+        """out_placements specifies placement but output is not a Tensor."""
+        X_dt = DTensor.from_local(
+            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
+        )
+
+        wrapped = local_map(
+            lambda X: 42,
+            out_placements=[Shard(0)],
+            in_placements=([Shard(0)],),
+            device_mesh=self.mesh,
+            spmd_types=True,
+        )
+
+        self.assertExpectedRaisesInline(
+            ValueError,
+            lambda: wrapped(X_dt),
+            """out_placements specifies [Shard(dim=0)] but the corresponding output is int, not a Tensor""",
+        )
+
+
+@unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
+    """Multi-GPU tests for local_map with spmd_types type checking."""
+
+    @property
+    def world_size(self):
+        return 2
+
     @with_comms()
     def test_spmd_types_dp_matmul(self):
         """DP matmul with custom autograd functions.
@@ -441,9 +706,9 @@ class TestLocalMap(DTensorTestBase):
         all-reduces grad_W so every rank sees the full gradient. The buggy
         version skips the all-reduce.
 
-        Step 1: BuggyDPMatmul without spmd_types → wrong W gradient.
-        Step 2: BuggyDPMatmul with spmd_types=True → spmd.SpmdTypeError (V + I).
-        Step 3: CorrectDPMatmul with spmd_types=True → correct gradients.
+        Step 1: BuggyDPMatmul without spmd_types -> wrong W gradient.
+        Step 2: BuggyDPMatmul with spmd_types=True -> spmd.SpmdTypeError (V + I).
+        Step 3: CorrectDPMatmul with spmd_types=True -> correct gradients.
         """
         from spmd_types import (
             assert_type,
@@ -507,9 +772,7 @@ class TestLocalMap(DTensorTestBase):
         W_ref = W.detach().clone().requires_grad_()
         torch.mm(X_ref, W_ref).sum().backward()
 
-        # Step 1: BuggyDPMatmul without spmd_types → wrong W gradient.
-        # No in_grad_placements so DTensor doesn't compensate for the
-        # missing all-reduce in backward.
+        # Step 1: BuggyDPMatmul without spmd_types -> wrong W gradient.
         X.grad, W.grad = None, None
         X_dt = distribute_tensor(X, device_mesh, [Shard(0)])
         W_dt = distribute_tensor(W, device_mesh, [Replicate()])
@@ -526,11 +789,7 @@ class TestLocalMap(DTensorTestBase):
             "Expected wrong W gradient from buggy (missing all-reduce)",
         )
 
-        # Step 2: BuggyDPMatmul with spmd_types=True → caught.
-        # The missing all-reduce means W should NOT be typed as R (which
-        # implies Partial grad / all-reduce). Typing W as I (Replicate grad,
-        # no all-reduce) is the honest declaration, but spmd_types rejects
-        # V + I mixing in a local op.
+        # Step 2: BuggyDPMatmul with spmd_types=True -> caught.
         X.grad, W.grad = None, None
         X_dt = distribute_tensor(X, device_mesh, [Shard(0)])
         W_dt = distribute_tensor(W, device_mesh, [Replicate()])
@@ -546,7 +805,7 @@ class TestLocalMap(DTensorTestBase):
         with self.assertRaises(spmd.SpmdTypeError):
             buggy_typed(X_dt, W_dt)
 
-        # Step 3: CorrectDPMatmul with spmd_types=True → correct gradients
+        # Step 3: CorrectDPMatmul with spmd_types=True -> correct gradients
         X.grad, W.grad = None, None
         X_dt = distribute_tensor(X, device_mesh, [Shard(0)])
         W_dt = distribute_tensor(W, device_mesh, [Replicate()])
@@ -563,12 +822,86 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(X_dt.grad.full_tensor(), X_ref.grad)
         self.assertEqual(W_dt.grad.full_tensor(), W_ref.grad)
 
+    @with_comms()
+    def test_spmd_types_backward_grad_placements(self):
+        """
+        Matching grad_out placements need no redistribution; mismatched grads get implicitly redistributed.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        # S(0) @ R -> S(0) FWD: backward expects S(0) grad
+        def s0_r_mm():
+            X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+            X_dt = distribute_tensor(X, device_mesh, [Shard(0)])
+            W = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+            W_dt = distribute_tensor(W, device_mesh, [Replicate()])
+
+            wrapped_shard = local_map(
+                mm_forward,
+                out_placements=[Shard(0)],
+                in_placements=([Shard(0)], [Replicate()]),
+                device_mesh=device_mesh,
+                spmd_types=True,
+            )
+            return wrapped_shard(X_dt, W_dt), X_dt, W_dt
+
+        Y_dt, X_dt, W_dt = s0_r_mm()
+        grad_out = DTensor.from_local(
+            torch.ones_like(Y_dt.to_local()), device_mesh, [Shard(0)]
+        )
+        with ExplicitRedistributionContext(strict=True):
+            Y_dt.backward(grad_out)
+
+        # Same, but Replicate grad is mismatched -> redistributed (no-comm)
+        Y_dt, X_dt, W_dt = s0_r_mm()
+        grad_out = distribute_tensor(
+            torch.ones_like(Y_dt.full_tensor()), device_mesh, [Replicate()]
+        )
+        Y_dt.backward(grad_out)
+
+        # S(1) @ S(0) -> P: backward P -> R, expects Replicate grad
+        wrapped_partial = local_map(
+            mm_forward,
+            out_placements=[Partial()],
+            in_placements=([Shard(1)], [Shard(0)]),
+            device_mesh=device_mesh,
+            spmd_types=True,
+        )
+
+        def s1_s0_mm():
+            X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+            X_dt = distribute_tensor(X, device_mesh, [Shard(1)])
+            W = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+            W_dt = distribute_tensor(W, device_mesh, [Shard(0)])
+            return wrapped_partial(X_dt, W_dt), X_dt, W_dt
+
+        Y_dt, X_dt, W_dt = s1_s0_mm()
+        grad_out = distribute_tensor(
+            torch.ones_like(Y_dt.full_tensor()), device_mesh, [Replicate()]
+        )
+        with ExplicitRedistributionContext(strict=True):
+            Y_dt.backward(grad_out)
+
+        # Same, but Partial grad is mismatched -> redistributed (all-reduce)
+        Y_dt, X_dt, W_dt = s1_s0_mm()
+        grad_out = DTensor.from_local(
+            torch.ones_like(Y_dt.to_local()), device_mesh, [Partial()]
+        )
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            Y_dt.backward(grad_out)
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+
 
 @unittest.skipUnless(spmd.is_available(), "requires spmd_types")
-class TestLocalMapSpmdTypes(TestCase):
-    """Single-process tests for local_map with spmd_types type checking."""
+class TestLocalMapSpmdTypesMesh(TestCase):
+    """Tests for local_map spmd_types with multi-dimensional meshes."""
 
-    WORLD_SIZE = 2
+    WORLD_SIZE = 4
 
     @classmethod
     def setUpClass(cls):
@@ -581,8 +914,8 @@ class TestLocalMapSpmdTypes(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=cls.WORLD_SIZE, store=store
         )
-        cls.mesh = init_device_mesh("cpu", (cls.WORLD_SIZE,), mesh_dim_names=("tp",))
-        cls.tp_axis = spmd.MeshAxis.of(cls.mesh.get_group("tp"))
+        cls.mesh_2d = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+        cls.mesh_ep = init_device_mesh("cpu", (4,), mesh_dim_names=("ep",))
 
     @classmethod
     def tearDownClass(cls):
@@ -602,116 +935,36 @@ class TestLocalMapSpmdTypes(TestCase):
     def tearDown(self):
         self.mode.__exit__(None, None, None)
 
-    def test_shard_annotated_as_varying(self):
-        """Shard inputs get V (via S(dim)) on the tp axis, mm(V, V) -> V."""
-        tp_axis = self.tp_axis
-        X_dt = DTensor.from_local(
-            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
-        )
-        W_dt = DTensor.from_local(
-            torch.randn(8, 4), self.mesh, [Shard(1)], run_check=False
-        )
+    def test_output_wrong_mesh(self):
+        """Output reinterpreted to a different mesh should raise.
 
-        def mm_fn(X, W):
-            self.assertIs(spmd.get_local_type(X)[tp_axis], spmd.V)
-            self.assertIs(spmd.get_local_type(W)[tp_axis], spmd.V)
-            return torch.mm(X, W)
-
-        wrapped = local_map(
-            mm_fn,
-            out_placements=[Shard(0)],
-            in_placements=([Shard(0)], [Shard(1)]),
-            device_mesh=self.mesh,
-            spmd_types=True,
-        )
-        wrapped(X_dt, W_dt)
-
-    def test_type_error_on_invalid_op(self):
-        """I + V is invalid: adding a Shard input to a Replicate(grad=Replicate) input."""
-        X_dt = DTensor.from_local(
-            torch.randn(4, 8), self.mesh, [Shard(0)], run_check=False
-        )
-        W_dt = DTensor.from_local(
-            torch.randn(4, 8), self.mesh, [Replicate()], run_check=False
-        )
-
-        def add_fn(X, W):
-            return X + W
-
-        wrapped = local_map(
-            add_fn,
-            out_placements=[Shard(0)],
-            in_placements=([Shard(0)], [Replicate()]),
-            in_grad_placements=([Shard(0)], [Replicate()]),
-            device_mesh=self.mesh,
-            spmd_types=True,
-        )
-
-        with self.assertRaises(spmd.SpmdTypeError):
-            wrapped(X_dt, W_dt)
-
-    def test_replicate_grad_typing(self):
+        TODO: support local_map with a different device_mesh + placements
+        than the input DTensor's mesh -- reinterpret to that mesh, then check
+        placements on it instead of raising.
         """
-        Replicate + grad Partial -> R (backward needs all-reduce).
-        Replicate + grad Replicate -> I (backward is identity).
-        """
-        tp_axis = self.tp_axis
-
-        # Partial grad
-        W_dt = DTensor.from_local(
-            torch.randn(8, 4), self.mesh, [Replicate()], run_check=False
-        )
-
-        def check_fn(W):
-            self.assertIs(spmd.get_local_type(W)[tp_axis], spmd.R)
-            return W
-
-        wrapped = local_map(
-            check_fn,
-            out_placements=[Replicate()],
-            in_placements=([Replicate()],),
-            in_grad_placements=([Partial()],),
-            device_mesh=self.mesh,
-            spmd_types=True,
-        )
-        wrapped(W_dt)
-
         X_dt = DTensor.from_local(
-            torch.randn(4, 8), self.mesh, [Replicate()], run_check=False
+            torch.randn(4, 8),
+            self.mesh_2d,
+            [Shard(0), Shard(1)],
+            run_check=False,
         )
 
-        # Replicate grad
-        def check_fn(X):
-            self.assertIs(spmd.get_local_type(X)[tp_axis], spmd.I)
-            return X
+        def fn_reinterpret(X):
+            return spmd.reinterpret_mesh(X, self.mesh_ep)
 
         wrapped = local_map(
-            check_fn,
-            out_placements=[Replicate()],
-            in_placements=([Replicate()],),
-            in_grad_placements=([Replicate()],),
-            device_mesh=self.mesh,
-            spmd_types=True,
-        )
-        wrapped(X_dt)
-
-    def test_incompatible_in_grad_placements(self):
-        """Replicate fwd expects Partial or Replicate grad, not Shard."""
-        X_dt = DTensor.from_local(
-            torch.randn(4, 8), self.mesh, [Replicate()], run_check=False
-        )
-
-        wrapped = local_map(
-            lambda X: X,
-            out_placements=[Replicate()],
-            in_placements=([Replicate()],),
-            in_grad_placements=([Shard(0)],),
-            device_mesh=self.mesh,
+            fn_reinterpret,
+            out_placements=[Shard(0), Shard(1)],
+            in_placements=([Shard(0), Shard(1)],),
+            device_mesh=self.mesh_2d,
             spmd_types=True,
         )
 
-        with self.assertRaisesRegex(ValueError, "Incompatible grad_placement"):
-            wrapped(X_dt)
+        self.assertExpectedRaisesInline(
+            ValueError,
+            lambda: wrapped(X_dt),
+            """Output tensor has no spmd_types annotation on mesh_dp but out_placements expects S(0). Actual annotations are on: {default_pg}""",
+        )
 
 
 if __name__ == "__main__":
