@@ -391,7 +391,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  const bool skip_torch_function = should_skip_torch_function();
+  const bool skip_torch_function = consume_should_skip_torch_function();
   if (!skip_torch_function && check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
@@ -490,7 +490,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
   }
-  const bool skip_torch_function = should_skip_torch_function();
+  const bool skip_torch_function = consume_should_skip_torch_function();
   if (!skip_torch_function &&
       ((check_has_torch_function(self)) ||
        (check_has_torch_function(py_value)))) {

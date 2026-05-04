@@ -1951,6 +1951,7 @@ class TestTorchFunctionRedispatch(TestCase):
         call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in x.call_log)
         self.assertExpectedInline(call_log_str, """\
 foo: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
+TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
 TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)""")
 
     def test_mode_with_redispatch(self):

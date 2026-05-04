@@ -379,8 +379,8 @@ std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
-//   input is an list with element types that cannot be unified
-//   input is an dict with key or value types that cannot be unified
+//   input is a list with element types that cannot be unified
+//   input is a dict with key or value types that cannot be unified
 inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
@@ -1203,7 +1203,7 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName& qualname) {
-  if (should_skip_torch_function()) {
+  if (consume_should_skip_torch_function()) {
     return std::nullopt;
   }
 

@@ -18,8 +18,12 @@ bool torch_function_enabled() {
       at::impl::TorchFunctionDisabledState::ENABLED;
 }
 
-bool should_skip_torch_function() {
+bool consume_should_skip_torch_function() {
   return at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
+}
+
+bool peek_should_skip_torch_function() {
+  return at::impl::PythonTorchFunctionTLS::peek_skip_next();
 }
 
 PyObject* disabled_torch_function_impl() {
@@ -266,7 +270,8 @@ PyObject* THPModule_skip_one_hop_torch_function(
 
   TORCH_CHECK(
       !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
-      "you cannot skip two levels of __torch_function__");
+      "you cannot skip two levels of __torch_function__, you need to run "
+      "one level of __torch_function__ before being able to skip again.");
   at::impl::PythonTorchFunctionTLS::exchange_skip_next(true);
   auto result = py::reinterpret_steal<py::object>(
       PyObject_Call(func, py_args.ptr(), kwargs));
@@ -365,7 +370,7 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
 }
 
 bool has_torch_function(c10::ArrayRef<PyObject*> args) {
-  if (torch::should_skip_torch_function()) {
+  if (torch::consume_should_skip_torch_function()) {
     return false;
   }
   for (const auto obj : args) {
@@ -400,7 +405,7 @@ inline static bool array_has_torch_function(
 }
 
 PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
-  if (torch::should_skip_torch_function()) {
+  if (torch::consume_should_skip_torch_function()) {
     Py_RETURN_FALSE;
   }
 
@@ -436,6 +441,6 @@ PyObject* THPModule_has_torch_function_variadic(
     PyObject* const* args,
     Py_ssize_t nargs) {
   return wrap(
-      !torch::should_skip_torch_function() &&
+      !torch::consume_should_skip_torch_function() &&
       array_has_torch_function(args, nargs));
 }

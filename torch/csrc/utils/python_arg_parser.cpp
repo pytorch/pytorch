@@ -1876,7 +1876,7 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
-  const bool skip_torch_function = torch::should_skip_torch_function();
+  const bool skip_torch_function = torch::consume_should_skip_torch_function();
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     std::vector<PyObject*> overloaded_args;

@@ -258,25 +258,42 @@ class RedispatchTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args, kwargs=None):
         call_log_entry = (func.__qualname__, types, args, kwargs)
 
-        # Collect input call_logs so we can propagate to output tensors
-        input_logs = []
+        inputs = []
 
-        def append_log(x):
+        def collect(x):
             if isinstance(x, RedispatchTensor):
-                x.call_log.append(call_log_entry)
-                input_logs.append(x.call_log)
+                inputs.append(x)
 
-        _ = tree_map(append_log, args)
+        _ = tree_map(collect, args)
         if kwargs:
-            _ = tree_map(append_log, kwargs)
-        ret = torch.overrides.redispatch_function(
-            func, types, args, kwargs)
+            _ = tree_map(collect, kwargs)
+
+        # Merge the call_logs of all input RedispatchTensors into a single
+        # shared list, then alias every input (and the wrapped output) to
+        # it.  Without the merge, logs from non-first inputs would be
+        # dropped; sharing the list means later ops on the output are also
+        # visible from the inputs' logs.
+        shared_log = inputs[0].call_log if inputs else None
+        if shared_log is not None:
+            seen_entry_ids = {id(e) for e in shared_log}
+            for t in inputs[1:]:
+                if t.call_log is shared_log:
+                    continue
+                for entry in t.call_log:
+                    if id(entry) not in seen_entry_ids:
+                        shared_log.append(entry)
+                        seen_entry_ids.add(id(entry))
+            shared_log.append(call_log_entry)
+            for t in inputs:
+                t.call_log = shared_log
+
+        ret = torch.overrides.redispatch_function(func, types, args, kwargs)
 
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
                 r = cls(x)
-                if input_logs:
-                    r.call_log = list(input_logs[0])
+                if shared_log is not None:
+                    r.call_log = shared_log
                 return r
             return x
         return tree_map(wrap, ret)

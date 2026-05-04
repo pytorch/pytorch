@@ -996,7 +996,7 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
-  if (should_skip_torch_function()) {
+  if (consume_should_skip_torch_function()) {
     return invokeOperatorFromPython(operations, args, kwargs, dk);
   }
 
