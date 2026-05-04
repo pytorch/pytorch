@@ -673,6 +673,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__dict__":
             return super().var_getattr(tx, name)
+        elif name == "__get__":
+            source = self.get_source()
+            source = source and AttrSource(source, "__get__")
+            return VariableTracker.build(tx, self.fn.__get__, source)
         elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(self.fn, name))
@@ -685,6 +689,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     ) -> ConstantVariable:
         result = hasattr(self.fn, name)
         return VariableTracker.build(tx, result)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name: str,
+    ) -> VariableTracker:
+        # Mirrors func_descr_get which calls PyMethod_New to bind
+        # the function to an instance.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
+        source = obj.source and AttrSource(obj.source, self.fn.__name__)
+        return UserMethodVariable(
+            self.fn, obj, source_fn=self.source, source=source
+        )
 
     def call_function(
         self,
@@ -1060,40 +1078,6 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
             return self.map_fn.call_function(tx, args, kwargs)
         return leaf
 
-
-class BuiltinMethodVariable(BaseUserFunctionVariable):
-    def __init__(
-        self, fn: types.BuiltinMethodType, is_constant: bool = False, **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        assert isinstance(fn, types.BuiltinMethodType)
-        self.fn = fn
-
-    def python_type(self) -> type:
-        return types.BuiltinMethodType
-
-    @staticmethod
-    def is_supported_builtin_method(obj: Any) -> bool:
-        method_self = obj.__self__
-        method_name = obj.__name__
-
-        # TODO(anijain2305) - Add support for more builtin methods
-        # Supports tuple.__new__ and frozenset({....}).__contains__
-        return (method_self is tuple and method_name == "__new__") or (
-            type(method_self) is frozenset and method_name == "__contains__"
-        )
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        method_self = self.fn.__self__
-        name = self.fn.__name__
-        obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
-        return obj_vt.call_method(tx, name, args, kwargs)
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
@@ -3896,6 +3880,20 @@ class MethodDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        # Mirrors descr_check: verify the first arg is an instance of
+        # __objclass__ before calling.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L78-L91
+        try:
+            obj_type = obj.python_type()
+            if not issubclass(obj_type, self.descriptor.__objclass__):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{self.descriptor.__name__}' for "
+                    f"'{self.descriptor.__objclass__.__name__}' objects "
+                    f"doesn't apply to a '{obj_type.__name__}' object",
+                )
+        except NotImplementedError:
+            pass
         return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
 
     def tp_descr_get_impl(
@@ -3930,13 +3928,15 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def __init__(
         self,
-        descriptor: types.MethodDescriptorType,
+        descriptor: types.MethodDescriptorType | types.BuiltinFunctionType,
         obj: VariableTracker,
         name: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.MethodDescriptorType)
+        assert isinstance(
+            descriptor, (types.MethodDescriptorType, types.BuiltinFunctionType)
+        )
         assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
@@ -4231,22 +4231,26 @@ class GetSetDescriptorVariable(VariableTracker):
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
         attr_name = self.desc.__name__
-        # When obj has a concrete value (e.g. UDOV), call the C getter
-        # directly. Otherwise (e.g. TensorVariable), delegate to
-        # var_getattr which handles proxy-based attribute access.
+        # Try to eagerly call the C getter when we can obtain the
+        # concrete Python object (UDOV.value, or as_python_constant
+        # for classes/constants). Fall back to var_getattr for
+        # proxy-based VTs like TensorVariable.
         obj_value = getattr(obj, "value", None)
-        if obj_value is not None:
+        if obj_value is None:
             try:
-                resolved = self.desc.__get__(obj_value)
-            except AttributeError:
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    args=[f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"],
-                )
-            result_source = obj.source and AttrSource(obj.source, attr_name)
-            return VariableTracker.build(tx, resolved, result_source)
-        return obj.var_getattr(tx, attr_name)
+                obj_value = obj.as_python_constant()
+            except NotImplementedError:
+                return obj.var_getattr(tx, attr_name)
+        try:
+            resolved = self.desc.__get__(obj_value)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"],
+            )
+        result_source = obj.source and AttrSource(obj.source, attr_name)
+        return VariableTracker.build(tx, resolved, result_source)
 
 
 class PropertyVariable(VariableTracker):
