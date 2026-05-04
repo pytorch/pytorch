@@ -751,7 +751,10 @@ def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
     h = hashlib.sha256()
     h.update(name.encode("utf-8"))
     with open(path, "rb") as f:
-        h.update(f.read())
+        if sys.version_info >= (3, 11):
+            h.update(hashlib.file_digest(f, "sha256").digest())
+        else:
+            h.update(f.read())
     return (name, h.digest())
 
 
@@ -761,9 +764,11 @@ def build_code_hash(
     from concurrent.futures import ThreadPoolExecutor
 
     files = _collect_module_files(roots, prefix)
+    if not files:
+        return
     with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
         per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
-    per_file_hashes.sort(key=lambda t: t[0])
+    per_file_hashes.sort()
     for _name, digest in per_file_hashes:
         hasher.update(digest)
 
