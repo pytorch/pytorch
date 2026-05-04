@@ -17,6 +17,11 @@
 #include <ATen/ops/empty_native.h>
 #endif
 
+// MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
+#if !defined(__MAC_26_0)
+static constexpr auto MTLGPUFamilyApple10 = static_cast<MTLGPUFamily>(1010);
+#endif
+
 namespace at {
 namespace native {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
@@ -539,7 +544,16 @@ static bool can_use_mpp_prefill(const Tensor& q,
                                 int64_t qL,
                                 int64_t kL,
                                 bool supports_fast_sdpa) {
-  if (!at::mps::is_macos_13_or_newer(at::mps::MacOSVersion::MACOS_VER_26_0_PLUS))
+  if (!at::mps::is_macos_13_or_newer(at::mps::MacOSVersion::MACOS_VER_26_2_PLUS))
+    return false;
+  // matmul2d cooperative_tensor's lane->element layout is implementation-defined.
+  // The MPP attention kernel hardcodes the simdgroup_matrix-style layout used
+  // on Apple10 (M5+). On Apple9 (M3/M4) the
+  // layout is different and the kernel produces wrong results, so restrict MPP
+  // to Apple10+ until the kernel becomes layout-agnostic.
+  static const bool is_apple10_or_newer =
+      [at::mps::MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
+  if (!is_apple10_or_newer)
     return false;
   if (supports_fast_sdpa || qL <= 8 || kL <= 0)
     return false;
