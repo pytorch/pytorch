@@ -8,6 +8,8 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
+#include <algorithm>
+#include <cstdint>
 
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
