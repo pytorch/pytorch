@@ -897,8 +897,8 @@ class AutogradFunctionVariable(VariableTracker):
                 raise TypeError(
                     f"forward() missing required argument: '{name}' (position {i})"
                 )
-        kwargs.clear()
-        return result, kwargs
+        empty: _KwargsT = {}  # type: ignore[assignment]
+        return result, empty
 
     def call_apply(
         self,
