@@ -19,7 +19,7 @@
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/StubBackend.hpp>
+#include <torch/csrc/distributed/c10d/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -2837,6 +2837,10 @@ Arguments:
               &::c10d::Backend::shutdown,
               py::call_guard<py::gil_scoped_release>(),
               "shutdown the backend")
+          .def(
+              "setUsePgForSymmMemRendezvous",
+              &::c10d::Backend::setUsePgForSymmMemRendezvous,
+              py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -4022,30 +4026,24 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
 
-  // StubBackend: minimal C++ Backend for testing custom backend plugins
+  // NCCLXStub: minimal C++ Backend for testing custom backend plugins
   // (simulates ncclx-like backends that register via extended_api=True).
-  auto stubBackend =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::StubBackend>(
-          module, "StubBackend", backend);
-  intrusive_ptr_class_<::c10d::StubBackend::Options>(
-      stubBackend, "Options", backendOptions)
-      .def(py::init<>())
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::StubBackend::Options::global_ranks_in_group)
-      .def_readwrite("group_name", &::c10d::StubBackend::Options::group_name);
-  stubBackend.def(
-      py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                  int rank,
-                  int size,
-                  c10::intrusive_ptr<::c10d::StubBackend::Options> options) {
-        return c10::make_intrusive<::c10d::StubBackend>(
-            store, rank, size, std::move(options));
-      }),
-      py::arg("store"),
-      py::arg("rank"),
-      py::arg("size"),
-      py::arg("options") = c10::make_intrusive<::c10d::StubBackend::Options>());
+  intrusive_ptr_class_<::c10d::NCCLXStub>(
+      module, "NCCLXStub", backend)
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
+                     options) {
+                return c10::make_intrusive<::c10d::NCCLXStub>(
+                    store, rank, size, std::move(options));
+              }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
 
   auto pythonCallbackWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::PythonCallbackWork>(

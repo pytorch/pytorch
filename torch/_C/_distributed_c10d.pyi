@@ -638,17 +638,13 @@ class FakeWork(Work):
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 
-class StubBackend(Backend):
-    class Options(Backend.Options):
-        global_ranks_in_group: list[int]
-        def __init__(self) -> None: ...
-
+class NCCLXStub(Backend):
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-        options: Options = ...,
+        options: ProcessGroupNCCL.Options = ...,
     ) -> None: ...
 
 class PythonCallbackWork(Work):
