@@ -3736,6 +3736,8 @@ class TestCase(expecttest.TestCase):
 
         # attempt to reset some global state at the end of the test
         self._prev_grad_state = torch.is_grad_enabled()
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -3757,6 +3759,23 @@ class TestCase(expecttest.TestCase):
         # attribute may not be defined, per above
         if hasattr(self, '_prev_grad_state'):
             torch.set_grad_enabled(self._prev_grad_state)
+
+        after = torch._C._len_torch_function_stack()
+        if after != self._prev_torch_function_mode_stack_len:
+            for _ in range(after - self._prev_torch_function_mode_stack_len):
+                torch._C._pop_torch_function_stack()
+            raise AssertionError(
+                f"torch function mode stack was leaked: "
+                f"length changed from {self._prev_torch_function_mode_stack_len} to {after}"
+            )
+
+        tf_state = torch._C._get_torch_function_state()
+        if tf_state != self._prev_torch_function_state:
+            torch._C._set_torch_function_state(self._prev_torch_function_state)
+            raise AssertionError(
+                f"torch function state was leaked: "
+                f"changed from {self._prev_torch_function_state} to {tf_state}"
+            )
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
