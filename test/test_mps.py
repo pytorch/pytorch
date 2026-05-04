@@ -10198,7 +10198,7 @@ class TestSDPA(TestCaseMPS):
         out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
         self._compare_tensors(out_mps.cpu(), out_cpu)
 
-    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_sdpa_math_mps_bool_mask_1pass(self, dtype):
         torch.manual_seed(0)
         q = torch.randn(1, 1, 8, 64, dtype=dtype, device='mps')
