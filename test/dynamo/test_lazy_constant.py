@@ -81,6 +81,29 @@ class LazyConstantVariableTests(TestCase):
 
         self.assertGreater(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_lazy_constant_int_comparison_becomes_symnode(self):
+        """Test that comparing lazy constant ints works when they realize to
+        SymNodeVariable.
+
+        The compare_by_value handler assumes ConstantVariable args (.value
+        access).  When specialize_int=False makes the lazy int resolve to
+        SymNodeVariable, the lazy_constant_handler must re-dispatch to the
+        symbolic comparison path.
+        """
+
+        def fn(x, n):
+            if n == 2:
+                return x.sum()
+            return x.mean()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3, 4)
+
+        eager = fn(x, 2)
+        compiled = opt_fn(x, 2)
+        self.assertTrue(same(eager, compiled))
+
     def test_slice_indices_unspecialized_ints(self):
         """Test that slice indices work with unspecialized ints.
 

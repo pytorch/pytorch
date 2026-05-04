@@ -69,7 +69,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
@@ -77,7 +77,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -264,7 +264,7 @@ WHEEL_CONTAINER_IMAGES = {
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
-    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
+    "cpu-s390x": "manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"

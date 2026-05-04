@@ -13,7 +13,7 @@ namespace torch::autograd {
 
 struct THPCppFunction {
   PyObject_HEAD
-  std::shared_ptr<Node> cdata;
+  c10::intrusive_ptr<Node> cdata;
 };
 
 template <typename Ctor>
@@ -26,7 +26,8 @@ TORCH_PYTHON_API PyObject* CppFunction_pynew(
     return nullptr;
   THPCppFunction* f = (THPCppFunction*)obj.get();
   HANDLE_TH_ERRORS
-  new (&f->cdata) std::shared_ptr<Node>(Ctor()(args));
+  new (&f->cdata) c10::intrusive_ptr<Node>(
+      c10::intrusive_ptr<Node>::unsafe_steal_from_new(Ctor()(args)));
   END_HANDLE_TH_ERRORS
   if (!f->cdata) {
     return nullptr;
@@ -105,6 +106,11 @@ TORCH_PYTHON_API PyTypeObject* _initFunctionPyTypeObject(
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods);
 
+TORCH_PYTHON_API int traverse_node(
+    c10::intrusive_ptr<Node>& fn,
+    visitproc visit,
+    void* arg);
+
 TORCH_PYTHON_API PyObject* registerFunctionHook(Node& fn, PyObject* hook);
 
 TORCH_PYTHON_API PyObject* registerFunctionPreHook(Node& fn, PyObject* hook);
@@ -124,7 +130,7 @@ TORCH_PYTHON_API void registerCppFunction(
     const std::type_info& type,
     PyTypeObject* pytype);
 TORCH_PYTHON_API PyObject* functionToPyObject(
-    const std::shared_ptr<Node>& cdata);
+    const c10::intrusive_ptr<Node>& cdata);
 
 TORCH_PYTHON_API bool THPCppFunction_Check(PyObject* obj);
 
