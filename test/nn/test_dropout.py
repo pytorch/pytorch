@@ -218,8 +218,8 @@ class TestDropoutNNDeviceType(NNTestCase):
     def test_Dropout1d(self, device, dtype):
         with set_default_dtype(dtype):
             N, C, L = (
-                random.randint(10, 15),
-                random.randint(10, 15),
+                random.randint(50, 60),
+                random.randint(50, 60),
                 random.randint(10, 15),
             )
             input = torch.empty(N, C, L)
