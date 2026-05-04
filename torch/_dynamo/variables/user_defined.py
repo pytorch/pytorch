@@ -572,6 +572,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             return variables.PropertyVariable(cls_attr, source=descriptor_source)
 
+        # TODO - There is an ordering issue - if we move this code to after the
+        # wrapper and method descriptor logic, the test fails
+        # PYTORCH_TEST_WITH_DYNAMO=1 pytest -vs test/dynamo/cpython/3_13/test_collections.py::TestUserObjects::test_list_copy
+        # Revisit this once we implement tp_richcompare slot
+
+        # Comparison dunders inherited from object — defer to runtime.
+        if name in cmp_name_to_op_mapping and not isinstance(
+            cls_attr, types.FunctionType
+        ):
+            return variables.GetAttrVariable(
+                self, name, py_type=type(cls_attr), source=source
+            )
+
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
@@ -598,14 +611,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
-
-        # Comparison dunders inherited from object — defer to runtime.
-        if name in cmp_name_to_op_mapping and not isinstance(
-            cls_attr, types.FunctionType
-        ):
-            return variables.GetAttrVariable(
-                self, name, py_type=type(cls_attr), source=source
-            )
 
         # User-defined descriptor with Python __get__.
         # For torch-internal classes or attributes in the class's own __dict__,

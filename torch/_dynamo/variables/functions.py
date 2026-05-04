@@ -3727,13 +3727,13 @@ class WrapperDescriptorVariable(VariableTracker):
     def python_type(self) -> type:
         return types.WrapperDescriptorType
 
+    def as_python_constant(self) -> types.WrapperDescriptorType:
+        return self.descriptor
+
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        # descr_members: __objclass__ and __name__ are PyMemberDef on all
-        # descriptor types.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
         if name == "__objclass__":
             return VariableTracker.build(tx, self.descriptor.__objclass__)
         if name == "__name__":
@@ -3859,13 +3859,13 @@ class MethodDescriptorVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MethodDescriptorType
 
+    def as_python_constant(self) -> types.MethodDescriptorType:
+        return self.descriptor
+
     def get_real_python_backed_value(self) -> types.MethodDescriptorType:
         return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        # descr_members: __objclass__ and __name__ are PyMemberDef on all
-        # descriptor types.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
         if name == "__objclass__":
             return VariableTracker.build(tx, self.descriptor.__objclass__)
         if name == "__name__":
