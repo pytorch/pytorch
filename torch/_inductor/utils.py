@@ -176,6 +176,7 @@ _TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
         torch.float8_e5m2,
         torch.float8_e4m3fnuz,
         torch.float8_e5m2fnuz,
+        torch.float4_e2m1fn_x2,
     ]
 )
 
@@ -4621,7 +4622,7 @@ def infer_scale_swizzle_ir(
     Infer the scaling type and swizzle mode for IR nodes (used during graph lowering).
 
     This is the IR-compatible version of infer_scale_swizzle, using symbolic
-    size comparisons via V.graph.sizevars.statically_known_equals.
+    size comparisons guarded through V.graph.sizevars.guard_or_false.
     """
     from torch._inductor.virtualized import V
 
@@ -4636,8 +4637,7 @@ def infer_scale_swizzle_ir(
     scale_numel = functools.reduce(operator.mul, scale_size, 1) if scale_size else 1
 
     def symbolic_eq(a: Any, b: Any) -> bool:
-        """Compare values using symbolic equality when possible."""
-        return V.graph.sizevars.statically_known_equals(a, b)
+        return V.graph.sizevars.guard_or_false(sympy.Eq(a, b))
 
     return _infer_scale_swizzle_impl(
         mat_size=(mat_size[0], mat_size[1]) if len(mat_size) >= 2 else (mat_size[0], 1),

@@ -3,6 +3,8 @@ import functools
 import logging
 from typing import Any
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -16,8 +18,9 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config, distributed_autotune
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
@@ -27,10 +30,12 @@ from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
+    fallback_handler,
     lowerings,
     make_pointwise,
     make_reduction,
     register_lowering,
+    to_dtype,
     transform_args,
 )
 from ..select_algorithm import (
@@ -43,6 +48,7 @@ from ..select_algorithm import (
 from ..utils import (
     _use_cutlass_for_op,
     ceildiv,
+    infer_scale_swizzle_ir,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
@@ -800,11 +806,36 @@ scaling_pairs = [
     (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise1x128),
     (ScalingType.BlockWise128x128, ScalingType.BlockWise1x128),
+    (ScalingType.BlockWise1x32, ScalingType.BlockWise1x32),
+    (ScalingType.BlockWise1x16, ScalingType.BlockWise1x16),
 ]
 
 
 epilogue_scaling_types = [ScalingType.TensorWise, ScalingType.RowWise]
-main_loop_scaling_types = [ScalingType.BlockWise1x128, ScalingType.BlockWise128x128]
+main_loop_scaling_types = [
+    ScalingType.BlockWise1x16,
+    ScalingType.BlockWise1x32,
+    ScalingType.BlockWise1x128,
+    ScalingType.BlockWise128x128,
+]
+
+scaled_mm_v2_recipe_value_to_type = {
+    scale_type.value: scale_type for scale_type in ScalingType.__members__.values()
+}
+
+scaled_mm_v2_inductor_supported_scaling_recipes = {
+    ScalingType.TensorWise: OrderedSet([ScalingType.TensorWise]),
+    ScalingType.RowWise: OrderedSet([ScalingType.RowWise]),
+    ScalingType.BlockWise1x16: OrderedSet([ScalingType.BlockWise1x16]),
+    ScalingType.BlockWise1x32: OrderedSet([ScalingType.BlockWise1x32]),
+    ScalingType.BlockWise1x128: OrderedSet(
+        [
+            ScalingType.BlockWise1x128,
+            ScalingType.BlockWise128x128,
+        ]
+    ),
+    ScalingType.BlockWise128x128: OrderedSet([ScalingType.BlockWise1x128]),
+}
 
 
 def _is_tensorwise_scaling(sz: Any) -> bool:
@@ -819,14 +850,26 @@ def _is_rowwise_scaling(sz: Any, transpose: bool) -> bool:
 
 
 def _is_blockwise1xTILESIZE_scaling(
-    sz: Any, tensor_sz: Any, tile_size: int, transpose: bool
+    sz: Any, t: Any, tile_size: int, transpose: bool
 ) -> bool:
+    tensor_sz = t.get_size()
     lhs = 1 if transpose else 0
     rhs = 0 if transpose else 1
-    return V.graph.sizevars.statically_known_equals(
-        sz[lhs], tensor_sz[lhs]
-    ) and V.graph.sizevars.statically_known_equals(
-        sz[rhs], ceildiv(tensor_sz[rhs], tile_size)
+    k_multiplier = 2 if t.get_dtype() == torch.float4_e2m1fn_x2 else 1
+    if len(sz) == 1:
+        if tile_size not in (16, 32):
+            return False
+        expected_numel = (
+            ceildiv(tensor_sz[lhs], 128)
+            * 128
+            * ceildiv(ceildiv(tensor_sz[rhs] * k_multiplier, tile_size), 4)
+            * 4
+        )
+        return V.graph.sizevars.guard_or_false(sympy.Eq(sz[0], expected_numel))
+    return V.graph.sizevars.guard_or_false(
+        sympy.Eq(sz[lhs], tensor_sz[lhs])
+    ) and V.graph.sizevars.guard_or_false(
+        sympy.Eq(sz[rhs], ceildiv(tensor_sz[rhs] * k_multiplier, tile_size))
     )
 
 
@@ -847,10 +890,12 @@ def is_desired_scaling(
             return _is_tensorwise_scaling(scale_size)
         case ScalingType.RowWise:
             return _is_rowwise_scaling(scale_size, transpose)
+        case ScalingType.BlockWise1x16:
+            return _is_blockwise1xTILESIZE_scaling(scale_size, t, 16, transpose)
+        case ScalingType.BlockWise1x32:
+            return _is_blockwise1xTILESIZE_scaling(scale_size, t, 32, transpose)
         case ScalingType.BlockWise1x128:
-            return _is_blockwise1xTILESIZE_scaling(
-                scale_size, t.get_size(), 128, transpose
-            )
+            return _is_blockwise1xTILESIZE_scaling(scale_size, t, 128, transpose)
         case ScalingType.BlockWise128x128:
             return _is_blockwise128x128_scaling(scale_size, t.get_size())
         case _:
@@ -859,9 +904,11 @@ def is_desired_scaling(
 
 def get_tile_size(scale_option) -> int:
     match scale_option:
-        case ScalingType.BlockWise128x128:
-            return 128
-        case ScalingType.BlockWise1x128:
+        case ScalingType.BlockWise1x16:
+            return 16
+        case ScalingType.BlockWise1x32:
+            return 32
+        case ScalingType.BlockWise1x128 | ScalingType.BlockWise128x128:
             return 128
         case _:
             raise AssertionError(
@@ -884,6 +931,192 @@ def get_scaling_options(
     raise AssertionError(
         f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
     )  # verify that shapes are supported by at least one existing pairing
+
+
+def _get_swizzle(swizzles, index):
+    if index >= len(swizzles):
+        return SwizzleType.NO_SWIZZLE
+    return SwizzleType(swizzles[index])
+
+
+def _get_single_scale_and_recipe(scales, recipes, swizzles):
+    if len(scales) != 1 or len(recipes) != 1:
+        return None
+    swizzle = _get_swizzle(swizzles, 0)
+    recipe = scaled_mm_v2_recipe_value_to_type.get(recipes[0])
+    if swizzle not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
+        return None
+    if recipe is None:
+        return None
+    return scales[0], recipe, swizzle
+
+
+def _get_nvfp4_two_level_scales_and_recipes(scales, recipes, swizzles):
+    if len(scales) != 2 or len(recipes) != 2:
+        return None
+    recipe_a = scaled_mm_v2_recipe_value_to_type.get(recipes[0])
+    recipe_b = scaled_mm_v2_recipe_value_to_type.get(recipes[1])
+    if (
+        recipe_a != ScalingType.BlockWise1x16
+        or recipe_b != ScalingType.TensorWise
+        or _get_swizzle(swizzles, 0) != SwizzleType.SWIZZLE_32_4_4
+        or _get_swizzle(swizzles, 1) != SwizzleType.NO_SWIZZLE
+    ):
+        return None
+    return scales[0], scales[1]
+
+
+def _fallback_scaled_mm_v2(
+    mat_a,
+    mat_b,
+    scale_a,
+    recipe_a,
+    swizzle_a,
+    scale_b,
+    recipe_b,
+    swizzle_b,
+    bias,
+    out_dtype,
+    contraction_dim,
+    use_fast_accum,
+):
+    return fallback_handler(aten._scaled_mm_v2.default, add_to_fallback_set=False)(
+        mat_a,
+        mat_b,
+        scale_a,
+        recipe_a,
+        swizzle_a,
+        scale_b,
+        recipe_b,
+        swizzle_b,
+        bias,
+        out_dtype,
+        contraction_dim,
+        use_fast_accum,
+    )
+
+
+@register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)  # type: ignore[misc]
+def tuned_scaled_mm_v2(
+    mat_a,
+    mat_b,
+    scale_a,
+    recipe_a,
+    swizzle_a,
+    scale_b,
+    recipe_b,
+    swizzle_b,
+    bias,
+    out_dtype,
+    contraction_dim=(),
+    use_fast_accum=False,
+    layout=None,
+):
+    """Lower supported scaled_mm_v2 recipes through Triton scaled_mm paths."""
+    scale_a_and_recipe = _get_single_scale_and_recipe(scale_a, recipe_a, swizzle_a)
+    scale_b_and_recipe = _get_single_scale_and_recipe(scale_b, recipe_b, swizzle_b)
+    if scale_a_and_recipe is None or scale_b_and_recipe is None:
+        nvfp4_a_scales = _get_nvfp4_two_level_scales_and_recipes(
+            scale_a, recipe_a, swizzle_a
+        )
+        nvfp4_b_scales = _get_nvfp4_two_level_scales_and_recipes(
+            scale_b, recipe_b, swizzle_b
+        )
+        if (
+            nvfp4_a_scales is not None
+            and nvfp4_b_scales is not None
+            and not contraction_dim
+            and bias is None
+            and not use_fast_accum
+        ):
+            base = tuned_scaled_mm(
+                mat_a,
+                mat_b,
+                nvfp4_a_scales[0],
+                nvfp4_b_scales[0],
+                out_dtype=torch.float32,
+                layout=layout,
+            )
+            alpha = lowerings[aten.mul](nvfp4_a_scales[1], nvfp4_b_scales[1])
+            result = lowerings[aten.mul](base, alpha)
+            return to_dtype(
+                result, out_dtype if out_dtype is not None else mat_a.get_dtype()
+            )
+        return _fallback_scaled_mm_v2(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            contraction_dim,
+            use_fast_accum,
+        )
+
+    if contraction_dim:
+        return _fallback_scaled_mm_v2(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            contraction_dim,
+            use_fast_accum,
+        )
+
+    scale_a_unwrapped, scale_option_a, expected_swizzle_a = scale_a_and_recipe
+    scale_b_unwrapped, scale_option_b, expected_swizzle_b = scale_b_and_recipe
+
+    inferred_scale_option_a, inferred_swizzle_a = infer_scale_swizzle_ir(
+        mat_a, scale_a_unwrapped
+    )
+    inferred_scale_option_b, inferred_swizzle_b = infer_scale_swizzle_ir(
+        mat_b, scale_b_unwrapped, transpose=True
+    )
+    if (
+        scale_option_b
+        not in scaled_mm_v2_inductor_supported_scaling_recipes.get(
+            scale_option_a, OrderedSet()
+        )
+        or inferred_scale_option_a != scale_option_a
+        or inferred_scale_option_b != scale_option_b
+        or inferred_swizzle_a != expected_swizzle_a
+        or inferred_swizzle_b != expected_swizzle_b
+    ):
+        return _fallback_scaled_mm_v2(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            contraction_dim,
+            use_fast_accum,
+        )
+
+    return tuned_scaled_mm(
+        mat_a,
+        mat_b,
+        scale_a_unwrapped,
+        scale_b_unwrapped,
+        bias=bias,
+        out_dtype=out_dtype,
+        use_fast_accum=use_fast_accum,
+        layout=layout,
+    )
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
@@ -960,13 +1193,13 @@ def tuned_scaled_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    if (
-        # We dont have triton lowerings for the MX variants yet
-        scale_a.dtype == torch.float32
-        and is_nonzero
-        and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
+    if is_nonzero and use_triton_template(
+        layout, enable_float8=True, check_max_autotune=False
     ):
-        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
+        overriders = dict(
+            USE_FAST_ACCUM=use_fast_accum,
+            FP4_INPUT=mat_a.get_dtype() == torch.float4_e2m1fn_x2,
+        )
 
         scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
 
@@ -995,6 +1228,10 @@ def tuned_scaled_mm(
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+                if mat_a.get_dtype() == torch.float4_e2m1fn_x2:
+                    overriders["TILE_SIZE_A"] //= 2
+                if mat_b.get_dtype() == torch.float4_e2m1fn_x2:
+                    overriders["TILE_SIZE_B"] //= 2
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
@@ -1007,7 +1244,10 @@ def tuned_scaled_mm(
                 )
 
         if (
-            use_triton_blackwell_tma_template(
+            use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
+            )
+            and use_triton_blackwell_tma_template(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
             and not bias
