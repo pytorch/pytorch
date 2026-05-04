@@ -684,7 +684,7 @@ void maximum_kernel(TensorIteratorBase& iter) {
                 if (a != a || b != b) {
                   return std::numeric_limits<scalar_t>::quiet_NaN();
                 } else {
-                  return std::max(a, b);
+                  return std::fmax(a, b);
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -719,7 +719,7 @@ void minimum_kernel(TensorIteratorBase& iter) {
                 if (a != a || b != b) {
                   return std::numeric_limits<scalar_t>::quiet_NaN();
                 } else {
-                  return std::min(a, b);
+                  return std::fmin(a, b);
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
