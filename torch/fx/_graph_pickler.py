@@ -15,7 +15,7 @@ from torch.utils._import_utils import import_dill
 
 dill = import_dill()
 if dill is not None:
-    pickle = dill
+    pickle = dill  # noqa: F811
 
 import torch
 import torch.utils._pytree as pytree
@@ -123,8 +123,6 @@ class GraphPickler(pickle.Pickler):
         # pickle so that duplicates and views are properly handled.
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
-    _PASSTHROUGH_TYPES = frozenset({int, float, str, bytes, bool, type(None)})
-
     @override
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -147,9 +145,6 @@ class GraphPickler(pickle.Pickler):
 
         # These are the types that need special handling. See the individual
         # *PickleData classes for details on pickling that particular type.
-        if type(obj) in self._PASSTHROUGH_TYPES:
-            return NotImplemented
-
         if isinstance(obj, FakeTensor):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
@@ -752,9 +747,9 @@ class _OpPickleData:
         options: Options,
     ) -> "_OpPickleData":
         if (ops_filter := options.ops_filter) and not ops_filter(name):
-            from torch._inductor.codecache import CacheabilityValidator
+            from torch._inductor.codecache import BypassFxGraphCache
 
-            CacheabilityValidator.bypass(f"Unable to pickle non-standard op: {name}")
+            raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
         return datacls(name)
 
     @abstractmethod

@@ -89,14 +89,14 @@ class TestCase(PytorchTestCase):
         try:
             result_e = expected()
             exception_e = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result_e = None
             exception_e = e
 
         try:
             result_a = actual()
             exception_a = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result_a = None
             exception_a = e
 

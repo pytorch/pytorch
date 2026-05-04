@@ -26,7 +26,6 @@
     driver_allocated_memory
     recommended_max_memory
     compile_shader
-    load_metallib
 ```
 
 ## MPS Profiler

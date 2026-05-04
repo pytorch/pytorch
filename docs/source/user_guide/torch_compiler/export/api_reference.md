@@ -12,7 +12,7 @@
    :exclude-members: __init__
 
 .. automodule:: torch.export.dynamic_shapes
-   :members: Dim, ShapesCollection, AdditionalInputs, dims, refine_dynamic_shapes_from_suggested_fixes
+   :members: Dim, ShapesCollection, AdditionalInputs, refine_dynamic_shapes_from_suggested_fixes
 
 .. autofunction:: torch.export.save
 

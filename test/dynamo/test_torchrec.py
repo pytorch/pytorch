@@ -62,7 +62,7 @@ class BucketizeMod(torch.nn.Module):
 
 if not HAS_TORCHREC:
     print("torchrec not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest
+    TestCase = NoTest  # noqa: F811
 
 
 @unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")

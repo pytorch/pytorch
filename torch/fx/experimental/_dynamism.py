@@ -26,10 +26,8 @@ def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
     """Recursively converts an nn.Module into a nested dictionary with explicit 'parameters' and 'modules' keys."""
     self_dict: dict[str, Any] = {}
 
-    parameters: dict[str, torch.Tensor] = {}
-    modules: dict[str, dict[str, Any]] = {}
-    self_dict["_parameters"] = parameters
-    self_dict["_modules"] = modules
+    self_dict["_parameters"] = {}
+    self_dict["_modules"] = {}
 
     for attr_name in dir(module):
         try:

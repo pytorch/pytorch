@@ -4,7 +4,7 @@
 set -eou pipefail
 
 function do_install() {
-    ROCSHMEM_VERSION=cb8a2d6f82ae738a632dcbb1583d18a8add4d1d1
+    ROCSHMEM_VERSION=ea5c137103f18a9aadd570d09d72e78ec52f0a3a
     rocm_dir="${ROCM_HOME:-}"
     if [[ -z "${rocm_dir}" && -f /etc/rocm_env.sh ]]; then
         source /etc/rocm_env.sh

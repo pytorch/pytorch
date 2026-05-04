@@ -76,10 +76,12 @@ class AdaptiveRoundingOptimizer:
                 # Knowing activation ahead-of-time would be helpful for asymmetric formulation
                 # But this is challenging in eager mode, but graph module.
                 layer_list.append((name, module, q_module))
-        print(f"Total number of layers : {len(layer_list)}")
+        print(f"Total number of layers : {len(layer_list)}")  # noqa: G004
 
         for name, module, q_module in layer_list:
-            print(f"Kick start adaptive rounding on {name} module {module}")
+            print(
+                f"Kick start adaptive rounding on {name} module {module}"  # noqa: G004
+            )
             self.optimize_adaptive_rounding(
                 module,
                 q_module,
@@ -160,7 +162,7 @@ class AdaptiveRoundingOptimizer:
             soft_quant_loss = F.mse_loss(out_soft_quant, fp_out)
             hard_quant_loss = F.mse_loss(out_hard_quant, fp_out)
             print(
-                f"soft quant loss: {soft_quant_loss.item()} hard quant loss: {hard_quant_loss.item()}"
+                f"soft quant loss: {soft_quant_loss.item()} hard quant loss: {hard_quant_loss.item()}"  # noqa: G004
             )
 
     def optimize_adaptive_rounding(
@@ -238,8 +240,8 @@ class AdaptiveRoundingOptimizer:
                 break
             if iteration % 30 == 0:
                 print(
-                    f"glob iter {global_idx} regularization_loss {regularization_loss.item()} "
-                    f"reconstruction_loss {reconstruction_loss.item()}"
+                    f"glob iter {global_idx} regularization_loss {regularization_loss.item()} "  # noqa: G004
+                    f"reconstruction_loss {reconstruction_loss.item()}"  # noqa: G004
                 )
         print("==================== After adaround ====================")
         self._compute_and_display_local_losses(ada_quantizer, q_module, inp[0], out[0])

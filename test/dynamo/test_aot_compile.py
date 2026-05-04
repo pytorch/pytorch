@@ -374,7 +374,7 @@ class TestVLLMModel(MultiModalMixin, TextModel):
 def _subprocess_entry(fn, queue):
     try:
         fn()
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001
         import traceback
 
         queue.put((type(exc).__name__, str(exc), traceback.format_exc()))

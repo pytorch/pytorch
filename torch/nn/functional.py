@@ -10,6 +10,7 @@ import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
+    _infer_size,
     _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
     _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
@@ -145,7 +146,7 @@ Examples::
     >>> inputs = torch.randn(1, 4, 5, 5)
     >>> F.conv2d(inputs, filters, padding=1)
 """,
-)
+)  # noqa: E501
 
 conv3d = _add_docstr(
     torch.conv3d,
@@ -195,7 +196,7 @@ Examples::
     >>> inputs = torch.randn(20, 16, 50, 10, 20)
     >>> F.conv3d(inputs, filters)
 """,
-)
+)  # noqa: E501
 
 conv_transpose1d = _add_docstr(
     torch.conv_transpose1d,
@@ -279,7 +280,7 @@ Examples::
     >>> weights = torch.randn(4, 8, 3, 3)
     >>> F.conv_transpose2d(inputs, weights, padding=1)
 """,
-)
+)  # noqa: E501
 
 conv_transpose3d = _add_docstr(
     torch.conv_transpose3d,
@@ -321,7 +322,7 @@ Examples::
     >>> weights = torch.randn(16, 33, 3, 3, 3)
     >>> F.conv_transpose3d(inputs, weights)
 """,
-)
+)  # noqa: E501
 
 conv_tbc = _add_docstr(
     torch.conv_tbc,
@@ -442,7 +443,7 @@ def fractional_max_pool2d_with_indices(
     output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -555,7 +556,7 @@ def fractional_max_pool3d_with_indices(
     output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -673,7 +674,7 @@ def max_pool1d_with_indices(
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -763,7 +764,7 @@ def max_pool2d_with_indices(
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -853,7 +854,7 @@ def max_pool3d_with_indices(
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -893,13 +894,6 @@ def max_pool3d_with_indices(
         )
     if stride is None:
         stride = torch.jit.annotate(list[int], [])
-    if not torch.jit.is_scripting():
-        if input.is_cuda and torch.are_deterministic_algorithms_enabled():
-            return importlib.import_module(
-                "torch._decomp.decompositions"
-            ).max_pool3d_with_indices(
-                input, kernel_size, stride, padding, dilation, ceil_mode
-            )
     return torch._C._nn.max_pool3d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode
     )
@@ -1207,7 +1201,7 @@ def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool1d(input, output_size, return_indices=False)
 
@@ -1262,7 +1256,7 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
@@ -1319,7 +1313,7 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
     return_indices: bool = False,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool3d(input, output_size, return_indices=False)
 
@@ -1715,7 +1709,7 @@ In-place version of :func:`~threshold`.
 )
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
+def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
@@ -1740,7 +1734,7 @@ In-place version of :func:`~relu`.
 )
 
 
-def glu(input: Tensor, dim: int = -1) -> Tensor:
+def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1772,7 +1766,7 @@ def hardtanh(
     min_val: float = -1.0,
     max_val: float = 1.0,
     inplace: bool = False,
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -1802,7 +1796,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
-def relu6(input: Tensor, inplace: bool = False) -> Tensor:
+def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
@@ -1842,7 +1836,7 @@ In-place version of :func:`~elu`.
 )
 
 
-def selu(input: Tensor, inplace: bool = False) -> Tensor:
+def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1875,7 +1869,7 @@ def celu(
     input: Tensor,
     alpha: float = 1.0,
     inplace: bool = False,
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1908,7 +1902,7 @@ def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
     inplace: bool = False,
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -1965,7 +1959,7 @@ def rrelu(
     upper: float = 1.0 / 3,
     training: bool = False,
     inplace: bool = False,
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -2040,7 +2034,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 )
 
 
-def tanhshrink(input):
+def tanhshrink(input):  # noqa: D400,D402
     r"""tanhshrink(input) -> Tensor
 
     Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
@@ -2052,7 +2046,7 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
-def softsign(input):
+def softsign(input):  # noqa: D400,D402
     r"""softsign(input) -> Tensor
 
     Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
@@ -2288,7 +2282,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 )
 
 
-def tanh(input):
+def tanh(input):  # noqa: D400,D402
     r"""tanh(input) -> Tensor
 
     Applies element-wise,
@@ -2299,7 +2293,7 @@ def tanh(input):
     return input.tanh()
 
 
-def sigmoid(input):
+def sigmoid(input):  # noqa: D400,D402
     r"""sigmoid(input) -> Tensor
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
@@ -3576,7 +3570,7 @@ def binary_cross_entropy(
         )
 
     if weight is not None:
-        new_size = torch.broadcast_shapes(target.size(), weight.size())
+        new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
     # pyrefly: ignore [bad-argument-type]
@@ -3650,158 +3644,6 @@ def binary_cross_entropy_with_logits(
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum
-    )
-
-
-def linear_cross_entropy(
-    input: Tensor,
-    linear_weight: Tensor,
-    target: Tensor,
-    *,
-    weight: Tensor | None = None,
-    reduction: str = "mean",
-    ignore_index: int | None = None,
-    label_smoothing: float = 0.0,
-) -> Tensor:
-    r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
-
-    The statement::
-
-      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
-
-    is equivalent to the following reference implementation of linear_cross_entropy::
-
-      logits = linear(input, linear_weight)
-      loss = cross_entropy(logits, target, **kwargs)
-
-    provided that :attr:`ignore_index` is not explicitly set to `None`
-    in `kwargs` (since :func:`cross_entropy` does not accept `None`
-    for :attr:`ignore_index`).
-
-    See :class:`~torch.nn.Linear` and :class:`~torch.nn.CrossEntropyLoss` for details.
-
-    Args:
-        input (Tensor) : input samples.
-        linear_weight (Tensor) : linear weight.
-        target (Tensor) : Ground truth class indices or class probabilities;
-        weight (Tensor, optional): a manual rescaling weight given to each class.
-        reduction (str, optional): Specifies the reduction to apply to
-            the output: ``'none'`` | ``'mean'`` |
-            ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the sum of the output will be divided by the
-            number of elements in the output, ``'sum'``: the output
-            will be summed.
-            Default: ``'mean'``.
-        ignore_index (int, optional): Specifies a target value that is
-            ignored and does not contribute to the input
-            gradient. Note that :attr:`ignore_index` is only
-            applicable when the target contains class indices.
-            Default: `None`. When target contains class indices, the
-            default value is mapped to `-100`. Note: the default
-            :attr:`ignore_index` in
-            :class:`~torch.nn.functional.cross_entropy` is `-100` for both
-            target types.
-        label_smoothing (float, optional): A float in [0.0, 1.0].
-            Specifies the amount of smoothing when computing the
-            loss, where 0.0 means no smoothing. The targets become a
-            mixture of the original ground truth and a uniform
-            distribution as described in `Rethinking the Inception
-            Architecture for Computer Vision
-            <https://arxiv.org/abs/1512.00567>`__.
-            Default: :math:`0.0`.
-
-    Shape:
-        - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
-        - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
-          ..., d_K, in\_features)` with :math:`K \geq 1` in the case of
-          K-dimensional loss.  Note: multi-dimensional weights (K > 0)
-          require batched input :math:`(N, in\_features)`.
-        - Target: If containing class indices, :math:`()`,
-          :math:`(N)`, or :math:`(N, d_1, d_2, ..., d_K)` when
-          :math:`K\geq 1`, where each value should be between
-          :math:`[0, C)`. The target data type is required to be long
-          when using class indices.
-          If containing class probabilities, the target must have
-          shape :math:`(C)`, :math:`(N, C)`, or :math:`(N, C, d_1,
-          d_2, ..., d_K)` when :math:`K\geq 1`, and each value should
-          be between :math:`[0, 1]`. This means the target data type
-          is required to be float when using class probabilities. Note
-          that PyTorch does not strictly enforce probability
-          constraints on the class probabilities and that it is the
-          user's responsibility to ensure ``target`` contains valid
-          probability distributions.
-        - Weight: :math:`(C)`.
-        - Output: If reduction is 'none', shape :math:`()`,
-          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
-          in the case of K-dimensional loss, depending on the
-          shape of the input. Otherwise, scalar.
-
-        where :math:`N` is batch size and :math:`C` is number of classes.
-
-    """
-    if has_torch_function_variadic(input, linear_weight, target, weight):
-        return handle_torch_function(
-            linear_cross_entropy,
-            (input, linear_weight, target, weight),
-            input,
-            linear_weight,
-            target,
-            weight=weight,
-            reduction=reduction,
-            ignore_index=ignore_index,
-            label_smoothing=label_smoothing,
-        )
-    if input.dim() < 1 or input.dim() > 2:
-        raise RuntimeError(
-            f"expected input with dimensionality 1 or 2, got {input.dim()}"
-        )
-    if linear_weight.dim() < 2:
-        raise RuntimeError(
-            f"expected linear_weight with dimensionality at least 2, got {linear_weight.dim()}"
-        )
-    num_batches = input.shape[:-1]
-    in_features = input.shape[-1]
-    if in_features != linear_weight.shape[-1]:
-        raise RuntimeError(
-            "expected equal input and linear_weight last dimensions (in_features), "
-            f"got {input.shape[-1]} and {linear_weight.shape[-1]}, respectively"
-        )
-    num_classes = linear_weight.shape[0]
-    out_features = linear_weight.shape[1:-1]
-    if len(out_features) > 0 and len(num_batches) == 0:
-        raise RuntimeError(
-            f"K-dimensional loss defined by linear_weight shape {tuple(linear_weight.shape)} requires"
-            f" batched input, (N, {in_features}), got unbatched"
-            f" input with shape {tuple(input.shape)}"
-        )
-    logits_shape = (*num_batches, num_classes, *out_features)
-    # Ensure compatibility with cross_entropy_loss_symint that uses
-    # target and logits shape equality to detect if target contains
-    # probabilities:
-    target_contains_probabilities = target.shape == logits_shape
-    if target_contains_probabilities and ignore_index is not None:
-        raise RuntimeError(
-            "ignore_index cannot be specified when target contains probabilities"
-        )
-    ignore_index = ignore_index if ignore_index is not None else -100
-
-    if out_features:
-        # reshape linear_weight to 2D required by linear
-        linear_weight = linear_weight.reshape(
-            (math.prod(out_features, start=num_classes), in_features)
-        )
-    logits = linear(input, linear_weight)
-    # recover logits shape that corresponds to the shape of specified
-    # linear_weight:
-    logits = logits.reshape(logits_shape)
-
-    return cross_entropy(
-        logits,
-        target,
-        weight=weight,
-        reduction=reduction,
-        ignore_index=ignore_index,
-        label_smoothing=label_smoothing,
     )
 
 
@@ -3971,7 +3813,7 @@ def l1_loss(
     reduce: bool | None = None,
     reduction: str = "mean",
     weight: Tensor | None = None,
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the L1 loss, with optional weighting.
 
     Function that takes the mean element-wise absolute value difference.
@@ -4126,7 +3968,7 @@ def margin_ranking_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the margin ranking loss.
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
@@ -4176,7 +4018,7 @@ def hinge_embedding_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the hinge embedding loss.
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
@@ -4219,7 +4061,7 @@ def multilabel_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the multilabel margin loss.
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
@@ -4261,7 +4103,7 @@ def soft_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the soft margin loss.
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
@@ -4304,7 +4146,7 @@ def multilabel_soft_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the multilabel soft margin loss.
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -4365,7 +4207,7 @@ def cosine_embedding_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the cosine embedding loss.
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
@@ -4413,7 +4255,7 @@ def multi_margin_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""Compute the multi margin loss, with optional weighting.
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
@@ -4604,14 +4446,14 @@ Examples::
 
 
 @_overload
-def upsample(
+def upsample(  # noqa: F811
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,
     mode: str = "nearest",
     align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     pass
 
 
@@ -4623,7 +4465,7 @@ def upsample(  # noqa: F811
     mode: str = "nearest",
     align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     pass
 
 
@@ -4717,7 +4559,7 @@ def _is_integer(x) -> bool:
 
 
 @_overload
-def interpolate(
+def interpolate(  # noqa: F811
     input: Tensor,
     size: int | None = None,
     scale_factor: list[float] | None = None,
@@ -4726,7 +4568,7 @@ def interpolate(
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     pass
 
 
@@ -4740,7 +4582,7 @@ def interpolate(  # noqa: F811
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     pass
 
 
@@ -4754,7 +4596,7 @@ def interpolate(  # noqa: F811
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     pass
 
 
@@ -4780,7 +4622,7 @@ def interpolate(  # noqa: F811
     align_corners: bool | None = None,
     recompute_scale_factor: bool | None = None,
     antialias: bool = False,
-) -> Tensor:
+) -> Tensor:  # noqa: B950
     r"""Down/up samples the input.
 
     Tensor interpolated to either the given :attr:`size` or the given
@@ -5128,7 +4970,7 @@ if interpolate.__doc__:
 
 
 @_overload
-def upsample_nearest(
+def upsample_nearest(  # noqa: F811
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,
@@ -5180,7 +5022,7 @@ if upsample_nearest.__doc__:
 
 
 @_overload
-def upsample_bilinear(
+def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: int | None = None,
     scale_factor: float | None = None,
@@ -6475,7 +6317,7 @@ def multi_head_attention_forward(
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is a binary mask. When the value is True,
+            be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
             Default: `True`

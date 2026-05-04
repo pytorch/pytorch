@@ -12,7 +12,7 @@ except ImportError:
     import utils
 
 
-class Pair:
+class Pair:  # noqa: B903
     def __init__(self, x, y):
         self.x = x
         self.y = y

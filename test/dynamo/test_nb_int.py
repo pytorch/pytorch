@@ -172,7 +172,7 @@ class NbIntTests(TestCase):
     def test_int_returning_non_int_raises(self):
         class Bad:
             def __int__(self):
-                return "not an int"
+                return "not an int"  # noqa: PLE0305
 
         obj = Bad()
 

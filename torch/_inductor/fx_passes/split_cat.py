@@ -141,6 +141,7 @@ def _get_dim(node: Any):
     )
 
 
+# noqa: W605
 # ############The pattern to be optimized is#########
 #         unbind (dim=0)
 #       /   ...    \
@@ -1429,6 +1430,7 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
 
 
+# noqa: W605
 # ############pattern to be optimized is#########
 
 #                 split_node(dim=1)

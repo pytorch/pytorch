@@ -151,8 +151,6 @@ class Completion::Data {
 
 Completion::Completion(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
-Completion::~Completion() = default;
-
 void Completion::Wait() {
   data_->Wait();
 }

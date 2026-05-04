@@ -348,24 +348,30 @@ class SuperVariable(VariableTracker):
         ):
             return self.objvar._base_vt.call_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
+            # object.__getattribute__ has no side-effects. We can directly call
+            # __getattribute__ to access the attribute.
             attr_name = args[0].value  # type: ignore[attr-defined]
-            # object.__getattribute__ IS PyObject_GenericGetAttr.  Delegate
-            # to the shared implementation so that __dict__, __class__,
-            # polyfilled C descriptors, etc. are all handled consistently.
-            if isinstance(self.objvar, UserDefinedObjectVariable):
-                return self.objvar.generic_getattr(tx, attr_name)
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self.objvar, attr_name
+            ):
+                result = tx.output.side_effects.load_attr(
+                    self.objvar, attr_name, deleted_ok=True
+                )
+                if isinstance(result, variables.DeletedVariable):
+                    raise_observed_exception(AttributeError, tx)
+                return result
 
             attr_value = None
             try:
-                attr_value = object.__getattribute__(
-                    self.objvar.value,  # pyrefly: ignore[missing-attribute]
-                    attr_name,
-                )
+                # NB - use object.__getattribute__ to prevent running any user code
+                # type: ignore[attr-defined]
+                attr_value = object.__getattribute__(self.objvar.value, attr_name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
             attr_source = None
             if self.objvar.source is not None:
+                # setup a object.__getattribute__(self.objvar, name) source
                 attr_source = GenericAttrSource(self.objvar.source, attr_name)
             return VariableTracker.build(tx, attr_value, attr_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
@@ -1598,23 +1604,6 @@ class TypingVariable(VariableTracker):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
-
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # GenericAlias types (e.g. Callable[[int], bool]) support __or__ for
-        # type unions (e.g. Callable[[int], bool] | None).
-        if not other.is_python_constant():
-            return VariableTracker.build(tx, NotImplemented)
-        other_val = other.as_python_constant()
-        # pyrefly: ignore[bad-argument-count]
-        result = type(self.value).__or__(self.value, other_val)
-        if result is NotImplemented:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, result)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+# flake8: noqa: B950
 
 import unittest
 from functools import partial
@@ -328,7 +329,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
 
     def test_offload_reload_fake_tensor(self):
         """Test fake tensor implementations for offload, reload, and wait_tensor."""
-        import torch._functorch._activation_offloading.offload_ops
+        import torch._functorch._activation_offloading.offload_ops  # noqa: F401
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():

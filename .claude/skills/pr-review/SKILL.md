@@ -115,15 +115,14 @@ only the diff and commit log need to be fetched via git.
 
 A single line of code can have deep cross-cutting implications: a missing device guard causes silent data corruption on multi-GPU, a missing `Composite` dispatch key breaks every out-of-tree backend, a manual dtype check instead of `TensorIterator` silently skips type promotion. **Treat every line as potentially load-bearing.**
 
-1. **Only report problems** — The review output must contain only issues, concerns, and actionable suggestions. Do NOT mention things that are done correctly, do NOT praise good decisions, do NOT explain why something is fine. If a section has no problems, omit it entirely. The reader's time is precious — every sentence must point to something that needs fixing or further discussion.
-2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
-3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
-4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
-6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
-7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
-8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
-9. **No repetition** — Each observation appears in exactly one section of the review output.
+1. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
+2. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
+3. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
+4. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
+6. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
+7. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
+8. **No repetition** — Each observation appears in exactly one section of the review output.
 
 ### Using sub-agents
 
@@ -151,15 +150,9 @@ Evaluate BC implications per [bc-guidelines.md](bc-guidelines.md). For non-trivi
 
 Structure your review with actionable feedback organized by category. Every finding should be traceable to a specific line in the diff.
 
-### Step 5: Fact-Check
-
-After drafting the review, spawn a sub-agent per reported issue (in parallel) to independently verify the claim by re-reading the relevant code and surrounding context. Each sub-agent returns **valid**, **invalid**, or **needs rewording**. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this low confidence.
-
 ## Output Format
 
-Structure your review as follows. **Omit sections where you have no problems to report** — most reviews should only have a few sections. Do not write "No concerns", "Looks good", or any affirmative commentary. Every sentence in the review must identify a problem or request a change.
-
-The Summary section is the one exception: it should briefly state what the PR does (1 sentence) and then state the problems found, or explicitly say no issues were found.
+Structure your review as follows. **Omit sections where you have no findings** — don't write "No concerns" for every empty section. Only include sections with actual observations.
 
 ```markdown
 ## PR Review: #<number>
@@ -167,38 +160,37 @@ The Summary section is the one exception: it should briefly state what the PR do
 ## Branch Review: <branch-name> (vs main)
 
 ### Summary
-What the PR does (1 sentence), then the overall verdict.
+Brief overall assessment of the changes (1-2 sentences).
 
 ### Code Quality
-[Problems only]
+[Issues and suggestions]
 
 ### Infrastructure
-[Problems only — flag checklist items that are violated]
+[Flag any checklist items from the PyTorch Infrastructure section that apply.
+Reference the specific infrastructure the PR should be using.]
 
 ### Testing
-[Problems only — missing tests, wrong patterns, inadequate coverage]
+[Testing adequacy findings — missing OpInfo usage, non-device-generic tests, etc.]
 
 ### API Design
-[Problems only]
+[Flag new patterns, internal-access flags, or broader implications if any.]
 
 ### Security
-[Problems only]
+[Issues if any]
 
 ### Thread Safety
-[Problems only]
+[Threading concerns if any]
 
 ### Backward Compatibility
-[Problems only]
+[BC concerns if any]
 
 ### Performance
-[Problems only]
+[Performance concerns if any]
 
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**.
-
-[Brief justification — focus on what blocks approval, if anything]
+[Brief justification for recommendation]
 ```
 
 ### Specific Comments (Detailed Review Only)

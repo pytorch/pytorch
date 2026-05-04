@@ -26,7 +26,6 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -242,7 +241,7 @@ static PyObject* THPModule_initExtension(
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -474,7 +473,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
           m->d_getset->name);
     }
     m->d_getset->doc = doc_str;
-  } else if (PyType_Check(obj)) {
+  } else if (Py_TYPE(obj) == &PyType_Type) {
     PyTypeObject* t = reinterpret_cast<PyTypeObject*>(obj);
     if (t->tp_doc) {
       return PyErr_Format(
@@ -517,7 +516,7 @@ static PyObject* THPModule_setBackcompatBroadcastWarn(
       "set_backcompat_broadcast_warn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  setBackCompatBroadcastWarn(Py_IsTrue(arg));
+  setBackCompatBroadcastWarn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -540,7 +539,7 @@ static PyObject* THPModule_setBackcompatKeepdimWarn(
       "set_backcompat_keepdim_warn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  setBackCompatKeepdimWarn(Py_IsTrue(arg));
+  setBackCompatKeepdimWarn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -683,7 +682,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
 
   auto tuple = PyTuple_New(2);
   if (!tuple) {
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
   }
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
@@ -853,7 +852,7 @@ static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
       "set_allow_tf32_cublas expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowTF32CuDNN(Py_IsTrue(arg));
+  at::globalContext().setAllowTF32CuDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -926,7 +925,7 @@ static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
       "set_sdp_use_math expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseFlash(Py_IsTrue(arg));
+  at::globalContext().setSDPUseFlash(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -945,7 +944,7 @@ static PyObject* THPModule_setSDPUseFA3(PyObject* _unused, PyObject* arg) {
       "set_sdp_use_fa3 expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseFA3(Py_IsTrue(arg));
+  at::globalContext().setSDPUseFA3(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -966,7 +965,7 @@ static PyObject* THPModule_setSDPUseMemEfficient(
       "set_sdp_use_math expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseMemEfficient(Py_IsTrue(arg));
+  at::globalContext().setSDPUseMemEfficient(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -985,7 +984,7 @@ static PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
       "set_sdp_use_math expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseMath(Py_IsTrue(arg));
+  at::globalContext().setSDPUseMath(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1006,7 +1005,7 @@ static PyObject* THPModule_setAllowFP16BF16ReductionMathSDP(
       "set_sdp_use_math expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowFP16BF16ReductionMathSDP(Py_IsTrue(arg));
+  at::globalContext().setAllowFP16BF16ReductionMathSDP(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1027,7 +1026,7 @@ static PyObject* THPModule_setSDPUseOverrideable(
       "set_sdp_use_overrideable expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseOverrideable(Py_IsTrue(arg));
+  at::globalContext().setSDPUseOverrideable(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1046,7 +1045,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
       "set_sdp_use_cudnn expects a bool, "
       "but got %s",
       THPUtils_typename(arg));
-  at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
+  at::globalContext().setSDPUseCuDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1068,7 +1067,7 @@ static PyObject* THPModule_setUserEnabledCuDNN(
       "set_enabled_cudnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setUserEnabledCuDNN(Py_IsTrue(arg));
+  at::globalContext().setUserEnabledCuDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1091,7 +1090,7 @@ static PyObject* THPModule_setUserEnabledMkldnn(
       "set_enabled_mkldnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setUserEnabledMkldnn(Py_IsTrue(arg));
+  at::globalContext().setUserEnabledMkldnn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1114,7 +1113,7 @@ static PyObject* THPModule_setDeterministicCuDNN(
       "set_deterministic_cudnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setDeterministicCuDNN(Py_IsTrue(arg));
+  at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1137,7 +1136,7 @@ static PyObject* THPModule_setDeterministicMkldnn(
       "set_deterministic_mkldnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setDeterministicMkldnn(Py_IsTrue(arg));
+  at::globalContext().setDeterministicMkldnn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1176,7 +1175,7 @@ static PyObject* THPModule_setAllowTF32OneDNN(
       "_set_onednn_allow_tf32 expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowTF32OneDNN(Py_IsTrue(arg));
+  at::globalContext().setAllowTF32OneDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1218,7 +1217,7 @@ static PyObject* THPModule_setDeterministicFillUninitializedMemory(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg), "expected a bool, but got ", THPUtils_typename(arg));
-  at::globalContext().setDeterministicFillUninitializedMemory(Py_IsTrue(arg));
+  at::globalContext().setDeterministicFillUninitializedMemory(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1241,7 +1240,7 @@ static PyObject* THPModule_setUserEnabledNNPACK(
       "set_enabled_NNPACK expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setUserEnabledNNPACK(Py_IsTrue(arg));
+  at::globalContext().setUserEnabledNNPACK(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1262,7 +1261,7 @@ static PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
       "setWarnOnlyOnce expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  c10::WarningUtils::set_warnAlways(Py_IsTrue(arg));
+  c10::WarningUtils::set_warnAlways(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1299,7 +1298,7 @@ static PyObject* THPModule_setBenchmarkCuDNN(PyObject* _unused, PyObject* arg) {
       "set_benchmark_cudnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setBenchmarkCuDNN(Py_IsTrue(arg));
+  at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1311,31 +1310,6 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setCuDNNDepthwiseKernel(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkString(arg),
-      "set_cudnn_depthwise_kernel expects a string, "
-      "but got ",
-      THPUtils_typename(arg));
-  std::string mode = THPUtils_unpackString(arg);
-  at::globalContext().setCuDNNDepthwiseKernel(at::str2cudnn_depthwise(mode));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_getCuDNNDepthwiseKernel(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  auto mode =
-      at::cudnn_depthwise2str(at::globalContext().cudnnDepthwiseKernel());
-  return THPUtils_packString(mode);
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THPModule_setImmediateMiopen(
     PyObject* _unused,
     PyObject* arg) {
@@ -1345,7 +1319,7 @@ static PyObject* THPModule_setImmediateMiopen(
       "set_immediate_miopen expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setImmediateMiopen(Py_IsTrue(arg));
+  at::globalContext().setImmediateMiopen(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1368,7 +1342,7 @@ static PyObject* THPModule_setAllowTF32CuBLAS(
       "set_allow_tf32_cublas expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowTF32CuBLAS(Py_IsTrue(arg));
+  at::globalContext().setAllowTF32CuBLAS(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1398,15 +1372,15 @@ static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
       "set_allow_fp16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
       THPUtils_typename(allow_reduction_obj));
-  bool allow_reduction = Py_IsTrue(allow_reduction_obj);
+  bool allow_reduction = allow_reduction_obj == Py_True;
   bool allow_splitk = true;
-  if (!Py_IsNone(allow_splitk_obj)) {
+  if (allow_splitk_obj != Py_None) {
     TORCH_CHECK(
         PyBool_Check(allow_splitk_obj),
         "set_allow_fp16_reduction_cublas expects a bool for allow_splitk, "
         "but got ",
         THPUtils_typename(allow_splitk_obj));
-    allow_splitk = Py_IsTrue(allow_splitk_obj);
+    allow_splitk = allow_splitk_obj == Py_True;
   }
   at::globalContext().setAllowFP16ReductionCuBLAS(
       allow_reduction, allow_splitk);
@@ -1442,15 +1416,15 @@ static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
       "set_allow_bf16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
       THPUtils_typename(allow_reduction_obj));
-  bool allow_reduction = Py_IsTrue(allow_reduction_obj);
+  bool allow_reduction = allow_reduction_obj == Py_True;
   bool allow_splitk = true;
-  if (!Py_IsNone(allow_splitk_obj)) {
+  if (allow_splitk_obj != Py_None) {
     TORCH_CHECK(
         PyBool_Check(allow_splitk_obj),
         "set_allow_bf16_reduction_cublas expects a bool for allow_splitk, "
         "but got ",
         THPUtils_typename(allow_splitk_obj));
-    allow_splitk = Py_IsTrue(allow_splitk_obj);
+    allow_splitk = allow_splitk_obj == Py_True;
   }
   at::globalContext().setAllowBF16ReductionCuBLAS(
       allow_reduction, allow_splitk);
@@ -1481,7 +1455,7 @@ static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
       "set_allow_fp16_accumulation_cublas expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowFP16AccumulationCuBLAS(Py_IsTrue(arg));
+  at::globalContext().setAllowFP16AccumulationCuBLAS(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1504,7 +1478,7 @@ static PyObject* THPModule_setAllowFP16ReductionCPU(
       "set_allow_fp16_reduction_cpu expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowFP16ReductionCPU(Py_IsTrue(arg));
+  at::globalContext().setAllowFP16ReductionCPU(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1525,7 +1499,7 @@ static PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
       "flush_denormal expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  if (!at::globalContext().setFlushDenormal(Py_IsTrue(arg))) {
+  if (!at::globalContext().setFlushDenormal(arg == Py_True)) {
     Py_RETURN_FALSE;
   };
   Py_RETURN_TRUE;
@@ -1536,55 +1510,6 @@ static PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
   return Py_NewRef(torch::getTHPDtype(scalar_type));
-  END_HANDLE_TH_ERRORS
-}
-
-// Returns the set of dtypes that are fully realized Python singletons: all
-// floating/complex/integer/bool/float8/float4/bits types. Excludes quantized
-// dtypes and the placeholder sub-byte int/uint types, matching the dtypes
-// tracked in torch.utils._dtype_abbrs.
-static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-#define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
-  auto all_scalar_types = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
-#undef DEFINE_SCALAR_TYPE
-
-  auto is_subbyte_dummy = [](at::ScalarType t) {
-    switch (t) {
-      case at::ScalarType::UInt1:
-      case at::ScalarType::UInt2:
-      case at::ScalarType::UInt3:
-      case at::ScalarType::UInt4:
-      case at::ScalarType::UInt5:
-      case at::ScalarType::UInt6:
-      case at::ScalarType::UInt7:
-      case at::ScalarType::Int1:
-      case at::ScalarType::Int2:
-      case at::ScalarType::Int3:
-      case at::ScalarType::Int4:
-      case at::ScalarType::Int5:
-      case at::ScalarType::Int6:
-      case at::ScalarType::Int7:
-        return true;
-      default:
-        return false;
-    }
-  };
-
-  THPObjectPtr result(PyList_New(0));
-  if (!result)
-    throw python_error();
-  for (auto scalar_type : all_scalar_types) {
-    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
-      continue;
-    }
-    auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
-    if (PyList_Append(result.get(), dtype) < 0) {
-      throw python_error();
-    }
-  }
-  return result.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -1645,7 +1570,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (Py_IsNone(arg)) {
+  if (arg == Py_None) {
     at::globalContext().setCheckSparseTensorInvariants(std::nullopt);
   } else {
     TORCH_CHECK(
@@ -1653,7 +1578,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
         "set_check_sparse_tensor_invariants expects a bool or None, "
         "but got ",
         THPUtils_typename(arg));
-    at::globalContext().setCheckSparseTensorInvariants(Py_IsTrue(arg));
+    at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1684,7 +1609,7 @@ static PyObject* THPModule_willEngineExecuteNode(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
   torch::autograd::Node* node = nullptr;
-  c10::intrusive_ptr<torch::autograd::Node> node_sp;
+  std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
     node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
     node = node_sp.get();
@@ -1802,7 +1727,7 @@ static PyObject* THPModule_set_display_vmap_fallback_warnings_mode(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setDisplayVmapFallbackWarnings(Py_IsTrue(arg));
+  at::globalContext().setDisplayVmapFallbackWarnings(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1828,7 +1753,7 @@ static PyObject* THPModule_set_warn_on_accumulate_grad_stream_mismatch(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setWarnOnAccumulateGradStreamMismatch(Py_IsTrue(arg));
+  at::globalContext().setWarnOnAccumulateGradStreamMismatch(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1838,32 +1763,6 @@ static PyObject* THPModule_warn_on_accumulate_grad_stream_mismatch(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::globalContext().warnOnAccumulateGradStreamMismatch()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_set_override_stale_capture_stream(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "enabled must be a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setOverrideStaleCaptureStream(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_override_stale_capture_stream(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  if (at::globalContext().overrideStaleCaptureStream()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -2037,14 +1936,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
-    {"_get_cudnn_depthwise_kernel",
-     THPModule_getCuDNNDepthwiseKernel,
-     METH_NOARGS,
-     nullptr},
-    {"_set_cudnn_depthwise_kernel",
-     THPModule_setCuDNNDepthwiseKernel,
-     METH_O,
-     nullptr},
     {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
     {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -2155,14 +2046,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_warn_on_accumulate_grad_stream_mismatch,
      METH_NOARGS,
      nullptr},
-    {"_set_override_stale_capture_stream",
-     THPModule_set_override_stale_capture_stream,
-     METH_O,
-     nullptr},
-    {"_override_stale_capture_stream",
-     THPModule_override_stale_capture_stream,
-     METH_NOARGS,
-     nullptr},
     {"_to_dlpack",
      castPyCFunctionWithKeywords(THPModule_toDLPack),
      METH_VARARGS | METH_KEYWORDS,
@@ -2188,7 +2071,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
-    {"_get_all_dtypes", THPModule_getAllDtypes, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
     {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
@@ -2475,7 +2357,6 @@ PyObject* initModule() {
 #endif
 #if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
-  ASSERT_TRUE(FastCudaLauncher_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));
@@ -2851,9 +2732,6 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
-  });
-  py_module.def("_get_blas_default_backend", []() {
-    return at::globalContext().blasDefaultBackend();
   });
 
   py::enum_<at::blas::ScalingType>(

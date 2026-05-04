@@ -70,8 +70,7 @@ void AnomalyMetadata::print_stack(const std::string& current_node_name) {
   }
 }
 
-void AnomalyMetadata::assign_parent(
-    const c10::intrusive_ptr<Node>& parent_node) {
+void AnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) {
   parent_ = parent_node;
 }
 

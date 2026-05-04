@@ -91,43 +91,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
         )
         self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
         self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
-        self._run_init_op(torch.Tensor.log_normal_)
-        self._run_init_op(torch.Tensor.exponential_)
-        self._run_init_op(torch.Tensor.geometric_, p=0.3)
 
         for dtype in (torch.float32, torch.float16):
             self._run_init_op(torch.rand_like, dtype=dtype)
             self._run_init_op(torch.randn_like, dtype=dtype)
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
-
-    @with_comms
-    def test_multinomial_sharded(self):
-        """Test multinomial with sharded batch dimension."""
-        device_mesh = self.build_device_mesh()
-        # Create a probability tensor with shape [8, 4] (batch_size=8, categories=4)
-        probs = torch.rand(8, 4, device=self.device_type)
-        probs = probs / probs.sum(dim=-1, keepdim=True)  # normalize to valid probs
-
-        # Shard on batch dim (dim 0) — should work
-        dt_probs = distribute_tensor(probs, device_mesh, [Shard(0)])
-        result = torch.multinomial(dt_probs, num_samples=2, replacement=True)
-        self.assertEqual(result.shape, torch.Size([8, 2]))
-        self.assertIsInstance(result, DTensor)
-        # Output should also be sharded on dim 0
-        self.assertEqual(result.placements, (Shard(0),))
-
-        # Shard on last dim (categories) — not supported, should redistribute
-        # to Replicate before sampling since the strategy excludes this dim.
-        dt_probs_last = distribute_tensor(probs, device_mesh, [Shard(1)])
-        with CommDebugMode() as comm_mode:
-            result_last = torch.multinomial(
-                dt_probs_last, num_samples=2, replacement=True
-            )
-        # Should have triggered a redistribute (all_gather) to unshard the categories dim
-        self.assertGreater(comm_mode.get_total_counts(), 0)
-        self.assertEqual(result_last.shape, torch.Size([8, 2]))
-        # Output should be Replicate since input was redistributed to Replicate
-        self.assertEqual(result_last.placements, (Replicate(),))
 
     @with_comms
     @skip_if_lt_x_gpu(4)

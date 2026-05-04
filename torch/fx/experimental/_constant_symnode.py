@@ -5,7 +5,7 @@ from typing import *  # noqa: F403
 # This needs to exist because the Python version of nested int is not compatible
 # with the C++ version of constant symnode.
 class ConstantIntNode:
-    def __init__(self, val: int) -> None:
+    def __init__(self, val: int):
         self.val = val
 
     def is_constant(self) -> bool:

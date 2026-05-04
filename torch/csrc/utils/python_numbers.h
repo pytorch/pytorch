@@ -115,9 +115,9 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
 }
 
 inline bool THPUtils_unpackBool(PyObject* obj) {
-  if (Py_IsTrue(obj)) {
+  if (obj == Py_True) {
     return true;
-  } else if (Py_IsFalse(obj)) {
+  } else if (obj == Py_False) {
     return false;
   } else {
     TORCH_CHECK(false, "couldn't convert python object to boolean");

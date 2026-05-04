@@ -547,7 +547,7 @@ Example::
 add_docstr(
     torch.addmm,
     r"""
-addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
+addmm(input, mat1, mat2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -584,6 +584,9 @@ Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -598,22 +601,6 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
-
-.. function:: addmm(input, mat1, mat2, out_dtype, *, beta=1, alpha=1, out=None) -> Tensor
-   :noindex:
-
-Args:
-    input (Tensor): matrix to be added
-    mat1 (Tensor): the first matrix to be matrix multiplied
-    mat2 (Tensor): the second matrix to be matrix multiplied
-    out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
-
-Keyword args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
-    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
-    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
 )
 
@@ -1366,7 +1353,7 @@ Example::
 add_docstr(
     torch.baddbmm,
     r"""
-baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
+baddbmm(input, batch1, batch2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -1400,6 +1387,9 @@ Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1413,22 +1403,6 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
-
-.. function:: baddbmm(input, batch1, batch2, out_dtype, *, beta=1, alpha=1, out=None) -> Tensor
-   :noindex:
-
-Args:
-    input (Tensor): the tensor to be added
-    batch1 (Tensor): the first batch of matrices to be multiplied
-    batch2 (Tensor): the second batch of matrices to be multiplied
-    out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
-
-Keyword args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
-    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
-    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes),
 )
 
@@ -1558,7 +1532,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input, mat2, *, out=None) -> Tensor
+bmm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1584,6 +1558,9 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword Args:
     {out}
@@ -1595,19 +1572,6 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
-
-.. function:: bmm(input, mat2, out_dtype, *, out=None) -> Tensor
-   :noindex:
-
-Args:
-    input (Tensor): the first batch of matrices to be multiplied
-    mat2 (Tensor): the second batch of matrices to be multiplied
-    out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
-
-Keyword Args:
-    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes),
 )
 
@@ -7553,7 +7517,7 @@ Example::
 add_docstr(
     torch.mm,
     r"""
-mm(input, mat2, *, out=None) -> Tensor
+mm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`input` and :attr:`mat2`.
 
@@ -7579,6 +7543,9 @@ layout will be deduced from that of :attr:`input`.
 Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     {out}
@@ -7590,19 +7557,6 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
-
-.. function:: mm(input, mat2, out_dtype, *, out=None) -> Tensor
-   :noindex:
-
-Args:
-    input (Tensor): the first matrix to be matrix multiplied
-    mat2 (Tensor): the second matrix to be matrix multiplied
-    out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
-
-Keyword args:
-    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
 )
 
@@ -8375,8 +8329,8 @@ total number of elements in each tensor need to be the same.
           its device with the CPU.
 
 Args:
-    mean (float or Tensor): per-element mean(s). Only floating point types are supported.
-    std (float or Tensor): per-element standard deviation(s). Only floating point types are supported.
+    mean (Tensor): the tensor of per-element means
+    std (Tensor): the tensor of per-element standard deviations
 
 Keyword args:
     {generator}
@@ -10579,7 +10533,7 @@ Keyword args:
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
         met and this will lead to silently incorrect results. To force
-        coalescing please use :meth:`coalesce` on the resulting
+        coalescion please use :meth:`coalesce` on the resulting
         Tensor.
         Default: None: except for trivial cases (e.g. nnz < 2) the
         resulting Tensor has is_coalesced set to ``False```.
@@ -13175,7 +13129,7 @@ Examples::
 add_docstr(
     torch.trapz,
     r"""
-trapz(y, x=None, *, dim=-1) -> Tensor
+trapz(y, x, *, dim=-1) -> Tensor
 
 Alias for :func:`torch.trapezoid`.
 """,

@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -4119,14 +4119,7 @@ class TestBufferProtocol(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    device = torch.device(device)
-
-    if device.type != "cpu":
-        return "cpu"
-
-    acc = torch.accelerator.current_accelerator(True)
-
-    return acc.type if acc is not None else None
+    return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
 def identity(tensor):
     return tensor
@@ -4240,16 +4233,8 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype, copy=True)
 
         # Copy is forced because of different device
-        other = get_another_device(device)
-        if other is not None:
-            try:
-                caps = torch.accelerator.get_device_capability(other)
-            except Exception:
-                pass
-            else:
-                if dtype not in caps["supported_dtypes"]:
-                    self.skipTest(f"{other} doesn't support {dtype}")
-
+        if torch.cuda.is_available():
+            other = get_another_device(device)
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
@@ -4321,8 +4306,8 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        other_device = get_another_device(device)
-        if other_device is not None:
+        if torch.cuda.is_available():
+            other_device = get_another_device(device)
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
@@ -4435,15 +4420,15 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @onlyAccelerator
+    @onlyCUDA
     def test_device_without_index(self, device):
-        original = torch.arange(5, device=device)
+        original = torch.arange(5, device="cuda")
 
-        tensor = torch.asarray(original, device=device)
+        tensor = torch.asarray(original, device="cuda")
         # The storage pointers should be equal
         self.assertEqual(original.data_ptr(), tensor.data_ptr())
 
-        tensor = torch.asarray(original, copy=True, device=device)
+        tensor = torch.asarray(original, copy=True, device="cuda")
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 

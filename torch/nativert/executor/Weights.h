@@ -49,8 +49,6 @@ class Weights {
       std::shared_ptr<std::unordered_map<
           std::string,
           std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta =
-          nullptr,
-      const std::unordered_map<std::string, at::Tensor>* cachedWeights =
           nullptr);
 
   at::Tensor at(const std::string& name) const;
@@ -109,10 +107,6 @@ class Weights {
     constFoldedValues_.insert_or_assign(n, std::move(iv));
   }
 
-  bool hasCachedWeights() const {
-    return hasCachedWeights_;
-  }
-
   std::string toString() const;
 
   WeightVersion version() const {
@@ -146,8 +140,6 @@ class Weights {
 
   // every instance of Weight has a unique version number
   static WeightVersion globalVersion_;
-
-  bool hasCachedWeights_ = false;
 
   std::function<bool(const std::string&)> skipSizeCheck_;
   std::function<bool(const std::string&)> skipDtypeCheck_;

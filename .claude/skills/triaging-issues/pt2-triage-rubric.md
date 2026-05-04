@@ -164,7 +164,7 @@ Check for existing labels before inventing categories:
 
 ---
 
-## 8. functorch + compile
+## 8. Functorch + Compile
 
 | Situation | Labels |
 |-----------|--------|
@@ -225,6 +225,7 @@ For `topic: fuzzer` issues:
 - `triage review` - Discuss at meeting
 - `needs reproduction` - Blocked on repro
 - `needs research` - Needs investigation
+- `actionable` - Clear what to do
 
 ### Redirects
 - `oncall: cpu inductor` - CPU/MKLDNN issues

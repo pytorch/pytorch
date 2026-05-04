@@ -65,9 +65,8 @@ remote_fx_cache_put_timed = functools.partial(
 
 class RemoteCacheBackend(Generic[_T]):
     """
-    A backend implementation for cache storage. Most backends are remote, but
-    local filesystem backends use the same bytes-oriented interface. For
-    structured data use a RemoteCache.
+    A backend implementation for accessing a remote/distributed cache.  Only
+    works with bytes in/out.  For structured data use a RemoteCache.
     """
 
     def __init__(self) -> None:
@@ -129,27 +128,6 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 
     def decode(self, data: _T) -> _T:
         return data
-
-
-class LocalCacheBackend(RemoteCacheBackend[bytes]):
-    """
-    A local filesystem implementation of the cache backend interface.
-    """
-
-    @override
-    def _get(self, key: str) -> bytes | None:
-        try:
-            with open(key, "rb") as fd:
-                return fd.read()
-        except FileNotFoundError:
-            return None
-
-    @override
-    def _put(self, key: str, data: bytes) -> None:
-        os.makedirs(os.path.dirname(key), exist_ok=True)
-        from torch._inductor import codecache
-
-        codecache.write_atomic(key, data)
 
 
 # This class is the top of a RemoteCache. A RemoteCache is fundamentally made of
@@ -352,21 +330,6 @@ class RedisRemoteCache(RemoteCache[JsonDataTy]):
         super()._put(key, value, sample)
 
 
-class LocalCache(RemoteCache[JsonDataTy]):
-    def __init__(self, cache_id: str) -> None:
-        # Local caches use the per-operation key as the filesystem path. Accept
-        # cache_id so they can be constructed through create_cache like remote
-        # caches.
-        backend = LocalCacheBackend()
-        serde = RemoteCacheJsonSerde()
-        super().__init__(backend, serde)
-
-
-class LocalAutotuneCache(LocalCache):
-    # Keep a distinct cache type for cache stats and test backend overrides.
-    pass
-
-
 class RemoteAutotuneCache(RedisRemoteCache):
     pass
 
@@ -389,30 +352,24 @@ class RemoteDynamoPGOCache(RedisRemoteCache):
 
 def create_cache(
     key: str,
-    is_fbcode: bool = False,
-    fb_cache_cls: str | None = None,
-    oss_cache_cls: str | None = None,
-    *,
-    local_cache_cls: str | None = None,
+    is_fbcode: bool,
+    fb_cache_cls: str,
+    oss_cache_cls: str,
 ) -> RemoteCache[JsonDataTy] | None:
     try:
-        this_module = sys.modules[__name__]
-        if local_cache_cls is not None:
-            cache_cls = getattr(this_module, local_cache_cls)
-            return cache_cls(key)
-        elif is_fbcode:
-            assert fb_cache_cls is not None
+        if is_fbcode:
             import torch._inductor.fb.remote_cache
 
             cache_cls = getattr(torch._inductor.fb.remote_cache, fb_cache_cls)
             return cache_cls(key)
         else:
-            assert oss_cache_cls is not None
+            this_module = sys.modules[__name__]
+
             cache_cls = getattr(this_module, oss_cache_cls)
             return cache_cls(key)
 
     except Exception:
-        log.warning("Unable to create cache", exc_info=True)
+        log.warning("Unable to create a remote cache", exc_info=True)
         return None
 
 

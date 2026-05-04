@@ -141,7 +141,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -159,11 +159,13 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
-from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
+from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    IteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -179,7 +181,6 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -682,13 +683,13 @@ def generic_jump(
         hints: list[str] = []
         if isinstance(value, TensorVariable):
             try:
-                node = value.proxy.node
-                example = node.meta.get("example_value")
+                example = value.proxy.node.meta.get("example_value")
                 if (
                     example is not None
                     and example.dim() == 0
                     and example.dtype
                     in (
+                        torch.bool,
                         torch.int32,
                         torch.int64,
                     )
@@ -699,32 +700,6 @@ def generic_jump(
                         "ints (e.g. use int attributes instead of tensor buffers) "
                         "so the condition becomes a shape guard instead of "
                         "data-dependent branching."
-                    )
-                if (
-                    example is not None
-                    and example.dim() == 0
-                    and example.dtype == torch.bool
-                ):
-                    hints.append(
-                        "For the common pattern `if tensor_cond: x = transform(x)` "
-                        "(e.g. clamping inf/nan values), consider making the code "
-                        "branchless by always applying the transform. Operations like "
-                        "torch.clamp, torch.nan_to_num, and torch.where are typically "
-                        "no-ops on well-behaved inputs and compile without graph breaks."
-                    )
-                # Detect boolean reductions (any/all) which are a telltale sign
-                # of `tensor.any() or other_tensor.any()` patterns.
-                # node.target is a str for call_method nodes (e.g. tensor.any())
-                # and a callable for call_function nodes (e.g. torch.any()).
-                target_name = getattr(node.target, "__name__", None) or (
-                    node.target if isinstance(node.target, str) else None
-                )
-                if target_name in ("any", "all", "bitwise_and", "bitwise_or"):
-                    hints.append(
-                        "Note: Python `or`/`and` between tensor expressions (e.g. "
-                        "`tensor.any() or other_tensor.any()`) triggers implicit bool "
-                        "conversion. Use `torch.logical_or`/`torch.logical_and` or the "
-                        "`|`/`&` operators instead."
                     )
             except Exception:
                 pass
@@ -897,25 +872,54 @@ def generic_jump(
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            result = generic_bool(self, value)  # type: ignore[arg-type]
-            if result.is_python_constant():
-                if truth_fn(result.as_python_constant()):
-                    if push:
-                        self.push(value)
-                    self.jump(inst)
-            elif isinstance(result, SymNodeVariable):
-                if truth_fn(result.evaluate_expr()):
-                    if push:
-                        self.push(value)
-                    self.jump(inst)
+            try:
+                x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
+            except exc.ObservedAttributeError:
+                exc.handle_observed_exception(self)
+                # if __bool__ is missing, trying __len__ to infer a truth value.
+                try:
+                    x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
+                except exc.ObservedAttributeError:
+                    exc.handle_observed_exception(self)
+                    x = None
+
+            # __bool__ or __len__ is function
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
+                result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
+                method_name = getattr(getattr(x, "fn", None), "__name__", None)
+                if result.is_python_constant():
+                    result_value = result.as_python_constant()
+                    if method_name == "__bool__" and not isinstance(result_value, bool):
+                        exc.raise_observed_exception(
+                            TypeError,
+                            self,
+                            args=[
+                                f"__bool__ should return bool, returned {type(result_value).__name__}"
+                            ],
+                        )
+                    if isinstance(result_value, (bool, int)) and truth_fn(result_value):
+                        if push:
+                            self.push(value)
+                        self.jump(inst)
+                elif isinstance(result, SymNodeVariable):
+                    if result.evaluate_expr():
+                        if push:
+                            self.push(value)
+                        self.jump(inst)
+                else:
+                    unimplemented(
+                        gb_type="Data-dependent branching with non-constant __bool__",
+                        context=f"method: {x}, result: {result}",
+                        explanation="Attempted to perform data-dependent branching on a user-defined "
+                        "object with a __bool__ method that did not return a constant.",
+                        hints=[],
+                    )
+            # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
-                unimplemented(
-                    gb_type="Data-dependent branching with non-constant __bool__",
-                    context=f"value: {value}, result: {result}",
-                    explanation="Attempted to perform data-dependent branching on a user-defined "
-                    "object with non-constant truthiness.",
-                    hints=[],
-                )
+                if truth_fn(True):
+                    if push:
+                        self.push(value)
+                    self.jump(inst)
         elif not value.is_tensor() and value.has_unpack_var_sequence(self):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 if push:
@@ -1372,7 +1376,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.value
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
-        if inner_fn is not None and callable(inner_fn) and is_forbidden(inner_fn):
+        if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
@@ -1882,25 +1886,6 @@ class InstructionTranslatorBase(
         assert isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
-        if val.source_location is None:
-            inst = self.current_instruction
-            if inst.positions is not None and inst.positions.lineno is not None:
-                val.set_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.positions.lineno,
-                        end_lineno=inst.positions.end_lineno,
-                        col_offset=inst.positions.col_offset,
-                        end_col_offset=inst.positions.end_col_offset,
-                    )
-                )
-            elif inst.starts_line is not None:
-                val.set_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.starts_line,
-                    )
-                )
         self.stack.append(val)
 
     def push_many(self, vals: list[VariableTracker]) -> None:
@@ -4617,25 +4602,6 @@ class InstructionTranslatorBase(
         frame_loc_chain_list.append(frame_loc)
         return tuple(frame_loc_chain_list)
 
-    def _format_stack_source_attribution(self) -> str:
-        """Format bytecode source locations for stack values involved in a graph break."""
-        seen: set[SourceLocation] = set()
-        parts: list[str] = []
-        for vt in self.stack:
-            source_location = vt.source_location
-            if source_location is None:
-                continue
-            if source_location in seen:
-                continue
-            seen.add(source_location)
-            parts.append(
-                f"  {vt!r} originated from:\n{source_location.format().rstrip()}"
-            )
-
-        if not parts:
-            return ""
-        return "Stack variable source attribution:\n" + "\n".join(parts)
-
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4685,15 +4651,11 @@ class InstructionTranslatorBase(
         if exc is not None:
             reason = augment_exc_message_with_hop_name(exc, reason)
 
-        stack_source_attribution = self._format_stack_source_attribution()
-        user_stack_trace_parts = [
-            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}",
-            f"Graph Break Reason: {reason}",
-        ]
-        if stack_source_attribution:
-            user_stack_trace_parts.extend(["", stack_source_attribution])
-        user_stack_trace_parts.extend(["", "User code traceback:"])
-        user_stack_trace = "\n".join(user_stack_trace_parts) + "\n"
+        user_stack_trace = (
+            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
+            f"Graph Break Reason: {reason}\n"
+            "\nUser code traceback:\n"
+        )
 
         if config.verbose:
             user_stack_trace += (

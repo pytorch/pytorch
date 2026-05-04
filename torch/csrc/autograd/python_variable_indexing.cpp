@@ -38,7 +38,7 @@ namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
+  if (check_has_torch_function(self)) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
@@ -116,8 +116,8 @@ static int64_t count_specified_dimensions(PyObject* index) {
           return -1; // Signal torch function handling needed
         }
       }
-      if (!Py_IsNone(obj) && obj != Py_Ellipsis && !Py_IsTrue(obj) &&
-          !Py_IsFalse(obj)) {
+      if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
+          obj != Py_False) {
         count++;
       }
     }
@@ -257,10 +257,10 @@ static Variable applySlicing(
                 at::indexing::Slice(val.start, val.stop, val.step));
           } else if (obj == Py_Ellipsis) {
             return at::indexing::TensorIndex(at::indexing::Ellipsis);
-          } else if (Py_IsNone(obj)) {
+          } else if (obj == Py_None) {
             return at::indexing::TensorIndex(at::indexing::None);
           } else if (PyBool_Check(obj)) {
-            return at::indexing::TensorIndex(Py_IsTrue(obj));
+            return at::indexing::TensorIndex(obj == Py_True);
           } else if (THPVariable_Check(obj)) {
             Tensor tensor = THPVariable_Unpack(obj);
             if (is_tracing) {
@@ -353,7 +353,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
           "different result");
       return true;
     }
-    if (obj.get() == Py_Ellipsis || Py_IsNone(obj.get())) {
+    if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
       TORCH_WARN(
           "Using a non-tuple sequence for "
           "multidimensional indexing is deprecated and will be changed in "
@@ -396,7 +396,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: none, ellipsis
-  if (Py_IsNone(index)) {
+  if (index == Py_None) {
     return THPVariable_Wrap(at::indexing::get_item(
         self_, {at::indexing::TensorIndex(at::indexing::None)}));
   } else if (index == Py_Ellipsis) {
@@ -422,11 +422,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
         self_,
         {at::indexing::TensorIndex(
             at::indexing::Slice(val.start, val.stop, val.step))}));
-  } else if (Py_IsFalse(index) || Py_IsTrue(index)) {
+  } else if (index == Py_False || index == Py_True) {
     return THPVariable_Wrap(([&]() {
       pybind11::gil_scoped_release no_gil;
       return at::indexing::get_item(
-          self_, {at::indexing::TensorIndex(Py_IsTrue(index))});
+          self_, {at::indexing::TensorIndex(index == Py_True)});
     })());
   }
 
@@ -513,7 +513,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   // handle simple types: ellipsis, none, bool
-  if (Py_IsFalse(index)) {
+  if (index == Py_False) {
     // do nothing for false (technically we should check the size, but we don't
     // have real 0-sized shapes.
     return 0;
@@ -521,11 +521,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     dispatch_set_item(
         self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
     return 0;
-  } else if (Py_IsNone(index)) {
+  } else if (index == Py_None) {
     dispatch_set_item(
         self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
     return 0;
-  } else if (Py_IsTrue(index)) {
+  } else if (index == Py_True) {
     dispatch_set_item(self_, {at::indexing::TensorIndex(true)}, value);
     return 0;
   }

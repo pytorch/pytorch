@@ -27,7 +27,7 @@ from .optimizer import (
 __all__ = ["Rprop", "rprop"]
 
 
-class Rprop(Optimizer):
+class Rprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -39,7 +39,7 @@ class Rprop(Optimizer):
         foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -58,7 +58,7 @@ class Rprop(Optimizer):
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)

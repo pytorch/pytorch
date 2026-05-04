@@ -7,9 +7,9 @@ import re
 import typing_extensions
 from typing import Any, cast, TYPE_CHECKING
 
-import sympy
+import sympy  # noqa: TC002
 
-import torch
+import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import ModularIndexing
 

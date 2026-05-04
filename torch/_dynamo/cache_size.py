@@ -79,15 +79,11 @@ class CacheSizeRelevantForFrame:
     could be useful for debugging as well.
     """
 
-    # Number of CacheEntry objects in this region's cache list
+    # Total number of CacheEntry objects in the Dynamo linked list
     num_cache_entries: int = 0
 
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
     num_cache_entries_with_same_id_matched_objs: int = 0
-
-    # Total cache entries across ALL regions on this code object.
-    # Used for accumulated_recompile_limit which is a global safety cap.
-    total_cache_entries_all_regions: int = 0
 
     def will_compilation_exceed(self, limit: int) -> bool:
         # Checks if a compilation will exceed the given limit (that's why >=).
@@ -97,10 +93,7 @@ class CacheSizeRelevantForFrame:
         )
 
     def will_compilation_exceed_accumulated_limit(self) -> bool:
-        # accumulated_recompile_limit is a global safety cap across all regions.
-        return (
-            self.total_cache_entries_all_regions >= config.accumulated_recompile_limit
-        )
+        return self.num_cache_entries >= config.accumulated_recompile_limit
 
     def will_compilation_exceed_specific_limit(self, limit: int) -> bool:
         return self.num_cache_entries_with_same_id_matched_objs >= limit
@@ -140,25 +133,23 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
 
 
 def compute_cache_size(
-    frame: DynamoFrameType,
-    cache_entries: list[Any],
-    total_cache_entries_all_regions: int = 0,
+    frame: DynamoFrameType, cache_entry: Any
 ) -> CacheSizeRelevantForFrame:
-    # cache_entries is already scoped to a single isolate_recompiles region.
-    # recompile_limit is checked per-region. accumulated_recompile_limit uses
-    # total_cache_entries_all_regions as a global safety cap.
+    # Walk the linked list to calculate the cache size
     num_cache_entries = 0
     num_cache_entries_with_same_id_matched_objs = 0
 
-    for cache_entry in cache_entries:
+    while cache_entry:
         num_cache_entries += 1
+        # Track the number of cache entries having same ID_MATCH'd objects as
+        # that of frame.f_locals. This will be used later to compare against the
+        # recompile_limit.
         if _has_same_id_matched_objs(frame, cache_entry):
             num_cache_entries_with_same_id_matched_objs += 1
+        cache_entry = cache_entry.next
 
     return CacheSizeRelevantForFrame(
-        num_cache_entries,
-        num_cache_entries_with_same_id_matched_objs,
-        max(total_cache_entries_all_regions, num_cache_entries),
+        num_cache_entries, num_cache_entries_with_same_id_matched_objs
     )
 
 

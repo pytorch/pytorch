@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 import itertools
 import operator
 from collections.abc import Callable
 from functools import reduce
-from typing import Any, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import sympy
@@ -19,9 +20,9 @@ from torch.nn.modules.conv import Conv2d
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_INFERENCE_RULES: dict[Target, Callable[..., Any]] = {}
-_REFINEMENT_RULES: dict[Target, Callable[..., Any]] = {}
-_RULES: dict[Target, Callable[..., Any]] = {}
+_INFERENCE_RULES: dict[Target, Callable] = {}
+_REFINEMENT_RULES: dict[Target, Callable] = {}
+_RULES: dict[Target, Callable] = {}
 
 __all__ = [
     "GraphTypeChecker",
@@ -59,8 +60,7 @@ __all__ = [
 ]
 
 
-# TODO: narrow t to TensorType | _DynType once Node.type is narrowed
-def expand_to_tensor_dim(t: Any, n: int) -> TensorType:
+def expand_to_tensor_dim(t, n):
     """
     Expand a type to the desired tensor dimension if possible
     Raise an error otherwise.
@@ -80,7 +80,7 @@ def expand_to_tensor_dim(t: Any, n: int) -> TensorType:
         raise TypeError(f"Cannot match the type {t}")
 
 
-def broadcast_types(t1: Any, t2: Any) -> tuple[Any, Any]:
+def broadcast_types(t1, t2):
     """
     Applies broadcasting to both given types such that they
     become consistent with each other and returns two new
@@ -163,7 +163,7 @@ def register_algebraic_expressions_inference_rule(
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
-def add_inference_rule(n: Node) -> Any:
+def add_inference_rule(n: Node):
     """
     Apply the addition inference rule. This includes:
     - scalar addition
@@ -228,7 +228,7 @@ def add_inference_rule(n: Node) -> Any:
 
 
 @register_inference_rule(getattr)
-def get_attr_inference_rule(n: Node, traced: Any) -> Any:
+def get_attr_inference_rule(n: Node, traced):
     """
     The current getattr rule only handles the shape attribute
     Can be extended to other attributes
@@ -247,7 +247,7 @@ def get_attr_inference_rule(n: Node, traced: Any) -> Any:
 
 
 @register_inference_rule(torch.transpose)
-def transpose_inference_rule(n: Node) -> Any:
+def transpose_inference_rule(n: Node):
     """
     We check that dimensions for the transpose operations
     are within range of the tensor type of the node
@@ -285,7 +285,7 @@ def transpose_inference_rule(n: Node) -> Any:
 
 
 @register_inference_rule(torch.reshape)
-def reshape_inference_rule(n: Node) -> TensorType:
+def reshape_inference_rule(n: Node):
     """
     Without dynamism, the rule checks that the
     product of the elements of the argument tensor
@@ -328,7 +328,7 @@ def reshape_inference_rule(n: Node) -> TensorType:
 
 
 @register_inference_rule(BatchNorm2d)
-def bn2d_inference_rule(n: Node, module_instance: Any) -> Any:
+def bn2d_inference_rule(n: Node, module_instance):
     """
     Given a BatchNorm2D instance and a node check the following conditions:
     - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, x_3, x_4)
@@ -364,7 +364,7 @@ def bn2d_inference_rule(n: Node, module_instance: Any) -> Any:
         )
 
 
-def calculate_out_dimension(d_in: Any, module_instance: Any, index: int) -> Any:
+def calculate_out_dimension(d_in, module_instance, index):
     """
     For calculating h_in and w_out according to the conv2D documentation
     """
@@ -405,8 +405,7 @@ def calculate_out_dimension(d_in: Any, module_instance: Any, index: int) -> Any:
         )
 
 
-# TODO: narrow params/return to TensorType | _DynType once Node.type is narrowed
-def get_greatest_upper_bound(type1: Any, type2: Any) -> Any:
+def get_greatest_upper_bound(type1, type2):
     """
     Get the most precise type that's consistent with the given types
     """
@@ -425,7 +424,7 @@ def get_greatest_upper_bound(type1: Any, type2: Any) -> Any:
 
 
 @register_inference_rule(Conv2d)
-def conv2d_inference_rule(n: Node, module_instance: Any) -> Any:
+def conv2d_inference_rule(n: Node, module_instance):
     """
     Given a Conv2D instance and a node check the following conditions:
     - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, H, W)
@@ -458,7 +457,7 @@ def conv2d_inference_rule(n: Node, module_instance: Any) -> Any:
 
 
 @register_inference_rule(torch.nn.ReLU)
-def relu_inference_rule(n: Node, module_instance: Any) -> Any:
+def relu_inference_rule(n: Node, module_instance):
     """
     Input and output shapes should be equal.
     """
@@ -473,7 +472,7 @@ def relu_inference_rule(n: Node, module_instance: Any) -> Any:
     return n.type
 
 
-def maxpool2d_check(typ: Any, module_instance: Any) -> TensorType:
+def maxpool2d_check(typ, module_instance):
     """
     Applies the maxpool2d shape information to the input
     this affects the last two dimensions
@@ -495,10 +494,9 @@ def maxpool2d_check(typ: Any, module_instance: Any) -> TensorType:
 
 
 @register_inference_rule(torch.nn.MaxPool2d)
-def maxpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
+def maxpool2d_inference_rule(n: Node, module_instance):
     """
     Given a MaxPool2D instance and a node check the following conditions:
-
     - Input size matches size 3 or 4
     - Current node type is consistent with the output type we will calculate
     - Input size matches output size and the last two dimensions of the output
@@ -517,7 +515,7 @@ def maxpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
     return n.type
 
 
-def linear_check(tensor_type: Any, module_instance: Any) -> TensorType:
+def linear_check(tensor_type, module_instance):
     """
     Checks that an input tensor type satisfies the conditions for linear operation
     and returns the output type based on in and out features given by module_instance
@@ -536,7 +534,7 @@ def linear_check(tensor_type: Any, module_instance: Any) -> TensorType:
 
 
 @register_inference_rule(torch.nn.Linear)
-def linear_inference_rule(n: Node, module_instance: Any) -> Any:
+def linear_inference_rule(n: Node, module_instance):
     """
     Applies the shape information to the input then gets the greatest upper bound
     of the resulting type and the existing type
@@ -551,7 +549,7 @@ def linear_inference_rule(n: Node, module_instance: Any) -> Any:
     return n.type
 
 
-def adaptiveavgpool2d_check(tensor_type: Any, module_instance: Any) -> TensorType:
+def adaptiveavgpool2d_check(tensor_type, module_instance):
     output_size = module_instance.output_size
     if isinstance(output_size, int):
         output_size = [output_size, output_size]
@@ -575,7 +573,7 @@ def adaptiveavgpool2d_check(tensor_type: Any, module_instance: Any) -> TensorTyp
 
 
 @register_inference_rule(torch.nn.AdaptiveAvgPool2d)
-def adaptiveavgpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
+def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
     """
     The input and output sizes should be the same except for the last
     two dimensions taken from the input, which represent width and height
@@ -590,7 +588,7 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
     return n.type
 
 
-def flatten_check(tensor_type: Any, start_dim: int, end_dim: int) -> TensorType:
+def flatten_check(tensor_type, start_dim, end_dim):
     l = len(tensor_type.__args__)
 
     start_dim = l if start_dim == -1 else abs(start_dim)
@@ -614,7 +612,7 @@ def flatten_check(tensor_type: Any, start_dim: int, end_dim: int) -> TensorType:
 
 
 @register_inference_rule(torch.flatten)
-def flatten_inference_rule(n: Node) -> Any:
+def flatten_inference_rule(n: Node):
     """
     Applies the flatten shape information to the input then gets the
     greatest upper bound of the resulting type and the existing type
@@ -647,11 +645,11 @@ def flatten_inference_rule(n: Node) -> Any:
 
 
 class GraphTypeChecker:
-    def __init__(self, env: dict[str, Any], traced: torch.fx.GraphModule) -> None:
+    def __init__(self, env, traced):
         self.env = env
         self.traced = traced
 
-    def type_check(self) -> bool:
+    def type_check(self):
         """
         A gradual type checker for graphs
         Effect: every node's field type will be
@@ -665,7 +663,7 @@ class GraphTypeChecker:
             self.type_check_node(n)
         return True
 
-    def type_check_node(self, n: Node) -> Any:
+    def type_check_node(self, n: Node):
         """
         Type check a given fx node.
         Current operations:
@@ -706,7 +704,6 @@ class GraphTypeChecker:
                 )
 
         elif n.op == "call_module":
-            # pyrefly: ignore[bad-argument-type]
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(module_instance)](n, module_instance)
@@ -717,7 +714,7 @@ class GraphTypeChecker:
 
         elif n.op == "output":
 
-            def get_node_type(a: Any) -> Any:
+            def get_node_type(a):
                 return a.type
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
@@ -728,12 +725,12 @@ class GraphTypeChecker:
 
 
 @register_refinement_rule(Conv2d)
-def conv_refinement_rule(n: Node) -> list[Any] | None:
+def conv_refinement_rule(n: Node):
     """
     The equality constraints are between the first dimension of
     the input and output
     """
-    res: list[Any] = []
+    res = []
     if not isinstance(n.args[0], Node):
         raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
@@ -743,12 +740,12 @@ def conv_refinement_rule(n: Node) -> list[Any] | None:
 
 
 @register_refinement_rule(torch.nn.Linear)
-def linear_refinement_rule(n: Node) -> list[Any]:
+def linear_refinement_rule(n: Node):
     """
     The equality constraints are between the first dimension of
     the input and output
     """
-    res: list[Any] = []
+    res = []
     if not isinstance(n.args[0], Node):
         raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
@@ -759,11 +756,11 @@ def linear_refinement_rule(n: Node) -> list[Any]:
 
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
-def all_eq(n: Node) -> list[Any]:
+def all_eq(n: Node):
     """
     For operations where the input shape is equal to the output shape
     """
-    res: list[Any] = []
+    res = []
     if not isinstance(n.args[0], Node):
         raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
@@ -776,12 +773,12 @@ def all_eq(n: Node) -> list[Any]:
 
 @register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
 @register_refinement_rule(torch.nn.MaxPool2d)
-def first_two_eq(n: Node) -> list[Any]:
+def first_two_eq(n: Node):
     """
     For operations where the first two dimensions of the input and output shape
     are equal
     """
-    res: list[Any] = []
+    res = []
     if not isinstance(n.args[0], Node):
         raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
@@ -794,7 +791,7 @@ def first_two_eq(n: Node) -> list[Any]:
 
 @register_refinement_rule(torch.add)
 @register_refinement_rule(operator.add)
-def element_wise_eq(n: Node) -> list[Any]:
+def element_wise_eq(n: Node):
     """
     For element-wise operations and handles broadcasting.
     Note that after applying broadcasting to the arguments
@@ -809,7 +806,7 @@ def element_wise_eq(n: Node) -> list[Any]:
     including unification) and another iteration to establish equality between the operands
     and the resulting type, requiring another round of constraint generation and unificaiton.
     """
-    res: list[Any] = []
+    res = []
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         arg_type1 = n.args[0].type
         arg_type2 = n.args[1].type
@@ -835,7 +832,7 @@ def element_wise_eq(n: Node) -> list[Any]:
 
 
 @register_refinement_rule(torch.flatten)
-def flatten_refinement_rule(n: Node) -> list[Any]:
+def flatten_refinement_rule(n: Node):
     """
     Generates equality constraints between the dimensions of the input and output
     that will not be involved in the flatten operation
@@ -873,7 +870,7 @@ def flatten_refinement_rule(n: Node) -> list[Any]:
 
 
 @register_algebraic_expressions_inference_rule(Conv2d)
-def conv_rule(n: Node, module_instance: Any) -> TensorType | None:
+def conv_rule(n: Node, module_instance):
     """
     Represents the output in terms of an algrbraic expression w.r.t
     the input when possible
@@ -898,12 +895,12 @@ class Refine:
     Currently all constraints are equality constraints.
     """
 
-    def __init__(self, traced: Any) -> None:
+    def __init__(self, traced):
         self.constraints = []
         self.traced = traced
         self.symbol_iter = itertools.count(start=0, step=1)
 
-    def refine(self) -> bool:
+    def refine(self):
         """
         Generates constraints for
         every node in the graph based on
@@ -914,7 +911,7 @@ class Refine:
             self.refine_node(n)
         return True
 
-    def symbolic_relations(self) -> bool:
+    def symbolic_relations(self):
         """
         Infers algebraic relations
         """
@@ -923,7 +920,7 @@ class Refine:
             self.infer_symbolic_relations(n)
         return True
 
-    def replace_dyn_with_fresh_var(self, typ: Any) -> Any:
+    def replace_dyn_with_fresh_var(self, typ):
         """
         Replace all unknown types with fresh type variables.
         """
@@ -940,7 +937,7 @@ class Refine:
         else:
             return typ
 
-    def convert_to_sympy_symbols(self, typ: Any) -> Any:
+    def convert_to_sympy_symbols(self, typ):
         """
         Replace all unknown types with fresh type variables.
         """
@@ -956,7 +953,7 @@ class Refine:
         else:
             return typ
 
-    def refine_node(self, n: Node) -> Any:
+    def refine_node(self, n: Node):
         """
         Returns a list of equality constraints for
         call_module and call_function nodes.
@@ -980,13 +977,13 @@ class Refine:
 
         if n.op == "output":
 
-            def get_node_type(a: Any) -> Any:
+            def get_node_type(a):
                 return a.type
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
-    def infer_symbolic_relations(self, n: Node) -> Any:
+    def infer_symbolic_relations(self, n: Node):
         n.type = self.convert_to_sympy_symbols(n.type)
         if n.op == "call_function":
             if n.target in _RULES:
@@ -999,14 +996,14 @@ class Refine:
 
         if n.op == "output":
 
-            def get_node_type(a: Any) -> Any:
+            def get_node_type(a):
                 return a.type
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
 
-def get_parameter(traced: Any, target: str) -> torch.nn.Parameter:
+def get_parameter(traced, target: str):
     """
     Returns the parameter given by ``target`` if it exists,
     otherwise throws an error.

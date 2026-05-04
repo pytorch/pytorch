@@ -11,9 +11,9 @@ import re
 import unittest
 
 import torch
-import torch._inductor.config as inductor_config
 import torch._inductor.metrics
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._inductor import config as inductor_config
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
     EnterDeviceContextManagerWithStreamInfoLine,
@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_WITH_ROCM,
-    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -191,7 +190,6 @@ class TestStreamCodegen(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-@xfailIfNoAcceleratorTriton
 class TestUserStreamCompile(InductorTestCase):
     """End-to-end tests for torch.compile with user stream contexts."""
 
@@ -1171,7 +1169,7 @@ class GraphModule(torch.nn.Module):
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
-""",
+""",  # noqa: B950
         )
 
         wrapper_body = _extract_wrapper_body(code)
@@ -1184,7 +1182,7 @@ with torch.cuda._DeviceGuard(0):
     default_stream = torch.cuda.current_stream()
     stream1 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
-        arg0_1 = copy_if_misaligned(arg0_1)
+        arg0_1 = copy_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         raw_stream = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
@@ -1244,19 +1242,19 @@ class GraphModule(torch.nn.Module):
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
         return (b,)
-""",
+""",  # noqa: B950
         )
 
         wrapper_body = _extract_wrapper_body(code)
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(default_stream):
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream1):
 # CHECK: wait_event
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: with torch.cuda.stream(default_stream):
 # CHECK: synchronize_stream""",
@@ -1338,24 +1336,24 @@ class GraphModule(torch.nn.Module):
 
         synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
         return (c,)
-""",
+""",  # noqa: B950
         )
 
         wrapper_body = _extract_wrapper_body(code)
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(stream1):
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream2):
 # CHECK: wait_event
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream3):
 # CHECK: wait_event
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: with torch.cuda.stream(default_stream):
 # CHECK: synchronize_stream
@@ -1430,18 +1428,18 @@ class GraphModule(torch.nn.Module):
 
         synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
         return (c,)
-""",
+""",  # noqa: B950
         )
 
         wrapper_body = _extract_wrapper_body(code)
         FileCheck().run(
             """\
 # CHECK: with torch.cuda.stream(stream1):
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(stream2):
-# CHECK: copy_if_misaligned
+# CHECK: copy_misaligned
 # CHECK: extern_kernels.mm(
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(default_stream):
@@ -1454,7 +1452,6 @@ class GraphModule(torch.nn.Module):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-@xfailIfNoAcceleratorTriton
 class TestStreamOrderingStress(InductorTestCase):
     """Stress tests verifying that interleaved event record/wait ops
     produce correct ordering under compilation.  Each test uses large
@@ -1737,7 +1734,6 @@ class TestStreamOrderingStress(InductorTestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-@xfailIfNoAcceleratorTriton
 class TestGenericStreamCompile(InductorTestCase):
     """Tests for torch.compile with device-agnostic torch.Stream API."""
 
@@ -1892,7 +1888,6 @@ class TestGenericStreamCompile(InductorTestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-@xfailIfNoAcceleratorTriton
 class TestStreamIdentity(InductorTestCase):
     """Verify that compiled code uses the user's original stream objects."""
 
@@ -1942,7 +1937,6 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
-@xfailIfNoAcceleratorTriton
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 class TestPDLWithMultiStream(InductorTestCase):
     """Tests that PDL (Programmatic Dependent Launch) composes safely with
@@ -2275,7 +2269,6 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
-@xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
     """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
 

@@ -21,13 +21,11 @@ from .builtin import (
     BaseBuiltinVariable,
     BuiltinVariable,
     DictBuiltinVariable,
-    GetAttrBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
-    AcceleratorDeviceIndexVariable,
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,
@@ -50,10 +48,10 @@ from .ctx_manager import (
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
-    XPUDeviceVariable,
 )
 from .dicts import (
     ConstDictVariable,
+    DefaultDictVariable,
     DictItemsVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -97,6 +95,7 @@ from .iter import (
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
+    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -165,12 +164,10 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
-    DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
     NamedTupleVariable,
-    OrderedDictVariable,
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
@@ -187,8 +184,6 @@ from .user_defined import (
 
 
 __all__ = [
-    "XPUDeviceVariable",
-    "AcceleratorDeviceIndexVariable",
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
@@ -211,7 +206,6 @@ __all__ = [
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
     "FakeItemVariable",
-    "GetAttrBuiltinVariable",
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
@@ -230,7 +224,6 @@ __all__ = [
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
-    "OrderedDictVariable",
     "NumpyVariable",
     "OptimizerVariable",
     "PolyfilledFunctionVariable",

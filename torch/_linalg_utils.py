@@ -1,14 +1,12 @@
+# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
 
 import torch
 from torch import Tensor
 
 
-def is_sparse(A: Tensor) -> bool:
-    """Check if tensor A is a sparse COO tensor.
-
-    All other sparse storage formats (CSR, CSC, etc...) will return False.
-    """
+def is_sparse(A):
+    """Check if tensor A is a sparse COO tensor. All other sparse storage formats (CSR, CSC, etc...) will return False."""
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
 
@@ -18,7 +16,7 @@ def is_sparse(A: Tensor) -> bool:
     raise TypeError(error_str)
 
 
-def get_floating_dtype(A: Tensor) -> torch.dtype:
+def get_floating_dtype(A):
     """Return the floating point dtype of tensor A.
 
     Integer types map to float32.
@@ -47,12 +45,12 @@ def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
     return matmul(X.mT, matmul(A, Y))
 
 
-def qform(A: Tensor | None, S: Tensor) -> Tensor:
+def qform(A: Tensor | None, S: Tensor):
     """Return quadratic form :math:`S^T A S`."""
     return bform(S, A, S)
 
 
-def basis(A: Tensor) -> Tensor:
+def basis(A):
     """Return orthogonal basis of A columns."""
     return torch.linalg.qr(A).Q
 

@@ -1490,9 +1490,7 @@ static at::Tensor _fp8_convolution_onednn_ref(
       y_f32 = y_f32.to(at::kHalf);
     }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
-    // Return a copy: custom ops must not return tensors that alias inputs.
-    // The accum buffer has already been mutated in-place above.
-    return x1.clone();
+    return x1;
   } else {
     TORCH_CHECK(
         false,
@@ -1753,9 +1751,7 @@ static at::Tensor _quantized_convolution_onednn(
               c10::MemoryFormat::ChannelsLast3d)
     );
   if (output.numel() == 0) {
-    // When has_accum_postop_sum, output aliases accum (the input). Custom ops
-    // must not return tensors that alias inputs, so return a copy.
-    return has_accum_postop_sum ? output.clone() : output;
+    return output;
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
   static ideep::tensor::desc dummy_accum_desc;
@@ -1889,12 +1885,10 @@ static at::Tensor _quantized_convolution_onednn(
 
   if (is_1d) {
     output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+    return output;
   }
   if (has_accum_postop_sum) {
-    // When has_accum_postop_sum, output aliases accum (the input) — see
-    // assignment above. Return a copy: custom ops must not return tensors
-    // that alias inputs.
-    return output.clone();
+    return accum.value();
   } else {
     return output;
   }

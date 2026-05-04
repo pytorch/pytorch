@@ -184,11 +184,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         module: fx.GraphModule,
         compiler: CompilerFn,
         fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
-        **compiler_configs: Any,
     ) -> None:
         super().__init__(module)
         self.compiler = compiler
-        self.compiler_configs = compiler_configs
         self.fake_mode = fake_mode
         # See Note [DDPOptimizer and fw_metadata]
         ctx = torch._guards.TracingContext.try_get()
@@ -241,7 +239,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         )
 
         wrapper = WrapperModule(
-            self.compiler(input_mod, args, **self.compiler_configs),
+            self.compiler(input_mod, args),
             unwrap_singleton_tuple,
         )
         return wrapper
@@ -487,13 +485,10 @@ class DDPOptimizer:
                 self.add_param(bucket, param, str(arg.target))
 
     def compile_fn(
-        self,
-        gm: fx.GraphModule,
-        example_inputs: list[torch.Tensor],
-        **compiler_configs: Any,
+        self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> CompiledFn:
         """
-        Implements graph splitting, first determining a set of buckets by counting
+        Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
         to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.
@@ -571,7 +566,7 @@ class DDPOptimizer:
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket
-            return self.backend_compile_fn(gm, example_inputs, **compiler_configs)
+            return self.backend_compile_fn(gm, example_inputs)
 
         # 2: partition the graphmodule according to bucket capacity
         partition_map = {}
@@ -616,9 +611,7 @@ class DDPOptimizer:
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
-        submod_compiler = SubmodCompiler(
-            split_gm, self.backend_compile_fn, fake_mode, **compiler_configs
-        )
+        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, fake_mode)
         with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
             submod_compiler.run(*example_inputs)
         split_gm.recompile()

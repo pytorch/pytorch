@@ -84,7 +84,6 @@
     :toctree: generated
     :nosignatures:
 
-    add_dim3
     compute_stats
     extract_arguments
     file_add_header
@@ -93,7 +92,6 @@
     find_closure_group
     find_parentheses_group
     fix_static_global_kernels
-    get_hip_file_path
     hip_header_magic
     hipify
     is_caffe2_gpu_file
@@ -155,12 +153,14 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.iter.routeddecoder
 .. py:module:: torch.utils.data.datapipes.iter.selecting
 .. py:module:: torch.utils.data.datapipes.iter.sharding
+.. py:module:: torch.utils.data.datapipes.iter.streamreader
 .. py:module:: torch.utils.data.datapipes.iter.utils
 .. py:module:: torch.utils.data.datapipes.map.callable
 .. py:module:: torch.utils.data.datapipes.map.combinatorics
 .. py:module:: torch.utils.data.datapipes.map.combining
 .. py:module:: torch.utils.data.datapipes.map.grouping
 .. py:module:: torch.utils.data.datapipes.map.utils
+.. py:module:: torch.utils.data.datapipes.utils.common
 .. py:module:: torch.utils.data.datapipes.utils.decoder
 .. py:module:: torch.utils.data.datapipes.utils.snapshot
 .. py:module:: torch.utils.data.dataset
@@ -180,16 +180,5 @@ for tracking purposes -->
 .. py:module:: torch.utils.tensorboard.summary
 .. py:module:: torch.utils.tensorboard.writer
 .. py:module:: torch.utils.throughput_benchmark
-.. automodule:: torch.utils.weak
-
-.. currentmodule:: torch.utils.weak
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    TensorWeakRef
-
 .. py:module:: torch.utils.weak
-   :noindex:
 ```

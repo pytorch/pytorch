@@ -1074,13 +1074,12 @@ _scaled_mxfp8_mxfp8(
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
               "Block-wise scaling only supports BFloat16 or Half output types");
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
-#else
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #endif
+
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
 void
@@ -1189,7 +1188,9 @@ _scaled_nvfp4_nvfp4(
           Tensor& out,
           const std::optional<Tensor>& global_scale_a = std::nullopt,
           const std::optional<Tensor>& global_scale_b = std::nullopt) {
-#ifndef USE_ROCM
+#ifdef USE_ROCM
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
+#endif
   std::optional<Tensor> alpha = std::nullopt;
   // Note: "Or" here means that if only one scale is passed, we check for the other. Otherwise,
   //       if this is "And" we would silently do nothing in the case where one global scale is
@@ -1223,9 +1224,6 @@ _scaled_nvfp4_nvfp4(
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
-#endif
 }
 
 void check_swizzle_lengths(ScaledGemmImplementation impl,

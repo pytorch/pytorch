@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/utils.h>
 
@@ -108,11 +107,6 @@ class FakeProcessGroup : public Backend {
       at::Tensor& inputBuffer,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
-    // Real collective backends (e.g. NCCL) write into the output from C++
-    // kernels that autograd never sees. We emulate that here: chunk() produces
-    // multi-output views, and without this guard autograd would reject the
-    // subsequent copy_() when the input requires grad.
-    at::AutoDispatchBelowAutograd guard;
     auto chunks = outputBuffer.chunk(size_);
     for (auto& tensor : chunks) {
       tensor.copy_(inputBuffer);
@@ -133,8 +127,6 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
-    // See note in _allgather_base above.
-    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto chunks = outputs[i].chunk(size_);
       for (auto& chunk : chunks) {

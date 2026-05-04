@@ -30,7 +30,7 @@ DistilBertForMaskedLM,pass,0
 
 
 
-DistillGPT2,pass,3
+DistillGPT2,pass,2
 
 
 
@@ -50,7 +50,7 @@ LayoutLMForMaskedLM,pass,0
 
 
 
-M2M100ForConditionalGeneration,pass,0
+M2M100ForConditionalGeneration,pass,7
 
 
 

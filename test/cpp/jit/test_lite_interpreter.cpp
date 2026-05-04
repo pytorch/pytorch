@@ -541,8 +541,10 @@ TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
  * build/run does).
  */
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
+  std::string filePath(__FILE__);
   auto test_model_file_v4 =
-      resolveTestDataFile(__FILE__, "script_module_v4.ptl");
+      filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file_v4.append("script_module_v4.ptl");
 
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
@@ -1668,8 +1670,9 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
 #if !defined FB_XPLAT_BUILD
 // The following test run in fbcode only
 TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_tensor_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl");
   /*
   (('__torch__.MyModule.forward',
     (('instructions',
@@ -1714,8 +1717,10 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_tensor_out_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_out_v2.ptl");
   /*
   (('__torch__.MyModule.forward',
     (('instructions',
@@ -1754,8 +1759,10 @@ TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_tensor_inplace_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_inplace_v2.ptl");
   /*
   (('__torch__.MyModule.forward',
     (('instructions',
@@ -1791,8 +1798,10 @@ TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_scalar_float_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_float_v2.ptl");
   /*
   (('__torch__.MyModuleFloat.forward',
     (('instructions',
@@ -1829,8 +1838,9 @@ TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__,
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
       "upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl");
   /*
   (('__torch__.MyModuleFloat.forward',
@@ -1869,8 +1879,9 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__,
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
       "upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl");
   /*
   (('__torch__.MyModuleInt.forward',
@@ -1908,8 +1919,10 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_scalar_scalar_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_scalar_v2.ptl");
   /*
   (('__torch__.MyModule.forward',
     (('instructions',
@@ -1960,8 +1973,10 @@ TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_scalar_int_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_int_v2.ptl");
   /*
   (('__torch__.MyModuleInt.forward',
     (('instructions',
@@ -1997,8 +2012,9 @@ TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__,
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
       "upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl");
   /*
   (('__torch__.MyModuleFloat.forward',
@@ -2036,8 +2052,10 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
 }
 
 TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
-  auto test_model_file = resolveTestDataFile(
-      __FILE__, "upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl");
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl");
   /*
   (('__torch__.MyModuleInt.forward',
     (('instructions',

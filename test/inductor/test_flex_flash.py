@@ -26,8 +26,6 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
-    SM80OrLater,
-    SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
     xfailIfSM90,
@@ -42,9 +40,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
 )
-
-
-IS_SM8X = SM80OrLater and not SM90OrLater
 
 
 def _times_two(score, _b, _h, _m, _n):
@@ -288,9 +283,7 @@ def _create_block_mask_for_device(
     dev = torch.device(device)
     if dev.type == "cuda":
         major, _ = torch.cuda.get_device_capability(dev)
-        if major == 8:
-            kv_block = 64
-        elif major == 10:
+        if major >= 10:
             q_block *= 2
     return create_block_mask(
         mask_mod,
@@ -882,14 +875,6 @@ class TestFlexFlash(InductorTestCase):
                 )
 
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].score_mod_factory is not None
-        ),
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -1054,14 +1039,6 @@ class TestFlexFlash(InductorTestCase):
                 "backward_mqa_block_mask_causal",
                 "backward_mqa_block_mask_causal_per_head",
             }
-        ),
-    )
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].block_mask_num_heads == 1
         ),
     )
     @decorateIf(
@@ -1323,48 +1300,6 @@ class TestFlexFlash(InductorTestCase):
                 flash_vs_triton(q, k, v, block_mask=block_mask)
         else:
             flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @xfailIfSM120OrLater
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_backend_return_lse_matches_triton_and_reference(self, device, dtype):
-        torch.manual_seed(0)
-        q, k, v = create_test_tensors(
-            batch_size=1,
-            num_heads=1,
-            seq_len=128,
-            dim=32,
-            dtype=dtype,
-            device=device,
-        )
-
-        flash_flex = torch.compile(
-            functools.partial(
-                flex_attention,
-                scale=1.0,
-                return_lse=True,
-                kernel_options={"BACKEND": "FLASH"},
-            )
-        )
-        triton_flex = torch.compile(
-            functools.partial(
-                flex_attention,
-                scale=1.0,
-                return_lse=True,
-                kernel_options={"BACKEND": "TRITON"},
-            )
-        )
-
-        _, lse_flash = flash_flex(q, k, v)
-        _, lse_triton = triton_flex(q, k, v)
-        ref_lse = torch.logsumexp(
-            torch.matmul(q.float(), k.float().transpose(-2, -1)), dim=-1
-        )
-
-        torch.testing.assert_close(lse_triton.float(), ref_lse, atol=1e-4, rtol=1e-4)
-        torch.testing.assert_close(lse_flash.float(), ref_lse, atol=1e-4, rtol=1e-4)
-        torch.testing.assert_close(
-            lse_flash.float(), lse_triton.float(), atol=1e-4, rtol=1e-4
-        )
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)

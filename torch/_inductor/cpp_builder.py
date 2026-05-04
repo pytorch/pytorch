@@ -853,7 +853,7 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
             "Zc:__cplusplus",
             # Enable max compatible to msvc for oneAPI headers.
-            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
             "permissive-",
         ]
     else:
@@ -1357,8 +1357,8 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implemented more math libraries than clang, for performance purposes.
-    We need to preload them like openmp library.
+    Intel Compiler implemented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
     """
     preload_list = [
         "libiomp5md.dll",  # openmp
@@ -1891,20 +1891,6 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
             if stub_dir.exists():
                 lpaths.append(str(stub_dir))
 
-    # Internal path needs special care, using the SDK lib path directly.
-    if config.is_fbcode():
-        stub_dir = Path(build_paths.sdk_lib) / "stubs"
-        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
-            lpaths.append(str(stub_dir))
-
-
-def _transform_rocm_paths(lpaths: list[str]) -> None:
-    # Internal path needs special care, using the SDK lib path directly.
-    if config.is_fbcode():
-        sdk_lib = build_paths.sdk_lib
-        if os.path.isdir(sdk_lib) and sdk_lib not in lpaths:
-            lpaths.append(sdk_lib)
-
 
 def get_cpp_torch_device_options(
     device_type: str,
@@ -1953,7 +1939,6 @@ def get_cpp_torch_device_options(
             else:
                 libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
-            _transform_rocm_paths(libraries_dirs)
         else:
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]

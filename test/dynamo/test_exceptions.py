@@ -128,7 +128,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError
+                    raise AssertionError  # noqa: B904
                 except AssertionError:
                     x = torch.cos(x)
 
@@ -188,7 +188,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def cm():
             try:
                 yield
-            except BaseException:
+            except BaseException:  # noqa: B036
                 raise ValueError  # noqa: B904
 
         @contextlib.contextmanager
@@ -266,7 +266,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 for x, y in args:
                     try:
                         fn(x, y)
-                    except BaseException:
+                    except BaseException:  # noqa: B036
                         new_exc = sys.exc_info()
                         fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
                         prev_exc = new_exc
@@ -274,7 +274,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 try:
                     fixed_ctx = prev_exc[1].__context__
                     raise prev_exc[1]
-                except BaseException:
+                except BaseException:  # noqa: B036
                     prev_exc[1].__context__ = fixed_ctx
                     raise
 
@@ -674,7 +674,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError
+                    raise ValueError  # noqa: B904
                 except ValueError:
                     pass
                 raise
@@ -724,7 +724,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -754,7 +754,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -807,7 +807,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise GeneratorExit
             except Exception:
                 return t.sin()
-            except BaseException:
+            except BaseException:  # noqa: B036
                 return t.cos()
 
         t = torch.randn(2)

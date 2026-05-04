@@ -123,7 +123,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     } else if (
         key_set_.has(DispatchKey::Python) &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-      interpreter = *c10::impl::getGlobalPyInterpreter();
+      interpreter = pyobj_slot_.load_pyobj_interpreter();
     } else {
       // otherwise just copy the SparseTensorImpl and not the PyObject.
       auto impl = c10::make_intrusive<SparseCsrTensorImpl>(

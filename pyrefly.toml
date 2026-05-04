@@ -110,7 +110,6 @@ ignore-missing-imports = [
     "onnxruntime.*",
     "onnxscript.*",
     "redis.*",
-    "tabulate.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
@@ -159,13 +158,3 @@ matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
-
-[[sub-config]]
-matches = "torch/fx/**"
-[sub-config.errors]
-implicit-import = false
-implicit-any = true
-bad-param-name-override = false
-unannotated-return = true
-unannotated-parameter = true
-unannotated-attribute = true

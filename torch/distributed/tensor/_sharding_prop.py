@@ -407,13 +407,6 @@ class ShardingPropagator:
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
         }
-        # ops with individual scalar shape args that need local adjustment
-        # maps op -> callable(input_specs, schema) -> adjusted schema
-        # populated by op modules (e.g. _math_ops.py) at registration time
-        self.op_to_scalar_shape_adjuster: dict[
-            OpOverload,
-            Callable[[list[DTensorSpec], OpSchema], OpSchema],
-        ] = {}
         # squeeze ops that need dim arg rewritten to only globally-singleton dims
         self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
             aten.squeeze.default: aten.squeeze.dims,
@@ -835,19 +828,6 @@ class ShardingPropagator:
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
-                        needs_redistribute = True
-                        use_val_from_redistribute_schema = True
-
-                # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
-                if op_schema.op in self.op_to_scalar_shape_adjuster:
-                    if any(
-                        isinstance(p, Shard | _StridedShard)
-                        for spec in expected_input_specs
-                        for p in spec.placements
-                    ):
-                        schema = suggestion_schema or op_schema
-                        adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
-                        suggestion_schema = adjuster(expected_input_specs, schema)
                         needs_redistribute = True
                         use_val_from_redistribute_schema = True
 

@@ -250,12 +250,6 @@ class _KinetoProfile:
             import torch._inductor.config as inductor_config
 
             self.has_cudagraphs = inductor_config.triton.cudagraphs
-        if (self.profiler is not None) and (not self.acc_events):
-            _warn_once(
-                "Warning: Profiler clears events at the end of each cycle. "
-                "Only events from the current cycle will be reported. "
-                "To keep events across cycles, set acc_events=True."
-            )
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -273,6 +267,12 @@ class _KinetoProfile:
                 activity_filters=self.activity_filters
                 if self.activity_filters
                 else None,
+            )
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle."
+                "Only events from the current cycle will be reported."
+                "To keep events across cycles, set acc_events=True."
             )
         self.profiler._prepare_trace()
 
@@ -401,8 +401,6 @@ class _KinetoProfile:
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
 
-        Returns an :class:`~torch.autograd.profiler_util.EventList` of the aggregated events.
-
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
@@ -417,8 +415,8 @@ class _KinetoProfile:
 
     def events(self):
         """
-        Return the list of unaggregated :class:`~torch.autograd.profiler_util.FunctionEvent`
-        objects, for use in the trace callback or after profiling has finished.
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
@@ -667,10 +665,8 @@ class profile(_KinetoProfile):
             The same activity group must not appear more than once.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (Callable): callable invoked at the end of each profiling cycle
-            (when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``). Receives the
-            :class:`profile` instance as its only argument, typically used to export the
-            trace (e.g. via :meth:`export_chrome_trace`) or print a summary.
+        on_trace_ready (Callable): callable that is called at each step when ``schedule``
+            returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
@@ -693,9 +689,6 @@ class profile(_KinetoProfile):
         post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
             results. If specified, event parsing will stop after this duration and return partial
             results. Useful for handling large traces that may take too long to process.
-        custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
-            invoked once per profiling cycle. Defaults to a random UUID; retrieve via
-            :meth:`get_trace_id`.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -977,8 +970,7 @@ class profile(_KinetoProfile):
 
     def set_custom_trace_id_callback(self, callback) -> None:
         """
-        Set the trace ID generator. Called at the start of each cycle, so updating
-        it between cycles yields distinct IDs per cycle.
+        Sets a callback to be called when a new trace ID is generated.
         """
         self.custom_trace_id_callback = callback
 

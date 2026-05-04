@@ -3,15 +3,12 @@
 import io
 import os
 import sys
-import unittest
 from pathlib import Path
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
-from torch.testing._internal.common_cuda import SM120OrLater
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -184,7 +181,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -280,7 +277,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -717,10 +714,6 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
-    @unittest.skipIf(
-        IS_WINDOWS and SM120OrLater,
-        "Process crash in PyTorchStreamWriter on SM120+ Windows",
-    )
     @skipIfTorchDynamo("too slow")
     def test_save_load_large_string_attribute(self):
         """
@@ -907,7 +900,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -997,7 +990,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass

@@ -63,16 +63,17 @@ class TORCH_API PrivateUse1ProfilerRegistry {
   // Useful for testing to verify the registration logic.
   bool isRegisteredWithKineto() const;
 
+  // Register the factory with Kineto's activity profiler.
+  // This is called internally when Kineto is ready.
+  // Safe to call multiple times - will only register once.
+  void registerWithKineto();
+
   // Mark that Kineto has been initialized.
   // If a factory was registered before Kineto init, it will be forwarded.
   void onKinetoInit();
 
  private:
   PrivateUse1ProfilerRegistry() = default;
-
-  // Register the factory with Kineto's activity profiler.
-  // Caller must hold mutex_.
-  void registerWithKineto();
 
   mutable std::mutex mutex_;
   PrivateUse1ProfilerFactory factory_;

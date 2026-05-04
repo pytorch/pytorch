@@ -48,7 +48,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MI350_ARCH,
     parametrize,
-    random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
     skipIfRocm,
@@ -1310,8 +1309,8 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=base_dtype, device=device, reduction_dim=-1)
-        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=base_dtype, device=device, reduction_dim=-1).t()
+        x = torch.randn(M, K, device=device, dtype=base_dtype)
+        y = torch.randn(N, K, device=device, dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
             bias = torch.randn((N,), device=device, dtype=base_dtype)
@@ -1811,7 +1810,8 @@ class TestFP8Matmul(TestCase):
                     ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                if SM100OrLater:
+                capability = torch.cuda.get_device_capability()
+                if capability in {(10, 0), (10, 3), (11, 0), (12, 0), (12, 1)}:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)
