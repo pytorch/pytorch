@@ -229,7 +229,7 @@ Low-Precision functions
    is required. When adding new enum values, update both the C++ definition in
    aten/src/ATen/BlasBackend.h and the entries below.
 
-.. class:: torch.nn.functional.ScalingType
+.. class:: ScalingType
 
     Enum describing how a tensor's scaling factors are organized for use with
     :func:`~torch.nn.functional.scaled_mm` and :func:`~torch.nn.functional.scaled_grouped_mm`.
@@ -258,7 +258,7 @@ Low-Precision functions
 
         One ``float32`` scale per 128×128 tile.
 
-.. class:: torch.nn.functional.SwizzleType
+.. class:: SwizzleType
 
     Enum describing the swizzling pattern of scale tensors for use with
     :func:`~torch.nn.functional.scaled_mm` and :func:`~torch.nn.functional.scaled_grouped_mm`.
