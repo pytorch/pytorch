@@ -476,11 +476,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # When only meta device is present, add_device_include is never
             # called so we need to pull in the common header explicitly.
             if V.graph.aot_mode:
-                self.header.writeln(
+                self.header.writeline(
                     "#include <torch/csrc/inductor/aoti_include/common.h>"
                 )
             else:
-                self.header.writeln(
+                self.header.writeline(
                     "#include <torch/csrc/inductor/cpp_wrapper/common.h>"
                 )
 
