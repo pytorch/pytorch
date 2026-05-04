@@ -1,14 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
-#include <cstring>
-#include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace c10d {
 namespace symmetric_memory {
@@ -19,43 +14,6 @@ bool allow_overlapping_devices();
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA();
-
-// All-gather a fixed-size byte payload through the given ProcessGroup.
-// Uses ProcessGroup::_allgather_base (NCCL allgather for a NCCL-backed PG).
-// The payload is staged through a uint8 CUDA tensor on `device_idx`; the H2D
-// and D2H copies are negligible at the sizes exchanged during rendezvous (a
-// few hundred bytes per rank). Returns a contiguous CPU tensor of
-// world_size * nbytes uint8 elements.
-at::Tensor pg_all_gather_bytes(
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
-    const void* data,
-    size_t nbytes,
-    int device_idx);
-
-// Templated wrapper around `pg_all_gather_bytes` matching the shape of
-// `StoreExchange::all_gather` so rendezvous code can swap transports without
-// caring about serialization.
-template <typename T>
-std::vector<T> pg_all_gather(
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
-    int device_idx,
-    const T& val) {
-  static_assert(
-      std::is_trivially_copyable_v<T>,
-      "pg_all_gather requires a trivially copyable type");
-  at::Tensor flat = pg_all_gather_bytes(pg, &val, sizeof(T), device_idx);
-  const auto world_size = pg->getSize();
-  const size_t expected = static_cast<size_t>(world_size) * sizeof(T);
-  TORCH_CHECK(
-      static_cast<size_t>(flat.numel()) == expected,
-      "pg_all_gather: expected ",
-      expected,
-      " bytes but got ",
-      flat.numel());
-  std::vector<T> out(world_size);
-  std::memcpy(out.data(), flat.data_ptr(), expected);
-  return out;
-}
 
 class IpcChannel {
  public:
