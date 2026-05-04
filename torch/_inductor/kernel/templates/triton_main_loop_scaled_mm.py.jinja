@@ -56,6 +56,37 @@
             a = tl.load_tensor_descriptor(a_desc, [offs_am_desc, offs_k_desc])
             b = tl.load_tensor_descriptor(b_desc, [offs_bn_desc, offs_k_desc])
 
+            {%- if SCALE_RECIPE_A == 3 and SCALE_RECIPE_B == 3 %}
+            scale_a_block = blockwise1xTILESIZE_scale(
+                pid_m,
+                A_inverse_scale,
+                ki,
+                M,
+                ak_blocks,
+                BLOCK_M,
+                BLOCK_K,
+                TILE_SIZE_A,
+            )
+            scale_b_block = blockwise1xTILESIZE_scale(
+                pid_n,
+                B_inverse_scale,
+                ki,
+                N,
+                bk_blocks,
+                BLOCK_N,
+                BLOCK_K,
+                TILE_SIZE_B,
+            )
+            accumulator = tl.dot_scaled(
+                a,
+                scale_a_block,
+                "{{ 'e2m1' if FP4_INPUT else 'e4m3' }}",
+                b.T,
+                scale_b_block,
+                "{{ 'e2m1' if FP4_INPUT else 'e4m3' }}",
+                accumulator,
+            )
+            {%- else %}
             {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
             scale_a_block = blockwise128x128_scaling(
                 pid_m,
@@ -80,6 +111,7 @@
                 BLOCK_K,
                 MIN_BLOCK_TILE_AK,
                 TILE_SIZE_A,
+                SCALE_RECIPE_A,
             )
             {%- endif %}
 
@@ -107,12 +139,21 @@
                 BLOCK_K,
                 MIN_BLOCK_TILE_BK,
                 TILE_SIZE_B,
+                SCALE_RECIPE_B,
             )
             {%- endif %}
 
+            {%- if FP4_INPUT %}
+            a_lo, a_hi = unpack_fp4_e2m1(a)
+            b_lo, b_hi = unpack_fp4_e2m1(b)
+            accumulator = tl.dot(a_lo * scale_a_block, (b_lo * scale_b_block).T, accumulator)
+            accumulator = tl.dot(a_hi * scale_a_block, (b_hi * scale_b_block).T, accumulator)
+            {%- else %}
             a_scaled = a * scale_a_block
             b_scaled = b * scale_b_block
             accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
+            {%- endif %}
+            {%- endif %}
 
         offs_cm = offs_am + tl.arange(0, BLOCK_M)
         offs_cn = offs_bn + tl.arange(0, BLOCK_N)
@@ -128,6 +169,57 @@
 
 
 @triton.jit
+def unpack_fp4_e2m1(x):
+    bits = x.to(tl.uint8, bitcast=True)
+    lo = decode_fp4_e2m1(bits & 0xF)
+    hi = decode_fp4_e2m1(bits >> 4)
+    return lo, hi
+
+
+@triton.jit
+def decode_fp4_e2m1(bits):
+    sign = tl.where((bits & 0x8) == 0, 1.0, -1.0)
+    exp = (bits >> 1) & 0x3
+    mant = bits & 0x1
+    mag = tl.where(
+        exp == 0,
+        mant.to(tl.float32) * 0.5,
+        tl.exp2(exp.to(tl.float32) - 1.0) * (1.0 + mant.to(tl.float32) * 0.5),
+    )
+    return sign * mag
+
+
+@triton.jit
+def blockwise1xTILESIZE_swizzled_offsets(row_offs_scale, col_offs_scale, k_blocks):
+    num_col_tiles = tl.cdiv(k_blocks, 4)
+    tile_offset = 512 * ((row_offs_scale[:, None] // 128) * num_col_tiles + (col_offs_scale[None, :] // 4))
+    outer = row_offs_scale[:, None] % 128
+    inner = col_offs_scale[None, :] % 4
+    return tile_offset + (outer % 32) * 16 + (outer // 32) * 4 + inner
+
+
+@triton.jit
+def blockwise1xTILESIZE_scale(
+    pid,
+    scale,
+    ki,
+    lhs_size,
+    k_blocks,
+    BLOCK_lhs: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    TILE_SIZE: tl.constexpr,
+):
+    row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
+    col_offs_scale = ki * tl.cdiv(BLOCK_K, TILE_SIZE) + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
+    mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
+    return tl.load(
+        scale + blockwise1xTILESIZE_swizzled_offsets(row_offs_scale, col_offs_scale, k_blocks),
+        mask=mask,
+        other=127,
+    ).to(tl.uint8, bitcast=True)
+
+
+@triton.jit
 def blockwise1xTILESIZE_scaling(
     pid,
     scale,
@@ -139,12 +231,30 @@ def blockwise1xTILESIZE_scaling(
     BLOCK_K: tl.constexpr,
     MIN_BLOCK_TILE_K: tl.constexpr,
     TILE_SIZE: tl.constexpr,
+    SCALE_RECIPE: tl.constexpr,
 ):
     row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
     col_offs_scale = ki * tl.cdiv(BLOCK_K, TILE_SIZE) + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
+    {%- if SCALE_RECIPE_A in (2, 3) or SCALE_RECIPE_B in (2, 3) %}
+    ptrs = scale + blockwise1xTILESIZE_swizzled_offsets(row_offs_scale, col_offs_scale, k_blocks)
+    {%- else %}
     ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
+    {%- endif %}
     mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
-    scale_block = tl.load(ptrs, mask=mask, other=1.0)
+    scale_block_raw = tl.load(ptrs, mask=mask, other=1.0)
+    if SCALE_RECIPE == 3:
+        scale_block = tl.exp2(scale_block_raw.to(tl.uint8, bitcast=True).to(tl.float32) - 127.0)
+    elif SCALE_RECIPE == 2:
+        scale_bits = scale_block_raw.to(tl.uint8, bitcast=True)
+        scale_exp = (scale_bits >> 3) & 0xF
+        scale_mant = scale_bits & 0x7
+        scale_block = tl.where(
+            scale_exp == 0,
+            tl.exp2(-6.0) * (scale_mant.to(tl.float32) / 8.0),
+            tl.exp2(scale_exp.to(tl.float32) - 7.0) * (1.0 + scale_mant.to(tl.float32) / 8.0),
+        )
+    else:
+        scale_block = scale_block_raw.to(tl.float32)
 
     scale_expanded = scale_block[:, :, None]
     scale_expanded = tl.broadcast_to(

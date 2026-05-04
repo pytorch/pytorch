@@ -11,7 +11,11 @@ from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import (  # type: ignore[attr-defined]
+    scaled_mm,
+    ScalingType,
+    SwizzleType,
+)
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     IS_SM90,
@@ -25,7 +29,11 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     skipCUDAIf,
 )
-from torch.testing._internal.common_quantized import ceil_div, to_blocked
+from torch.testing._internal.common_quantized import (
+    _bfloat16_to_float4_e2m1fn_x2,
+    ceil_div,
+    to_blocked,
+)
 from torch.testing._internal.common_utils import parametrize, skipIfXpu, xfailIf
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
@@ -435,27 +443,112 @@ class TestFP8Types(TestCase):
 class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyCUDA
-    def test_functional_scaled_mm_fullgraph(self, device):
+    @parametrize("scaling_type", (ScalingType.TensorWise, ScalingType.RowWise))
+    def test_functional_scaled_mm_fullgraph(self, scaling_type, device):
         M, N, K = 128, 128, 128
         x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
         w = torch.randn(N, K, device=device, dtype=torch.bfloat16)
-        x_fp8, x_scale = _quantize_tensorwise(x, torch.float8_e4m3fn)
-        w_fp8, w_scale = _quantize_tensorwise(w, torch.float8_e4m3fn)
+        if scaling_type == ScalingType.TensorWise:
+            x_fp8, x_scale = _quantize_tensorwise(x, torch.float8_e4m3fn)
+            w_fp8, w_scale = _quantize_tensorwise(w, torch.float8_e4m3fn)
+        else:
+            x_fp8, x_scale = _quantize_rowwise(x, torch.float8_e4m3fn)
+            w_fp8, w_scale = _quantize_rowwise(w, torch.float8_e4m3fn)
+            w_scale = w_scale.t()
 
         def fn(x_fp8, w_fp8_t, x_scale, w_scale):
             return scaled_mm(
                 x_fp8,
                 w_fp8_t,
                 x_scale,
-                ScalingType.TensorWise,
+                scaling_type,
                 w_scale,
-                ScalingType.TensorWise,
+                scaling_type,
                 output_dtype=torch.bfloat16,
             )
 
-        expected = fn(x_fp8, w_fp8.t(), x_scale, w_scale)
-        actual = torch.compile(fn, fullgraph=True)(x_fp8, w_fp8.t(), x_scale, w_scale)
-        self.assertEqual(expected, actual)
+        w_fp8_t = w_fp8.t()
+        expected = fn(x_fp8, w_fp8_t, x_scale, w_scale)
+        compiled_fn = torch.compile(fn, fullgraph=True, mode="max-autotune")
+        actual, (wrapper,) = run_and_get_code(
+            compiled_fn, x_fp8, w_fp8_t, x_scale, w_scale
+        )
+        torch.testing.assert_close(expected, actual, rtol=5e-2, atol=0.07)
+        FileCheck().check_not("torch.ops.aten._scaled_mm_v2.default").check_not(
+            "extern_kernels._scaled_mm"
+        ).check("triton_").run(wrapper)
+
+    @unittest.skipIf(not SM100OrLater, "MX/NV blocked scaled_mm recipes require SM100+")
+    @onlyCUDA
+    @parametrize(
+        "recipe,mat_dtype,scale_dtype,block_size",
+        (
+            (ScalingType.BlockWise1x32, torch.float8_e4m3fn, torch.float8_e8m0fnu, 32),
+            (
+                ScalingType.BlockWise1x16,
+                torch.float4_e2m1fn_x2,
+                torch.float8_e4m3fn,
+                16,
+            ),
+            (
+                ScalingType.BlockWise1x32,
+                torch.float4_e2m1fn_x2,
+                torch.float8_e8m0fnu,
+                32,
+            ),
+        ),
+    )
+    def test_functional_scaled_mm_blockwise_fullgraph(
+        self, recipe, mat_dtype, scale_dtype, block_size, device
+    ):
+        M, N, K = 128, 128, 128
+        if mat_dtype is torch.float4_e2m1fn_x2:
+            x_q = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            )
+            w_q = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(N, K, device=device, dtype=torch.bfloat16)
+            )
+        else:
+            x_q = torch.randint(-1, 2, (M, K), device=device).to(mat_dtype)
+            w_q = torch.randint(-1, 2, (N, K), device=device).to(mat_dtype)
+
+        scale_cols = ceil_div(ceil_div(K, block_size), 4) * 4
+        x_scale = to_blocked(torch.rand(M, scale_cols, device=device).to(scale_dtype))
+        w_scale = to_blocked(torch.rand(N, scale_cols, device=device).to(scale_dtype))
+
+        def fn(x_q, w_q_t, x_scale, w_scale):
+            return scaled_mm(
+                x_q,
+                w_q_t,
+                x_scale,
+                recipe,
+                w_scale,
+                recipe,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        w_q_t = w_q.t()
+        expected = fn(x_q, w_q_t, x_scale, w_scale)
+        compiled_fn = torch.compile(fn, fullgraph=True, mode="max-autotune")
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": True,
+            }
+        ):
+            actual, (wrapper,) = run_and_get_code(
+                compiled_fn, x_q, w_q_t, x_scale, w_scale
+            )
+
+        torch.testing.assert_close(expected, actual, rtol=5e-2, atol=0.1)
+        FileCheck().check_not("torch.ops.aten._scaled_mm_v2.default").check_not(
+            "extern_kernels._scaled_mm"
+        ).check_not("nv_universal").check("triton_").run(wrapper)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
