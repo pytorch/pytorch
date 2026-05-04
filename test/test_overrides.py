@@ -1931,24 +1931,27 @@ class TestTorchFunctionMode(TestCase):
 
 class TestTorchFunctionRedispatch(TestCase):
     def test_simple(self):
-        x = RedispatchTensor(torch.ones(1))
+        call_log = []
+        x = RedispatchTensor(torch.ones(1), call_log=call_log)
         ret = bar(x)
         self.assertIs(ret, x)
         # Check that bar was intercepted
-        call_log_str = '\n'.join(f"{entry[0]}" for entry in x.call_log)
+        call_log_str = '\n'.join(f"{entry[0]}" for entry in call_log)
         self.assertExpectedInline(call_log_str, """bar""")
 
     def test_skip_to_inner(self):
-        x = RedispatchTensor(torch.full((1,), 1))
-        y = RedispatchTensor(torch.full((1,), 2))
-        z = RedispatchTensor(torch.full((1,), 3))
+        call_log = []
+        x = RedispatchTensor(torch.full((1,), 1), call_log=call_log)
+        y = RedispatchTensor(torch.full((1,), 2), call_log=call_log)
+        z = RedispatchTensor(torch.full((1,), 3), call_log=call_log)
         ret = foo(x, y, z)
-        self.assertEqual(ret, torch.full((1,), 6))
 
         # Key behavior: redispatch skips dispatch for foo once,
         # but then the + operations inside foo DO dispatch to __torch_function__
         # So we should see: foo, then add (from a+b), then add (from temp+c)
-        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in x.call_log)
+        # Snapshot the log before assertEqual triggers more __torch_function__ calls.
+        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in call_log)
+        self.assertEqual(ret, torch.full((1,), 6))
         self.assertExpectedInline(call_log_str, """\
 foo: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
 TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)

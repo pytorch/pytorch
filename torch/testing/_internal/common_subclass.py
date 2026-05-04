@@ -245,9 +245,9 @@ class NonWrapperTensor(torch.Tensor):
 class RedispatchTensor(torch.Tensor):
     __slots__ = ['call_log']
 
-    def __new__(cls, data):
+    def __new__(cls, data, call_log=None):
         t = torch.Tensor._make_subclass(cls, data, require_grad=data.requires_grad)
-        t.call_log = []
+        t.call_log = call_log if call_log is not None else []
         return t
 
     def __repr__(self):
@@ -258,43 +258,25 @@ class RedispatchTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args, kwargs=None):
         call_log_entry = (func.__qualname__, types, args, kwargs)
 
-        inputs = []
+        call_log = None
 
-        def collect(x):
-            if isinstance(x, RedispatchTensor):
-                inputs.append(x)
+        def find_log(x):
+            nonlocal call_log
+            if isinstance(x, RedispatchTensor) and call_log is None:
+                call_log = x.call_log
 
-        _ = tree_map(collect, args)
-        if kwargs:
-            _ = tree_map(collect, kwargs)
+        _ = tree_map(find_log, args)
+        if kwargs and call_log is None:
+            _ = tree_map(find_log, kwargs)
 
-        # Merge the call_logs of all input RedispatchTensors into a single
-        # shared list, then alias every input (and the wrapped output) to
-        # it.  Without the merge, logs from non-first inputs would be
-        # dropped; sharing the list means later ops on the output are also
-        # visible from the inputs' logs.
-        shared_log = inputs[0].call_log if inputs else None
-        if shared_log is not None:
-            seen_entry_ids = {id(e) for e in shared_log}
-            for t in inputs[1:]:
-                if t.call_log is shared_log:
-                    continue
-                for entry in t.call_log:
-                    if id(entry) not in seen_entry_ids:
-                        shared_log.append(entry)
-                        seen_entry_ids.add(id(entry))
-            shared_log.append(call_log_entry)
-            for t in inputs:
-                t.call_log = shared_log
+        if call_log is not None:
+            call_log.append(call_log_entry)
 
         ret = torch.overrides.redispatch_function(func, types, args, kwargs)
 
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
-                r = cls(x)
-                if shared_log is not None:
-                    r.call_log = shared_log
-                return r
+                return cls(x, call_log=call_log)
             return x
         return tree_map(wrap, ret)
 
