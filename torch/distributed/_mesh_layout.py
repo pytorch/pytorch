@@ -111,7 +111,7 @@ class _FlatLayout:
         - The composition only generates indices that the left layout could originally produce,
           but the right layout determines which indices to be picked.
         - The stride of the composition layout will not be smaller than the stride of the right layout,
-          because when picking the indices the composition will at least follow the the right layout's stride
+          because when picking the indices the composition will at least follow the right layout's stride
           to move forward.
 
         Example:
@@ -224,7 +224,7 @@ class _FlatLayout:
     def check_sorted(self) -> bool:
         return tuple(sorted(self.stride, reverse=True)) == self.stride
 
-    def check_non_overlap(self) -> bool:
+    def check_orthogonal(self) -> bool:
         """
         Check if the layout has any overlap between the ranks it generates. If there is overlap,
         we return False, otherwise True.
@@ -253,8 +253,13 @@ class _FlatLayout:
         Returns:
             bool: True if no overlap, False if overlap detected
         """
-        ranks = self.all_ranks_from_zero()
-        return len(ranks) == len(set(ranks))
+        if len(self.shape) < 2:
+            return True
+        stride, shape = zip(*sorted(zip(self.stride, self.shape), reverse=True))
+        return all(
+            stride[i] % (stride[i + 1] * shape[i + 1]) == 0
+            for i in range(len(stride) - 1)
+        )
 
     @property
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:

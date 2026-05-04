@@ -4,7 +4,6 @@ import functools
 import inspect
 import re
 import sys
-import warnings
 import weakref
 from collections.abc import Callable, Sequence
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
@@ -138,6 +137,70 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             )
 
 
+def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
+    """Validate that a schema has valid inplace semantics, i.e., it can be tagged with torch.Tag.inplace.
+
+    Requirements:
+    - The first positional argument must be a mutable Tensor (Tensor(a!))
+    - Must return exactly that Tensor
+    - Only the first positional argument may be mutable
+
+    Native inplace ops (defined in native_functions.yaml) have relaxed requirements:
+    they may have Tensor[] self and multiple mutable arguments. This validation is
+    stricter because it is only used for custom ops defined via torch.library.
+    """
+    if isinstance(schema, str):
+        schema = torch._C.parse_schema(schema)
+    args = schema.arguments
+    if not args or args[0].kwarg_only:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must have at least one positional argument. "
+            f"Got: {schema}"
+        )
+    first_arg = args[0]
+    if first_arg.alias_info is None or not first_arg.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be mutable (e.g., Tensor(a!)). Got: {schema}"
+        )
+    if not isinstance(first_arg.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be a Tensor. Got type '{first_arg.type}' for arg '{first_arg.name}'. "
+            f"Got: {schema}"
+        )
+    # Must return exactly one Tensor aliasing the first arg
+    returns = schema.returns
+    if len(returns) != 1:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return exactly one value "
+            f"(the first argument). Got {len(returns)} returns. Got: {schema}"
+        )
+    ret = returns[0]
+    if ret.alias_info is None:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must alias the first argument). Got: {schema}"
+        )
+    if ret.alias_info.before_set != first_arg.alias_info.before_set:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return aliases {ret.alias_info.before_set} but first arg aliases "
+            f"{first_arg.alias_info.before_set}). Got: {schema}"
+        )
+    other_mutable = [
+        arg
+        for arg in args[1:]
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    if other_mutable:
+        names = [a.name for a in other_mutable]
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must only mutate the first positional argument. "
+            f"Found additional mutable args: {names}. Got: {schema}"
+        )
+
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -236,6 +299,8 @@ class Library:
 
         if torch.Tag.out in tags:
             _validate_out_schema(schema)
+        if torch.Tag.inplace in tags:
+            _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
@@ -419,19 +484,6 @@ class Library:
             if "::" not in dispatcher_op_name:
                 dispatcher_op_name = f"{self.ns}::{dispatcher_op_name}"
 
-            op = torch._library.utils.lookup_op(dispatcher_op_name)
-            if torch._library.utils.is_out(op) and not torch._library.utils.is_builtin(
-                op
-            ):
-                warnings.warn(
-                    f"Registering a Meta kernel for operator '{dispatcher_op_name}' "
-                    f"which has torch.Tag.out. Operators with Tag.out automatically "
-                    f"get a fake kernel that returns the out= arguments. We "
-                    f"recommend not registering a fake/meta kernel manually "
-                    f"because it is easy to get wrong.",
-                    stacklevel=2,
-                )
-
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
@@ -520,21 +572,28 @@ class Library:
         self._registration_handles.clear()
         global _impls
         _impls -= self._op_impls
-        for name in self._op_defs:
-            # Delete the cached torch.ops.ns.foo if it was registered.
-            # Otherwise, accessing it leads to a segfault.
-            # It's possible that we only registered an overload in this Library
-            # and another library owns an alive overload.
-            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
-            # recomputed to point at the right collection of overloads.
-            ns, name_with_overload = name.split("::")
-            name = name_with_overload.split(".")[0]
-            if not hasattr(torch.ops, ns):
-                continue
-            namespace = getattr(torch.ops, ns)
-            if not hasattr(namespace, name):
-                continue
-            delattr(namespace, name)
+        _clear_torch_ops_cache(self._op_defs)
+
+
+def _clear_torch_ops_cache(op_defs):
+    # Delete the cached torch.ops.ns.foo if it was registered.
+    # Otherwise, accessing it leads to a segfault, or to enumerations
+    # over the namespace (e.g. _collect_all_valid_cia_ops) tripping on
+    # an OpOverloadPacket whose underlying overload was just removed.
+    # It's possible that we only registered an overload in this Library
+    # and another library owns an alive overload.
+    # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+    # recomputed to point at the right collection of overloads.
+    for qualname in op_defs:
+        ns, name_with_overload = qualname.split("::")
+        name = name_with_overload.split(".")[0]
+        if not hasattr(torch.ops, ns):
+            continue
+        namespace = getattr(torch.ops, ns)
+        if not hasattr(namespace, name):
+            continue
+        delattr(namespace, name)
+        if name in namespace._dir:
             namespace._dir.remove(name)
 
 
@@ -565,6 +624,8 @@ def _del_library(
 
     if m is not None:
         m.reset()
+
+    _clear_torch_ops_cache(op_defs)
 
 
 @contextlib.contextmanager

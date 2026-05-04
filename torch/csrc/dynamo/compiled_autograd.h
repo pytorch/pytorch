@@ -155,7 +155,7 @@ struct CacheKey {
 };
 
 struct NodeCall {
-  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+  NodeCall(uint32_t id_, c10::intrusive_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
@@ -163,7 +163,7 @@ struct NodeCall {
   }
 
   uint32_t id;
-  std::shared_ptr<Node> node;
+  c10::intrusive_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
@@ -174,7 +174,7 @@ struct NodeCall {
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
-  NodeCall& lookup(const std::shared_ptr<Node>& function) {
+  NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
     auto it = find(function.get());
     if (it == end()) {
       it = emplace(function.get(), NodeCall(_next_id++, function)).first;
@@ -254,7 +254,9 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+  TensorArg& add(
+      const SavedVariable& sv,
+      const c10::intrusive_ptr<Node>& node) {
     // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
@@ -552,7 +554,7 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const std::shared_ptr<Node>& t) {
+  void collect(const c10::intrusive_ptr<Node>& t) {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by

@@ -158,9 +158,13 @@ class GraphPickler(pickle.Pickler):
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
-            # FakeScriptObjects wrap opaque traced objects (e.g. DeviceMesh,
-            # ProcessGroup) that can't be default-pickled. Reduce to None
-            # since they aren't meaningful after deserialization.
+            from torch._library.opaque_object import is_opaque_value_type
+
+            real_obj = object.__getattribute__(obj, "real_obj")
+            if real_obj is not None and is_opaque_value_type(type(real_obj)):
+                # Use default pickling; value-type opaques are picklable.
+                return NotImplemented
+            # Reference-type FakeScriptObjects can't be default-pickled.
             return (_unpickle_as_none, ())
         elif isinstance(obj, weakref.ref):
             # Serialize weakrefs properly: if the referent is alive,

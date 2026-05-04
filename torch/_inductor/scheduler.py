@@ -3039,10 +3039,6 @@ class NodeUser:
 _post_grad_graph_counter = itertools.count()
 
 
-def used_non_deterministic_runtime_estimations() -> bool:
-    return config.runtime_estimations_mms_benchmark
-
-
 def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
     """Get free symbols from a node's layout (size, stride, offset)."""
     free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
@@ -3286,14 +3282,7 @@ class Scheduler:
                     self.nodes, self.name_to_buf
                 )
 
-            if (
-                used_non_deterministic_runtime_estimations()
-                and config_comms.runtime_estimations_align_across_all_distributed_ranks
-                and (
-                    config.runtime_estimations_mms_benchmark
-                    or config_comms.runtime_estimations_use_nccl_lib_estimations
-                )
-            ):
+            if config_comms.runtime_estimations_align_across_all_distributed_ranks:
                 has_collectives = False
                 for node in self.nodes:
                     if is_collective(node.node):
@@ -5219,11 +5208,11 @@ class Scheduler:
                     # All fusion outputs are in ancestors of node1 and node2, thus
                     # cannot introduce new path:
                     #
-                    # 1. if output is neither descendent of node1 or node2, the
+                    # 1. if output is neither descendant of node1 or node2, the
                     #        output cannot introduce a path
-                    # 2. due to [can_fuse]: if WLOG output is descendent of node1, it cannot be
+                    # 2. due to [can_fuse]: if WLOG output is descendant of node1, it cannot be
                     #        on path(node1->node2), hence it cannot be ancestor of node2
-                    # 3. due to [acyclic]: if WLOG output is descendent of node1, it cannot be
+                    # 3. due to [acyclic]: if WLOG output is descendant of node1, it cannot be
                     #        ancestor of node1
                     return False
                 else:

@@ -79,6 +79,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
+    xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
@@ -6083,6 +6084,17 @@ class CommonTemplate:
         if out.dtype != torch.bfloat16:
             raise AssertionError(f"Expected dtype torch.bfloat16, got {out.dtype}")
 
+    def test_as_strided_on_split_view(self):
+        # as_strided without an explicit storage_offset must preserve the
+        # offset of split/slice views instead of resetting to the base tensor.
+        def fn(x):
+            a, b = x.split(3)
+            a_s = a.as_strided((2,), (1,))
+            b_s = b.as_strided((2,), (1,))
+            return a_s + b_s
+
+        self.common(fn, (torch.arange(6, dtype=torch.float32),))
+
     def test_repeat_interleave(self):
         def fn(x):
             return (
@@ -6823,6 +6835,14 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_clone_dropout(self):
+        def fn(x):
+            y = x.t().contiguous()
+            return torch.nn.functional.dropout(y)
+
+        self.common(fn, (torch.randn(3, 4),))
+
     def test_masked_fill(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
@@ -7331,6 +7351,26 @@ class CommonTemplate:
             return y + x
 
         self.common(fn, (torch.randn(2, 4),))
+
+    def test_same_meta_non_tensor(self):
+        from torch._inductor.fx_passes.post_grad import same_meta
+
+        g = torch.fx.Graph()
+        n1 = g.create_node("placeholder", "x")
+        n2 = g.create_node("placeholder", "y")
+
+        n1.meta["val"] = torch.SymInt(42)
+        n2.meta["val"] = torch.SymInt(42)
+        self.assertFalse(same_meta(n1, n2))
+
+        n1.meta["val"] = None
+        n2.meta["val"] = torch.randn(4)
+        self.assertFalse(same_meta(n1, n2))
+
+        t = torch.randn(4)
+        n1.meta["val"] = t
+        n2.meta["val"] = t
+        self.assertTrue(same_meta(n1, n2))
 
     def test_remove_noop_slice(self):
         def f(x):
@@ -8496,13 +8536,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
-        # MPS has correctness problem for transposed sort before MacOS15
+        # MPS has correctness problem for transposed sort before MacOS15.
+        # Size is chosen above the single-block Metal path threshold so the
+        # MPSGraph fallback (where the pre-15 bug exists) is exercised.
         ctx = (
             contextlib.nullcontext()
             if self.device != "mps" or MACOS_VERSION >= 15.0
             else self.assertRaises(AssertionError)
         )
-        inp = torch.randn(128, 10).transpose(0, 1)
+        inp = torch.randn(4097, 10).transpose(0, 1)
         with ctx:
             self.common(fn, (inp, False))
             self.common(fn, (inp, True))
@@ -14155,6 +14197,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
     @slowTest
     def test_fuse_large_params(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("Metal has a 31-buffer argument limit per kernel")
+
         def pt2_optimizer_step(optimizer):
             @torch.compile()
             def f():
@@ -16482,6 +16527,40 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    def test_jvp_compile_backward(self):
+        def jvp_fn(f, x):
+            return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
+
+        def compute(f, x):
+            first, rest = x[..., :1], x[..., 1:]
+            return jvp_fn(lambda X: f(torch.cat([X, rest])), first)
+
+        in_features = 4
+        net = torch.nn.Sequential(
+            torch.nn.Linear(in_features, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 8),
+        ).to(self.device)
+
+        x = torch.rand((in_features,), device=self.device)
+
+        eager_out = compute(net, x).sum()
+        eager_out.backward()
+        eager_grads = [p.grad.clone() for p in net.parameters() if p.grad is not None]
+        net.zero_grad()
+
+        compiled = torch.compile(compute)
+        compiled_out = compiled(net, x).sum()
+        compiled_out.backward()
+        compiled_grads = [
+            p.grad.clone() for p in net.parameters() if p.grad is not None
+        ]
+
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(len(eager_grads), len(compiled_grads))
+        for eg, cg in zip(eager_grads, compiled_grads):
+            self.assertEqual(eg, cg)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -16646,6 +16725,10 @@ if RUN_GPU:
 
             return kernels
 
+        # On Blackwell+, #179729 raised the split-reduction no-split threshold to 524288,
+        # so the 256*256=65536-element reduction below no longer splits and produces 1 kernel
+        # instead of the expected 2.
+        @xfailIfSM100OrLater
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
