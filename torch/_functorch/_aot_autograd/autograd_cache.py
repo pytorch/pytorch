@@ -57,7 +57,7 @@ from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
@@ -525,7 +525,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
-            FxGraphCache._check_can_cache(gm)
+            FxGraphCache._check_can_cache(gm, example_inputs, fx_config)
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
@@ -1164,10 +1164,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if entry is None and guard_info["cache_status_detailed"] == "guard_miss":
                 counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             cache_info.update(guard_info)
+            CacheArtifactRecorder(
+                AOTAutogradCacheArtifact.type(), key
+            ).record_if_present(pickled_content)
             if pickled_content is not None:
-                CacheArtifactManager.record_artifact(
-                    AOTAutogradCacheArtifact.type(), key, pickled_content
-                )
                 if (
                     should_bundle_autograd_cache()
                     and aot_config is not None
@@ -1233,7 +1233,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     ) -> bytes | None:
         """Pickle entry, returning None on failure."""
         try:
-            return pickle.dumps(entry)
+            with torch.utils._python_dispatch._disable_current_modes():
+                return pickle.dumps(entry)
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
@@ -1278,9 +1279,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             content = AOTAutogradCache._pickle_entry(entry, remote)
             if content is None:
                 return None
-            CacheArtifactManager.record_artifact(
-                AOTAutogradCacheArtifact.type(), key, content
-            )
+            CacheArtifactRecorder(AOTAutogradCacheArtifact.type(), key).record(content)
             if (
                 should_bundle_autograd_cache()
                 and entry.sanitized_aot_config.precompile_backend_id is not None
@@ -1343,6 +1342,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
+        min_cut_info_str: str | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1373,6 +1373,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 aot_joint_graph_str=aot_joint_graph_str,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
                 runtime_metadata=runtime_metadata,
                 dispatch_wrappers=dispatch_wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
@@ -1422,6 +1423,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 aot_joint_graph_str=aot_joint_graph_str,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
                 runtime_metadata=runtime_metadata,
                 dispatch_wrappers=dispatch_wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,

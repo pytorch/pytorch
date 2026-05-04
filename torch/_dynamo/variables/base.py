@@ -581,6 +581,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        """
+        Implements PyObject_GetIter semantics (tp_iter slot).
+        Subclasses override this to support iteration.
+        """
+        # PyObject_GetIter: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2847-L2870
+        # TODO: raise TypeError instead - Make sure the jit tests for ScriptDict/ScriptList works with
+        # this change
+        unimplemented(
+            gb_type="missing tp_iter",
+            context=f"tp_iter_impl not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to iterate over `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_function(
         self,
         tx: Any,
@@ -619,13 +634,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # TODO: raise TypeError for non-subscriptable objects (blocked on
-        # branch 3 __class_getitem__ support for type objects).
+        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # objects.  This base fallback fires for types with mp_subscript at the
+        # C level but no Dynamo override yet.
         unimplemented(
             gb_type="missing_mp_subscript",
             context=f"mp_subscript_impl not defined for {type(self).__name__}",
             explanation=f"Dynamo does not yet support subscripting '{self.python_type_name()}'.",
             hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_item_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
+        # https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L168-L181
+        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        unimplemented(
+            gb_type="unsupported __getitem__ (sq_item)",
+            context=f"sq_item_impl {self} {key}",
+            explanation=f"Dynamo does not know how to handle sq_item on {self}",
+            hints=[],
         )
 
     def call_method(
@@ -637,7 +668,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
-                return self.mp_subscript_impl(tx, args[0])
+                from .object_protocol import vt_getitem
+
+                return vt_getitem(tx, self, args[0])
             from ..utils import raise_args_mismatch
 
             raise_args_mismatch(
@@ -650,6 +683,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__iter__" and not args and not kwargs:
+            return self.tp_iter_impl(tx)
+        elif name == "__next__" and not args and not kwargs:
+            return self.tp_iternext_impl(tx)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -917,13 +954,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx: Any) -> VariableTracker:
+    def tp_iternext_impl(self, tx: Any) -> VariableTracker:
+        """
+        Implements tp_iternext slot semantics.
+        Subclasses override this to support next(). Reaching this base is a
+        bug — it means tp_iternext is missing for that VariableTracker subclass.
+        """
         unimplemented(
-            gb_type="Unsupported next() call",
-            context=f"next({self})",
-            explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
-            hints=[*graph_break_hints.USER_ERROR],
+            gb_type="Missing tp_iternext",
+            context=f"next({self.python_type_name()})",
+            explanation=(
+                f"Dynamo does not support next() on {self.python_type_name()}."
+                " Add tp_iternext_impl to this VariableTracker subclass."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def next_variable(self, tx: Any) -> VariableTracker:
+        return self.tp_iternext_impl(tx)
 
     def is_strict_mode(self, tx: Any) -> bool:
         return bool(tx.strict_checks_fn and tx.strict_checks_fn(self))
@@ -994,6 +1042,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+    def get_id(self, tx: InstructionTranslator) -> int | None:
+        """Return id() of the underlying Python object, or None if unavailable.
+
+        The base implementation uses source resolution for sourceful VTs.
+        Subclasses override for special cases (e.g. NNModuleVariable uses
+        get_submodule, ConstantVariable handles singletons).
+        """
+        if self.source:
+            return id(tx.output.resolve_source_value(self.source))
+        return None
+
+    def get_id_guard_type(self) -> Callable[..., Any] | None:
+        if self.source:
+            return GuardBuilder.ID_MATCH
+        return None
 
     def get_real_python_backed_value(self) -> object:
         """Return the Python object this VT wraps, for `is` comparison.

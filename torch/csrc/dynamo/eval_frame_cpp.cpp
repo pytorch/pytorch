@@ -491,12 +491,18 @@ PyObject* dynamo__custom_eval_frame(
     extra = init_and_set_extra_state(F_CODE(frame));
   }
 
-  // Get recursive action
-  FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
+  // Resolve strategy per isolate_recompiles scope. For non-isolated
+  // frames (id < 0) this returns extra->strategy; for isolated regions
+  // it returns the region's own strategy if set, otherwise inherits
+  // global SKIP (deliberate "do not trace" marks must apply across
+  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
+  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  FrameExecStrategy strategy =
+      extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
+
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
-  // Skip this frame
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
@@ -523,6 +529,7 @@ PyObject* dynamo__custom_eval_frame(
       extra,
       locals.get(),
       backend,
+      isolate_recompiles_id,
       &maybe_cached_code,
       &trace_annotation,
       is_skip_guard_eval_unsafe);
@@ -542,12 +549,14 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
-  // NB: We only do guard collectives when there are any compiled code entries
-  // at all; these reduces overtriggering and we don't need to do guard
-  // collectives the very first time we've seen a frame
-  // TODO: We could also check if we had just created extra for the first
-  // time?  Not too sure the best condition for extra->cache_entry_list
-  if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
+  // NB: We only do guard collectives when there are compiled code entries
+  // for the current region (or the default region); this reduces
+  // overtriggering and we don't need to do guard collectives the very first
+  // time we've seen a frame in this region.
+  bool has_relevant_entries =
+      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+      extra->cache_entry_map.count(-1) > 0;
+  if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
@@ -582,7 +591,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
-  CacheEntry* cache_entry = extract_cache_entry(extra);
+  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
   FrameExecStrategy new_strategy;
@@ -632,7 +641,8 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_exec_strategy(extra, new_strategy);
+    extra_state_set_region_exec_strategy(
+        extra, isolate_recompiles_id, new_strategy);
   }
 
   if (!Py_IsNone(guarded_code)) {

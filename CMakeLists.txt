@@ -38,6 +38,12 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 # unconditionally.
 include(cmake/EnvVarForwarding.cmake)
 
+# Pre-build steps: submodule init, NCCL checkout.
+# When built via setup.py, these are handled by build_deps() in setup.py;
+# the module checks for existing state, so it is safe to include
+# unconditionally.
+include(cmake/PreBuildSteps.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -258,7 +264,8 @@ else()
   set(_USE_CUDA_EXPLICITLY_SET FALSE)
 endif()
 
-option(USE_CUDA "Use CUDA" ON)
+# CUDA is incompatible with TSAN
+cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
@@ -1473,6 +1480,12 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# File mirroring: copy source files into torchgen/packaged/, vendored
+# inductor templates, and symlink-replacement copies.  Previously handled
+# by setup.py; now consolidated here for both scikit-build-core and
+# setuptools builds.
+include(cmake/FileMirroring.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()

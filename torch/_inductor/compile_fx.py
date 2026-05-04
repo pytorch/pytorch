@@ -1331,7 +1331,7 @@ class _InProcessFxCompile(FxCompile):
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
             #
-            # It's needed because when we do layout optimization, an contiguous tensor
+            # It's needed because when we do layout optimization, a contiguous tensor
             # in eager mode may becomes a channels last tensor. A view op previously
             # can be applied to the contiguous tensor may not be able to be applied
             # on the channels tensor any more. An error like

@@ -2067,8 +2067,17 @@ def _new_process_group_helper(
                 backend_str,
             )
             # TODO: figure out pg option conversion for torchComms.
+            # `persistent_store=true` tells torchcomms to reuse the c10d-side
+            # `backend_prefix_store` directly instead of constructing its own
+            # TCPStore via StoreManager (which would otherwise require an
+            # explicit MASTER_ADDR/MASTER_PORT and conflict with the c10d
+            # rendezvous store on rapid re-binds).
             comm = new_comm(
-                backend_str, torch_device, name=group_name, store=backend_prefix_store
+                backend_str,
+                torch_device,
+                name=group_name,
+                store=backend_prefix_store,
+                hints={"persistent_store": "true"},
             )
             buffer_size = os.environ.get(
                 "TORCH_FR_BUFFER_SIZE",
@@ -4382,22 +4391,26 @@ def all_gather_coalesced(
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    Example:
-        we have 2 process groups, 2 ranks.
-        rank 0 passes:
-            input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
-            output_tensor_lists =
-               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
-                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
-        rank 1 passes:
-            input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
-            output_tensor_lists =
-               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
-                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
-        both rank 0 and 1 get:
-            output_tensor_lists =
-               [[[1, 1], [1, 1]], [2], [3, 3]],
-                [[3, 3], [3, 3]], [5], [1, 1]]].
+    Example::
+
+        # we have 2 process groups, 2 ranks.
+        # rank 0 passes:
+        input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
+        output_tensor_lists = [
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+        ]
+        # rank 1 passes:
+        input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
+        output_tensor_lists = [
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+        ]
+        # both rank 0 and 1 get:
+        output_tensor_lists = [
+            [[[1, 1], [1, 1]], [2], [3, 3]],
+            [[[3, 3], [3, 3]], [5], [1, 1]],
+        ]
 
     WARNING: at this time individual shape checking is not implemented across nodes.
     For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
@@ -5719,7 +5732,7 @@ def _new_group_with_tag(
     _check_valid_timeout(timeout)
 
     if use_local_synchronization:
-        # MPI backend doesn't have have a way for us to perform a partial sync
+        # MPI backend doesn't have a way for us to perform a partial sync
         if backend == Backend.MPI:
             raise ValueError(
                 "MPI backend doesn't support use_local_synchronization=True"

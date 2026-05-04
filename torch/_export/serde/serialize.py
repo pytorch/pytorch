@@ -1021,6 +1021,16 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
+        elif callable(node.target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
+            # as plain Python function call_function nodes in pre_dispatch graphs.
+            ex_node = Node(
+                name=node.name,
+                target=self.serialize_operator(node.target),
+                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                outputs=self.serialize_hoo_outputs(node),
+                metadata=self.serialize_metadata(node),
+            )
         else:
             raise SerializeError(f"Serializing {node.target} is not supported")
 
@@ -1963,7 +1973,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
-            elif isinstance(meta, FakeTensor):
+            elif isinstance(meta, torch.Tensor):
                 if not isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
                 ):
@@ -2578,11 +2588,21 @@ class GraphModuleDeserializer(metaclass=Final):
         output_node = self.graph.output(outputs)
 
         if serialized_graph.is_single_tensor_return:
-            output_node.meta["val"] = output_node.args[0].meta["val"]
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, torch.fx.Node):
+                raise AssertionError(
+                    f"Expected Node for single tensor return, got {type(first_arg)}"
+                )
+            output_node.meta["val"] = first_arg.meta["val"]
         else:
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, (tuple, list)):
+                raise AssertionError(
+                    f"Expected tuple/list for multi tensor return, got {type(first_arg)}"
+                )
             output_node.meta["val"] = tuple(
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in output_node.args[0]
+                for arg in first_arg
             )
 
         # recompute unbacked bindings
@@ -2686,6 +2706,14 @@ class GraphModuleDeserializer(metaclass=Final):
                 )
 
             args, kwargs = self.deserialize_inputs(target, serialized_node)
+            fx_node = self.graph.create_node(
+                "call_function", target, args, kwargs, name
+            )
+            self.deserialize_outputs(serialized_node, fx_node)
+        elif callable(target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.)
+            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
             )

@@ -2162,9 +2162,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
             estimator = ProfileGuidedEstimator(trace_path)
 
             def func(a, b):
-                ar = torch.ops._c10d_functional.all_reduce(
-                    a, "sum", len(pg_ranks), group_name
-                )
+                ar = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
                 ar_out = torch.ops._c10d_functional.wait_tensor(ar)
                 mm = torch.mm(b, b)
                 return ar_out + mm
@@ -2192,7 +2190,6 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
                 collective_hit, "Estimator should match the collective node"
             )
             self.assertTrue(mm_hit, "Estimator should match the mm node")
-            self.assertGreater(len(estimator.estimation_log), 0)
         finally:
             os.unlink(trace_path)
 
