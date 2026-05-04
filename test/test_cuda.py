@@ -180,20 +180,6 @@ def get_wait_for_cpu_kernel():
     return _wait_for_cpu_kernel
 
 
-def _allocator_settings_for_restore():
-    # Build a settings string that pins the live allocator state, including the
-    # sticky knobs (expandable_segments, pinned_use_background_threads) that
-    # AcceleratorAllocatorConfig::parseArgs does not auto-reset between calls.
-    # Round-tripping _accelerator_getAllocatorSettings() alone is not enough
-    # when the saved string omits a sticky knob.
-    md = torch.cuda.memory._snapshot()["allocator_settings"]
-    last = torch._C._accelerator_getAllocatorSettings() or ""
-    if "expandable_segments" in last:
-        return last
-    es = "True" if md["expandable_segments"] else "False"
-    return f"expandable_segments:{es},{last}" if last else f"expandable_segments:{es}"
-
-
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -5112,11 +5098,14 @@ class TestCudaAllocator(TestCase):
                 finally:
                     torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     @serialTest()
     def test_max_split_expandable(self):
-        orig = torch.cuda.get_per_process_memory_fraction()
-        restore_alloc_settings = _allocator_settings_for_restore()
         try:
+            orig = torch.cuda.get_per_process_memory_fraction()
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
@@ -5148,13 +5137,15 @@ class TestCudaAllocator(TestCase):
             alloc(120)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
-            torch._C._accelerator_setAllocatorSettings(restore_alloc_settings)
 
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     @serialTest()
     def test_garbage_collect_expandable(self):
-        orig = torch.cuda.get_per_process_memory_fraction(0)
-        restore_alloc_settings = _allocator_settings_for_restore()
         try:
+            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
@@ -5182,7 +5173,6 @@ class TestCudaAllocator(TestCase):
             alloc(80)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
-            torch._C._accelerator_setAllocatorSettings(restore_alloc_settings)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -5859,15 +5849,6 @@ class TestBlockStateAbsorption(TestCase):
 
     def setUp(self):
         super().setUp()
-        # Pin allocator settings around this test class. Segment-count
-        # assertions in this suite depend on whether expandable_segments is
-        # active, and that knob is sticky in parseArgs — see issue #158764
-        # for the cross-test leak this guards against. Force the runtime to
-        # match self.expandable_segments so a leaked True from another test
-        # cannot make these assertions flaky.
-        self._restore_alloc_settings = _allocator_settings_for_restore()
-        es = "True" if self.expandable_segments else "False"
-        torch._C._accelerator_setAllocatorSettings(f"expandable_segments:{es}")
         self.segment_length = len(get_all_cudagraph_segments())
 
     def tearDown(self):
@@ -5876,7 +5857,6 @@ class TestBlockStateAbsorption(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(len(get_all_cudagraph_segments()), self.segment_length)
-        torch._C._accelerator_setAllocatorSettings(self._restore_alloc_settings)
 
         super().tearDown()
 
@@ -7307,6 +7287,10 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     # expandable_segments not supported (PYTORCH_C10_DRIVER_API_SUPPORTED not defined for windows builds)
     @unittest.skipIf(
         IS_WINDOWS and SM89OrLater,

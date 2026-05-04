@@ -1,6 +1,16 @@
 # Owner(s): ["module: cuda"]
 # run time cuda tests, but with the allocator using expandable segments
 
+import os
+
+
+# Must precede the test_cuda import: EXPANDABLE_SEGMENTS in
+# torch.testing._internal.common_utils reads PYTORCH_CUDA_ALLOC_CONF once at
+# import time, and the C10 caching allocator picks up the same env var on
+# first use. Setting it here keeps the @skipIf(not EXPANDABLE_SEGMENTS, ...)
+# guards on expandable-only tests in test_cuda.py from skipping in this runner.
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import pathlib
 import sys
 
@@ -8,6 +18,7 @@ from test_cuda import (  # noqa: F401
     TestBlockStateAbsorption,
     TestCuda,
     TestCudaAllocator,
+    TestMemPool,
 )
 
 import torch
@@ -27,9 +38,4 @@ sys.path.remove(str(REPO_ROOT))
 if __name__ == "__main__":
     if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS:
         get_disabled_tests(".")
-
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        TestCuda.expandable_segments = lambda _: True
-        TestBlockStateAbsorption.expandable_segments = lambda _: True
-
         run_tests()
