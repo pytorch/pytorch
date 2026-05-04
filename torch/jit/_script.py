@@ -204,10 +204,10 @@ class OrderedDictWrapper:
         self._c = _c
 
     def keys(self):
-        return list(self.keys())
+        return list(self._c.keys())
 
     def values(self):
-        return list(self.values())
+        return list(self._c.values())
 
     def __len__(self):
         return len(self.values())
