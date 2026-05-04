@@ -111,6 +111,7 @@ ignore-missing-imports = [
     "onnxscript.*",
     "redis.*",
     "tabulate.*",
+    "spmd_types.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
@@ -128,7 +129,7 @@ errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
 
 permissive-ignores = true
-replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*", "torch.distributed.spmd_types", "torch.distributed.spmd_types.*"]
 search-path = ["tools/experimental"]
 
 # Dynamo sub-config - note, we experiment with stricter typing here

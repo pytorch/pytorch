@@ -478,6 +478,25 @@ class BaseTorchVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        dunder = "__ror__" if reverse else "__or__"
+        method = getattr(type(self.value), dunder, None)
+        if method is None:
+            return VariableTracker.build(tx, NotImplemented)
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        result = method(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -994,25 +1013,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.use_deterministic_algorithms)
         def handle_use_deterministic_algorithms(
-            self, tx: "InstructionTranslator", mode: Any, warn_only: bool = False
+            self,
+            tx: "InstructionTranslator",
+            mode: Any,
+            warn_only: VariableTracker | bool = False,
         ) -> VariableTracker:
-            # pyrefly: ignore [missing-attribute]
-            if warn_only and warn_only.as_python_constant():
-                unimplemented(
-                    gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
-                    context=f"mode={mode}, warn_only={warn_only}",
-                    explanation="Dynamo does not support this.",
-                    hints=[
-                        "Remove param warn_only in function call torch.use_deterministic_algorithms.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
             value = mode.as_python_constant()
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            warn_only_value = (
+                warn_only.as_python_constant()
+                if isinstance(warn_only, VariableTracker)
+                else warn_only
             )
-            torch._C._set_deterministic_algorithms(value)
+            tx.output.create_node(
+                "call_function",
+                torch._C._set_deterministic_algorithms,
+                (value,),
+                {"warn_only": warn_only_value},
+            )
+            torch._C._set_deterministic_algorithms(value, warn_only=warn_only_value)
             return ConstantVariable.create(None)
 
         @register(torch.autocast_increment_nesting)

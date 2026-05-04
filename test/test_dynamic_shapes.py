@@ -4166,6 +4166,31 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice_noop_with_unbacked_bindings(self):
+        # Regression test: the no-op early return in slice_ lowering
+        # (start==0, size<=end, step==1) must register DynamicSliceSize
+        # for unbacked bindings created at trace time.
+        # torch._check after the slice adds facts to ShapeEnv that make
+        # statically_known_leq(size, end) True at lowering time.
+        def f(x, n):
+            u0 = n.item()
+            result = x[:u0]
+            torch._check(u0 >= 0)
+            torch._check(u0 >= x.size(0))
+            return result
+
+        x = torch.randn(10, 16)
+        n = torch.tensor([10])
+
+        eager_result = f(x, n)
+
+        compiled_fn = torch.compile(f, fullgraph=True, backend="inductor")
+        compiled_result = compiled_fn(x, n)
+
+        self.assertEqual(eager_result, compiled_result)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_slice_with_tensor_indices(self):
         for d in [True, False]:
             # Test slicing with tensor start/stop/step on RHS (reading)
