@@ -19,7 +19,6 @@
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -33,6 +32,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #endif
@@ -4026,6 +4026,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
 
+#ifdef USE_C10D_NCCL
   // NCCLXStub: minimal C++ Backend for testing custom backend plugins
   // (simulates ncclx-like backends that register via extended_api=True).
   intrusive_ptr_class_<::c10d::NCCLXStub>(
@@ -4044,6 +4045,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("rank"),
           py::arg("size"),
           py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
+#endif
 
   auto pythonCallbackWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::PythonCallbackWork>(
