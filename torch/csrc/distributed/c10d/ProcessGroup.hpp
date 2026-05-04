@@ -977,14 +977,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
-  bool getUsePgForSymmMemRendezvous() const {
-    return getDefaultBackend()->getUsePgForSymmMemRendezvous();
-  }
-
-  void setUsePgForSymmMemRendezvous(bool value) {
-    getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
-  }
-
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
