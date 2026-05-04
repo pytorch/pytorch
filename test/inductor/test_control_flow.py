@@ -2079,7 +2079,9 @@ class ScanTests(TestCase):
     ):
         # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
         if autograd:
-            raise unittest.SkipTest("Fails due to ")
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
 
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
