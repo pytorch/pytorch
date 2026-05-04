@@ -533,5 +533,29 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.iter.streamreader
+
+.. currentmodule:: torch.utils.data.datapipes.iter.streamreader
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    StreamReaderIterDataPipe
+```
+
+```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.utils.common
+
+.. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    StreamWrapper
+```
+
+```{eval-rst}
 .. py:module:: torch.utils.data.datapipes.utils
 ```

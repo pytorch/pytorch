@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
+    xfailIfNoAcceleratorTriton,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -2229,6 +2230,40 @@ class TestSDPA(NNTestCase):
             expected_shape[-1] = v_shape[-1]
             self.assertEqual(actual.shape, torch.Size(expected_shape))
 
+    def test_sdpa_export_unbacked_attn_mask(self, device):
+        """SDPA backend selection should not crash on unbacked symbolic mask shapes."""
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_heads = 4
+                self.head_dim = 8
+                self.hidden_size = self.num_heads * self.head_dim
+                # 3 * 12 * 12 = 432
+                self.proj_q = nn.Linear(432, self.hidden_size)
+                self.proj_k = nn.Linear(432, self.hidden_size)
+                self.proj_v = nn.Linear(432, self.hidden_size)
+
+            def forward(self, x):
+                keep = x.sum(dim=(-1, -2, -3)) != 0  # x: [B, 3, 12, 12]
+                x = x[keep]  # [u0, 3, 12, 12].
+                flat = x.flatten(1)  # [u0, 432]
+                q = self.proj_q(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                k = self.proj_k(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                v = self.proj_v(flat).view(-1, 1, self.num_heads, self.head_dim).transpose(1, 2)
+                attn_mask = torch.ones(
+                    (x.shape[0], 1, 1, 1), dtype=torch.bool, device=x.device
+                )
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
+                )
+
+        model = Model().eval().to(device)
+        x = torch.randn(4, 3, 12, 12, device=device)
+        x[0].zero_()
+
+        # Should not crash during export with unbacked symbolic mask batch dim
+        torch.export.export(model, args=(x,))
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
@@ -2992,6 +3027,7 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
@@ -3029,6 +3065,7 @@ class TestSDPACudaOnly(NNTestCase):
             for use_compile in [False, True]:
                 test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_cudnn_attention_broadcast_stride_zero(self, device, dtype):
@@ -3091,6 +3128,7 @@ class TestSDPACudaOnly(NNTestCase):
         out = fn(q, k, v)
         self.assertEqual(out.shape, (B, H, S, D_v))
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):
         q = torch.randn(2, 8, 1024, 128, dtype=torch.half, device='cuda', requires_grad=True)
@@ -3623,6 +3661,7 @@ class TestSDPACudaOnly(NNTestCase):
                 if torch._fused_sdp_choice(query, key, value) != SDPBackend.EFFICIENT_ATTENTION.value:
                     raise AssertionError("expected EFFICIENT_ATTENTION backend")
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")

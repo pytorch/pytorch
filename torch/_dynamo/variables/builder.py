@@ -24,6 +24,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import importlib.machinery
 import inspect
 import itertools
 import logging
@@ -162,6 +163,7 @@ from ..utils import (
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
+    is_pybind11_enum_member,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -601,7 +603,7 @@ class VariableBuilder:
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
-            (re.Pattern, cls.wrap_regex_pattern),
+            ((re.Pattern, re.Match), cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
@@ -621,7 +623,9 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern[Any]) -> ConstantLikeVariable:
+    def wrap_regex_pattern(
+        self, value: re.Pattern[Any] | re.Match[Any]
+    ) -> ConstantLikeVariable:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return ConstantLikeVariable(value)
@@ -983,7 +987,7 @@ class VariableBuilder:
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
-        ):
+        ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -1616,8 +1620,11 @@ class VariableBuilder:
                 # Value-type: guard on equality (will use __eq__)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
             elif is_opaque_reference_type(type(value)):
-                # Reference-type: guard only on type, and registered guard_fn
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+                # Reference-type: guard only on type, and registered guard_fn.
+                # Use FAKE_SCRIPT_TYPE_MATCH because at runtime the source may
+                # resolve to either a FakeScriptObject (during outer
+                # AOTAutograd tracing) or the underlying real opaque object.
+                self.install_guards(GuardBuilder.FAKE_SCRIPT_TYPE_MATCH)
                 self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
@@ -3609,7 +3616,7 @@ def infer_subclass_type(value: T) -> type[T] | None:
         # Ordinarily, we would fakeify a tensor so that it can get dynamic
         # shapes and be computed on without triggering actual operations.
         # However, how can we fakeify a tensor subclass?  Ordinary
-        # inheritance (nor multiple inheritance) won't work work.
+        # inheritance (nor multiple inheritance) won't work.
         #
         # Instead, our plan is to *manually simulate* the tensor subclass
         # inheriting from a fake tensor with dynamo.  This means our
@@ -3940,13 +3947,13 @@ def _automatic_dynamic(
     specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
-        marked_strict_unbacked = i in getattr(
-            e, "_dynamo_strict_unbacked_indices", set()
-        )
-        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
-        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-        marked_static = i in getattr(e, "_dynamo_static_indices", set())
+        marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", ())
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", ())
+        marked_weak_dynamic = i in getattr(
+            e, "_dynamo_weak_dynamic_indices", ()
+        ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
+        marked_static = i in getattr(e, "_dynamo_static_indices", ())
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
@@ -4287,7 +4294,11 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)) and not isinstance(value, enum.Enum):
+        elif (
+            is_opaque_value_type(type(value))
+            and not isinstance(value, enum.Enum)
+            and not is_pybind11_enum_member(value)
+        ):
             return TorchScriptObjectVariable.create(value, value)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
@@ -4321,7 +4332,7 @@ class SourcelessBuilder:
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
-        ):
+        ) or is_pybind11_enum_member(value):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             if issubclass(type(value), type) and issubclass(value, BaseException):
@@ -4348,9 +4359,11 @@ class SourcelessBuilder:
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(value, torch.utils._pytree.TreeSpec):
+        elif isinstance(
+            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+        ):
             return UserDefinedObjectVariable(value)
-        elif isinstance(value, re.Pattern):
+        elif isinstance(value, (re.Pattern, re.Match)):
             return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:

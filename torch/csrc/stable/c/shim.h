@@ -159,7 +159,7 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
-// Shims for the a few dtypes not already in
+// Shims for a few dtypes not already in
 // torch/csrc/inductor/aoti_torch/c/shim.h
 AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
 AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
@@ -185,6 +185,43 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     void* deleter_ctx);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+/**
+ * The beginning of all shims added in 2.12.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Tag getter functions for ABI-stable tag passing.  By hiding these behind
+// functions, the precise enum ordinal is NOT part of the ABI contract.
+AOTI_TORCH_EXPORT int32_t torch_tag_core();
+AOTI_TORCH_EXPORT int32_t torch_tag_cudagraph_unsafe();
+AOTI_TORCH_EXPORT int32_t torch_tag_data_dependent_output();
+AOTI_TORCH_EXPORT int32_t torch_tag_dynamic_output_shape();
+AOTI_TORCH_EXPORT int32_t torch_tag_flexible_layout();
+AOTI_TORCH_EXPORT int32_t torch_tag_generated();
+AOTI_TORCH_EXPORT int32_t torch_tag_inplace_view();
+AOTI_TORCH_EXPORT int32_t torch_tag_maybe_aliasing_or_mutating();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_contiguous_strides();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_exact_strides();
+AOTI_TORCH_EXPORT int32_t torch_tag_needs_fixed_stride_order();
+AOTI_TORCH_EXPORT int32_t torch_tag_nondeterministic_bitwise();
+AOTI_TORCH_EXPORT int32_t torch_tag_nondeterministic_seeded();
+AOTI_TORCH_EXPORT int32_t torch_tag_out_variant();
+AOTI_TORCH_EXPORT int32_t torch_tag_pointwise();
+AOTI_TORCH_EXPORT int32_t torch_tag_pt2_compliant_tag();
+AOTI_TORCH_EXPORT int32_t torch_tag_reduction();
+AOTI_TORCH_EXPORT int32_t torch_tag_view_copy();
+
+// Stable corollary to torch::Library method m.def() with tags.
+// Tags are passed as int32_t values obtained from torch_tag_*() getters,
+// not raw enum ordinals, so the ABI is stable across versions.
+AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
+    TorchLibraryHandle self,
+    const char* schema,
+    const int32_t* tags,
+    int32_t num_tags);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 #ifdef __cplusplus
 } // extern "C"

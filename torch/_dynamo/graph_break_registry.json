@@ -380,6 +380,12 @@
   "GB0035": [
     {
       "Gb_type": "Data-dependent branching with non-constant __bool__",
+      "Context": "value: {value}, result: {result}",
+      "Explanation": "Attempted to perform data-dependent branching on a user-defined object with non-constant truthiness.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Data-dependent branching with non-constant __bool__",
       "Context": "method: {x}, result: {result}",
       "Explanation": "Attempted to perform data-dependent branching on a user-defined object with a __bool__ method that did not return a constant.",
       "Hints": []
@@ -692,6 +698,15 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute",
+      "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dyanmo only supports mutating `.data` of tensor created outside `torch.compile` region",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
@@ -722,6 +737,15 @@
     }
   ],
   "GB0058": [
+    {
+      "Gb_type": "Failed to set tensor attribute",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo doesn't support setting these tensor attributes",
+      "Hints": [
+        "Don't mutate attribute '{name}' on tensors, or ",
+        "move the mutation out of `torch.compile` region"
+      ]
+    },
     {
       "Gb_type": "Failed to set tensor attribute",
       "Context": "setattr({obj}, {name}, {val})",
@@ -1027,6 +1051,16 @@
       "Gb_type": "Missing CALL_INTRINSIC_1 handler",
       "Context": "CALL_INTRINSIC_1 operand: {inst.argval}",
       "Explanation": "No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0755": [
+    {
+      "Gb_type": "nb_negative_impl not implemented",
+      "Context": "{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_negative C slot but the corresponding VariableTracker doesn't implement nb_negative_impl.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -1562,6 +1596,14 @@
       ]
     }
   ],
+  "GB5976": [
+    {
+      "Gb_type": "Data pointer comparison",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo can only trace data pointer comparisons when it can prove both operands have the same data pointer.",
+      "Hints": []
+    }
+  ],
   "GB4695": [
     {
       "Gb_type": "torch.jit.script/freeze modules unsupported",
@@ -1660,6 +1702,24 @@
       "Context": "code name: {code.co_name}, args: {args}",
       "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
       "Hints": []
+    }
+  ],
+  "GB4413": [
+    {
+      "Gb_type": "HOP: Non-nullified side effect",
+      "Context": "Attribute '{name}' was not restored to its original value",
+      "Explanation": "Attribute '{name}' on an outer-scope object was changed from {original} to {current} inside a higher-order op subgraph. Dynamo only supports mutations that are undone before the subgraph exits (e.g., context managers that save/restore a flag). If you intentionally want this side effect, move the mutation outside of the higher-order op.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "HOP: Non-nullified side effect",
+      "Context": "Attribute '{name}' was not restored to its original value",
+      "Explanation": "A variable from an outer scope was mutated inside a higher-order op subgraph and not restored to its original value. This is not supported. If using a context manager, ensure it fully restores the original state on exit.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
     }
   ],
   "GB0132": [
@@ -2113,6 +2173,14 @@
         "and passed as an argument.",
         "If the module is a class attribute, access it via self.module_name."
       ]
+    }
+  ],
+  "GB5904": [
+    {
+      "Gb_type": "unsupported __getitem__ (sq_item)",
+      "Context": "sq_item_impl {self} {key}",
+      "Explanation": "Dynamo does not know how to handle sq_item on {self}",
+      "Hints": []
     }
   ],
   "GB0163": [
@@ -2820,6 +2888,15 @@
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dyanmo only supports mutating `.data` of tensor to a new one with the same dtype",
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
@@ -3150,6 +3227,16 @@
       ]
     }
   ],
+  "GB0811": [
+    {
+      "Gb_type": "missing tp_iter",
+      "Context": "tp_iter_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to iterate over `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0248": [
     {
       "Gb_type": "improper torch.get_device_module arguments",
@@ -3278,6 +3365,15 @@
     }
   ],
   "GB0257": [
+    {
+      "Gb_type": "TypedDict with optional keys",
+      "Context": "str(self.value)",
+      "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
+      "Hints": [
+        "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "TypedDict with optional keys",
       "Context": "str(self.value)",
@@ -3416,6 +3512,28 @@
       ]
     }
   ],
+  "GB9840": [
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9158": [
+    {
+      "Gb_type": "Can't convert torch._check*() message closure",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a function whose closure variables are Python constants.",
+      "Hints": [
+        "Remove closure variables that reference non-constant values, e.g. ",
+        "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
@@ -3494,6 +3612,12 @@
     }
   ],
   "GB0271": [
+    {
+      "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
+      "Context": "str(self.value)",
+      "Explanation": "Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
+      "Hints": []
+    },
     {
       "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
       "Context": "str(self.value)",
@@ -4184,7 +4308,7 @@
     {
       "Gb_type": "torch.associative_scan: mismatched input/output tree structure",
       "Context": "xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
-      "Explanation": "The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
+      "Explanation": "The tree structure of the xs and the outs of the combine_fn are expected to be identical, but got xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
@@ -4562,6 +4686,16 @@
       "Hints": []
     }
   ],
+  "GB3006": [
+    {
+      "Gb_type": "tp_as_number slot not implemented",
+      "Context": "{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
+      "Explanation": "The type {self.python_type_name()} does not implement the {tp_slot_name}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0350": [
     {
       "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
@@ -4606,6 +4740,16 @@
       ]
     }
   ],
+  "GB4347": [
+    {
+      "Gb_type": "Missing tp_iternext",
+      "Context": "next({self.python_type_name()})",
+      "Explanation": "Dynamo does not support next() on {self.python_type_name()}. Add tp_iternext_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0354": [
     {
       "Gb_type": "failed to find name in frame builtins",
@@ -4614,6 +4758,14 @@
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
+    }
+  ],
+  "GB7444": [
+    {
+      "Gb_type": "register_hook with stride-dependent code",
+      "Context": "Hook accesses grad metadata (e.g. is_contiguous)",
+      "Explanation": "register_hook callbacks that branch on gradient metadata are not supported because grad properties are unknown at trace time.",
+      "Hints": []
     }
   ],
   "GB0355": [
