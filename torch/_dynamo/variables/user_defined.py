@@ -42,6 +42,7 @@ from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
+from torch._C._dynamo import PyNumberSlots
 from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import GetAttrKey, is_structseq_class
@@ -65,6 +66,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    EphemeralSource,
     GetItemSource,
     RandomValueSource,
     TypeDictSource,
@@ -95,8 +97,9 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
-from .dicts import ConstDictVariable
+from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
+from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
 from .sets import SetVariable
 
 
@@ -132,11 +135,27 @@ def is_standard_delattr(val: object) -> bool:
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
 
+    # pytest >= 8.4 moved RaisesContext into _pytest.raises and renamed it to RaisesExc,
+    # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
+    # in independent try blocks so that one missing symbol doesn't drop the others.
+    try:
+        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
+
+        f_ctxs.append(RaisesExc)
+        f_ctxs.append(RaisesGroup)
+    except ImportError:
+        pass
+
     try:
         from _pytest.python_api import RaisesContext  # type: ignore[attr-defined]
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
 
         f_ctxs.append(RaisesContext)
+    except ImportError:
+        pass
+
+    try:
+        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
+
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
@@ -219,6 +238,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # this case, we don't want to allow mutation in the class because there
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
+
+    def get_id_guard_type(self) -> Callable[..., Any] | None:
+        if self.source:
+            return GuardBuilder.CLASS_MATCH
+        return None
 
     def as_python_constant(self) -> type[object]:
         return self.value
@@ -335,6 +359,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if hasattr(metaclass, "__bool__") and metaclass is not type:
             return self.call_method(tx, "__bool__", [], {})
         return ConstantVariable.create(True)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython's type.__or__ implements _Py_union_type_or (type unions).
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -594,6 +635,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             pass
         return super().tp_iter_impl(tx)
 
+    def nb_negative_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__neg__")
+        if m:
+            source = self.source and AttrSource(self.source, "__neg__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx, f"object of type {self.python_type_name()} has no negative"
+        )
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -738,7 +790,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
                 context=str(self.value),
-                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
 
@@ -830,7 +882,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unimplemented(
                     gb_type="TypedDict with optional keys",
                     context=str(self.value),
-                    explanation="Dyanmo does not support tracing TypedDict with optional keys",
+                    explanation="Dynamo does not support tracing TypedDict with optional keys",
                     hints=[
                         "Avoid using TypedDict with optional keys",
                         *graph_break_hints.SUPPORTABLE,
@@ -930,6 +982,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if not args[0].is_python_constant():
                 raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
+        elif self.value is torch.xpu.device and not kwargs and len(args) == 1:
+            if not args[0].is_python_constant():
+                raise_type_error(tx, "torch.xpu.device() requires a constant argument")
+            return variables.XPUDeviceVariable.create(tx, args[0].as_python_constant())
+        elif (
+            self.value is torch.accelerator.device_index
+            and not kwargs
+            and len(args) == 1
+        ):
+            if not args[0].is_python_constant():
+                raise_type_error(
+                    tx, "torch.accelerator.device_index() requires a constant argument"
+                )
+            return variables.AcceleratorDeviceIndexVariable.create(
+                tx, args[0].as_python_constant()
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -1388,6 +1456,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or is_pybind11_enum_member(self.value):
             return self.value
 
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton.language as tl
+
+            if isinstance(self.value, tl.constexpr):
+                return self.value.value
+
         if self.is_pytree_constant_class and self.source:
             # NOTE pytree constants created in the torch.compile region will
             # NOT be guarded (even though they have a source set)
@@ -1521,6 +1597,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return result
 
+    def nb_negative_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        type_attr = self.lookup_class_mro_attr("__neg__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__neg__")
+        if method is None:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no negative"
+            )
+
+        return self.call_method(tx, "__neg__", [], {})
+
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (
             f"calling torch function on object without __torch_function__ {self}"
@@ -1553,6 +1651,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
+    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__next__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.tp_iternext_impl(tx)
+
+        if isinstance(method, types.FunctionType):
+            method_var = self.resolve_type_attr(tx, "__next__", method, self.source)
+            return method_var.call_function(tx, [], {})
+        return super().tp_iternext_impl(tx)
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         method = self._maybe_get_baseclass_method("__iter__")
         if (
@@ -1563,13 +1675,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self._base_vt.tp_iter_impl(tx)
 
         if isinstance(method, types.FunctionType):
-            source_fn = self.source and self.get_source_by_walking_mro(tx, "__iter__")
-            return variables.UserMethodVariable(
-                method,
-                self,
-                source_fn=source_fn,
-                source=self.source,
-            ).call_function(tx, [], {})
+            method_var = self.resolve_type_attr(tx, "__iter__", method, self.source)
+            return method_var.call_function(tx, [], {})
         return super().tp_iter_impl(tx)
 
     @staticmethod
@@ -1604,6 +1711,137 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method, self, source_fn=source_fn, source=self.source
             ).call_function(tx, [key], {})
         return super().mp_subscript_impl(tx, key)
+
+    def SLOT1BIN(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        dunder: str,
+        rdunder: str,
+        nb_slot: int,  # NB_OR, NB_AND, etc
+        reverse: bool,
+    ) -> VariableTracker:
+        # Implement SLOT1BIN semantics from CPython
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9202-L9246
+        #
+        # Direct translation of CPython's SLOT1BINFULL macro (Objects/typeobject.c).
+        # The logic is a bit convoluted, but the main idea remains the same.
+        # While implementing this I had some questions that might be worth
+        # answering here:
+        #
+        # Q1) What does SLOT1BIN do?
+        #
+        # It bridges a C nb_slot to the corresponding Python-level dunder
+        # methods, handling dispatch order (subclass priority, reflected calls)
+        # correctly.
+        #
+        # Q2) Why does this macro exist?
+        #
+        # For built-in types, CPython dispatches binary operations through
+        # C-level tp_as_number slots (e.g., nb_or). User-defined types don't
+        # have a native C slot implementation, so CPython installs a wrapper
+        # function (e.g., slot_nb_or) that maps the C slot interface to the
+        # Python-level dunder methods (e.g., __or__ / __ror__). SLOT1BINFULL is
+        # the body of that wrapper.
+        #
+        # Q3) Does SLOT1BIN implement the same logic as binary_op1?
+        #
+        # Not quite. binary_op1 (Objects/abstract.c) reads C slot pointers and
+        # dispatches based on pointer identity. SLOT1BINFULL runs *inside* a
+        # slot call and handles Python-level dispatch (MRO lookup, subclass
+        # priority, NotImplemented fallthrough). They are complementary layers.
+        #
+        # Q4) What types can self and other be?
+        #
+        # SLOT1BINFULL is installed as the C slot for Python-defined types, so
+        # at least one operand always has the slot wrapper (e.g., slot_nb_or).
+        # The do_other / TESTFUNC checks determine if the *other* operand also
+        # has a Python-defined slot:
+        #
+        #     int do_other = !Py_IS_TYPE(self, Py_TYPE(other)) &&
+        #         Py_TYPE(other)->tp_as_number != NULL &&
+        #         Py_TYPE(other)->tp_as_number->SLOTNAME == TESTFUNC;
+        #     if (Py_TYPE(self)->tp_as_number != NULL &&
+        #         Py_TYPE(self)->tp_as_number->SLOTNAME == TESTFUNC) { ... }
+        #
+        # TESTFUNC == slot_nb_or (for the | operator), so this is basically
+        # asking "does this operand's type have a Python-defined dunder?" Native
+        # C types (e.g., int) fail the check and are skipped.
+        #
+        # Q5) Can this cause infinite recursion?
+        #
+        # Not if the dunder methods are called directly (MRO lookup + direct
+        # call), which is what CPython's vectorcall_maybe does. This is
+        # equivalent to calling a.__or__(b) directly, NOT a | b, which would
+        # re-enter the C slot layer and loop.
+
+        def py_is_type(w_type: type, v_type: type) -> bool:
+            return w_type is v_type
+
+        def py_is_subtype(w_type: type, v_type: type) -> bool:
+            return issubclass(w_type, v_type)
+
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        s_type = self_.python_type()
+        o_type = other_.python_type()
+
+        # Check if other is a different type and has the number slots
+        do_other = (
+            not py_is_type(s_type, o_type)
+            and type_implements_nb_slot(o_type, nb_slot)
+            and isinstance(other_, UserDefinedObjectVariable)
+        )
+
+        if isinstance(self_, UserDefinedObjectVariable) and type_implements_nb_slot(
+            s_type, nb_slot
+        ):
+            if do_other and py_is_subtype(o_type, s_type):
+                # TODO: missing method_is_overloaded
+                method_is_overloaded = self_._maybe_get_baseclass_method(
+                    rdunder
+                ) != other_._maybe_get_baseclass_method(rdunder)
+                if method_is_overloaded:
+                    r = other_.call_method(tx, rdunder, [self_], {})
+                    if not is_nb_not_implemented(r):
+                        return r
+                    do_other = False
+
+            r = self_.call_method(tx, dunder, [other_], {})
+            if not is_nb_not_implemented(r) or py_is_type(o_type, s_type):
+                return r
+
+        if do_other:
+            assert isinstance(other_, UserDefinedObjectVariable)
+            r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
+            if not is_nb_not_implemented(r):
+                return r
+
+        return variables.ConstantVariable.create(NotImplemented)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10354-L10355
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__or__",
+            "__ror__",
+            nb_slot=PyNumberSlots.NB_OR,
+            reverse=reverse,
+        )
+
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
+        return self.call_method(tx, "__ior__", [other], {})
 
     def call_method(
         self,
@@ -1888,21 +2126,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         while True:
             try:
-                r = iter_.next_variable(tx)
+                r = iter_.tp_iternext_impl(tx)
                 result.append(r)
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
         return result
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.call_method(tx, "__next__", [], {})
-
     def is_supported_random(self) -> bool:
         try:
             return self.value in self._supported_random_functions()
-        except TypeError:
+        except (TypeError, AttributeError):
             # TypeError: unhashable type
+            # AttributeError: backing object may not be fully initialized
             return False
 
     def call_function(
@@ -3193,6 +3429,30 @@ class OrderedDictVariable(UserDefinedDictVariable):
         assert self._base_vt is not None
         return collections.OrderedDict(self._base_vt.as_python_constant())
 
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327C5-L339
+        if not issubclass(other.python_type(), dict):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        if reverse:
+            new = VariableTracker.build(
+                tx, self.value.__class__, source=EphemeralSource()
+            ).call_function(tx, [other], {})
+            new.call_method(tx, "update", [self], {})
+        else:
+            new = self.call_method(tx, "copy", [], {})
+            new.call_method(tx, "update", [other], {})
+        return new
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L323-L325
+        self.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3370,6 +3630,44 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if key in self._base_vt:  # type: ignore[operator]
             return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
         return self._missing_impl(tx, key)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2356-L2395
+        # The C impl uses a naming convention of left/right for the two operands
+        # and swap self/other depending on some conditions. For simplicity, we
+        # will suffix the var names with "_"
+
+        # new_defdict(self, left) calls type(self)(self.default_factory, left),
+        # then PyDict_Update(new, right). left/right are the original operands.
+        left, right = (other, self) if reverse else (self, other)
+        ret = issubclass(left.python_type(), collections.defaultdict)
+        self_, other_ = (left, right) if ret else (right, left)
+        assert isinstance(self_, DefaultDictVariable)
+
+        if not pydict_check(other_):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        if isinstance(left, ConstDictVariable):
+            items = left.items
+        else:
+            assert isinstance(left, UserDefinedDictVariable), left
+            items = left._base_vt.items  # type: ignore[missing-attribute]
+
+        new = tx.output.side_effects.track_new_user_defined_object(
+            VariableTracker.build(tx, dict),
+            VariableTracker.build(tx, collections.defaultdict),
+            [],
+        )
+        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
+        new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
+        tx.output.side_effects.store_attr(new, "default_factory", new.default_factory)  # type: ignore[missing-attribute]
+        new.call_method(tx, "update", [right], {})
+        return new
 
     def call_method(
         self,
@@ -3593,6 +3891,25 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def items(self) -> list[VariableTracker]:
         assert self._base_vt is not None
         return self._base_vt.items  # type: ignore[return-value]
+
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, _collections._tuplegetter):
+            # namedtuple fields are _tuplegetter descriptors implemented in C.
+            # Emulate _tuplegetter.__get__ via tracked tuple items because
+            # self.value may be a freshly-created empty tuple from
+            # SideEffects.get_example_value (tuple.__new__(cls) with no args)
+            # or otherwise underpopulated. Subclasses (NamedTupleVariable,
+            # StructSequenceVariable) may further override for their specific
+            # descriptor types.
+            _, (idx, _) = type_attr.__reduce__()
+            return self.items[idx]
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def call_method(
         self,
