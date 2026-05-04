@@ -751,7 +751,10 @@ def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
     h = hashlib.sha256()
     h.update(name.encode("utf-8"))
     with open(path, "rb") as f:
-        h.update(f.read())
+        if sys.version_info >= (3, 11):
+            h.update(hashlib.file_digest(f, "sha256").digest())
+        else:
+            h.update(f.read())
     return (name, h.digest())
 
 
