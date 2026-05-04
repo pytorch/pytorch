@@ -641,6 +641,15 @@ def is_impure(
     from torch._higher_order_ops.effects import _get_effect
     from torch.fx.node import _side_effectful_functions
 
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        if op in _side_effectful_functions:
+            return True
+        default = getattr(op, "default", None)
+        if default is not None:
+            return is_impure(
+                default, args=args, kwargs=kwargs, impure_random=impure_random
+            )
+
     if isinstance(op, torch._ops.OpOverload):
         schema = getattr(op, "_schema", None)
         if schema is not None and schema.is_mutable:
