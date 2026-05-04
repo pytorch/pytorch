@@ -45,6 +45,12 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.dynamic_spec import (
+    IntSpec,
+    IntSpecType,
+    lookup_spec_from_dynamo_source,
+    TensorSpec,
+)
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
@@ -603,7 +609,7 @@ class VariableBuilder:
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
-            (re.Pattern, cls.wrap_regex_pattern),
+            ((re.Pattern, re.Match), cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
@@ -623,7 +629,9 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern[Any]) -> ConstantLikeVariable:
+    def wrap_regex_pattern(
+        self, value: re.Pattern[Any] | re.Match[Any]
+    ) -> ConstantLikeVariable:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return ConstantLikeVariable(value)
@@ -2256,13 +2264,7 @@ class VariableBuilder:
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
-            # Check for user-provided IntSpec from shapes_spec
-            from torch._dynamo.dynamic_spec import (
-                IntSpec,
-                IntSpecType,
-                lookup_spec_from_dynamo_source,
-            )
-
+            # Check for user-provided IntSpec from shapes_spec.
             int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
             if isinstance(int_spec, IntSpec):
                 if int_spec._type is IntSpecType.STATIC:
@@ -2405,10 +2407,27 @@ class VariableBuilder:
 
         is_static_input = get_static_address_type(value) is not None
 
-        if not is_static_input and (
-            isinstance(value, torch.nn.Parameter)
-            # mark tensor attributes of nn modules static
-            or (source and source.guard_source.is_unspecialized_nn_module())
+        # If the user provided any spec for this source, the
+        # Parameter / nn-module-attr static-marking and the
+        # graph-attribute lifting paths below would route the tensor as
+        # a constant and skip ``_automatic_dynamic`` (where the spec is
+        # consulted). Skip those paths so the spec drives shape
+        # decisions. Checking ``is not None`` rather than
+        # ``isinstance(..., TensorSpec)`` so that a mis-typed user spec
+        # (e.g. ``IntSpec`` on a tensor) still bypasses the fast path
+        # rather than being silently ignored.
+        _has_spec = (
+            lookup_spec_from_dynamo_source(source, config._shapes_spec) is not None
+        )
+
+        if (
+            not is_static_input
+            and not _has_spec
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static
+                or (source and source.guard_source.is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
@@ -2427,16 +2446,19 @@ class VariableBuilder:
             is_parameter_freezing() or torch._dynamo.config.prepare_freezing
         )
 
-        if should_install_free_tensor or (
-            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source.is_fsdp_module()
+        if not _has_spec and (
+            should_install_free_tensor
+            or (
+                (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+                and not source.guard_source.is_fsdp_module()
+            )
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
             )
 
-        if get_static_address_type(value) == "guarded":
+        if get_static_address_type(value) == "guarded" and not _has_spec:
             # If it's a guarded tensor, we can install the parameter directly
             # into  the Fx graph instead of lifting it as an input. Lifting
             # offers no benefit,  such as regional compilation, since we still
@@ -2445,6 +2467,11 @@ class VariableBuilder:
             # from locals/globals, reducing overhead.  This can lead to
             # significant cost savings, especially for optimizers  handling many
             # tensors.
+            #
+            # Skipped when a TensorSpec applies — the user opted into
+            # dynamic shapes via the spec system, so we route through
+            # ``wrap_to_fake_tensor`` (and ``_automatic_dynamic``) where
+            # the spec is consulted.
             self.install_guards(GuardBuilder.ID_MATCH)
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -3914,7 +3941,21 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes and not is_dynamic_source(name):
+    # If the user provided any spec for this source, fall through to
+    # per-dim dispatch below so the spec can override the all-static
+    # fast path. ``tensor_spec`` is only set when it's specifically a
+    # TensorSpec — that's what the per-dim loop indexes — but the
+    # bypass condition checks for *any* spec so a mis-typed user spec
+    # still opts out of the fast path instead of being silently
+    # specialized.
+    _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
+    tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
+
+    if (
+        static_shapes
+        and not is_dynamic_source(name)
+        and _spec_lookup is None
+    ):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3988,15 +4029,8 @@ def _automatic_dynamic(
     constraint_strides = []
     specialize_on = []
 
-    # Look up user-provided TensorSpec for this tensor
-    from torch._dynamo.dynamic_spec import (
-        IntSpecType,
-        lookup_spec_from_dynamo_source,
-        TensorSpec,
-    )
-
-    spec = lookup_spec_from_dynamo_source(source, config._shapes_spec)
-    tensor_spec = spec if isinstance(spec, TensorSpec) else None
+    # ``tensor_spec`` was looked up earlier (above the static-shapes
+    # fast-path guard) and reused here for per-dim dispatch.
 
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
@@ -4256,8 +4290,6 @@ def _wrap_to_fake_tensor_and_record_impl(
         # Apply min/max constraints and hint overrides from TensorSpec
         _tensor_spec = getattr(symbolic_context, "tensor_spec", None)
         if isinstance(fake_e, FakeTensor) and _tensor_spec is not None:
-            from torch._dynamo.dynamic_spec import IntSpecType
-
             for dim_i in range(fake_e.dim()):
                 dim_spec = _tensor_spec[dim_i]
                 if dim_spec is None or dim_spec._type is IntSpecType.STATIC:
@@ -4470,7 +4502,7 @@ class SourcelessBuilder:
             value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
         ):
             return UserDefinedObjectVariable(value)
-        elif isinstance(value, re.Pattern):
+        elif isinstance(value, (re.Pattern, re.Match)):
             return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:

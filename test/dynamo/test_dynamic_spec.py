@@ -14,7 +14,7 @@ from torch._dynamo.dynamic_spec import (
     ShapesSpec,
     TensorSpec,
 )
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -23,7 +23,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
     skipIfTorchDynamo,
 )
 
@@ -494,7 +493,6 @@ class TestTensorSpecConstruction(TestCase):
         self.assertIsNotNone(ts[3])
 
 
-@skipIfTorchDynamo()
 class TestTensorSpecCompile(TestCase):
     """TensorSpec + compile integration via torch.compile(shapes_spec=...)."""
 
@@ -564,7 +562,6 @@ class TestTensorSpecCompile(TestCase):
         self.assertEqual(len(backend.graphs), 2)
 
 
-@skipIfTorchDynamo()
 class TestIntSpecCompile(TestCase):
     """IntSpec + torch.compile integration via shapes_spec parameter."""
 
@@ -918,6 +915,43 @@ class TestIntSpecMinMax(TestCase):
                     self.assertIn(expr, shape_env.var_to_hint_override)
                     self.assertEqual(shape_env.var_to_hint_override[expr], 256)
                     break
+
+
+@skipIfTorchDynamo()
+class TestParameterSpecCompile(TestCase):
+    """End-to-end: ``nn.Parameter`` as a top-level arg honors the spec.
+
+    Parameters are normally force-marked static in ``wrap_tensor`` and
+    routed to ``register_attr_or_module`` (graph attribute), bypassing
+    ``_automatic_dynamic`` where the spec is consulted. The integration
+    consults ``lookup_spec_from_dynamo_source`` first and bypasses the
+    static-mark / graph-attribute paths when a ``TensorSpec`` is
+    provided, letting the Parameter flow through the dynamic-shape
+    path.
+    """
+
+    def test_parameter_top_level_dim_backed(self):
+        def fn(p):
+            return p + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec().arg(
+                    "p", TensorSpec([IntSpec.backed("h"), None])
+                )
+            ),
+        )
+
+        compiled(torch.nn.Parameter(torch.randn(4, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Spec drove ``_automatic_dynamic`` — dim 0 is a backed SymInt.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
 
 
 if __name__ == "__main__":
