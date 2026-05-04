@@ -161,6 +161,33 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   at::OptionalDeviceGuard _device_guard;
   auto* py_fn = reinterpret_cast<THPFunction*>(pyobj());
 
+  // Refresh ctx.needs_input_grad to reflect the engine's current reachability
+  // info, so custom autograd Functions can skip work for inputs whose grads
+  // are unreachable in a partial backward (issue #174017). Skip the refresh
+  // when exec_info_ is empty (the common case where `backward()` is called
+  // without `inputs=`): task_should_compute_output() reduces to next.is_valid()
+  // and the static requires_grad-derived tuple already holds the right value.
+  {
+    const auto* exec_info = get_current_graph_task_exec_info();
+    if (exec_info && !exec_info->empty()) {
+      const auto& is_var = py_fn->is_variable_input;
+      auto n = static_cast<Py_ssize_t>(is_var.size());
+      THPObjectPtr fresh(PyTuple_New(n));
+      if (!fresh)
+        throw_python_error();
+      size_t edge_idx = 0;
+      for (Py_ssize_t i = 0; i < n; ++i) {
+        bool val = is_var[i] ? task_should_compute_output(edge_idx++) : false;
+        PyObject* py = val ? Py_True : Py_False;
+        Py_INCREF(py);
+        PyTuple_SET_ITEM(fresh.get(), i, py);
+      }
+      PyObject* old = py_fn->needs_input_grad;
+      py_fn->needs_input_grad = fresh.release();
+      Py_XDECREF(old);
+    }
+  }
+
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
   inputs.clear();

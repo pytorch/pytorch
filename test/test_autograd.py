@@ -9059,6 +9059,135 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_custom_function_needs_input_grad_partial_backward(self):
+        # https://github.com/pytorch/pytorch/issues/174017
+        # When torch.autograd.backward(..., inputs=...) trims unreachable edges,
+        # ctx.needs_input_grad in custom Functions should reflect that — and the
+        # corresponding gradient computation should be skipped.
+        bwd_calls = []
+        skipped_branch_runs = [0]
+
+        class MyMatmul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return torch.matmul(a, b)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                bwd_calls.append(tuple(ctx.needs_input_grad))
+                grad_a = grad_b = None
+                if ctx.needs_input_grad[0]:
+                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
+                else:
+                    skipped_branch_runs[0] += 1  # MUST stay 0 when unreachable
+                if ctx.needs_input_grad[1]:
+                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
+                else:
+                    skipped_branch_runs[0] += 1
+                return grad_a, grad_b
+
+        def fresh():
+            return (
+                torch.randn(2, 3, requires_grad=True),
+                torch.randn(3, 4, requires_grad=True),
+            )
+
+        # 1. Partial backward wrt only the first input.
+        a, b = fresh()
+        skipped_branch_runs[0] = 0
+        torch.autograd.backward(MyMatmul.apply(a, b).sum(), inputs=[a])
+        self.assertEqual(bwd_calls[-1], (True, False))
+        self.assertEqual(skipped_branch_runs[0], 1)
+        self.assertIsNotNone(a.grad)
+        self.assertIsNone(b.grad)
+
+        # 2. Partial backward wrt only the second input.
+        a, b = fresh()
+        skipped_branch_runs[0] = 0
+        torch.autograd.backward(MyMatmul.apply(a, b).sum(), inputs=[b])
+        self.assertEqual(bwd_calls[-1], (False, True))
+        self.assertEqual(skipped_branch_runs[0], 1)
+        self.assertIsNone(a.grad)
+        self.assertIsNotNone(b.grad)
+
+        # 3. Both inputs.
+        a, b = fresh()
+        skipped_branch_runs[0] = 0
+        torch.autograd.backward(MyMatmul.apply(a, b).sum(), inputs=[a, b])
+        self.assertEqual(bwd_calls[-1], (True, True))
+        self.assertEqual(skipped_branch_runs[0], 0)
+
+        # 4. Default backward (no `inputs=`) is unchanged.
+        a, b = fresh()
+        skipped_branch_runs[0] = 0
+        MyMatmul.apply(a, b).sum().backward()
+        self.assertEqual(bwd_calls[-1], (True, True))
+        self.assertEqual(skipped_branch_runs[0], 0)
+
+        # 5. Tensor input without requires_grad stays False (no edge).
+        a = torch.randn(2, 3, requires_grad=True)
+        b = torch.randn(3, 4)  # no grad
+        torch.autograd.backward(MyMatmul.apply(a, b).sum(), inputs=[a])
+        self.assertEqual(bwd_calls[-1], (True, False))
+
+        # 6. retain_graph with different `inputs=` per call gets independent
+        # reachability info each time.
+        a, b = fresh()
+        out = MyMatmul.apply(a, b).sum()
+        torch.autograd.backward(out, inputs=[b], retain_graph=True)
+        self.assertEqual(bwd_calls[-1], (False, True))
+        torch.autograd.backward(out, inputs=[a, b])
+        self.assertEqual(bwd_calls[-1], (True, True))
+
+    def test_custom_function_needs_input_grad_setter_preserved(self):
+        # BC: assigning to ctx.needs_input_grad inside backward continues to
+        # work. The refresh at backward entry must not stop user code from
+        # overriding the value.
+        observed = []
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                ctx.needs_input_grad = (False,)
+                observed.append(ctx.needs_input_grad)
+                return grad
+
+        x = torch.randn(3, requires_grad=True)
+        MyFn.apply(x).sum().backward()
+        self.assertEqual(observed[-1], (False,))
+
+    def test_custom_function_needs_input_grad_non_tensor_input(self):
+        # Index alignment: needs_input_grad has one entry per *forward arg*
+        # (tensor or not), but only tensor args have edges. The refresh logic
+        # must keep the indexing aligned.
+        captured = []
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scale, y):
+                ctx.scale = scale
+                return x * scale + y
+
+            @staticmethod
+            def backward(ctx, grad):
+                captured.append(tuple(ctx.needs_input_grad))
+                grad_x = grad * ctx.scale if ctx.needs_input_grad[0] else None
+                grad_y = grad if ctx.needs_input_grad[2] else None
+                return grad_x, None, grad_y
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        torch.autograd.backward(MyFn.apply(x, 2.0, y).sum(), inputs=[y])
+        # Position 1 is a non-tensor (scale), always False; position 0 is
+        # unreachable in this partial backward.
+        self.assertEqual(captured[-1], (False, False, True))
+
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
     )
