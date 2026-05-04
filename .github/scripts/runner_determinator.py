@@ -54,6 +54,13 @@ Example config:
     @User2,lf
     @User3,split_build
     @User4,lf,arc:10
+
+    # These are checked after user opt-in/opt-out but before global rollout.
+    # User settings always take priority over workflow overrides.
+    # Format: @workflow:<workflow-name>,<experiment>[,<experiment>...]
+    @workflow:periodic,arc
+    @workflow:slow,arc
+    @workflow:nightly,-arc
 """
 
 import json
@@ -227,6 +234,13 @@ def parse_args() -> Any:
         default="",
         help="the optional PR number where this is run",
     )
+    parser.add_argument(
+        "--workflow-name",
+        type=str,
+        required=False,
+        default="",
+        help="the name of the calling workflow (github.workflow)",
+    )
 
     return parser.parse_args()
 
@@ -320,6 +334,46 @@ class UserOptins(dict[str, list[UserExperimentConfig]]):
     """
     Dictionary of users with a list of experiment configs they have opted into
     """
+
+
+class WorkflowOptins(dict[str, list[UserExperimentConfig]]):
+    """
+    Dictionary of workflow names with a list of experiment configs.
+    """
+
+
+def parse_workflow_opt_in_from_text(text: str) -> WorkflowOptins:
+    """
+    Parse @workflow: lines from the opt-in text.
+
+    Format: @workflow:<name>,<experiment>[,<experiment>...]
+    Example: @workflow:periodic,arc
+             @workflow:slow,-arc
+    """
+    optins = WorkflowOptins()
+    for line in text.split("\n"):
+        line = line.strip("\r\n\t -")
+        if not line or not line.startswith("@workflow:"):
+            continue
+        parts = line.split(",")
+        wf_name = parts[0].split(":", 1)[1].strip()
+        configs = []
+        for exp_str in parts[1:]:
+            exp_str = exp_str.strip()
+            if not exp_str:
+                continue
+            if ":" in exp_str and not exp_str.startswith("-"):
+                name, perc_str = exp_str.split(":", 1)
+                try:
+                    perc = float(perc_str)
+                except ValueError:
+                    perc = 100
+                perc = max(0.0, min(100.0, perc))
+                configs.append(UserExperimentConfig(name=name, rollout_perc=perc))
+            else:
+                configs.append(UserExperimentConfig(name=exp_str, rollout_perc=100))
+        optins[wf_name] = configs
+    return optins
 
 
 def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
@@ -498,9 +552,12 @@ def get_runner_prefix(
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
+    workflow_name: str = "",
 ) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
+    _, users_text = extract_settings_user_opt_in_from_text(rollout_state)
+    workflow_optins = parse_workflow_opt_in_from_text(users_text)
 
     fleet_prefix = ""
     prefixes = []
@@ -586,6 +643,33 @@ def get_runner_prefix(
                     f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
                     f"with 0% rollout. Not enabling."
                 )
+
+        # Workflow-level override: checked after user opt-in/opt-out,
+        # before global rollout. Only applies when no user config matched.
+        elif workflow_name and workflow_name in workflow_optins:
+            wf_configs = workflow_optins[workflow_name]
+            wf_optout = any(c.name == f"-{experiment_name}" for c in wf_configs)
+            if wf_optout:
+                log.info(
+                    f"Workflow '{workflow_name}' has opted out of experiment {experiment_name}."
+                )
+                continue
+            wf_optin = next((c for c in wf_configs if c.name == experiment_name), None)
+            if wf_optin:
+                if (
+                    wf_optin.rollout_perc >= 100
+                    or random.uniform(0, 100) <= wf_optin.rollout_perc
+                ):
+                    log.info(
+                        f"Workflow '{workflow_name}' has opted into experiment {experiment_name} "
+                        f"(rollout {wf_optin.rollout_perc}%). Enabling."
+                    )
+                    enabled = True
+                else:
+                    log.info(
+                        f"Workflow '{workflow_name}' has opted into experiment {experiment_name} "
+                        f"(rollout {wf_optin.rollout_perc}%). Not enabling this run."
+                    )
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
@@ -706,6 +790,9 @@ def main() -> None:
             set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
             sys.exit()
 
+    if args.workflow_name:
+        log.info(f"Workflow name: '{args.workflow_name}'")
+
     try:
         rollout_state = get_rollout_state_from_issue(
             args.github_token, args.github_issue_repo, args.github_issue
@@ -728,6 +815,7 @@ def main() -> None:
             args.eligible_experiments,
             args.opt_out_experiments,
             is_canary,
+            workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix
         set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())
