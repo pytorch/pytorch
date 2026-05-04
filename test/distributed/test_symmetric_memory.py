@@ -310,6 +310,51 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_rendezvous_custom_backend(self) -> None:
+        # Simulate the ncclx multi-backend setup.  When new_group() is called
+        # with a multi-backend config like "cpu:gloo,cuda:<custom_plugin>",
+        # _new_process_group_helper only sets the default backend when it
+        # recognises the CUDA backend as "nccl".  For third-party backends
+        # (e.g. ncclx) it can leave backendType_ as UNDEFINED, which used to
+        # crash getUsePgForSymmMemRendezvous() because getDefaultBackend()
+        # fails for UNDEFINED.  Symmetric memory doesn't need a PG backend
+        # (it exchanges metadata via the store), so rendezvous must still
+        # work via the TCPStore path.
+        self._init_process()
+
+        from torch._C._distributed_c10d import _DistributedBackendOptions, StubBackend
+
+        def create_stub(dist_opts: _DistributedBackendOptions, pg_options=None):
+            if pg_options is None:
+                pg_options = StubBackend.Options()
+            pg_options.global_ranks_in_group = list(dist_opts.global_ranks_in_group)
+            pg_options.group_name = dist_opts.group_id
+            return StubBackend(
+                dist_opts.store, dist_opts.group_rank, dist_opts.group_size, pg_options
+            )
+
+        dist.Backend.register_backend(
+            "stub", create_stub, extended_api=True, devices=["cuda"]
+        )
+
+        pg = dist.new_group(list(range(self.world_size)), backend="cpu:gloo,cuda:stub")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_pg_rendezvous_abort_after(self) -> None:
         self._init_process()
 

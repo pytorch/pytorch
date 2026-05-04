@@ -638,6 +638,19 @@ class FakeWork(Work):
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 
+class StubBackend(Backend):
+    class Options(Backend.Options):
+        global_ranks_in_group: list[int]
+        def __init__(self) -> None: ...
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: Options = ...,
+    ) -> None: ...
+
 class PythonCallbackWork(Work):
     def __init__(self, callback: Callable[[timedelta], bool]) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...

@@ -19,6 +19,7 @@
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/StubBackend.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -4020,6 +4021,31 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
+
+  // StubBackend: minimal C++ Backend for testing custom backend plugins
+  // (simulates ncclx-like backends that register via extended_api=True).
+  auto stubBackend =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::StubBackend>(
+          module, "StubBackend", backend);
+  intrusive_ptr_class_<::c10d::StubBackend::Options>(
+      stubBackend, "Options", backendOptions)
+      .def(py::init<>())
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::StubBackend::Options::global_ranks_in_group)
+      .def_readwrite("group_name", &::c10d::StubBackend::Options::group_name);
+  stubBackend.def(
+      py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                  int rank,
+                  int size,
+                  c10::intrusive_ptr<::c10d::StubBackend::Options> options) {
+        return c10::make_intrusive<::c10d::StubBackend>(
+            store, rank, size, std::move(options));
+      }),
+      py::arg("store"),
+      py::arg("rank"),
+      py::arg("size"),
+      py::arg("options") = c10::make_intrusive<::c10d::StubBackend::Options>());
 
   auto pythonCallbackWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::PythonCallbackWork>(
