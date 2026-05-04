@@ -280,7 +280,7 @@ class CacheArtifactManager:
             cls._cache_info.add(artifact)
 
         if cls._cache_info.empty():
-            # If there are not artifacts, dont just return bytes with
+            # If there are no artifacts, don't just return bytes with
             # version.
             return None
 

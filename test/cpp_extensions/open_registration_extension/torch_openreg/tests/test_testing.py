@@ -36,6 +36,18 @@ class TestBypassDeviceRestrictions(TestCase):
         self.bypass_device_restrictions = True
         super().setUp()
 
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 2
+        actual_runs = cls.executed_count
+        if actual_runs != expected_runs:
+            raise AssertionError(
+                f"Bypass logic failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but only {actual_runs} executed."
+            )
+        super().tearDownClass()
+
     @onlyCUDA
     def test_bypass_only_cuda(self, device):
         type(self).executed_count += 1
@@ -45,19 +57,6 @@ class TestBypassDeviceRestrictions(TestCase):
     def test_bypass_only_on(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
-
-    def test_vaildate_bypass_execution(self, device):
-        # Must run last. The 'v' prefix ensures this sorts after test_bypass_* ('b') alphabetically,
-        # so executed_count has been incremented by both bypass tests before we check it here.
-        expected_runs = 2
-        actual_runs = type(self).executed_count
-        self.assertEqual(
-            actual_runs,
-            expected_runs,
-            f"Bypass logic failed! "
-            f"Expected {expected_runs} tests to run, "
-            f"but only {actual_runs} executed.",
-        )
 
 
 def _make_dummy_op(name, **kwargs):
