@@ -3764,23 +3764,14 @@ class LinearCrossEntropyOptions:
             )
         if self.chunking_method is not None:
             if ":" in self.chunking_method:
-                factor = self.chunking_method.split(":", 1)[1]
+                name, factor = self.chunking_method.split(":", 1)
             else:
-                factor = "1"
-            if not self.chunking_method.startswith("aspect_ratio") or not (
-                factor.isdigit() and int(factor) > 0
-            ):
+                name, factor = self.chunking_method, "1"
+            if not (name == "aspect_ratio" and factor.isdigit() and int(factor) > 0):
                 raise ValueError(
                     f"chunking_method must be 'aspect_ratio', 'aspect_ratio:N' for a positive integer N, or None, "
                     f"got {self.chunking_method!r}"
                 )
-
-            if ":" in self.chunking_method:
-                factor = self.chunking_method.split(":", 1)[1]
-                if not factor.isdigit() or int(factor) == 0:
-                    raise ValueError(
-                        f"aspect_ratio factor must be a positive integer, got {factor!r}"
-                    )
 
     def _adjust(self, num_batches, in_features, num_classes, dtype):
         """Adjust options to input sizes and dtype.
