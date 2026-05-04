@@ -88,7 +88,6 @@ goto build_end
 
 :pytorch
 set BUILD_TEST=0
-if not "%DEBUG%" == "1" set CMAKE_BUILD_TYPE=Release
 %PYTHON_EXEC% -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 
 :build_end
