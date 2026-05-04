@@ -1871,6 +1871,19 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             loss.backward()
         self.assertIsNotNone(x.grad)
 
+    def test_batched_matmul_inference_mode(self):
+        # Regression test for torch.compile crash with batched matmul in inference_mode
+        x = torch.randn(2, 4, 8)
+        w = torch.randn(8, 8)
+
+        def f(x, w):
+            with torch.inference_mode():
+                return (x @ w).sum()
+
+        torch._dynamo.reset()
+        result = torch.compile(f)(x, w)
+        self.assertIsInstance(result, torch.Tensor)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
