@@ -39,9 +39,9 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    _get_torch_rocm_version
+    SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -14512,6 +14512,194 @@ class TestUtils(TestCase):
         # Check they are the same preserving order
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
+
+
+def _rmsnorm_override_registered():
+    try:
+        from torch._native.registry import _graphs
+        return ("_fused_rms_norm", "CUDA") in _graphs
+    except ImportError:
+        return False
+
+
+_OVERRIDE_PREFIX_FWD = "_native::_fused_rms_norm_cutedsl"
+_OVERRIDE_PREFIX_BWD = "_native::_fused_rms_norm_backward_cutedsl"
+
+
+def _override_fwd_fired(events):
+    return any(
+        e.name.startswith(_OVERRIDE_PREFIX_FWD)
+        and not e.name.startswith(_OVERRIDE_PREFIX_BWD)
+        for e in events
+    )
+
+
+def _override_bwd_fired(events):
+    return any(e.name.startswith(_OVERRIDE_PREFIX_BWD) for e in events)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
+@unittest.skipIf(
+    not _rmsnorm_override_registered(),
+    "cutedsl _fused_rms_norm override not registered",
+)
+class TestFusedRMSNormOverride(TestCase):
+    """Tests that target the cutedsl _fused_rms_norm override's own branches
+    (cond true/false, weight=None, eps=None, output_mask variants,
+    non-contiguous inputs). Generic numerics are covered by the OpInfo entry
+    in torch/testing/_internal/common_methods_invocations.py.
+    """
+
+    def _profile(self, fn):
+        # Warmup outside the profiled region so lazy JIT compile doesn't
+        # pollute the event list.
+        fn()
+        torch.cuda.synchronize()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            out = fn()
+            torch.cuda.synchronize()
+        return out, prof.events()
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_override_fires_on_supported_dtype(self, dtype):
+        x = torch.randn(8, 128, dtype=dtype, device="cuda")
+        w = torch.randn(128, dtype=dtype, device="cuda")
+        _, events = self._profile(
+            lambda: torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        )
+        self.assertTrue(_override_fwd_fired(events))
+
+    def test_cond_false_falls_through_on_unsupported_dtype(self):
+        # fp64 is outside the override's supported dtype set; cond returns
+        # False and the registry transparently dispatches to the aten kernel.
+        x = torch.randn(8, 128, dtype=torch.float64, device="cuda")
+        w = torch.randn(128, dtype=torch.float64, device="cuda")
+        out, events = self._profile(
+            lambda: torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        )
+        self.assertFalse(_override_fwd_fired(events))
+        # Still correct numerically — aten handles fp64.
+        ref = torch.nn.functional.rms_norm(x, [128], w, 1e-5)
+        self.assertEqual(out[0], ref, atol=1e-12, rtol=0)
+
+    def test_weight_none(self):
+        dtype = torch.float16
+        x = torch.randn(8, 128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], None, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], None, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_eps_none(self):
+        dtype = torch.float16
+        x = torch.randn(8, 128, dtype=dtype, device="cuda")
+        w = torch.randn(128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], w, None)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], w, None)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_multi_dim_normalized_shape(self):
+        dtype = torch.bfloat16
+        x = torch.randn(2, 4, 8, 16, dtype=dtype, device="cuda")
+        w = torch.randn(8, 16, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [8, 16], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [8, 16], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_non_contiguous_input(self):
+        dtype = torch.float32
+        base = torch.randn(8, 256, dtype=dtype, device="cuda")
+        x = base[:, ::2]  # non-contiguous view, trailing dim = 128
+        self.assertFalse(x.is_contiguous())
+        w = torch.randn(128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-5, rtol=0)
+
+    # Tolerances picked to match the aten kernel within ~1 ULP of the reduced
+    # dtype; the quack kernel uses a different accumulation order.
+    _BWD_ATOL = {
+        torch.float16: 1e-1,
+        torch.bfloat16: 3e-1,
+        torch.float32: 1e-5,
+    }
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize_test(
+        "shape",
+        [(8, 128), (4, 8, 32), (2, 16, 512), (4, 32, 1024)],
+    )
+    def test_autograd_roundtrip_matches_aten(self, dtype, shape):
+        atol = self._BWD_ATOL[dtype]
+        normalized_shape = list(shape[-1:])
+        x = torch.randn(*shape, dtype=dtype, device="cuda")
+        w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+        gout = torch.randn(*shape, dtype=dtype, device="cuda")
+
+        x1 = x.detach().requires_grad_(True)
+        w1 = w.detach().requires_grad_(True)
+        y, _ = torch.ops.aten._fused_rms_norm(x1, normalized_shape, w1, 1e-5)
+        y.backward(gout)
+
+        x2 = x.detach().requires_grad_(True)
+        w2 = w.detach().requires_grad_(True)
+        with torch.backends.python_native.operations_disabled(
+            "_fused_rms_norm", "_fused_rms_norm_backward"
+        ):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x2, normalized_shape, w2, 1e-5)
+            y_ref.backward(gout)
+
+        self.assertEqual(y, y_ref, atol=atol, rtol=0)
+        self.assertEqual(x1.grad, x2.grad, atol=atol, rtol=0)
+        self.assertEqual(w1.grad, w2.grad, atol=atol, rtol=0)
+
+    @parametrize_test(
+        "output_mask",
+        [[True, True], [True, False], [False, True]],
+    )
+    def test_backward_output_mask_variants(self, output_mask):
+        dtype = torch.float16
+        shape = (8, 128)
+        normalized_shape = [128]
+        x = torch.randn(*shape, dtype=dtype, device="cuda")
+        w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+        gout = torch.randn(*shape, dtype=dtype, device="cuda")
+
+        # Forward once to get rstd (shape [*batch, 1...]) under the aten path;
+        # the backward kernel takes rstd as an explicit input.
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            _, rstd = torch.ops.aten._fused_rms_norm(x, normalized_shape, w, 1e-5)
+
+        gx, gw = torch.ops.aten._fused_rms_norm_backward(
+            gout, x, normalized_shape, rstd, w, output_mask
+        )
+        with torch.backends.python_native.operations_disabled(
+            "_fused_rms_norm_backward"
+        ):
+            gx_ref, gw_ref = torch.ops.aten._fused_rms_norm_backward(
+                gout, x, normalized_shape, rstd, w, output_mask
+            )
+
+        if output_mask[0]:
+            self.assertIsNotNone(gx)
+            self.assertEqual(gx, gx_ref, atol=1e-1, rtol=0)
+        else:
+            self.assertIsNone(gx)
+        if output_mask[1]:
+            self.assertIsNotNone(gw)
+            self.assertEqual(gw, gw_ref, atol=1e-1, rtol=0)
+        else:
+            self.assertIsNone(gw)
+
+
+instantiate_parametrized_tests(TestFusedRMSNormOverride)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)

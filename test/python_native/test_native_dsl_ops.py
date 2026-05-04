@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
     TestCase,
 )
 
@@ -473,7 +474,6 @@ class TestNativeDSLOps(TestCase):
         """Test that DSL test helper decorators work"""
         from torch.testing._internal.common_utils import (
             skipIfDSLUnavailable,
-            skipIfNoCuteDSL,
             skipIfNoTritonDSL,
             skipUnlessDSLAvailable,
         )
@@ -564,6 +564,7 @@ class TestNativeDSLOps(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeDSLOps)
+
 
 if __name__ == "__main__":
     run_tests()

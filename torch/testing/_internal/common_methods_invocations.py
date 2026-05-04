@@ -34,7 +34,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -4652,6 +4652,27 @@ def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
         )
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=((2,),))
+
+def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # Shapes chosen to land on the quack/cutedsl override's supported path:
+    # fp16/bf16/fp32, SM 9.x/10.x, rank >= 2.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((4, 8, 32), (32,), {'eps': 1e-5}),
+        ((2, 16, 512), (512,), {'eps': 1e-5}),
+        ((4, 32, 1024), (1024,), {'eps': 1e-5}),
+        # multi-dim normalized_shape: exercises the override's reshape logic
+        ((2, 4, 8, 16), (8, 16), {'eps': 1e-5}),
+        # eps=None exercises the finfo(dtype).eps fallback in _fused_rms_norm_impl
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
 
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -23516,6 +23537,52 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
         variant_test_name="triton_optimized",
     )
 )
+
+def _cutedsl_rmsnorm_override_registered() -> bool:
+    # The override only registers on CUDA SM 9.x / 10.x when the vendored
+    # quack module is importable; gate OpInfo-driven suites on that so they
+    # skip cleanly on CPU-only binaries or older GPUs.
+    try:
+        from torch._native.registry import _graphs
+        return ("_fused_rms_norm", "CUDA") in _graphs
+    except ImportError:
+        return False
+
+
+if "cutedsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="cutedsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_cutedsl,
+            decorators=[
+                onlyCUDA,
+                skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
+                unittest.skipIf(
+                    not _cutedsl_rmsnorm_override_registered(),
+                    "cutedsl _fused_rms_norm override not registered",
+                ),
+            ],
+            skips=(
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective — but this variant is specifically for
+                # the override's supported dtypes only.
+                DecorateInfo(
+                    unittest.skip("override intentionally narrower than aten"),
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 
