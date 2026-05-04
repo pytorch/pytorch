@@ -379,26 +379,22 @@ Tensor& addmv_out(
 
   Tensor vec_v = vec.view({vec.size(0), 1});
 
-  bool is_float64 =
-      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
-  bool need_preserve_strides =
-      out.dim() == 1 && out.stride(0) != 1 && out.numel() > 0;
-
-  if (is_float64 && self.is_same(out) && !need_preserve_strides) {
-    self_v = self_v.clone();
-  }
-
-  // addmm_out resizes its output to 2D, destroying stride information.
-  // When out has noncontiguous strides, compute into a temporary and copy back.
-  if (need_preserve_strides) {
-    Tensor tmp = at::empty({mat.size(0)}, out.options());
-    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
-    tmp.resize_({mat.size(0)});
-    out.copy_(tmp);
-  } else {
-    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-    out.resize_({mat.size(0)});
-  }
+  // Use a fresh contiguous (M, 1) buffer for the addmm call. We cannot pass
+  // `out` (or a view of it) directly because `addmm_out` internally calls
+  // `result.resize_({M, 1})`, which silently rewrites the strides of any
+  // non-contiguous 1D view (e.g. `out = batched.select(-1, k)` produced by
+  // the vmap fallback). That would cause subsequent writes to land at wrong
+  // storage offsets and corrupt the parent tensor.
+  // Cloning `self_v` when in-place is also required: when `out` aliases
+  // `self`, `addmm_out`'s own in-place detection (which compares TensorImpls
+  // with `is_same`) cannot see the aliasing through the `self.view(...)`,
+  // so it would otherwise read `self_v` as a post-binary-add input while
+  // writing to the same storage.
+  bool is_inplace = self.is_same(out);
+  Tensor self_v_in = is_inplace ? self_v.clone() : self_v;
+  Tensor result_2d = at::empty({mat.size(0), 1}, out.options());
+  at::native::xpu::addmm_out(self_v_in, mat, vec_v, beta, alpha, result_2d);
+  out.copy_(result_2d.view(mat.size(0)));
   return out;
 }
 
