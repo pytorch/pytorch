@@ -12,7 +12,7 @@ If any tool you're trying to use (pip, python, spin, etc) is missing, always sto
 
 # Build
 
-Always ask for build configuration environment variables before running build.
+Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
 You should NEVER run any other command to build PyTorch.
 
@@ -49,7 +49,11 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with Claude.
+Disclose that the PR was authored with an AI assistant. Do this informally in
+the commit body (e.g., "Authored by Claude." or a similar attribution for
+whichever assistant was used). NEVER add a `Co-authored-by:` trailer
+attributing the AI assistant, as it interferes with the Linux Foundation CLA
+bot.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
@@ -107,6 +111,10 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- ASCII only in newly added code comments. Do not introduce Unicode characters
+  (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
+  Leave preexisting Unicode in untouched comments alone; only enforce this for
+  comments you are adding or rewriting.
 
 If uncertain, choose the simpler, more concise implementation.
 
