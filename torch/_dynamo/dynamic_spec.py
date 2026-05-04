@@ -34,7 +34,6 @@ from collections.abc import Iterator
 from typing import Any, ClassVar, TypeAlias
 
 import torch
-import torch.utils._pytree as pytree
 
 
 __all__ = [
@@ -634,66 +633,3 @@ class ObjectSpec:
 
     # No ``__eq__`` / ``__hash__``: same call as :class:`IntSpec` /
     # :class:`TensorSpec`.
-
-
-# -- pytree registration -----------------------------------------------------
-#
-# ``TensorSpec`` is a list-like container of per-dim ``IntSpec | None`` —
-# register it so ``tree_flatten_with_path`` exposes each per-dim entry as a
-# leaf with a ``SequenceKey(i)`` path entry.
-#
-# ``IntSpec`` is intentionally *not* registered: pytree treats unregistered
-# classes as opaque leaves, which is the correct behavior — flattening should
-# stop at ``IntSpec``.
-
-
-def _tensorspec_flatten(ts: TensorSpec) -> tuple[list[Any], None]:
-    return list(ts), None
-
-
-def _tensorspec_unflatten(children: Any, _context: Any) -> TensorSpec:
-    return TensorSpec(list(children))
-
-
-def _tensorspec_flatten_with_keys(
-    ts: TensorSpec,
-) -> tuple[list[tuple[Any, Any]], None]:
-    return [(pytree.SequenceKey(i), spec) for i, spec in enumerate(ts)], None
-
-
-pytree.register_pytree_node(
-    TensorSpec,
-    _tensorspec_flatten,
-    _tensorspec_unflatten,
-    flatten_with_keys_fn=_tensorspec_flatten_with_keys,
-)
-
-
-# ``ObjectSpec`` flattens to its field values; the field names are the
-# context, and each entry becomes a ``GetAttrKey`` on the keypath when
-# ``tree_flatten_with_path`` is used.
-
-
-def _objectspec_flatten(os: ObjectSpec) -> tuple[list[Any], list[str]]:
-    return list(os._fields.values()), list(os._fields.keys())
-
-
-def _objectspec_unflatten(values: Any, keys: Any) -> ObjectSpec:
-    return ObjectSpec(dict(zip(keys, values)))
-
-
-def _objectspec_flatten_with_keys(
-    os: ObjectSpec,
-) -> tuple[list[tuple[Any, Any]], list[str]]:
-    return (
-        [(pytree.GetAttrKey(name), spec) for name, spec in os._fields.items()],
-        list(os._fields.keys()),
-    )
-
-
-pytree.register_pytree_node(
-    ObjectSpec,
-    _objectspec_flatten,
-    _objectspec_unflatten,
-    flatten_with_keys_fn=_objectspec_flatten_with_keys,
-)
