@@ -4608,27 +4608,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
-    def test_wrapper_descriptor_as_input(self):
-        wd = str.__eq__
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(descriptor, a, b):
-            return descriptor(a, b)
-
-        self.assertTrue(fn(wd, "hello", "hello"))
-        self.assertFalse(fn(wd, "hello", "world"))
-
-    def test_method_descriptor_as_input(self):
-        md = list.append
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(descriptor, lst, val):
-            descriptor(lst, val)
-            return lst
-
-        result = fn(md, [1, 2], 3)
-        self.assertEqual(result, [1, 2, 3])
-
     def test_method_wrapper_as_input(self):
         bound = "hello".__add__
 
