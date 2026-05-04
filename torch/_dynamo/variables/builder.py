@@ -17,6 +17,7 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
+import _collections  # type: ignore[import-not-found]
 import abc
 import collections
 import contextlib
@@ -203,6 +204,8 @@ from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
+    ClassMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -212,9 +215,12 @@ from .functions import (
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
+    StaticMethodVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
+    TupleGetterVariable,
     UserFunctionVariable,
     WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
@@ -739,9 +745,7 @@ class VariableBuilder:
         types.BuiltinFunctionType,
     )
 
-    def _try_build_bound_builtin_method(
-        self, value: Any
-    ) -> VariableTracker | None:
+    def _try_build_bound_builtin_method(self, value: Any) -> VariableTracker | None:
         """Try to build a BoundBuiltinMethodVariable for a bound C method.
 
         Only handles builtin_function_or_method values backed by a known
@@ -763,9 +767,7 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.ID_MATCH)
         obj_source = self.source and AttrSource(self.source, "__self__")
         obj_vt = VariableTracker.build(self.tx, obj, obj_source)
-        return BoundBuiltinMethodVariable(
-            descriptor, obj_vt, source=self.source
-        )
+        return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
 
     def _wrap(self, value: Any) -> VariableTracker:
         # import here to avoid circular dependencies
@@ -1214,12 +1216,6 @@ class VariableBuilder:
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif isinstance(value, CudagraphOverrideContextManager):
             return CudagraphOverrideVariable(value.fwd, value.bwd)
-        elif isinstance(value, types.WrapperDescriptorType):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return WrapperDescriptorVariable(value, source=self.source)
-        elif isinstance(value, types.MethodDescriptorType):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return MethodDescriptorVariable(value, source=self.source)
         elif (result := self._try_build_bound_builtin_method(value)) is not None:
             return result
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
@@ -1229,6 +1225,35 @@ class VariableBuilder:
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
             )
+        elif isinstance(value, types.WrapperDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            owner_source = self.source and AttrSource(self.source, "__objclass__")
+            owner_vt = VariableTracker.build(
+                self.tx, value.__objclass__, source=owner_source
+            )
+            return WrapperDescriptorVariable(value, owner=owner_vt, source=self.source)
+        elif isinstance(value, types.MethodDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            owner_source = self.source and AttrSource(self.source, "__objclass__")
+            owner_vt = VariableTracker.build(
+                self.tx, value.__objclass__, source=owner_source
+            )
+            return MethodDescriptorVariable(value, owner=owner_vt, source=self.source)
+        elif isinstance(value, types.ClassMethodDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ClassMethodDescriptorVariable(value, source=self.source)
+        elif isinstance(value, staticmethod):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return StaticMethodVariable(value, source=self.source)
+        elif isinstance(value, classmethod):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ClassMethodVariable(value, source=self.source)
+        elif isinstance(value, property):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return PropertyVariable(value, source=self.source)
+        elif isinstance(value, _collections._tuplegetter):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return TupleGetterVariable(value, source=self.source)
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif isinstance(value, HigherOrderOperator):
@@ -1570,9 +1595,7 @@ class VariableBuilder:
             else:
                 obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, obj, obj_source)
-            return MethodWrapperVariable(
-                descriptor, obj_vt, source=self.source
-            )
+            return MethodWrapperVariable(descriptor, obj_vt, source=self.source)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -4379,15 +4402,27 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
-        elif isinstance(value, types.WrapperDescriptorType):
-            return WrapperDescriptorVariable(value)
-        elif isinstance(value, types.MethodDescriptorType):
-            return MethodDescriptorVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup_callable(value)(value)
+        elif isinstance(value, types.WrapperDescriptorType):
+            owner_vt = SourcelessBuilder.create(tx, value.__objclass__)
+            return WrapperDescriptorVariable(value, owner=owner_vt)
+        elif isinstance(value, types.MethodDescriptorType):
+            owner_vt = SourcelessBuilder.create(tx, value.__objclass__)
+            return MethodDescriptorVariable(value, owner=owner_vt)
+        elif isinstance(value, types.ClassMethodDescriptorType):
+            return ClassMethodDescriptorVariable(value)
+        elif isinstance(value, staticmethod):
+            return StaticMethodVariable(value)
+        elif isinstance(value, classmethod):
+            return ClassMethodVariable(value)
+        elif isinstance(value, property):
+            return PropertyVariable(value)
+        elif isinstance(value, _collections._tuplegetter):
+            return TupleGetterVariable(value)
         elif callable(value) and UserDefinedClassVariable.is_supported_new_method(
             value
         ):

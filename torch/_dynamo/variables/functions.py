@@ -1078,7 +1078,6 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
         return leaf
 
 
-
 class LocalGeneratorObjectVariable(VariableTracker):
     # PyGen_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L814
     _cpython_type = types.GeneratorType
