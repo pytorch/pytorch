@@ -12,7 +12,7 @@ requires = [
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
+    "typing-extensions>=4.15.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -22,15 +22,15 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
-    "setuptools>=70.1.0,<80.0",  # setuptools develop deprecated on 80.0
+    "setuptools>=77.0.0,<80.0",  # setuptools develop deprecated on 80.0
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging",
+    "packaging>=24.2",
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
+    "typing-extensions>=4.15.0",
 
     # This list should be kept in sync with the requirements.txt in
     # PyTorch root until the project fully migrates to pyproject.toml

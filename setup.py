@@ -1607,8 +1607,8 @@ def main() -> None:
 
     install_requires = [
         "filelock",
-        "typing-extensions>=4.10.0",
-        "setuptools<82",
+        "typing-extensions>=4.15.0",
+        "setuptools>=77.0.0,<82",
         "sympy>=1.13.3",
         "networkx>=2.5.1",
         "jinja2",
