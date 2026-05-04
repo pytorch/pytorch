@@ -4,9 +4,11 @@ from typing import Any
 import torch
 
 from ._utils import _device_t, _get_device_index
+from torch.accelerator import _component_tracking as component_tracking  # noqa: F401
 
 
 __all__ = [
+    "component_tracking",
     "empty_cache",
     "empty_host_cache",
     "get_memory_info",
