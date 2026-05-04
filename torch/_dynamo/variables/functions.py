@@ -3841,6 +3841,9 @@ class MethodWrapperVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MethodWrapperType
 
+    def as_python_constant(self) -> types.MethodWrapperType:
+        return self.descriptor.__get__(self.obj.as_python_constant())
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3994,6 +3997,9 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
+    def as_python_constant(self) -> Any:
+        return self.descriptor.__get__(self.obj.as_python_constant())  # type: ignore[union-attr]
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -4041,6 +4047,9 @@ class ClassMethodDescriptorVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.ClassMethodDescriptorType
+
+    def as_python_constant(self) -> types.ClassMethodDescriptorType:
+        return self.descriptor
 
     def get_real_python_backed_value(self) -> types.ClassMethodDescriptorType:
         return self.descriptor
@@ -4098,6 +4107,9 @@ class StaticMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return staticmethod
 
+    def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
+        return self.descriptor
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
@@ -4140,6 +4152,9 @@ class ClassMethodVariable(VariableTracker):
 
     def python_type(self) -> type:
         return classmethod
+
+    def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
+        return self.descriptor
 
     def tp_descr_get_impl(
         self,
@@ -4196,6 +4211,9 @@ class MemberDescriptorVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.MemberDescriptorType
+
+    def as_python_constant(self) -> types.MemberDescriptorType:
+        return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # descr_members: __objclass__ and __name__ are PyMemberDef on all
@@ -4332,6 +4350,9 @@ class PropertyVariable(VariableTracker):
     def python_type(self) -> type:
         return property
 
+    def as_python_constant(self) -> property:
+        return self.descriptor
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
@@ -4377,6 +4398,9 @@ class TupleGetterVariable(VariableTracker):
 
     def python_type(self) -> type:
         return _collections._tuplegetter
+
+    def as_python_constant(self) -> "_collections._tuplegetter":
+        return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__doc__":
