@@ -3763,7 +3763,13 @@ class LinearCrossEntropyOptions:
                 f"acc_policy must be 'memory' or 'accurate', got {self.acc_policy!r}"
             )
         if self.chunking_method is not None:
-            if not self.chunking_method.startswith("aspect_ratio"):
+            if ":" in self.chunking_method:
+                factor = self.chunking_method.split(":", 1)[1]
+            else:
+                factor = "1"
+            if not self.chunking_method.startswith("aspect_ratio") or not (
+                factor.isdigit() and int(factor) > 0
+            ):
                 raise ValueError(
                     f"chunking_method must be 'aspect_ratio', 'aspect_ratio:N' for a positive integer N, or None, "
                     f"got {self.chunking_method!r}"
@@ -3797,7 +3803,7 @@ class LinearCrossEntropyOptions:
             batch_chunk_size = (
                 1 << (-(num_batches // (num_classes // -in_features)) - 1).bit_length()
             )
-            batch_chunk_size = max(batch_chunk_size // factor, 1)
+            batch_chunk_size = min(max(batch_chunk_size // factor, 1), num_batches)
 
             if (
                 self.batch_chunk_size is not None

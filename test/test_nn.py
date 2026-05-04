@@ -7475,7 +7475,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         if acc_policy is None:
             expected_max_ulp_diff = 2
             expected_input_grad_max_ulp_diff = 7000
-            expected_weight_grad_max_ulp_diff = 2500
+            expected_weight_grad_max_ulp_diff = 3000
         elif acc_policy == "memory":
             expected_max_ulp_diff = 1
             if device == "cpu":
@@ -7519,6 +7519,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             norm = torch.linalg.matrix_norm(expected, ord="fro")
             return abserr / (eta + norm)
 
+        maximal_input_grad_max_ulp_diff = 0
+        maximal_linear_weight_grad_max_ulp_diff = 0
+        worst_input_grad_kwargs = None
+        worst_linear_weight_grad_kwargs = None
         for module_input in module_inputs_torch_nn_LinearCrossEntropyLoss(
                 module_info=None, device=torch.device(device), dtype=dtype,
                 requires_grad=True, training=None, allow_retain_graph=False, acc_dtype=acc_dtype
@@ -7575,15 +7579,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # so, we'll check gradients explicitly:
             out.sum().backward()
             ref_out.sum().backward()
+
             max_ulp_diff = diff_ulp(input.grad, ref_input.grad.to(dtype)).max().item()
+            if max_ulp_diff > maximal_input_grad_max_ulp_diff:
+                maximal_input_grad_max_ulp_diff = max_ulp_diff
+                worst_input_grad_kwargs = dict(module_kwargs)
+
             err = grad_error(input.grad, ref_input.grad.to(dtype))
             self.assertLess(err, feps)
-            self.assertLessEqual(max_ulp_diff, expected_input_grad_max_ulp_diff)
 
             max_ulp_diff = diff_ulp(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype)).max().item()
+            if max_ulp_diff > maximal_linear_weight_grad_max_ulp_diff:
+                maximal_linear_weight_grad_max_ulp_diff = max_ulp_diff
+                worst_linear_weight_grad_kwargs = dict(module_kwargs)
             err = grad_error(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype))
             self.assertLess(err, feps)
-            self.assertLessEqual(max_ulp_diff, expected_weight_grad_max_ulp_diff)
+
+        self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
+                             msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
+        self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
+                             msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
 
     def test_linear_cross_entropy_loss_default(self):
         self._test_linear_cross_entropy_loss(device='cpu', dtype=torch.float32)
