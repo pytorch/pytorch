@@ -321,7 +321,6 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
-        use_pg_for_symm_mem_rendezvous: bool
 
     def __init__(
         self,
@@ -613,16 +612,6 @@ class ProcessGroup:
     def bound_device_id(self) -> torch.device | None: ...
     @bound_device_id.setter
     def bound_device_id(self, device: torch.device | None) -> None: ...
-    @property
-    def use_pg_for_symm_mem_rendezvous(self) -> bool:
-        """When True, symmetric memory rendezvous exchanges metadata via this
-        PG's NCCL allgather instead of TCPStore, which gets overloaded at large
-        rank counts. This will lazily create the NCCL communicator if it doesn't
-        already exist. If this PG is only used for symmetric memory (no regular
-        collectives), consider calling ``abort()`` after rendezvous to release
-        the communicator."""
-    @use_pg_for_symm_mem_rendezvous.setter
-    def use_pg_for_symm_mem_rendezvous(self, value: bool) -> None: ...
     @property
     def group_name(self) -> GroupName: ...
     @property
