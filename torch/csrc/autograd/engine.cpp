@@ -286,7 +286,6 @@ void Engine::stop() {
     return;
   }
   stopped_ = true;
-  device_threads_started_.store(false, std::memory_order_release);
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str =
@@ -324,7 +323,6 @@ void Engine::stop() {
 
 void Engine::release_workers() {
   std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-  device_threads_started_.store(false, std::memory_order_release);
   non_reentrant_device_thread_count_.store(0);
   non_reentrant_device_thread_condvar_.notify_one();
 }
@@ -1493,24 +1491,6 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::execute_node_with_graph_task(std::shared_ptr<Node> graph_root) {
-  initialize_device_threads_pool();
-  init_local_ready_queue();
-
-  c10::SmallVector<Node*, 4> graph_roots{graph_root.get()};
-  auto graph_task = std::make_shared<GraphTask>(
-      /* keep_graph */ false,
-      /* grad_mode */ false,
-      /* reentrant_depth */ worker_device == NO_DEVICE ? 0 : total_depth + 1,
-      /* cpu_ready_queue */ local_ready_queue,
-      /* graph_roots */ std::move(graph_roots));
-
-  auto future = execute_with_graph_task(
-      graph_task, std::move(graph_root), InputBuffer(0));
-  future->waitAndThrow();
-  graph_task->warning_handler_.replay_warnings();
-}
-
 // note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
@@ -1547,10 +1527,6 @@ void Engine::queue_callback(std::function<void()> callback) {
 
   std::lock_guard<std::mutex> lock(current_graph_task->final_callbacks_lock_);
   current_graph_task->final_callbacks_.emplace_back(std::move(callback));
-}
-
-bool Engine::device_threads_started() const {
-  return device_threads_started_.load(std::memory_order_acquire);
 }
 
 bool Engine::is_checkpoint_valid() {
@@ -1652,7 +1628,6 @@ auto Engine::start_device_threads() -> void {
       non_reentrant_device_thread_condvar_.wait(lk);
     }
   }
-  device_threads_started_.store(true, std::memory_order_release);
 }
 
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
