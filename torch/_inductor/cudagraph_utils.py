@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, TYPE_CHECKING, TypeVar
@@ -288,10 +289,28 @@ def check_multiple_devices_or_any_cpu_nodes(
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
+def check_caching_allocator_for_cudagraphs() -> str | None:
+    """Skip cudagraphs when the CUDA/HIP caching allocator has been forced off
+    via PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING. Cudagraph capture pools allocations
+    through the caching allocator; with it bypassed, capture appears to succeed
+    but pool tracking diverges (see check_memory_pool in cudagraph_trees.py),
+    surfacing as 'storage data ptrs not allocated in pool ...' at replay time.
+    Truthy match follows c10::utils::check_env: only the literal "1" counts."""
+    if (
+        os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING") == "1"
+        or os.environ.get("PYTORCH_NO_HIP_MEMORY_CACHING") == "1"
+    ):
+        return format_default_skip_message(
+            "PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING is set; "
+            "cudagraph capture requires the caching allocator"
+        )
+    return None
+
+
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    return check_caching_allocator_for_cudagraphs() or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:

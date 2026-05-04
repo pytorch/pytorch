@@ -2216,6 +2216,15 @@ class CudaReproTests(TestCase):
     @skipIfXpu(msg="cudagraph is not supported on xpu")
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
+        # Asserts cudagraphs are NOT skipped; cudagraph capture is unconditionally
+        # disabled when the caching allocator is bypassed
+        # (cudagraph_utils.check_caching_allocator_for_cudagraphs).
+        if (
+            os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING") == "1"
+            or os.environ.get("PYTORCH_NO_HIP_MEMORY_CACHING") == "1"
+        ):
+            self.skipTest("cudagraphs disabled when caching allocator is bypassed")
+
         def fn(x, y):
             return x.sin().sin().sin().sin().cos() + 1
 
@@ -2254,6 +2263,16 @@ class CudaReproTests(TestCase):
     @skipIfXpu(msg="cudagraph is not supported on xpu")
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
+        # Test asserts cudagraphs are NOT skipped (disable_cudagraphs_reason is None).
+        # Inductor unconditionally skips cudagraph capture when the caching allocator
+        # is bypassed (cudagraph_utils.check_caching_allocator_for_cudagraphs), so this
+        # test cannot pass under PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING.
+        if (
+            os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING") == "1"
+            or os.environ.get("PYTORCH_NO_HIP_MEMORY_CACHING") == "1"
+        ):
+            self.skipTest("cudagraphs disabled when caching allocator is bypassed")
+
         @torch.compile(fullgraph=True)
         def fn(x):
             return x[torch.arange(32)]
