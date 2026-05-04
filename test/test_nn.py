@@ -7784,9 +7784,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             weights_channels_last,
             msg="Conv3d initialization is inconsistent between memory formats"
         )
-        # 4. Verify both initializations are identical
-        self.assertEqual(weights_default, weights_channels_last, 
-                         msg="Conv3d initialization is inconsistent between memory formats")
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
