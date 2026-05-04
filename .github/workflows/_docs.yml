@@ -100,7 +100,7 @@ jobs:
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -110,7 +110,7 @@ jobs:
               cd docs && make html && make coverage
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -119,12 +119,12 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -264,7 +264,7 @@ jobs:
           echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
         if: always()
 
   build-docs-osdc:
@@ -290,7 +290,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -309,7 +309,7 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@release/2.12
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}

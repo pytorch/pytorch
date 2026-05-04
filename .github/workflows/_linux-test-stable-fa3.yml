@@ -60,7 +60,7 @@ jobs:
       contents: read
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
 
       - name: Checkout flash-attention as a secondary repository
         uses: actions/checkout@v4
@@ -73,7 +73,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
@@ -87,7 +87,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -249,5 +249,5 @@ jobs:
           workflow_attempt: ${{github.run_attempt}}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
         if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
