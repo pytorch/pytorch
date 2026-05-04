@@ -100,7 +100,6 @@ class TestGuards(TestCase):
 
 class TestExecution(TestCase):
     def test_autograd(self):
-
         @torch.compile(backend="openreg")
         def fn(x):
             return (x * 2).sum()
@@ -113,7 +112,6 @@ class TestExecution(TestCase):
         self.assertEqual(x.grad, torch.full_like(x, 2.0))
 
     def test_nn_module(self):
-
         class SimpleModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -136,7 +134,6 @@ class TestExecution(TestCase):
 
 class TestDynamicShapes(TestCase):
     def test_dynamic_shapes(self):
-
         @torch.compile(backend="openreg", dynamic=True)
         def fn(x):
             return x + 1
@@ -155,6 +152,7 @@ class TestGraphBreaks(TestCase):
             y = x + 1
             z = y.cpu()
             return z * 2
+
         x = torch.randn(4, device="openreg")
         result = fn(x)
         expected = (x + 1).cpu() * 2
@@ -163,11 +161,13 @@ class TestGraphBreaks(TestCase):
 
     def test_graph_break_resilience(self):
         counter = CompileCounterWithBackend("openreg")
+
         @torch.compile(backend=counter)
         def fn(x):
             y = x + 1
             torch._dynamo.graph_break()
             return y * 2
+
         x = torch.randn(4, device="openreg")
         result = fn(x)
         self.assertEqual(result, (x + 1) * 2)
@@ -176,7 +176,6 @@ class TestGraphBreaks(TestCase):
 
 class TestAutocast(TestCase):
     def test_compile_with_autocast(self):
-
         @torch.compile(backend="openreg")
         def fn(x, y):
             with torch.autocast(device_type="openreg", dtype=torch.float16):
@@ -201,6 +200,27 @@ class TestDefaultDevice(TestCase):
         x = torch.randn(4, device="openreg")
         result = fn(x)
         self.assertEqual(result.device.type, "openreg")
+
+
+class TestDeviceInterface(TestCase):
+    def test_interface_registered(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        iface = get_interface_for_device("openreg")
+        self.assertIsNotNone(iface)
+
+    def test_current_device(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        iface = get_interface_for_device("openreg")
+        device_idx = iface.current_device()
+        self.assertIsInstance(device_idx, int)
+
+    def test_device_count(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        iface = get_interface_for_device("openreg")
+        self.assertGreater(iface.device_count(), 0)
 
 
 if __name__ == "__main__":
