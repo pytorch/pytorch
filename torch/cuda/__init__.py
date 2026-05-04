@@ -1302,6 +1302,52 @@ def current_solver_handle():
     return torch._C._cuda_getCurrentSolverHandle()
 
 
+_ClearCublasWorkspaces = None
+
+
+def _clear_cublas_workspaces(device: Device = None) -> None:
+    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads."""
+    if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
+        return
+
+    torch._C._cuda_clearCublasWorkspaces()
+    if not is_initialized():
+        return
+
+    if device is None:
+        device_indices = range(device_count())
+    else:
+        device_index = _get_device_index(device)
+        if device_index < 0:
+            return
+        device_indices = (device_index,)
+
+    global _ClearCublasWorkspaces
+    if _ClearCublasWorkspaces is None:
+        from torch.autograd import Function
+
+        class ClearCublasWorkspaces(Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                return dummy
+
+            @staticmethod
+            def backward(ctx, grad):
+                torch._C._cuda_clearCublasWorkspaces()
+                return None
+
+        _ClearCublasWorkspaces = ClearCublasWorkspaces
+
+    for device_index in device_indices:
+        with (
+            torch.cuda.device(device_index),
+            torch.inference_mode(False),
+            torch.enable_grad(),
+        ):
+            dummy = torch.empty((), device=f"cuda:{device_index}", requires_grad=True)
+            _ClearCublasWorkspaces.apply(dummy).backward()
+
+
 def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
