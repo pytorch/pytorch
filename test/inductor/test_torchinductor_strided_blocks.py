@@ -20,6 +20,7 @@ from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -51,6 +52,15 @@ importlib.import_module("filelock")
 
 max_block: int = TRITON_MAX_BLOCK["X"]
 
+
+def _get_no_split_threshold() -> int:
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        if props.major is not None and props.major >= 10:
+            return 524288
+    return 8192
+
+
 # Config shortcuts
 tiled_reduction_config = {
     "triton.prefer_nd_tiling": True,
@@ -67,26 +77,31 @@ def xfail_if_use_tensor_descriptor(fn):
 
 
 TMA_XFAIL = test_torchinductor.TestFailure(GPU_TYPE, is_skip=False)
-TMA_TEST_XFAIL = dict.fromkeys(
-    (
-        "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
-        "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
-        "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-    ),
-    TMA_XFAIL,
-)
+_TMA_XFAIL_TESTS = [
+    "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+    "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
+    "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
+    "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
+    "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
+    "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
+    "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
+]
+# On SM100+, reduction tests use single persistent kernels, so some TMA xfails no longer apply.
+if SM100OrLater:
+    _TMA_XFAIL_TESTS = [
+        t
+        for t in _TMA_XFAIL_TESTS
+        if "num_triton_kernels_2" not in t or "view_size4" in t
+    ]
+TMA_TEST_XFAIL = dict.fromkeys(_TMA_XFAIL_TESTS, TMA_XFAIL)
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -536,6 +551,14 @@ class CommonTemplate:
         if view_size == (128, 128) and torch.version.hip is not None:
             view_size = (256, 256)
 
+        # On SM100+, larger max_block means reductions that previously needed 2
+        # kernels now fit in a single persistent kernel with fewer block pointers.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            if num_block_pointers is not None:
+                num_block_pointers = max(num_block_pointers - 2, 0)
+
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
@@ -812,6 +835,12 @@ class CommonTemplate:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            num_block_pointers = 1
+
         # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
         # may result in off-by-one differences in the number of block pointers.
         # Allow a small tolerance here to avoid backend-specific flakiness.
@@ -858,7 +887,8 @@ class CommonTemplate:
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
-                ((128, 128), 7, 2, False), decorators=[xfail_if_use_tensor_descriptor]
+                ((128, 128), 7, 2, False),
+                decorators=[] if SM100OrLater else [xfail_if_use_tensor_descriptor],
             ),  # Looped Welford reduction
         ],
     )
@@ -879,6 +909,16 @@ class CommonTemplate:
         """
         if torch.version.hip is not None and expected_num_triton_kernels == 2:
             size = (256, 256)
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(size)
+        if (
+            expected_num_triton_kernels == 2
+            and reduction_numel <= _get_no_split_threshold()
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 1
+
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
@@ -913,11 +953,22 @@ class CommonTemplate:
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         )
+        expected_num_block_pointers = 0 if cooperative_reductions else 6
+        expected_num_triton_kernels = 1 if cooperative_reductions else 2
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        if (
+            expected_num_triton_kernels == 2
+            and view.numel() <= _get_no_split_threshold()
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 0
+
         result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
-            expected_num_block_pointers=0 if cooperative_reductions else 6,
-            expected_num_triton_kernels=1 if cooperative_reductions else 2,
+            expected_num_block_pointers=expected_num_block_pointers,
+            expected_num_triton_kernels=expected_num_triton_kernels,
             config_patches={"triton.prefer_nd_tiling": True},
         )
 
