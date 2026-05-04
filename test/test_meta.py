@@ -2198,6 +2198,23 @@ class TestMetaKernelRegistrations(TestCase):
         with self.assertRaises(RuntimeError):
             torch.ops.aten._weight_int8pack_mm(A_meta, B_meta, scales_meta)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_miopen_batch_norm_save_dtype(self):
+        # miopen_batch_norm is ROCm-only with no CPU implementation.
+        # Test that meta kernel outputs use weight's dtype (matching C++ behavior).
+        input_t = torch.randn(2, 3, 4, 4, device="meta", dtype=torch.float16)
+        weight = torch.randn(3, device="meta", dtype=torch.float32)
+        bias = torch.randn(3, device="meta", dtype=torch.float32)
+        running_mean = torch.randn(3, device="meta", dtype=torch.float32)
+        running_var = torch.randn(3, device="meta", dtype=torch.float32)
+        result = torch.ops.aten.miopen_batch_norm(
+            input_t, weight, bias, running_mean, running_var, True, 0.1, 1e-5
+        )
+        output, save_mean, save_var = result
+        self.assertEqual(save_mean.dtype, weight.dtype)
+        self.assertEqual(save_var.dtype, weight.dtype)
+
+
 instantiate_device_type_tests(TestMeta, globals())
 
 
