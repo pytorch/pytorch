@@ -673,6 +673,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__dict__":
             return super().var_getattr(tx, name)
+        elif name == "__get__":
+            source = self.get_source()
+            source = source and AttrSource(source, "__get__")
+            return VariableTracker.build(tx, self.fn.__get__, source)
         elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(self.fn, name))
@@ -685,6 +689,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     ) -> ConstantVariable:
         result = hasattr(self.fn, name)
         return VariableTracker.build(tx, result)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors func_descr_get which calls PyMethod_New to bind
+        # the function to an instance.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
+        source = obj.source and AttrSource(obj.source, self.fn.__name__)
+        return UserMethodVariable(
+            self.fn, obj, source_fn=self.source, source=source
+        )
 
     def call_function(
         self,
@@ -3812,7 +3830,8 @@ class MethodWrapperVariable(VariableTracker):
         self.obj = obj
 
     def __repr__(self) -> str:
-        return f"MethodWrapperVariable({self.descriptor}, {self.obj})"
+        cls_name = self.descriptor.__objclass__.__name__
+        return f"MethodWrapperVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
 
     def python_type(self) -> type:
         return types.MethodWrapperType
@@ -3927,11 +3946,13 @@ class MethodDescriptorVariable(VariableTracker):
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
-    """Bound builtin method (method_descriptor bound to an instance).
+    """Bound builtin_function_or_method (PyCFunction_Type).
 
-    Produced by MethodDescriptorVariable.tp_descr_get_impl, mirroring
-    PyCFunction_NewEx which creates a PyCFunctionObject storing the
-    PyMethodDef and the bound instance.
+    Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
+    method_descriptor to an instance, e.g. [].append) or created by the
+    builder for bound C methods (e.g. frozenset().__contains__,
+    tuple.__new__).  The backing descriptor can be a MethodDescriptorType
+    or a BuiltinFunctionType (for methods stored directly in type dicts).
     https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L331
     """
 
@@ -3942,18 +3963,29 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def __init__(
         self,
-        descriptor: types.MethodDescriptorType,
+        descriptor: types.MethodDescriptorType
+        | types.BuiltinFunctionType
+        | types.ClassMethodDescriptorType,
         obj: VariableTracker,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.MethodDescriptorType)
+        assert isinstance(
+            descriptor,
+            (
+                types.MethodDescriptorType,
+                types.BuiltinFunctionType,
+                types.ClassMethodDescriptorType,
+            ),
+        )
         assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
 
     def __repr__(self) -> str:
-        cls_name = self.descriptor.__objclass__.__name__
+        cls_name = getattr(
+            getattr(self.descriptor, "__objclass__", None), "__name__", "?"
+        )
         return f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
 
     def python_type(self) -> type:
@@ -4027,16 +4059,13 @@ class ClassMethodDescriptorVariable(VariableTracker):
         tx: "InstructionTranslator",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> VariableTracker:
-        # classmethod_get binds to the class, producing a
-        # builtin_function_or_method.  It ignores obj and uses type.
+    ) -> BoundBuiltinMethodVariable:
+        # classmethod_get binds the C method to the class (ignoring obj),
+        # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        try:
-            obj_value = obj.as_python_constant()
-        except NotImplementedError:
-            obj_value = obj.value  # type: ignore[attr-defined]
-        func = self.descriptor.__get__(obj_value, None)
-        return VariableTracker.build(tx, func, self.source)
+        return BoundBuiltinMethodVariable(
+            self.descriptor, owner, source=self.source
+        )
 
 
 class StaticMethodVariable(VariableTracker):
@@ -4209,6 +4238,10 @@ class GetSetDescriptorVariable(VariableTracker):
     def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.desc = desc
+
+    def __repr__(self) -> str:
+        cls_name = self.desc.__objclass__.__name__
+        return f"GetSetDescriptorVariable({cls_name}.{self.desc.__name__})"
 
     def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
         return self.desc
