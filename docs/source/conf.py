@@ -1504,6 +1504,7 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.api
     "CheckpointException",
     # torch.distributed.checkpoint.default_planner
+    "DefaultLoadPlanner",
     "DefaultSavePlanner",
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
