@@ -3981,6 +3981,18 @@ def tensor_constructor(fill_value):
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
+        # When this lowering is reached from a backward graph that consumes a
+        # SymInt produced by an ``invoke_subgraph`` HOP (e.g. an outer
+        # ``torch.compile`` whose body contains a ``nested_compile_region``
+        # that returns a SymInt, or whose AOT-partitioned forward saves a
+        # SymInt for backward), Inductor wraps that SymInt as a
+        # ``ShapeAsConstantBuffer`` IR node at the HOP boundary (see
+        # ``ExternKernel.realize_input`` and ``InvokeSubgraph.create``).
+        # Unwrap it back to the underlying sympy expression here so
+        # ``sympy.expand`` below works -- without this, ``sympy.expand``
+        # raises ``SympifyError: cannot sympify object of type
+        # <class 'torch._inductor.ir.ShapeAsConstantBuffer'>``.
+        size = [s.expr if isinstance(s, ir.ShapeAsConstantBuffer) else s for s in size]
         # See https://github.com/pytorch/pytorch/issues/118102
         # All sizes at lowering time should be sympy.Symbol, not SymInt!
         for s in size:

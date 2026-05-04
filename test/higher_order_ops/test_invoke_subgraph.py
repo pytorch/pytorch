@@ -3223,6 +3223,42 @@ class <lambda>(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_full_size_symint_returned_from_nested_region(self):
+        """Regression test: ``torch.full`` (and other ``tensor_constructor``-
+        backed ops) lowered with a size element that is a SymInt produced by
+        an ``invoke_subgraph`` HOP.
+
+        Inductor wraps such SymInts as ``ShapeAsConstantBuffer`` at the HOP
+        boundary (see ``ExternKernel.realize_input`` constructing
+        ``ShapeAsConstantBuffer(expr=x)`` for ``sympy.Expr`` inputs, and
+        ``InvokeSubgraph.create`` passing through the same node type for
+        SymInt outputs). Before the fix in ``tensor_constructor.inner``,
+        the consumer ``aten.full`` lowering called ``sympy.expand`` on the
+        ``ShapeAsConstantBuffer`` IR node and raised
+        ``SympifyError: cannot sympify object of type ShapeAsConstantBuffer``.
+        """
+
+        @nested_compile_region
+        def gn(x):
+            # Return both a tensor and a SymInt -- the SymInt is the trigger.
+            return x.sin(), x.shape[0] * 2
+
+        def fn(x):
+            h, s2 = gn(x)
+            # ``torch.full`` is the original failing op (see PR description
+            # of #<filed>); other ``tensor_constructor``-backed ops such as
+            # ``torch.zeros``/``torch.ones`` exercise the same lowering path.
+            scratch = torch.full(
+                (s2, 8, 4), 0.0, dtype=h.dtype, device=h.device
+            )
+            return h.sum() + scratch.sum() * 0.0
+
+        x = torch.randn(16, 4, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
