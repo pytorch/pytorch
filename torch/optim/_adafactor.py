@@ -15,11 +15,11 @@ from .optimizer import (
     ParamsT,
     TensorListList,
 )
-
+from torch.utils._exposed_in import exposed_in
 
 __all__ = ["Adafactor", "adafactor"]
 
-
+@exposed_in("torch.optim")
 class Adafactor(Optimizer):
     def __init__(
         self,

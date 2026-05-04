@@ -25,8 +25,6 @@ from torch.optim.sgd import SGD as SGD
 from torch.optim.sparse_adam import SparseAdam as SparseAdam
 
 
-Adafactor.__module__ = "torch.optim"
-Muon.__module__ = "torch.optim"
 
 
 del adadelta  # type: ignore[name-defined] # noqa: F821
