@@ -74,6 +74,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+# Bound Inductor compile-worker futures on ROCm so a stuck Triton compile
+# fails fast with a clear RuntimeError naming the kernel, instead of blocking
+# until the outer test timeout kills the shard and loses all context. Scoped
+# to ROCm because the known-bad cases (sort-with-index on gfx90a/gfx942) have
+# only been observed there; leaving CPU/CUDA jobs unbounded avoids regressing
+# any legitimately long compile on those backends.
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+fi
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -2066,6 +2076,12 @@ test_operator_benchmark() {
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install . -v --no-build-isolation
 
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
+
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
@@ -2088,6 +2104,12 @@ test_operator_microbenchmark() {
   python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
+
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
   for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm; do
@@ -2166,6 +2188,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_torchcomms
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2189,6 +2212,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2323,6 +2347,7 @@ elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  install_torchcomms
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem

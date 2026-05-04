@@ -29,7 +29,6 @@
 #include <type_traits>
 
 
-#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/ThrustAllocator.h>
@@ -267,8 +266,9 @@ Tensor& add_out_dense_sparse_compressed_cuda(
               // dimension.
               thrust::for_each(
                   policy,
-                  cccl_counting_iterator<int64_t>{0ll},
-                  cccl_counting_iterator<int64_t>{src_compressed_indices.size(-1) - 1},
+                  thrust::make_counting_iterator(int64_t(0)),
+                  thrust::make_counting_iterator(
+                      int64_t(src_compressed_indices.size(-1) - 1)),
                   [values_accessor,
                    compressed_indices_accessor,
                    plain_indices_accessor,
