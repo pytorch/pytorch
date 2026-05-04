@@ -1354,8 +1354,9 @@ class GetAttrVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         if self.name == "__dict__":
-            dunder = DunderDictVariable.create(tx, self.obj)
-            return dunder.mp_subscript_impl(tx, key)
+            if hasattr(self.obj, "get_dict_vt"):
+                return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
+            return DunderDictVariable.create(tx, self.obj).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
 
 
