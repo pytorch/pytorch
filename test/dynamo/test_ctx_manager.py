@@ -576,7 +576,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
+        self.assertExpectedInline(str(cnts.op_count), """17""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -1631,9 +1631,13 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
     def test_graph_break_inlining_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in ["cuda", "cpu", "xpu"]:
             if device == "cuda" and not (
                 torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            ):
+                continue
+            if device == "xpu" and not (
+                torch.xpu.is_available() and torch.xpu.is_bf16_supported()
             ):
                 continue
             self._graph_break_inlining_autocast_test_helper(device)
@@ -1788,7 +1792,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):  # noqa: F841
+        def check_graph(actual, expected):
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]
@@ -2338,11 +2342,11 @@ class GraphModule(torch.nn.Module):
     @parametrize("gb", (True, False))
     def test_functorch_low_level_jvp(self, gb):
         def f(x, gb):
-            level = torch._C._functorch._jvp_increment_nesting()
+            level = torch._functorch.predispatch._jvp_increment_nesting()
             if gb:
                 torch._dynamo.graph_break()
             depth = torch._C._functorch.get_dynamic_layer_stack_depth()
-            torch._C._functorch._jvp_decrement_nesting()
+            torch._functorch.predispatch._jvp_decrement_nesting()
             return x + level + depth
 
         prev_level = torch._C._functorch.maybe_current_level()

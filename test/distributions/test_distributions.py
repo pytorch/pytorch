@@ -4809,7 +4809,7 @@ class TestRsample(DistributionsTestCase):
                         "expected_grad: %.5g" % expected_grad,  # noqa: UP031
                         "actual_grad: %.5g" % actual_grad,  # noqa: UP031
                         "error = %.2g"  # noqa: UP031
-                        % torch.abs(expected_grad - actual_grad).max(),  # noqa: UP031
+                        % torch.abs(expected_grad - actual_grad).max(),
                     ]
                 ),
             )
@@ -4893,7 +4893,7 @@ class TestDistributionShapes(DistributionsTestCase):
                     expected_shape = (
                         dist.batch_shape if dist.batch_shape else torch.Size()
                     )
-                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"  # noqa: B950
+                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"
                     self.assertEqual(actual_shape, expected_shape, msg=message)
                 except NotImplementedError:
                     continue

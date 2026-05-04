@@ -91,7 +91,7 @@ void PythonEngine::thread_init(
 
 void PythonEngine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const std::shared_ptr<Node>& fn,
+    const c10::intrusive_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
   auto python_err = dynamic_cast<python_error*>(&e);
@@ -134,7 +134,7 @@ variable_list PythonEngine::execute(
 
 c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
+    c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   try {
     return Engine::execute_with_graph_task(
@@ -153,7 +153,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
-  std::shared_ptr<torch::autograd::Node> grad_fn_sp;
+  c10::intrusive_ptr<torch::autograd::Node> grad_fn_sp;
   if (THPFunction_Check(grad_fn)) {
     grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
   } else if (THPCppFunction_Check(grad_fn)) {
@@ -285,7 +285,7 @@ static PyObject* THPEngine_run_backward(
       grads.push_back(grad_var);
     } else {
       TORCH_CHECK(
-          grad == Py_None,
+          Py_IsNone(grad),
           "element ",
           i,
           " of gradients tuple is not a Tensor or None");
@@ -340,7 +340,7 @@ static PyObject* THPEngine_run_backward(
           // so nodes in the graph (e.g., mul when an operand is scalar) that
           // have edges pointing to nullptr don't get erroneously assigned
           // `needed = True` in exec_info.
-          output_edges.emplace_back(std::make_shared<Identity>(), 0);
+          output_edges.emplace_back(c10::make_intrusive<Identity>(), 0);
         } else {
           output_edges.emplace_back(grad_fn, output_nr);
         }

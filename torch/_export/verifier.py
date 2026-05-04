@@ -246,6 +246,13 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._functorch.predispatch._vmap_increment_nesting,
                 torch._functorch.predispatch._vmap_decrement_nesting,
                 torch._functorch.predispatch.lazy_load_decompositions,
+                torch._functorch.predispatch._make_dual,
+                torch._functorch.predispatch._unpack_dual,
+                torch._functorch.predispatch._jvp_increment_nesting,
+                torch._functorch.predispatch._jvp_decrement_nesting,
+                torch._functorch.predispatch._unwrap_for_grad,
+                torch._functorch.predispatch._enter_dual_level,
+                torch._functorch.predispatch._exit_dual_level,
             )
 
             if not isinstance(op, _allowed_op_types()):

@@ -426,9 +426,9 @@ def _unique(
 
         if dim is None:
             if unique_consecutive:
-                arg.unique_consecutive_memo = nnz
+                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
             else:
-                arg.unique_memo = nnz
+                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -909,7 +909,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz
+        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
@@ -927,7 +927,7 @@ def _padded_dense_to_jagged_forward(
             f"Only one jagged dim is supported, got {len(offsets)} offsets"
         )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1257,7 +1257,7 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
-# takes in multiple-devices, dont default to default device handling
+# takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)

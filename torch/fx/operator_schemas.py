@@ -10,6 +10,7 @@ from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 import torch
 from torch._jit_internal import boolean_dispatched
 from torch._ops import OpOverload, OpOverloadPacket
+from torch.utils._inspect import _fast_bind
 
 from ._compatibility import compatibility
 
@@ -184,7 +185,7 @@ def check_for_mutable_operation(
         # values. If none matches, `new_args_and_kwargs` will be None
         for candidate_signature, schema in zip(signatures, schemas):
             try:
-                candidate_signature.bind(*args, **kwargs)
+                _fast_bind(candidate_signature, *args, **kwargs)
                 matched_schemas.append((candidate_signature, schema))
             except TypeError:
                 continue
@@ -398,7 +399,7 @@ def normalize_function(
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs). Does not support modules.
+    parameters or varargs parameters (``*args``, ``**kwargs``). Does not support modules.
 
     May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
 
@@ -468,7 +469,7 @@ def normalize_function(
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    candidate_signature.bind(*args, **kwargs)
+                    _fast_bind(candidate_signature, *args, **kwargs)
                     matched_schemas.append(candidate_signature)
                 except TypeError:
                     continue
@@ -488,8 +489,8 @@ def normalize_function(
                     for candidate_signature in torch_op_schemas:
                         sig_matches = True
                         try:
-                            bound_types = candidate_signature.bind(
-                                *arg_types, **kwarg_types
+                            bound_types = _fast_bind(
+                                candidate_signature, *arg_types, **kwarg_types
                             )
                             for arg_name, arg_type in bound_types.arguments.items():
                                 param = candidate_signature.parameters[arg_name]
@@ -537,7 +538,7 @@ def normalize_module(
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs).
+    parameters or varargs parameters (``*args``, ``**kwargs``).
 
     Args:
         root (nn.Module): root module upon which we query modules
@@ -608,7 +609,7 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = sig.bind(*args, **kwargs)
+    bound_args = _fast_bind(sig, *args, **kwargs)
     bound_args.apply_defaults()
 
     new_kwargs: dict[str, Any] = {}

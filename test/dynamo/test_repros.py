@@ -1493,8 +1493,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
-        # noqa: F841
-
         class TestModel(nn.Module):
             def __init__(
                 self,
@@ -2170,7 +2168,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(b(y), y.sin().cos()))
 
     @skipIfWindows(
-        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"  # noqa: B950
+        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"
     )
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
@@ -4892,7 +4890,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
-            (a, b) = arg  # noqa: F841
+            (a, b) = arg
 
         def fn():
             return myfn((1, 2, 3))
@@ -7272,6 +7270,40 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = f()
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch("use_recursive_dict_tags_for_guards", True)
+    def test_guard_tag_safe_tensor_metadata_segfault(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180741
+        # When a submodule becomes a tag-safe root, the recording pass stashes
+        # tensor pointers found during traversal.  PythonLambdaGuardAccessor
+        # (from ___from_numpy on the np.float64 attribute) creates a temporary
+        # tensor with refcount 1, which is freed after Py_DECREF.  The stashed
+        # raw pointer then dangles and check_tensor_metadata_fast segfaults.
+        import numpy as np
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.scale = np.float64(8.0)
+
+            def forward(self, x):
+                return self.linear(x) / self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer()])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        model = Model()
+        compiled = torch.compile(model, backend="eager")
+        out = compiled(torch.randn(2, 10))
+        self.assertEqual(out.shape, torch.Size([2, 10]))
 
     def test_deleted_compile_wrapper_segfault(self):
         def fn(x):

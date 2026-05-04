@@ -305,6 +305,94 @@ class TestMarkKernels(TestCase):
         # Re-enable for other tests
         enable_annotations()
 
+    def test_enable_annotations_kwarg(self):
+        """enable_annotations on torch.cuda.graph auto-resolves annotations."""
+        from torch.cuda._graph_annotations import disable_annotations
+
+        # Start with annotations disabled to verify the kwarg enables them.
+        disable_annotations()
+        clear_kernel_annotations()
+
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("auto"):
+                _ = x + 1
+
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for anns in annotations.values():
+            for ann in anns:
+                self.assertEqual(ann, {"str": "auto"})
+
+    def test_enable_annotations_does_not_clear(self):
+        """Annotations from a previous graph survive a second capture."""
+        from torch.cuda._graph_annotations import disable_annotations
+
+        disable_annotations()
+        clear_kernel_annotations()
+
+        graph1 = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph1, enable_annotations=True):
+            with mark_kernels("first"):
+                _ = x + 1
+
+        first_count = len(get_kernel_annotations())
+        self.assertGreater(first_count, 0)
+
+        graph2 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph2, enable_annotations=True):
+            with mark_kernels("second"):
+                _ = x * 2
+
+        # Both graphs' annotations should be present.
+        self.assertGreater(len(get_kernel_annotations()), first_count)
+
+    def test_enable_annotations_remaps_to_exec_graph(self):
+        """enable_annotations=True must remap toolsIds to the exec graph ID."""
+        from cuda.bindings import runtime as cuda_runtime
+
+        clear_kernel_annotations()
+
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("remap_test"):
+                _ = x + 1
+
+        exec_handle = cuda_runtime.cudaGraphExec_t(
+            init_value=graph.raw_cuda_graph_exec()
+        )
+        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(exec_handle)
+
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for tools_id in annotations:
+            graph_id = tools_id >> 32
+            self.assertEqual(
+                graph_id,
+                exec_graph_id,
+                f"toolsId 0x{tools_id:016x} has graph_id {graph_id}, "
+                f"expected exec_graph_id {exec_graph_id}",
+            )
+
+    def test_enable_annotations_false_does_not_auto_resolve(self):
+        """Without enable_annotations, pending scopes are not resolved."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        # enable_annotations=False (default): no auto-resolve.
+        with torch.cuda.graph(graph):
+            with mark_kernels("unresolved"):
+                _ = x + 1
+
+        # Annotations should be empty because resolve was never called.
+        self.assertEqual(len(get_kernel_annotations()), 0)
+
 
 if __name__ == "__main__":
     run_tests()

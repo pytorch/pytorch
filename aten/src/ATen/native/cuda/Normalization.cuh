@@ -54,7 +54,7 @@ __device__ __forceinline__ int getMSB(int val) {
 template <typename scalar_t, typename accscalar_t>
 struct Float2 {
   accscalar_t v1, v2;
-  __device__ Float2() {}
+  __device__ Float2() = default;
   __device__ Float2(scalar_t v1, scalar_t v2) : v1(static_cast<accscalar_t>(v1)), v2(static_cast<accscalar_t>(v2)) {}
   __device__ Float2(int v) : v1(static_cast<accscalar_t>(v)), v2(static_cast<accscalar_t>(v)) {}
   __device__ Float2& operator+=(const Float2& a) {

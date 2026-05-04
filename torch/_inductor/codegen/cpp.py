@@ -1521,6 +1521,12 @@ class CppVecOverrides(CppOverrides):
         assert a.dtype == b.dtype, (
             "remainder vec implementation expect the same inputs' dtype."
         )
+        if is_integer_dtype(a.dtype):
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -2187,14 +2193,24 @@ class CppKernel(Kernel):
             csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
         else:
-            # indexing in loads
-            prior_compute = V.kernel.compute
-            try:
-                V.kernel.compute = self.loads
+            # Prefer to put the assert in loads so it runs before the actual
+            # memory access.  However, if the index expression may have already
+            # been CSE'd into compute by a prior ops.index_expr call, placing a
+            # reference to it in loads would be a forward reference (loads are
+            # emitted before compute in the kernel body).  In that case fall
+            # back to compute.
+            idx_str = cexpr(self.rename_indexing(expr))
+            if self.cse.try_get(idx_str) is not None:
                 csevar = ops.index_expr(expr, torch.int64).value
-            finally:
-                V.kernel.compute = prior_compute
-            buffer = self.loads
+                buffer = V.kernel.compute
+            else:
+                prior_compute = V.kernel.compute
+                try:
+                    V.kernel.compute = self.loads
+                    csevar = ops.index_expr(expr, torch.int64).value
+                finally:
+                    V.kernel.compute = prior_compute
+                buffer = self.loads
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
@@ -3066,6 +3082,9 @@ class CppVecKernel(CppKernel):
         else:
             raise NotImplementedError(f"store mode={mode}")
 
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return index
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         """
         Perform vectorized reduction operation.
@@ -3525,7 +3544,7 @@ class CppVecKernel(CppKernel):
             if index is not None:
                 assert horizontal_reduction is not None
                 t_extra = f", {str(horizontal_reduction).lower()}"
-                arg_extra = f", {index}"
+                arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
@@ -3676,6 +3695,10 @@ class CppTile2DKernel(CppVecKernel):
     def need_vec_transpose(self, index):
         outer_var = self.itervars[self.outer_idx]
         inner_var = self.itervars[self.tiling_idx]
+        # Indirect indexing (SymT.TMP) variables are declared inside the inner
+        # loop, but transpose_mxn is emitted into preloads (before the loop).
+        if free_symbol_is_type(index, SymT.TMP):
+            return False
         outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
         inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
@@ -3834,6 +3857,9 @@ class CppTile2DKernel(CppVecKernel):
             itervar_idx=self.outer_idx,
             offset=self.inner_itervar(),
         )
+
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return self.transform_indexing(index)
 
 
 def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
@@ -4800,6 +4826,77 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
+    def _get_indexing_ranges_exprs(self, node):
+        if isinstance(node, FusedSchedulerNode):
+            assert len(node.snodes) > 0, node.snodes
+            var_ranges = None
+            indexing_exprs = OrderedSet[Any]()
+            for snode in node.snodes:
+                v, exprs = self._get_indexing_ranges_exprs(snode)
+                if var_ranges is None:
+                    var_ranges = v
+                assert var_ranges == v, (var_ranges, v, node.snodes)
+                indexing_exprs.update(exprs)
+            return var_ranges, list(indexing_exprs)
+
+        assert isinstance(node, SchedulerNode)
+        comp_buffer = node.node
+        assert isinstance(comp_buffer, ir.ComputedBuffer)
+        _, body, _ = comp_buffer.get_default_sizes_body()
+        return body.var_ranges, list(body.indexing_exprs.values())
+
+    def _snapshot_node_loop_states(self, node):
+        if isinstance(node, SchedulerNode):
+            return [(node, node.snapshot_loop_state())]
+
+        assert isinstance(node, FusedSchedulerNode)
+        snapshots = []
+        for snode in node.snodes:
+            assert isinstance(snode, SchedulerNode)
+            snapshots.append((snode, snode.snapshot_loop_state()))
+        return snapshots
+
+    def _align_compatible_range_nodes(self, node1, node2):
+        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+        assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+        assert isinstance(node_to_recomp, SchedulerNode)
+
+        ref_indexing_constraints = self._get_indexing_ranges_exprs(ref_node)
+        node_to_recomp.recompute_size_and_body(
+            extra_indexing_constraints=ref_indexing_constraints
+        )
+
+        _, (vars1, _) = node1.group
+        _, (vars2, _) = node2.group
+        if vars1 == vars2:
+            return True
+
+        node_to_recomp_indexing_constraints = self._get_indexing_ranges_exprs(
+            node_to_recomp
+        )
+        if isinstance(ref_node, SchedulerNode):
+            ref_node.recompute_size_and_body(
+                extra_indexing_constraints=node_to_recomp_indexing_constraints
+            )
+        else:
+            assert isinstance(ref_node, FusedSchedulerNode)
+            for snode in ref_node.snodes:
+                assert isinstance(snode, SchedulerNode)
+                snode.recompute_size_and_body(
+                    extra_indexing_constraints=node_to_recomp_indexing_constraints
+                )
+
+        _, (vars1, _) = node1.group
+        _, (vars2, _) = node2.group
+        return vars1 == vars2
+
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
@@ -4811,69 +4908,10 @@ class CppScheduling(BaseScheduling):
                 self._why_fuse_nodes(node1, node2)
                 == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
             ):
-                assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-                assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
-
-                _, (vars1, reduce1) = node1.group
-                _, (vars2, reduce2) = node2.group
-                assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
-
-                def get_indexing_ranges_exprs(node):
-                    if isinstance(node, FusedSchedulerNode):
-                        assert len(node.snodes) > 0, node.snodes
-                        var_ranges = None
-                        indexing_exprs = OrderedSet[Any]()
-                        for snode in node.snodes:
-                            v, exprs = get_indexing_ranges_exprs(snode)
-                            if var_ranges is None:
-                                var_ranges = v
-                            assert var_ranges == v, (var_ranges, v, node.snodes)
-                            indexing_exprs.update(exprs)
-                        return var_ranges, list(indexing_exprs)
-                    else:
-                        assert isinstance(node, SchedulerNode)
-                        comp_buffer = node.node
-                        assert isinstance(comp_buffer, ir.ComputedBuffer)
-                        _, body, _ = comp_buffer.get_default_sizes_body()
-                        return body.var_ranges, list(body.indexing_exprs.values())
-
-                node_to_recomp = node1 if len(vars1) < len(vars2) else node2
-                assert isinstance(node_to_recomp, SchedulerNode)
-
-                ref_node = node2 if len(vars1) < len(vars2) else node1
-
-                ref_indexing_constraints = get_indexing_ranges_exprs(ref_node)
-
-                node_to_recomp.recompute_size_and_body(
-                    extra_indexing_constraints=ref_indexing_constraints
+                assert self._align_compatible_range_nodes(node1, node2), (
+                    node1.group,
+                    node2.group,
                 )
-
-                _, (vars1, _) = node1.group
-                _, (vars2, _) = node2.group
-
-                if vars1 == vars2:
-                    return FusedSchedulerNode.fuse(node1, node2)
-
-                # recompute ref_node if its ranges are also changed
-                node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
-                    node_to_recomp
-                )
-                if isinstance(ref_node, SchedulerNode):
-                    ref_node.recompute_size_and_body(
-                        extra_indexing_constraints=node_to_recomp_indexing_constraints
-                    )
-                else:
-                    assert isinstance(ref_node, FusedSchedulerNode)
-                    for snode in ref_node.snodes:
-                        assert isinstance(snode, SchedulerNode)
-                        snode.recompute_size_and_body(
-                            extra_indexing_constraints=node_to_recomp_indexing_constraints
-                        )
-                    ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
-
-                _, (vars1, _) = node1.group
-                _, (vars2, _) = node2.group
-                assert vars1 == vars2, (vars1, vars2)
                 return FusedSchedulerNode.fuse(node1, node2)
             elif self.can_fuse_vertical_outer_loop(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
@@ -4932,6 +4970,7 @@ class CppScheduling(BaseScheduling):
         if isinstance(ref_node, FusedSchedulerNode):
             ranges_set = OrderedSet[tuple[Any, ...]]()
             for snode in ref_node.snodes:
+                assert isinstance(snode, SchedulerNode)
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
                 assert isinstance(snode.node, ir.ComputedBuffer)
@@ -4949,7 +4988,13 @@ class CppScheduling(BaseScheduling):
         if ranges1 != ranges2:
             return False
 
-        return True
+        snapshots = self._snapshot_node_loop_states(node_to_recomp)
+        snapshots.extend(self._snapshot_node_loop_states(ref_node))
+        try:
+            return self._align_compatible_range_nodes(node1, node2)
+        finally:
+            for node, state in reversed(snapshots):
+                node.restore_loop_state(state)
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(
@@ -5246,7 +5291,7 @@ class CppScheduling(BaseScheduling):
                 for _node in node.get_outer_nodes()
             ):
                 # Ref to the typical case of local buffer in
-                # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159 # noqa: B950
+                # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
                 visited_scheduler_nodes: OrderedSet[str] = OrderedSet()
@@ -5661,6 +5706,10 @@ class KernelGroup:
 
         # 3. Function body
         with code.indent():
+            code.writeline("std::atomic<int> inductor_cpu_integer_div_error{0};")
+            code.writeline(
+                "inductor_cpu_integer_div_error_flag = &inductor_cpu_integer_div_error;"
+            )
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
@@ -5675,6 +5724,10 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
+            code.writeline("inductor_cpu_integer_div_error_flag = nullptr;")
+            code.writeline(
+                "inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);"
+            )
         return code.getvalue()
 
     def call_kernel(self, wrapper, kernel_name):

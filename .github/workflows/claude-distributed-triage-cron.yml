@@ -1,0 +1,172 @@
+name: Claude Distributed Triage Cron
+
+on:
+  schedule:
+    # Daily at 9am PT (4pm UTC, 5pm UTC during DST)
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      llm_batch_size:
+        description: "Max issues to process with Claude (default 20)"
+        type: string
+        required: false
+        default: "20"
+      dry_run:
+        description: "If true, only print what would be done without making changes"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  sweep:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: bedrock
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: "Phase 1: Mark already-triaged issues (no LLM)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          echo "=== Phase 1: Sweeping for issues with oncall:distributed + module label but missing triaged ==="
+
+          # Load primary distributed module labels from the skill's label manifest.
+          # module: performance is a secondary tag, not a primary module classifier.
+          LABELS_FILE=".claude/skills/distributed-triage/distributed-labels.json"
+          mapfile -t MODULE_LABELS < <(
+            jq -r '.labels[].name
+                   | select(startswith("module: "))
+                   | select(. != "module: performance")' \
+              "$LABELS_FILE"
+          )
+          echo "Loaded ${#MODULE_LABELS[@]} module labels: ${MODULE_LABELS[*]}"
+
+          # Find open issues with oncall:distributed but without ptd-bot-triaged
+          ISSUES=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "oncall: distributed" \
+            --state open \
+            --limit 1000 \
+            --json number,labels \
+            --jq '.[]')
+
+          PHASE1_COUNT=0
+
+          while IFS= read -r issue; do
+            [ -z "$issue" ] && continue
+            ISSUE_NUM=$(echo "$issue" | jq -r '.number')
+            LABELS=$(echo "$issue" | jq -r '[.labels[].name] | join(",")')
+            LABEL_NAMES=$(echo "$issue" | jq -r '.labels[].name')
+
+            # Skip if already processed by distributed bot OR finalized by PT-level bot
+            if echo "$LABEL_NAMES" | grep -qxF "ptd-bot-triaged" \
+               || echo "$LABEL_NAMES" | grep -qxF "triaged"; then
+              continue
+            fi
+
+            # Auto-mark issues already classified by a human (has a module: label)
+            REASON=""
+            for mod in "${MODULE_LABELS[@]}"; do
+              if echo "$LABEL_NAMES" | grep -qxF "$mod"; then
+                REASON="already has ${mod}"
+                break
+              fi
+            done
+
+            if [ -n "$REASON" ]; then
+              PHASE1_COUNT=$((PHASE1_COUNT + 1))
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "[DRY RUN] Would add 'ptd-bot-triaged' to #${ISSUE_NUM} (${REASON})"
+              else
+                echo "Adding 'ptd-bot-triaged' to #${ISSUE_NUM} (${REASON}; full labels: ${LABELS})"
+                gh issue edit "$ISSUE_NUM" --repo ${{ github.repository }} --add-label "ptd-bot-triaged"
+
+                # Fetch title and append to daily manifest
+                TITLE=$(gh issue view "$ISSUE_NUM" --repo ${{ github.repository }} --json title --jq '.title')
+                TODAY=$(date -u +%Y-%m-%d)
+                MANIFEST_KEY="review-logs/distributed-triage/manifest-${TODAY}.jsonl"
+                ENTRY=$(jq -c -n \
+                  --arg issue "$ISSUE_NUM" \
+                  --arg title "$TITLE" \
+                  --arg labels "$LABELS" \
+                  --arg source "phase1-auto" \
+                  --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                  '{issue: ($issue | tonumber), title: $title, labels: ($labels | split(",")), source: $source, timestamp: $timestamp}')
+                MANIFEST_FILE=$(mktemp)
+                aws s3 cp "s3://ossci-raw-job-status/${MANIFEST_KEY}" "$MANIFEST_FILE" 2>/dev/null || true
+                echo "$ENTRY" >> "$MANIFEST_FILE"
+                aws s3 cp "$MANIFEST_FILE" "s3://ossci-raw-job-status/${MANIFEST_KEY}"
+              fi
+            fi
+          done <<< "$ISSUES"
+
+          echo "Phase 1 complete: ${PHASE1_COUNT} issues marked as ptd-bot-triaged"
+
+      - name: "Phase 2: Collect issues needing LLM triage"
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BATCH_SIZE: ${{ inputs.llm_batch_size || '20' }}
+        run: |
+          echo "=== Phase 2: Collecting issues needing LLM triage ==="
+
+          # Find open issues with oncall:distributed that haven't been triaged yet.
+          # Exclude issues already marked ptd-bot-triaged (distributed bot done)
+          # or triaged (PT-level bot finalized — hands off).
+          # Use exact label-name match (any(.name == ...)) rather than jq's
+          # contains(), which does substring matching and would falsely match
+          # bot-triaged against a "triaged" filter.
+          ISSUES=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "oncall: distributed" \
+            --state open \
+            --limit 1000 \
+            --json number,labels \
+            --jq '[.[] | select(.labels | any(.name == "ptd-bot-triaged") | not)
+                      | select(.labels | any(.name == "triaged") | not)
+                      | .number] | sort | .[:'"${BATCH_SIZE}"']')
+
+          echo "Issues needing LLM triage: $ISSUES"
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+
+          COUNT=$(echo "$ISSUES" | jq 'length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Will process $COUNT issues (batch limit: $BATCH_SIZE)"
+
+      - name: "Phase 2: Run LLM triage on each issue"
+        if: steps.collect.outputs.count != '0' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUES: ${{ steps.collect.outputs.issues }}
+        run: |
+          echo "=== Phase 2: Running LLM triage ==="
+
+          for ISSUE_NUM in $(echo "$ISSUES" | jq -r '.[]'); do
+            echo "--- Triggering triage for issue #${ISSUE_NUM} ---"
+
+            gh workflow run claude-distributed-triage.yml \
+              --repo ${{ github.repository }} \
+              -f issue_number="$ISSUE_NUM"
+
+            echo "Triggered triage for #${ISSUE_NUM}"
+            sleep 10
+          done
+
+          echo "Phase 2 complete: triggered triage for $(echo "$ISSUES" | jq 'length') issues"

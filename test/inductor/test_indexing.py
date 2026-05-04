@@ -117,10 +117,62 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
+        # FloorDiv(ModularIndexing(b, d1, m), d2) simplifies to
+        # ModularIndexing(b, d1*d2, m//d2) when d2 | m
+        expected = ModularIndexing(i2, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
+    def test_floordiv_modularindexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+
+        # FloorDiv(ModularIndexing(b, d1, m), d2) -> ModularIndexing(b, d1*d2, m//d2)
+        # when d2 divides m
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                FloorDiv(ModularIndexing(i0, 1, 8192), 128), {}
+            ),
+            ModularIndexing(i0, 128, 64),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 2, 120), 6), {}),
+            ModularIndexing(i0, 12, 20),
+        )
+        # Does NOT simplify when d2 does not divide m
+        expr = FloorDiv(ModularIndexing(i0, 1, 28), 5)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {}), expr)
+
+        # FloorDiv(base, divisor) -> 0 when 0 <= base < divisor
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
+            sympy.S.Zero,
+        )
+
+    def test_remove_zero_terms_generalized(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+
+        # FloorDiv(v + 128*i1, 8192): gcd(128*i1, 8192) = 128
+        # Old rule fails (128 != 8192), new rule: v < 128 => drop v
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128}),
+            FloorDiv(128 * i1, 8192),
+        )
+        # v range equals gcd exactly — still safe since v < gcd (strict)
+        # v=127 max, 127 < 128
+        self.assertEqual(
+            sizevars.simplify_with_ranges(FloorDiv(i0 + 6 * i1, 18), {i0: 6}),
+            FloorDiv(6 * i1, 18),
+        )
+        # v range exceeds gcd — cannot simplify
+        expr = FloorDiv(i0 + 128 * i1, 8192)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, {i0: 129}),
+            expr,
+        )
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
@@ -506,7 +558,7 @@ class ExprPrinterTests(InductorTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",
             )
             self.assertEqual(
                 cexpr(expr),

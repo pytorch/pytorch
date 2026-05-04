@@ -2938,6 +2938,7 @@
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
+    MPS: grid_sampler_2d_backward_mps
   autogen: grid_sampler_2d_backward.out
 
 # See NOTE [ grid_sample CPU fallback ]
@@ -2964,6 +2965,7 @@
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
+    MPS: grid_sampler_3d_backward_mps
   autogen: grid_sampler_3d_backward.out
 
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4064,8 +4066,7 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: mean_out
-    MPS: mean_out_mps
+    CPU, CUDA, MPS: mean_out
     QuantizedCPU: mean_out_quantized_cpu
   tags: reduction
 
@@ -6018,8 +6019,7 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: sum_out
-    MPS: sum_out_mps
+    CPU, CUDA, MPS: sum_out
   tags: reduction
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
@@ -6034,14 +6034,12 @@
 - func: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: nansum
-    MPS: nansum_mps
+    CPU, CUDA, MPS: nansum
   tags: reduction
 
 - func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: nansum_out
-    MPS: nansum_out_mps
+    CPU, CUDA, MPS: nansum_out
   tags: reduction
 
 - func: hash_tensor(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0) -> Tensor

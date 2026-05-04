@@ -20,13 +20,7 @@ from cutlass_api.metadata import (
 from cutlass_api.providers.cutedsl.kernel import CuteDslKernel
 from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
 from cutlass_api.status import Status
-from cutlass_api.utils import (
-    ceil_div,
-    round_up,
-    strides_to_layout_string,
-    to_cuda_stream,
-    tuple_to_string,
-)
+from cutlass_api.utils import strides_to_layout_string, to_cuda_stream, tuple_to_string
 
 
 log = logging.getLogger(__name__)
@@ -133,27 +127,47 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         return 0
 
     def _supports(self, args: GemmArguments) -> Status:
-        import cutlass
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+            cutlass_dtype_to_torch,
+        )
+        from torch._inductor.utils import _infer_scale_swizzle_impl
+
+        mat_dtype = cutlass_dtype_to_torch(args.A.element_type)
+        sf_dtype = cutlass_dtype_to_torch(args.A.scale.element_type)
+        if mat_dtype is None or sf_dtype is None:
+            return Status.fail(
+                f"Unknown dtype: mat={args.A.element_type}, sf={args.A.scale.element_type}."
+            )
 
         m, n = args.out.shape[-2:]
         k = args.A.shape[-1]
-        if args.A.element_type == cutlass.Float4E2M1FN:
-            k = k * 2
-        l = args.A.shape[0] if len(args.A.shape) == 3 else 1
 
-        expected_sf_k = round_up(ceil_div(k, self.sf_vec_size), 4)
-        expected_sfa_elements = l * m * expected_sf_k
-        expected_sfb_elements = l * n * expected_sf_k
-
-        if args.A.scale.numel() != expected_sfa_elements:
+        scaling_type_a, _ = _infer_scale_swizzle_impl(
+            mat_size=(m, k),
+            scale_size=(args.A.scale.numel(),),
+            scale_numel=args.A.scale.numel(),
+            mat_dtype=mat_dtype,
+            scale_dtype=sf_dtype,
+            eq_fn=lambda a, b: a == b,
+        )
+        if scaling_type_a is None:
             return Status.fail(
-                f"Scale factor A for tensor A of shape {args.A.shape} must have "
-                f"{expected_sfa_elements} elements, got {args.A.scale.numel()}."
+                f"Unrecognized scale layout for A: "
+                f"mat shape {args.A.shape}, scale numel {args.A.scale.numel()}."
             )
-        if args.B.scale.numel() != expected_sfb_elements:
+
+        scaling_type_b, _ = _infer_scale_swizzle_impl(
+            mat_size=(n, k),
+            scale_size=(args.B.scale.numel(),),
+            scale_numel=args.B.scale.numel(),
+            mat_dtype=mat_dtype,
+            scale_dtype=sf_dtype,
+            eq_fn=lambda a, b: a == b,
+        )
+        if scaling_type_b is None:
             return Status.fail(
-                f"Scale factor B for tensor B of shape {args.B.shape} must have "
-                f"{expected_sfb_elements} elements, got {args.B.scale.numel()}."
+                f"Unrecognized scale layout for B: "
+                f"mat shape {args.B.shape}, scale numel {args.B.scale.numel()}."
             )
 
         return Status.success()
