@@ -2917,7 +2917,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_all_caches()
             compiled_fn = torch.compile(fn)
             with self.assertRaisesRegex(
-                RuntimeError, "pre_grad_custom_pass must implement uuid"
+                RuntimeError, "pre_grad_custom_pass.*must implement uuid"
             ):
                 compiled_fn(x, y)
 
