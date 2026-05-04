@@ -374,11 +374,23 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
-        lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
         )
+        lines.append(
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
 
     warnings.warn("\n".join(lines), stacklevel=2)
 
