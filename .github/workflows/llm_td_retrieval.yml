@@ -8,23 +8,17 @@ permissions:
   contents: read
 
 jobs:
-  get-label-type:
-    name: get-label-type
-    # Don't run on forked repos
-    if: github.repository_owner == 'pytorch'
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
+  # NB: inner get-label-type was removed (2026-05). Every parent workflow
+  # that invokes this reusable workflow already runs runner-determinator at
+  # the workflow_run level — the duplicate per-call invocation was redundant
+  # and contributed disproportionately to before-test/runner-determinator
+  # job overhead. The retrieval job has continue-on-error: true so falling
+  # back to a fixed cheap label here is safe.
   llm-retrieval:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: linux.4xlarge
     continue-on-error: true
-    needs: get-label-type
     steps:
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main

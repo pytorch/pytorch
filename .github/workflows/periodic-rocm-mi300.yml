@@ -2,7 +2,13 @@ name: periodic-rocm-mi300
 
 on:
   schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+    # Reduced from every-3-hours (8x/day) to twice-daily (2026-05) — the
+    # 8x/day cadence was a major contributor to the +397% YoY periodic
+    # cost growth and the +5689% YoY us-east-2 (OSDC) capacity-block
+    # spend (the runners here are H100/MI300 capacity blocks). If
+    # regression coverage demands faster cadence, raise via ciflow trigger
+    # rather than restoring every-3-hours.
+    - cron: 0 0,12 * * * # twice daily (00:00 / 12:00 UTC)
   push:
     tags:
       - ciflow/periodic-rocm-mi300/*
@@ -20,15 +26,10 @@ permissions:
   actions: read
 
 jobs:
-  llm-td:
-    if: github.repository_owner == 'pytorch'
-    name: before-test
-    uses: ./.github/workflows/llm_td_retrieval.yml
-
+  # llm-td removed for periodic-rocm-mi300 (2026-05): see trunk.yml note.
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    needs: llm-td
 
   get-label-type:
     name: get-label-type

@@ -2,7 +2,10 @@ name: periodic-rocm-mi355
 
 on:
   schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * *
+    # Reduced from every-3-hours (8x/day) to twice-daily (2026-05) — see
+    # periodic-rocm-mi300.yml for rationale. MI355 uses H100/MI355 OSDC
+    # capacity-block runners (us-east-2).
+    - cron: 0 0,12 * * * # twice daily (00:00 / 12:00 UTC)
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
@@ -21,15 +24,10 @@ permissions:
   actions: read
 
 jobs:
-  llm-td:
-    if: github.repository_owner == 'pytorch'
-    name: before-test
-    uses: ./.github/workflows/llm_td_retrieval.yml
-
+  # llm-td removed for periodic-rocm-mi355 (2026-05): see trunk.yml note.
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    needs: llm-td
 
   get-label-type:
     name: get-label-type

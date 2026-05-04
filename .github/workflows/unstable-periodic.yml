@@ -2,7 +2,11 @@ name: unstable-periodic
 
 on:
   schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
+    # Reduced from every-4-hours (6x/day = 42 runs/week) to once-daily
+    # (2026-05) — file is rarely-touched (1 commit in last 6 months as of
+    # 2026-05); the 6x/day cadence is unjustified. If owner needs faster
+    # cadence, raise via `ciflow/unstable` trigger.
+    - cron: 45 8 * * *
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
