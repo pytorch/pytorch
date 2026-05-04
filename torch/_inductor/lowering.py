@@ -2920,11 +2920,33 @@ def inductor_randint(
     )
 
 
+def _clone_if_view(tb: TensorBox) -> TensorBox:
+    """Clone a TensorBox into a contiguous buffer if it wraps a view.
+
+    Views (SliceView, ReinterpretView, etc.) can cause _boundaries_helper to
+    crash (SliceView has no get_stride) or return wrong buffer references
+    (ReinterpretView's get_name returns the original pre-slice buffer while
+    the layout offset is ignored). Cloning materializes the viewed data into
+    a fresh buffer with its own name and contiguous layout.
+
+    No-op when the tensor is already a realized contiguous buffer.
+    """
+    from torch._inductor.ir import BaseView
+
+    if isinstance(tb.data, BaseView):
+        tb = clone(tb)
+        tb.realize()
+    return tb
+
+
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
     # Calculate the maximum offset for the boundaries tensor
     # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
     # This ensures the mask check in bucketize_binary_search works correctly
     # for both contiguous and non-contiguous tensors.
+    # Materialize views into contiguous buffers so that get_name() and
+    # get_stride() refer to the actual sliced data, not the original buffer.
+    tb = _clone_if_view(tb)
     size = tb.get_size()
     stride = tb.get_stride()
     max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
@@ -2981,6 +3003,13 @@ def searchsorted(
     # sorted_sequence.get_name() (used below) will exist unless we call
     # sorted_sequence.realize().
     sorted_sequence.realize()
+
+    # Clone views (SliceView, ReinterpretView) into contiguous buffers.
+    # This fixes two bugs when sorted_sequence is a slice (e.g., offsets[1:]):
+    #   Bug 1: SliceView does not implement get_stride() -> NotImplementedError
+    #   Bug 2: ReinterpretView's get_name() returns the original buffer name,
+    #           ignoring the slice offset -> off-by-one results
+    sorted_sequence = _clone_if_view(sorted_sequence)
 
     if sorter is not None:
         sorter.realize()
