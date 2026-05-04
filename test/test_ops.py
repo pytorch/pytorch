@@ -40,6 +40,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types_and,
     highest_precision_float,
+    get_unsupported_dtypes_for_device,
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -1638,9 +1639,24 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.add(dtype)
 
+        # Dtypes the device has declared as unsupported via the capability API
+        # (``torch.accelerator.get_device_capability().supported_dtypes``). For
+        # CPU/CUDA this set is empty, preserving existing behavior. Devices
+        # that declare capability (e.g. PrivateUse1 accelerators without
+        # complex support) can skip iterating dtypes that are guaranteed to
+        # fail, avoiding unnecessary compile attempts that can hang or time
+        # out while still accounting for them as unsupported for the
+        # dtype-consistency checks below.
+        device_unsupported_dtypes = get_unsupported_dtypes_for_device(device_type)
+
         for dtype in all_types_and_complex_and(
             *((torch.half, torch.bfloat16, torch.bool) + include_complex32)
         ):
+            if dtype in device_unsupported_dtypes:
+                unsupported_dtypes.add(dtype)
+                if dtype in allowed_backward_dtypes:
+                    unsupported_backward_dtypes.add(dtype)
+                continue
             # tries to acquire samples - failure indicates lack of support
             requires_grad = dtype in allowed_backward_dtypes
             try:
