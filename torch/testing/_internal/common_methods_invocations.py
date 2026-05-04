@@ -15750,9 +15750,10 @@ op_db: list[OpInfo] = [
                 "TestInductorOpInfo", "test_comprehensive",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-            # torch._inductor.exc.InductorError:
-            # MissingOperatorWithoutDecomp: missing lowering
-            DecorateInfo(unittest.skip("missing lowering"),
+
+            # No Inductor lowering for the chunked op. Unchunked samples
+            # (options=None) would lower, but OpInfo can't gate per-sample.
+            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
                          'TestInductorOpInfo', 'test_comprehensive',
                          device_type="cuda"),
 

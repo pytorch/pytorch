@@ -15,8 +15,8 @@ from torch.nn import (
     parameter as parameter,
     utils as utils,
 )
-from torch.nn.functional import (  # pyrefly: ignore [missing-module-attribute]
-    LinearCrossEntropyOptions as LinearCrossEntropyOptions,
+from torch.nn.functional import (
+    LinearCrossEntropyOptions as LinearCrossEntropyOptions,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch.nn.parallel import DataParallel as DataParallel
 

@@ -60,6 +60,9 @@ def _linear_cross_entropy_batch_chunked(
             f"linear_cross_entropy: target dtype must be torch.int64, got {target.dtype}."
         )
 
+    # Inf/NaN at X_[:, ignore_index] propagates through the
+    # masked-by-zero multiply (matches cross_entropy; differs from
+    # nll_loss):
     mask = target == ignore_index
     if ignore_index < 0 or ignore_index >= num_classes:
         # map out-of-range ignore_index to 0:
@@ -144,6 +147,8 @@ def _linear_cross_entropy_batch_chunked(
         dtype=dtypes["GL"],
         requires_grad=False,
     )
+    # Chunk-sized scratch reused per iteration: first as Xmax, then as
+    # tmp_chunk after Xmax is consumed by X_.sub_(Xmax):
     tmp = torch.empty(
         batch_chunk_size, device=device, dtype=dtypes["X"], requires_grad=False
     )

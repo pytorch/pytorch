@@ -3793,6 +3793,7 @@ class LinearCrossEntropyOptions:
             else:
                 factor = 1
 
+            # next power-of-2 >= ceil(num_batches * in_features / num_classes)
             batch_chunk_size = (
                 1 << (-(num_batches // (num_classes // -in_features)) - 1).bit_length()
             )
