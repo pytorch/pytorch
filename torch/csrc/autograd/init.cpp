@@ -395,6 +395,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_toggle_collection_dynamic",
       toggleCollectionDynamic,
       py::call_guard<py::gil_scoped_release>());
+  m.def("_is_kineto_stopped", isKinetoStopped);
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
