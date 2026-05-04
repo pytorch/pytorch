@@ -69,7 +69,6 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
-from .dicts import DunderDictVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -1353,10 +1352,8 @@ class GetAttrVariable(VariableTracker):
         tx: "InstructionTranslator",
         key: VariableTracker,
     ) -> VariableTracker:
-        if self.name == "__dict__":
-            if hasattr(self.obj, "get_dict_vt"):
-                return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
-            return DunderDictVariable.create(tx, self.obj).mp_subscript_impl(tx, key)
+        if self.name == "__dict__" and hasattr(self.obj, "get_dict_vt"):
+            return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
 
 
