@@ -1729,6 +1729,10 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_accelerator = unittest.skipUnless(
+    torch.accelerator.is_available(),
+    "No accelerator available",
+)
 
 def skipIfCrossRef(fn):
     @wraps(fn)

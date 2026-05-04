@@ -7,7 +7,7 @@ from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, requires_accelerator
 
 
 class TestDefaultStager(TestCase):
@@ -23,7 +23,7 @@ class TestDefaultStager(TestCase):
             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
         }
 
-    @requires_cuda
+    @requires_accelerator
     def test_sync_staging(self) -> None:
         """Test synchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -46,7 +46,7 @@ class TestDefaultStager(TestCase):
         # Clean up
         stager.close()
 
-    @requires_cuda
+    @requires_accelerator
     def test_async_staging(self) -> None:
         """Test asynchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=True)
@@ -70,10 +70,12 @@ class TestDefaultStager(TestCase):
         # Clean up
         stager.close()
 
-    def test_cuda_non_blocking_without_cuda(self) -> None:
-        """Test that non-blocking copy fails when CUDA is not available."""
-        if torch.cuda.is_available():
-            self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
+    def test_non_blocking_without_accelerator(self) -> None:
+        """Test that non-blocking copy fails when no accelerator is available."""
+        if torch.accelerator.is_available():
+            self.skipTest(
+                "Accelerator is available, cannot test unavailable scenario"
+            )
 
         options = CheckpointStagerConfig(use_non_blocking_copy=True)
         with self.assertRaises(AssertionError):
@@ -81,6 +83,8 @@ class TestDefaultStager(TestCase):
 
     def test_different_option_combinations(self) -> None:
         """Test various combinations of staging options."""
+        has_accelerator = torch.accelerator.is_available()
+
         test_cases = [
             # All disabled
             CheckpointStagerConfig(
@@ -105,23 +109,23 @@ class TestDefaultStager(TestCase):
             ),
         ]
 
-        if torch.cuda.is_available():
+        if has_accelerator:
             # Only async staging
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.accelerator.is_available(),
+                    use_pinned_memory=True,
                     use_shared_memory=False,
                     use_async_staging=True,
                     use_non_blocking_copy=False,
                 )
             )
-            # Only CUDA non-blocking copy
+            # Only non-blocking copy
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.accelerator.is_available(),
+                    use_pinned_memory=True,
                     use_shared_memory=False,
                     use_async_staging=False,
-                    use_non_blocking_copy=torch.accelerator.is_available(),
+                    use_non_blocking_copy=True,
                 )
             )
 
@@ -130,7 +134,7 @@ class TestDefaultStager(TestCase):
                 stager = DefaultStager(options)
 
                 # Test staging works with these options
-                if options.use_async_staging and torch.accelerator.is_available():
+                if options.use_async_staging and has_accelerator:
                     result = stager.stage(self.state_dict)
                     self.assertIsInstance(result, Future)
                     staged_dict = result.result()
@@ -142,34 +146,37 @@ class TestDefaultStager(TestCase):
 
                 stager.close()
 
-    @requires_cuda
-    def test_cuda_tensors_staging(self) -> None:
-        """Test staging with CUDA tensors."""
-        # Create state dict with CUDA tensors
-        cuda_state_dict = {
-            "cuda_tensor": torch.randn(3, 4).cuda(),
+    @requires_accelerator
+    def test_accelerator_tensors_staging(self) -> None:
+        """Test staging with accelerator tensors."""
+        device = torch.accelerator.current_accelerator()
+
+        # Create state dict with accelerator tensors
+        device_state_dict = {
+            "device_tensor": torch.randn(3, 4).to(device),
             "cpu_tensor": torch.randn(2, 3),
             "mixed_model": {
-                "weight": torch.randn(5, 5).cuda(),
-                "bias": torch.randn(5).cuda(),
+                "weight": torch.randn(5, 5).to(device),
+                "bias": torch.randn(5).to(device),
             },
         }
 
         options = CheckpointStagerConfig(use_async_staging=False)
         stager = DefaultStager(options)
 
-        staged_dict = stager.stage(cuda_state_dict)
+        # Stage the state dict
+        staged_dict = stager.stage(device_state_dict)
         if not isinstance(staged_dict, dict):
             raise AssertionError(f"Expected dict, got {type(staged_dict)}")
 
         # Verify tensors are staged (should be moved to CPU)
-        self.assertIn("cuda_tensor", staged_dict)
+        self.assertIn("device_tensor", staged_dict)
         self.assertIn("cpu_tensor", staged_dict)
         self.assertIn("mixed_model", staged_dict)
 
         stager.close()
 
-    @requires_cuda
+    @requires_accelerator
     def test_resource_cleanup(self) -> None:
         """Test that resources are properly cleaned up."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -183,11 +190,12 @@ class TestDefaultStager(TestCase):
 
     def test_multiple_staging_operations(self) -> None:
         """Test multiple staging operations with the same stager."""
+        has_accelerator = torch.accelerator.is_available()
         options = CheckpointStagerConfig(
             use_async_staging=False,
-            use_pinned_memory=torch.accelerator.is_available(),
+            use_pinned_memory=has_accelerator,
             use_shared_memory=False,
-            use_non_blocking_copy=torch.accelerator.is_available(),
+            use_non_blocking_copy=has_accelerator,
         )
         stager = DefaultStager(options)
 
