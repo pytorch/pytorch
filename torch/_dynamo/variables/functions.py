@@ -3896,6 +3896,20 @@ class MethodDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        # Mirrors descr_check: verify the first arg is an instance of
+        # __objclass__ before calling.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L78-L91
+        try:
+            obj_type = obj.python_type()
+            if not issubclass(obj_type, self.descriptor.__objclass__):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{self.descriptor.__name__}' for "
+                    f"'{self.descriptor.__objclass__.__name__}' objects "
+                    f"doesn't apply to a '{obj_type.__name__}' object",
+                )
+        except NotImplementedError:
+            pass
         return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
 
     def tp_descr_get_impl(
@@ -4182,7 +4196,8 @@ class MemberDescriptorVariable(VariableTracker):
                 tx,
                 args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
             )
-        return VariableTracker.build(tx, resolved, self.source)
+        result_source = obj.source and AttrSource(obj.source, name)
+        return VariableTracker.build(tx, resolved, result_source)
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -4229,15 +4244,27 @@ class GetSetDescriptorVariable(VariableTracker):
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
+        attr_name = self.desc.__name__
+        # Try to eagerly call the C getter when we can obtain the
+        # concrete Python object (UDOV.value, or as_python_constant
+        # for classes/constants). Fall back to var_getattr for
+        # proxy-based VTs like TensorVariable.
+        obj_value = getattr(obj, "value", None)
+        if obj_value is None:
+            try:
+                obj_value = obj.as_python_constant()
+            except NotImplementedError:
+                return obj.var_getattr(tx, attr_name)
         try:
-            resolved = self.desc.__get__(obj.value)  # type: ignore[attr-defined]
+            resolved = self.desc.__get__(obj_value)
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{name}'"],  # type: ignore[attr-defined]
+                args=[f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"],
             )
-        return VariableTracker.build(tx, resolved, self.source)
+        result_source = obj.source and AttrSource(obj.source, attr_name)
+        return VariableTracker.build(tx, resolved, result_source)
 
 
 class PropertyVariable(VariableTracker):
