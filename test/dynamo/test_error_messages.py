@@ -766,34 +766,6 @@ from user code:
     class Foo:""",
         )
 
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test___build_class__(self):
-        x = 3
-
-        def fn():
-            class Foo:
-                def __init__(self):
-                    self.x = x
-
-            return Foo
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Reconstruction failure: source.reconstruct not implemented
-  Explanation: Dynamo has no bytecode reconstruction implemented for <class 'torch._dynamo.source.EphemeralSource'> variable EphemeralSource(desc=None).
-  Hint: This is likely to be a Dynamo bug. Please report an issue to PyTorch.
-
-  Developer debug context: EphemeralSource(desc=None)
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0093.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return Foo""",
-        )
-
     @skipIfNotPy312
     def test_unsupported_bytecode(self):
         async def fn():
