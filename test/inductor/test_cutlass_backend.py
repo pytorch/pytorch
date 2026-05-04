@@ -790,10 +790,7 @@ class TestCutlassBackend(TestCase):
                 dynamo_config.patch({"error_on_recompile": dynamic}),
             ):
                 expected = [
-                    model(
-                        *[t.float() for t in input]
-                    ).to(dtype)
-                    for input in inputs
+                    model(*[t.float() for t in input]).to(dtype) for input in inputs
                 ]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
@@ -855,9 +852,9 @@ class TestCutlassBackend(TestCase):
                     "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ):
-                expected = torch.addmm(
-                    bias.float(), x.float(), w.float()
-                ).to(torch.bfloat16)
+                expected = torch.addmm(bias.float(), x.float(), w.float()).to(
+                    torch.bfloat16
+                )
                 actual = torch.compile(torch.addmm)(bias, x, w)
                 torch.testing.assert_close(actual, expected)
 
