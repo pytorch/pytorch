@@ -150,13 +150,12 @@ class _ToTorchTensor(torch.autograd.Function):
                 ),
             )
         return (
-            # pyrefly: ignore [bad-argument-type]
-            DTensor(
-                # pyrefly: ignore [bad-argument-count]
+            DTensor.from_local(
                 grad_output,
-                grad_spec,
-                # pyrefly: ignore [unexpected-keyword]
-                requires_grad=grad_output.requires_grad,
+                grad_spec.device_mesh,
+                grad_spec.placements,
+                shape=grad_spec.shape,
+                stride=grad_spec.stride,
             ),
             None,
         )
@@ -361,7 +360,12 @@ class DTensor(torch.Tensor):
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], (self._spec, self.requires_grad)
+        return ["_local_tensor", "device_mesh"], (
+            self._spec.placements,
+            self._spec.tensor_meta,
+            self._spec.shard_order,
+            self.requires_grad,
+        )
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -370,16 +374,18 @@ class DTensor(torch.Tensor):
                 "Expecting spec to be not None from `__tensor_flatten__` return value!"
             )
         local_tensor = inner_tensors["_local_tensor"]
-        spec, requires_grad = flatten_spec
+        mesh = inner_tensors["device_mesh"]
+        placements, old_tensor_meta, shard_order, requires_grad = flatten_spec
         unflatten_tensor_meta = TensorMeta(
             shape=outer_size,
             stride=outer_stride,
-            dtype=spec.tensor_meta.dtype,
+            dtype=old_tensor_meta.dtype,
         )
         unflatten_spec = DTensorSpec(
-            spec.mesh,
-            spec.placements,
+            mesh,
+            placements,
             tensor_meta=unflatten_tensor_meta,
+            shard_order=shard_order,
         )
         # pyrefly: ignore [bad-argument-type]
         return DTensor(
@@ -411,10 +417,10 @@ class DTensor(torch.Tensor):
         if expected_type is not None:
             return None
 
-        (spec, _) = flatten_spec  # Result of tensor_flatten()
+        (placements, _, _, _) = flatten_spec
         return self.redistribute(
             device_mesh=self.device_mesh,
-            placements=spec.placements,
+            placements=placements,
         )
 
     @classmethod
@@ -646,16 +652,22 @@ class DTensor(torch.Tensor):
                 asynchronously or not. Default: False
             forward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
                 ``forward_dtype`` before redistributing the local tensor in its forward.
-                The result DTensor will be in ``forward_dtype`` Default: None.
+                The result DTensor will be in ``forward_dtype``. If ``None``, no dtype
+                conversion is performed and the result DTensor preserves the input
+                DTensor's local tensor dtype. Default: None
             backward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
                 ``backward_dtype`` before redistributing the local tensor in its backward.
-                The result DTensor gradient would be converted back to the current DTensor dtype. Default: None
+                The result DTensor gradient would be converted back to the current (input)
+                DTensor dtype. If ``None``, no dtype conversion is performed before backward
+                redistribution; the gradient is still converted to the input DTensor's local
+                tensor dtype after redistribution. Default: None
 
         Returns:
             A :class:`DTensor` object
 
-        .. note:: ``redistribute`` is differentiable, which means user do not need to worry about
-            the backward formula of the redistribute operation.
+        .. note:: ``redistribute`` is twice-differentiable, which means user do not need to worry about
+            the backward formula of the redistribute operation, or its compatibility with autograd for
+            second-order gradients. Higher-order differentiation has not been tested (but may work).
 
         .. note:: ``redistribute`` currently only supports redistributing DTensor on the same DeviceMesh,
             Please file an issue if you need to redistribute DTensor to different DeviceMesh.
@@ -799,19 +811,6 @@ class DTensor(torch.Tensor):
         else:
             raise RuntimeError("Unsupported tensor type!")
 
-    @classmethod
-    def __metadata_guard__(
-        cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
-    ) -> bool:
-        # TODO - delete this - This is now unused after the PR -
-        # https://github.com/pytorch/pytorch/pull/165824
-        orig_spec, orig_requires_grad = orig
-        other_spec, other_requires_grad = other
-        return (
-            orig_spec._check_equals(other_spec, skip_shapes=True)
-            and orig_requires_grad == other_requires_grad
-        )
-
 
 def distribute_tensor(
     tensor: torch.Tensor,
@@ -906,8 +905,8 @@ def distribute_tensor(
     assert_no_mixed_partial_types(placements)
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we need to check:
-        # 1. if the we can further shard this DTensor if the two device mesh belong to
-        #   the same parenet mesh and further sharding is possible.
+        # 1. if we can further shard this DTensor if the two device mesh belong to
+        #   the same parent mesh and further sharding is possible.
         # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(

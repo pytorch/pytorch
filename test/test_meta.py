@@ -1947,6 +1947,231 @@ class TestMetaKernelConv(TestCase):
         self.assertTrue(gw2.is_contiguous(memory_format=torch.channels_last))
 
 
+
+
+class TestMetaKernelRegistrations(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_make_dep_token(self):
+        cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
+        meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_rrelu_backward_small_range(self):
+        from torch._decomp.decompositions import rrelu_with_noise_backward
+
+        x = torch.randn(5, requires_grad=True)
+        lower, upper = 0.125, 0.125 + torch.finfo(torch.float32).eps
+        noise = torch.rand(5)
+        grad = torch.ones(5)
+        cpp_result = torch.ops.aten.rrelu_with_noise_backward(
+            grad, x, noise, lower, upper, True, False
+        )
+        decomp_result = rrelu_with_noise_backward(
+            grad, x, noise, lower, upper, True, False
+        )
+        self.assertEqual(cpp_result, decomp_result)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_linalg_eig_strides_cpu(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        matrix = torch.randn(3, 3)
+        _, eigvecs = torch.linalg.eig(matrix)
+        with FakeTensorMode():
+            matrix_fake = torch.randn(3, 3, device="cpu")
+            _, eigvecs_fake = torch.linalg.eig(matrix_fake)
+        self.assertEqual(eigvecs.stride(), eigvecs_fake.stride())
+        self.assertEqual(eigvecs.shape, eigvecs_fake.shape)
+        self.assertEqual(eigvecs.dtype, eigvecs_fake.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_randint_like_tensor_dtype_kwarg(self):
+        x_cpu = torch.randn(3, 4)
+        high_cpu = torch.tensor(10)
+        y_cpu = torch.ops.aten.randint_like.Tensor(x_cpu, high_cpu, dtype=torch.int32)
+        x_meta = torch.randn(3, 4, device="meta")
+        high_meta = torch.tensor(10, device="meta")
+        y_meta = torch.ops.aten.randint_like.Tensor(
+            x_meta, high_meta, dtype=torch.int32
+        )
+        self.assertEqual(y_cpu.dtype, y_meta.dtype)
+        self.assertEqual(y_cpu.shape, y_meta.shape)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_randint_like_tensor_preserves_default(self):
+        x_cpu = torch.randn(3, 4, dtype=torch.float16)
+        high_cpu = torch.tensor(10)
+        y_cpu = torch.ops.aten.randint_like.Tensor(x_cpu, high_cpu)
+        x_meta = torch.randn(3, 4, device="meta", dtype=torch.float16)
+        high_meta = torch.tensor(10, device="meta")
+        y_meta = torch.ops.aten.randint_like.Tensor(x_meta, high_meta)
+        self.assertEqual(y_cpu.dtype, y_meta.dtype)
+        self.assertEqual(y_cpu.shape, y_meta.shape)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_pad_sequence_decomp_left(self):
+        from torch._decomp import decompositions
+
+        a = torch.tensor([1, 2, 3])
+        b = torch.tensor([4, 5])
+        cpu_result = decompositions.pad_sequence(
+            [a, b], batch_first=True, padding_value=0.0, padding_side="left"
+        )
+        expected = torch.tensor([[1, 2, 3], [0, 4, 5]])
+        self.assertEqual(cpu_result, expected)
+        a_meta = torch.randn(3, device="meta")
+        b_meta = torch.randn(2, device="meta")
+        meta_result = decompositions.pad_sequence(
+            [a_meta, b_meta], batch_first=True, padding_value=0.0, padding_side="left"
+        )
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_pad_sequence_decomp_left_not_batch_first(self):
+        from torch._decomp import decompositions
+
+        a = torch.tensor([1, 2, 3])
+        b = torch.tensor([4, 5])
+        result = decompositions.pad_sequence(
+            [a, b], batch_first=False, padding_value=0.0, padding_side="left"
+        )
+        expected = torch.tensor([[1, 0], [2, 4], [3, 5]])
+        self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_padded_dense_to_jagged_total_L_zero(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        cpu_padded = torch.randn(2, 3, 4)
+        cpu_offsets = [torch.tensor([0, 0, 0])]
+        cpu_result = torch.ops.aten._padded_dense_to_jagged_forward(
+            cpu_padded, cpu_offsets, total_L=0
+        )
+        with FakeTensorMode():
+            fake_padded = torch.randn(2, 3, 4)
+            fake_offsets = [torch.tensor([0, 0, 0])]
+            fake_result = torch.ops.aten._padded_dense_to_jagged_forward(
+                fake_padded, fake_offsets, total_L=0
+            )
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.dtype, fake_result.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_padded_dense_to_jagged_total_L_none(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        cpu_padded = torch.randn(2, 3, 4)
+        cpu_offsets = [torch.tensor([0, 1, 3])]
+        cpu_result = torch.ops.aten._padded_dense_to_jagged_forward(
+            cpu_padded, cpu_offsets, total_L=None
+        )
+        shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+        with FakeTensorMode(shape_env=shape_env):
+            fake_padded = torch.randn(2, 3, 4)
+            fake_offsets = [torch.tensor([0, 1, 3])]
+            fake_result = torch.ops.aten._padded_dense_to_jagged_forward(
+                fake_padded, fake_offsets, total_L=None
+            )
+        self.assertEqual(len(cpu_result.shape), len(fake_result.shape))
+        self.assertEqual(cpu_result.dtype, fake_result.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_segment_reduce_2d(self):
+        data_cpu = torch.randn(10, 5)
+        lengths = torch.tensor([3, 4, 3])
+        cpu_result = torch.segment_reduce(data_cpu, "sum", lengths=lengths, axis=0)
+        data_meta = torch.randn(10, 5, device="meta")
+        meta_result = torch.segment_reduce(
+            data_meta, "sum", lengths=lengths, axis=0
+        )
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_segment_reduce_batched_shape(self):
+        # axis=1 with 2D lengths exercises the shape fix (using data.shape
+        # as base instead of lengths.shape). CPU segfaults for this case
+        # so we verify shape on meta only.
+        data = torch.randn(10, 5, device="meta")
+        lengths = torch.ones(2, 3, dtype=torch.long)
+        result = torch.segment_reduce(
+            data, "sum", lengths=lengths, axis=1, unsafe=True
+        )
+        self.assertEqual(result.shape, (10, 3))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_avg_pool3d_divisor_zero_error(self):
+        x_cpu = torch.randn(1, 1, 4, 4, 4)
+        with self.assertRaisesRegex(RuntimeError, "divisor"):
+            torch.nn.functional.avg_pool3d(x_cpu, kernel_size=2, divisor_override=0)
+        x_meta = torch.randn(1, 1, 4, 4, 4, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "divisor"):
+            torch.nn.functional.avg_pool3d(x_meta, kernel_size=2, divisor_override=0)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_avg_pool3d_backward_divisor_zero_error(self):
+        grad_cpu = torch.randn(1, 1, 2, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, "divisor"):
+            torch.ops.aten.avg_pool3d_backward(
+                grad_cpu,
+                torch.randn(1, 1, 4, 4, 4),
+                [2, 2, 2], [2, 2, 2], [0, 0, 0], True, True, 0,
+            )
+        grad_meta = torch.randn(1, 1, 2, 2, 2, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "divisor"):
+            torch.ops.aten.avg_pool3d_backward(
+                grad_meta,
+                torch.randn(1, 1, 4, 4, 4, device="meta"),
+                [2, 2, 2], [2, 2, 2], [0, 0, 0], True, True, 0,
+            )
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_tensor_dim_check(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            x_cpu.fill_(value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.randn(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            x_meta.fill_(value_meta)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_tensor_scalar_ok(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.tensor(1.0)
+        cpu_result = x_cpu.fill_(value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.tensor(1.0, device="meta")
+        meta_result = x_meta.fill_(value_meta)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_out_of_place_tensor_dim_check(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            torch.fill(x_cpu, value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.randn(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "0-dimension"):
+            torch.fill(x_meta, value_meta)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_fill_out_of_place_tensor_scalar_ok(self):
+        x_cpu = torch.randn(3, 4)
+        value_cpu = torch.tensor(1.0)
+        cpu_result = torch.fill(x_cpu, value_cpu)
+        x_meta = torch.randn(3, 4, device="meta")
+        value_meta = torch.tensor(1.0, device="meta")
+        meta_result = torch.fill(x_meta, value_meta)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
 instantiate_device_type_tests(TestMeta, globals())
 
 

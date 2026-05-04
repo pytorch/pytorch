@@ -84,7 +84,7 @@ def lower_cpu(
             "torch.compile on current platform is not supported for CPU."
         )
 
-    fake_buffers: list[Buffer] = []  # noqa: F821
+    fake_buffers: list[Buffer] = []
 
     # [Note] Handle the case where the split sizes are not statically known.
     # The value of cur_qSplitSize and cur_kvSplitSize are decided during runtime.

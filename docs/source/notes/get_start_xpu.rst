@@ -26,7 +26,7 @@ Intel Client GPU
 +---------------------------------------+-----------------------------------------------------------------------------------------------------+
 | Supported OS                          | Validated Hardware                                                                                  |
 +=======================================+=====================================================================================================+
-| Windows 11 & Ubuntu 24.04/25.04       | | Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
+| Windows 11 & Ubuntu 24.04/25.10       | | Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                |
 |                                       | | Intel® Arc B-Series Graphics (CodeName: Battlemage)                                               |
 |                                       | | Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                 |
 |                                       | | Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)       |
@@ -42,7 +42,7 @@ Software Prerequisite
 
 To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. For installation guide, visit `Intel GPUs Driver Installation <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_.
 
-Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to  `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_ for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
+Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_ for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
 
 
 Installation
@@ -74,17 +74,17 @@ To install the latest preview/nightly wheels:
 Previous Versions
 ~~~~~~~~~~~~~~~~~
 
+**v2.11.0**
+
+.. code-block:: bash
+
+    pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/xpu
+
 **v2.10.0**
 
 .. code-block:: bash
 
     pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/xpu
-
-**v2.9.1**
-
-.. code-block:: bash
-
-    pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/xpu
 
 .. note::
 
@@ -93,7 +93,7 @@ Previous Versions
 From Source
 ^^^^^^^^^^^
 
-Now that we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_ installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
+Now that we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_ installed, follow the guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
 
 Build from source for ``torch`` refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
 
@@ -129,7 +129,7 @@ If you are migrating code from ``cuda``, you would change references from ``cuda
 The following points outline the support and limitations for PyTorch with Intel GPU:
 
 #. Both training and inference workflows are supported.
-#. Both eager mode and ``torch.compile`` is supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to use torch.compile on Windows CPU/XPU <https://pytorch.org/tutorials/unstable/inductor_windows.html>`_.
+#. Both eager mode and ``torch.compile`` are supported. The feature ``torch.compile`` is also supported on Windows from PyTorch* 2.7 with Intel GPU, refer to `How to use torch.compile on Windows CPU/XPU <https://pytorch.org/tutorials/unstable/inductor_windows.html>`_.
 #. Data types such as FP32, BF16, FP16, and Automatic Mixed Precision (AMP) are all supported.
 
 Examples
@@ -226,7 +226,7 @@ Inference with ``torch.compile``
 Training Examples
 ^^^^^^^^^^^^^^^^^
 
-Here is a few training workflow examples.
+Here are a few training workflow examples.
 
 Train with FP32
 ~~~~~~~~~~~~~~~

@@ -190,6 +190,68 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
   lib.exec_binary_kernel(iter, "lerp_alpha", weight);
 }
 
+static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
+  using namespace mps;
+  auto type_str = scalarToMetalTypeString(iter.common_dtype());
+  auto numel = static_cast<uint32_t>(iter.numel());
+  auto ndim = static_cast<uint32_t>(iter.ndim());
+
+  // simple elementwise kernel for dense tensors
+  if (iter.is_contiguous()) {
+    auto pso = lib.getPipelineStateForFunc("lerp_tensor_dense_" + type_str);
+    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      mtl_dispatch1DJob(computeEncoder, pso, numel);
+    });
+    return;
+  }
+
+  // Scalar weight broadcast path
+  if (ndim == 1 && iter.strides(3)[0] == 0) {
+    auto pso = lib.getPipelineStateForFunc("lerp_tensor_scalar_weight_" + type_str);
+    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      mtl_dispatch1DJob(computeEncoder, pso, numel);
+    });
+    return;
+  }
+
+  // 2D/3D: multi-dimensional dispatch, to avoid integer division for coordinates
+  if (ndim >= 2 && ndim <= 3) {
+    auto pso = lib.getPipelineStateForFunc(fmt::format("lerp_tensor_strided_{}d_{}", ndim, type_str));
+    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      mtl_setArgs<4>(computeEncoder, iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3));
+      auto sizes = iter.shape();
+      auto maxTg = [pso maxTotalThreadsPerThreadgroup];
+      auto tg_x = std::min(static_cast<NSUInteger>(sizes[0]), maxTg);
+      auto tg_y = std::min(static_cast<NSUInteger>(sizes[1]), maxTg / tg_x);
+      auto grid_z = ndim > 2 ? static_cast<NSUInteger>(sizes[2]) : 1;
+      auto tg_z = std::min(grid_z, std::max(maxTg / (tg_x * tg_y), (NSUInteger)1));
+      [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], grid_z)
+                threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+    });
+    return;
+  }
+
+  // General strided fallback
+  auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_" + type_str);
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+    [computeEncoder setComputePipelineState:pso];
+    bind_iter_tensors(computeEncoder, iter);
+    mtl_setArgs<4>(
+        computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), iter.strides(3), ndim);
+    mtl_dispatch1DJob(computeEncoder, pso, numel);
+  });
+}
+
 static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
   lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
 }
@@ -261,6 +323,7 @@ REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_mps_kernel)
 REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)

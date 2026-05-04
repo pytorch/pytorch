@@ -4,6 +4,7 @@
 #include <c10/metal/common.h>
 #include <functional>
 #include <stdexcept>
+#include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -397,7 +398,8 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
 static void check_mps_shape(MPSShape* shape) {
   for (NSNumber* elem in shape) {
     const auto val = [elem longValue];
-    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(), "MPSGaph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(),
+                "MPSGraph does not support tensor dims larger than INT_MAX");
   }
 }
 
@@ -442,8 +444,6 @@ MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) 
   auto sizes = src.sizes();
   auto nStrides = strides.size();
   auto nonZeroStrides = src.strides();
-  int64_t crtNonZeroStride = 1;
-  bool hasZeroStrides = false;
   auto sortedStridesIndices = getSortedStrides(nonZeroStrides);
 
   NSMutableArray<NSNumber*>* sortedStridesShape = [NSMutableArray arrayWithCapacity:nStrides];
@@ -560,7 +560,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
     auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
     TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
-                "MPSGaph does not support tensor dims larger than INT_MAX");
+                "MPSGraph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
                                                                                  shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
@@ -645,6 +645,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     case ScalarType::ComplexDouble:
       return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
     // Unsigned types
+    case ScalarType::UInt64:
+      return {.size = sizeof(uint64_t), .type = type, .value.u = scalar.to<uint64_t>()};
     case ScalarType::UInt32:
       return {.size = sizeof(uint32_t), .type = type, .value.i = scalar.to<uint32_t>()};
     case ScalarType::UInt16:
@@ -931,16 +933,21 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
   return raw_ptr;
 }
 
-class BundledShaderLibary : public MetalShaderLibrary {
+class BundledShaderLibrary : public MetalShaderLibrary {
  public:
-  BundledShaderLibary() : MetalShaderLibrary("") {}
+  BundledShaderLibrary() : MetalShaderLibrary("") {}
 
  protected:
   id<MTLLibrary> getLibrary() override {
     if (C10_UNLIKELY(!library)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
-      library = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
+#ifdef CAN_BUILD_METAL_4
+      const auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS) ? "metal_40" : "metal_basic";
+#else
+      const auto section_name = "metal_basic";
+#endif
+      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
       TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
     }
     return library;
@@ -992,10 +999,45 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     return;
   }
   using namespace mps;
+  // For contiguous non-alpha unary ops we have two kernel flavors: an
+  // ILP_PER_THREAD-wide one that wins on large tensors, and a one-thread-per-
+  // element scalar fallback for small tensors where the ILP per-thread
+  // overhead isn't amortized. Crossover measured empirically on M-series.
+  // Crossover empirically measured on M-series across {sin, cos, tanh, exp} x
+  // {f32, f16, bf16}: cos/sin cross over near 128K, exp/tanh near 256K. Picking
+  // 256K here avoids regressions on every measured op at the cost of leaving
+  // some 128-256K wins on the table. Revisit per-Apple-GPU if wider data exists.
+  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18; // 262144 elements
+  const bool is_contiguous = iter.is_contiguous();
+  // ILP is gated on floating-point output dtype. Integer outputs come only from
+  // cheap ops (neg/abs/sqr/bitwise_not) where the smaller threadgroup count
+  // from the wider per-thread tile regresses real-world sizes, and complex
+  // outputs lose because the wide per-thread state spills out of registers.
+  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type());
+  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ILP_DISPATCH_THRESHOLD;
+  // Bench-only override: force ILP or scalar dispatch.
+  if (is_contiguous && !alpha.has_value()) {
+    if (auto force = c10::utils::get_env("PYTORCH_UNARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  // alpha kernels are registered under "_dense_" (unary_alpha_dense); only the
+  // plain unary path has the new "_dense_scalar_" / "_dense_" (ILP) split.
+  std::string_view dense_suffix;
+  if (!is_contiguous) {
+    dense_suffix = "strided";
+  } else if (dense_ilp || alpha.has_value()) {
+    dense_suffix = "dense";
+  } else {
+    dense_suffix = "dense_scalar";
+  }
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 iter.is_contiguous() ? "dense" : "strided",
+                                 dense_suffix,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
@@ -1010,17 +1052,23 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (!iter.is_contiguous()) {
-        mtl_setArgs<2>(computeEncoder,
-                       outputTensor.sizes(),
-                       inputTensor.strides(),
-                       outputTensor.strides(),
-                       inputTensor.ndimension());
+      if (dense_ilp) {
+        mtl_setBytes(computeEncoder, length, 2);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+      } else {
+        if (!is_contiguous) {
+          mtl_setArgs<2>(computeEncoder,
+                         outputTensor.sizes(),
+                         inputTensor.strides(),
+                         outputTensor.strides(),
+                         inputTensor.ndimension());
+        }
+        if (alpha) {
+          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), is_contiguous ? 2 : 6);
+        }
+        mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
-      if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), iter.is_contiguous() ? 2 : 6);
-      }
-      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
@@ -1069,7 +1117,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
@@ -1101,8 +1148,26 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
-  const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  const auto alpha_type =
+      scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+
+  // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
+  // elements. Eligibility matches unary_dense — contiguous, floating-point,
+  // no cast / broadcast / scalar / alpha — and the same 256K crossover (see
+  // exec_unary_kernel for the rationale).
+  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18;
+  const bool ilp_eligible = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
+      !alpha.has_value() && c10::isFloatingType(out.scalar_type());
+  bool dense_ilp = ilp_eligible && static_cast<uint32_t>(iter.numel()) >= ILP_DISPATCH_THRESHOLD;
+  if (ilp_eligible) {
+    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
 
   std::string kernel_name;
   if (use_scalar_kernel) {
@@ -1137,6 +1202,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
+    const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" : "dense") : "strided";
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
@@ -1184,7 +1250,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         }
       } else {
         if (iter.is_contiguous()) {
-          if (alpha) {
+          if (dense_ilp) {
+            mtl_setBytes(computeEncoder, static_cast<uint32_t>(iter.numel()), 3);
+          } else if (alpha) {
             mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);
           }
           if (cast_needed) {
@@ -1216,7 +1284,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      const auto dispatch_n =
+          dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, dispatch_n);
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
@@ -1314,12 +1384,39 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
 }
 
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
-  static BundledShaderLibary l;
+  static BundledShaderLibrary l;
   return l;
 }
 
 // DynamicMetalShaderLibrary implementation
 DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
+  [library release];
+}
+
+// PrecompiledMetalShaderLibrary implementation
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(std::vector<uint8_t> data) : MetalShaderLibrary("") {
+  auto device = MPSDevice::getInstance()->device();
+  NSError* error = nil;
+  dispatch_data_t dd =
+      dispatch_data_create(data.data(), data.size(), dispatch_get_main_queue(), DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+  library = [device newLibraryWithData:dd error:&error];
+  dispatch_release(dd);
+  TORCH_CHECK(library, "Failed to load metallib: ", error ? [[error description] UTF8String] : "unknown error");
+}
+
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::string& path) : MetalShaderLibrary("") {
+  auto device = MPSDevice::getInstance()->device();
+  NSError* error = nil;
+  NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
+  library = [device newLibraryWithURL:url error:&error];
+  TORCH_CHECK(library,
+              "Failed to load metallib from '",
+              path,
+              "': ",
+              error ? [[error description] UTF8String] : "unknown error");
+}
+
+PrecompiledMetalShaderLibrary::~PrecompiledMetalShaderLibrary() {
   [library release];
 }
 

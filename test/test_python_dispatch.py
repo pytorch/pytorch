@@ -26,8 +26,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -47,6 +50,8 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
     is_in_torch_dispatch_mode,
+    is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
@@ -55,6 +60,49 @@ from torch.utils._pytree import tree_map, tree_map_only
 # used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda
 def _identity(x):
     return x
+
+
+class _TraceableWrapperSubclassTestBase(torch.Tensor):
+    elem: torch.Tensor
+
+    __slots__ = ["elem"]
+
+    @staticmethod
+    def __new__(cls, elem):
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            elem.size(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            device=elem.device,
+            requires_grad=elem.requires_grad,
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+        )
+        r.elem = elem
+        return r
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise RuntimeError("NYI")
+
+
+class _StaticUnflattenWrapper(_TraceableWrapperSubclassTestBase):
+    def __tensor_flatten__(self):
+        return ["elem"], {"kind": "static"}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return _StaticUnflattenWrapper(inner_tensors["elem"])
+
+
+class _ClassmethodUnflattenWrapper(_TraceableWrapperSubclassTestBase):
+    def __tensor_flatten__(self):
+        return ["elem"], {"kind": "classmethod"}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["elem"])
 
 
 class TestDispatcherPythonBindings(TestCase):
@@ -219,9 +267,6 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
-    @unittest.skip(
-        "Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108"
-    )
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -243,6 +288,29 @@ class TestPythonRegistration(TestCase):
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+
+    def test_include_dispatch_key_guard_restores_tls_exactly(self) -> None:
+        before = torch._C._dispatch_tls_local_include_set().raw_repr()
+        with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
+            pass
+        after = torch._C._dispatch_tls_local_include_set().raw_repr()
+        self.assertEqual(before, after)
+
+    @parametrize(
+        "key",
+        [
+            torch.DispatchKey.Meta,
+            torch.DispatchKey.CUDA,
+            torch.DispatchKey.CPU,
+        ],
+    )
+    def test_exclude_dispatch_key_guard_restores_tls_exactly(self, key) -> None:
+        keyset = torch._C.DispatchKeySet(key)
+        before = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        with torch._C._ExcludeDispatchKeyGuard(keyset):
+            pass
+        after = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        self.assertEqual(before, after)
 
     def test_dispatchkeyset_pickle(self) -> None:
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
@@ -314,7 +382,7 @@ class TestPythonRegistration(TestCase):
 
     def test_finalizer(self):
         impls_refcnt = sys.getrefcount(torch.library._impls)
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         lib.define("foo123(Tensor x) -> Tensor")
 
         # 1 for `lib`, 1 for sys.getrefcount' for previous python version (<=3.12)
@@ -354,6 +422,55 @@ class TestPythonRegistration(TestCase):
 
         # lib's finalizer should not have a reference anymore
         self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt)
+
+    @skipIfTorchDynamo(
+        "dynamo's tracing keeps a reference to `lib`, so `del lib` doesn't "
+        "trigger the finalizer; this test is exclusively about gc-driven "
+        "Library teardown."
+    )
+    def test_finalizer_clears_torch_ops_cache(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181765:
+        # `del lib` (running the finalizer) must clear the cached
+        # OpOverloadPacket on torch.ops.<ns>, otherwise iterating ops in that
+        # namespace later raises AttributeError.
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define("my_func() -> None")
+
+        @impl(lib, "my_func", "")
+        def my_func():
+            pass
+
+        torch.ops._test_python_registration.my_func()
+        del lib
+        gc.collect()
+
+        namespace = torch.ops._test_python_registration
+        self.assertNotIn("my_func", namespace._dir)
+        from torch._export.utils import _collect_all_valid_cia_ops_for_namespace
+
+        _collect_all_valid_cia_ops_for_namespace(namespace)
+
+    def test_register_check_mem_op_survives_gc(self):
+        # Regression guard for the autorevert of #181785: inductor's
+        # `register_check_mem_op` is an lru_cache-decorated registration whose
+        # `lib` is a local variable. Once the finalizer started clearing the
+        # torch.ops cache (this PR), the op vanished from torch.ops as soon as
+        # the registration function returned, so later access to
+        # `torch.ops._inductor_debug.check_memory_step.default` raised
+        # AttributeError. The fix is in debug_utils.py (keep `lib` alive); this
+        # test guards that the contract holds end-to-end.
+        from torch._inductor.runtime import debug_utils
+
+        debug_utils.register_check_mem_op.cache_clear()
+        debug_utils.register_check_mem_op()
+        gc.collect()
+
+        self.assertTrue(hasattr(torch.ops, "_inductor_debug"))
+        self.assertTrue(
+            hasattr(torch.ops._inductor_debug, "check_memory_step"),
+            "register_check_mem_op must keep its Library alive so the op "
+            "remains in torch.ops after the finalizer would otherwise fire.",
+        )
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
@@ -580,7 +697,7 @@ class TestPythonRegistration(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
-            my_lib1 = Library(self.test_ns, "DEF")  # noqa: TOR901
+            my_lib1 = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
 
             called = [0]
 
@@ -606,11 +723,11 @@ class TestPythonRegistration(TestCase):
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
-            my_lib1 = Library("myns", "BLA")  # noqa: TOR901
+            my_lib1 = Library("myns", "BLA")  # noqa: SCOPED_LIBRARY
 
         for kind in ("DEF", "FRAGMENT"):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
-                my_lib1 = Library("prim", kind)  # noqa: TOR901
+                my_lib1 = Library("prim", kind)  # noqa: SCOPED_LIBRARY
 
     def test_dispatcher_error_filenames(self) -> None:
         # Test that dispatcher errors report correct Python filenames and line numbers
@@ -622,13 +739,15 @@ class TestPythonRegistration(TestCase):
         # NOTE: Using Library directly instead of _scoped_library because this test
         # specifically verifies filename tracking in error messages, and _scoped_library
         # would report library.py locations instead of the actual test file locations
-        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: TOR901
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: SCOPED_LIBRARY
         try:
             lib1.define("duplicate_op(Tensor x) -> Tensor")
 
             # Try to create another library with same namespace - this should trigger error
             with self.assertRaises(RuntimeError) as cm:
-                lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER  # noqa: TOR901
+                lib2 = Library(  # SECOND_LIB_MARKER  # noqa: SCOPED_LIBRARY
+                    self.test_ns, "DEF"
+                )
         finally:
             lib1._destroy()
 
@@ -687,6 +806,9 @@ class TestPythonRegistration(TestCase):
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
+
+
+instantiate_parametrized_tests(TestPythonRegistration)
 
 
 class TestPythonDispatch(TestCase):
@@ -1054,6 +1176,49 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.0)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_traceable_wrapper_subclass_protocol_runtime_check(self) -> None:
+        @torch._dynamo.disable
+        def run_checks() -> None:
+            base = torch.randn(2, 2)
+            static = _StaticUnflattenWrapper(base)
+            classmethod_wrapper = _ClassmethodUnflattenWrapper(base)
+
+            self.assertFalse(is_traceable_wrapper_subclass(base))
+            self.assertTrue(is_traceable_wrapper_subclass(static))
+            self.assertTrue(is_traceable_wrapper_subclass(classmethod_wrapper))
+            self.assertTrue(is_traceable_wrapper_subclass_type(type(static)))
+            self.assertTrue(
+                is_traceable_wrapper_subclass_type(type(classmethod_wrapper))
+            )
+            self.assertFalse(is_traceable_wrapper_subclass_type(torch.Tensor))
+
+            static_attrs, static_meta = static.__tensor_flatten__()
+            static_rebuilt = type(static).__tensor_unflatten__(
+                {attr: getattr(static, attr) for attr in static_attrs},
+                static_meta,
+                static.size(),
+                static.stride(),
+            )
+            self.assertIs(type(static_rebuilt), _StaticUnflattenWrapper)
+            self.assertEqual(static_rebuilt.elem, static.elem)
+
+            classmethod_attrs, classmethod_meta = (
+                classmethod_wrapper.__tensor_flatten__()
+            )
+            classmethod_rebuilt = type(classmethod_wrapper).__tensor_unflatten__(
+                {
+                    attr: getattr(classmethod_wrapper, attr)
+                    for attr in classmethod_attrs
+                },
+                classmethod_meta,
+                classmethod_wrapper.size(),
+                classmethod_wrapper.stride(),
+            )
+            self.assertIs(type(classmethod_rebuilt), _ClassmethodUnflattenWrapper)
+            self.assertEqual(classmethod_rebuilt.elem, classmethod_wrapper.elem)
+
+        run_checks()
 
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):

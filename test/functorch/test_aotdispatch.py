@@ -11,13 +11,16 @@ import itertools
 import operator
 import unittest
 import warnings
+import weakref
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
+    capture_codegen_source,
     decorate,
     decorateForModules,
     saved_tensors_hooks_to_gm,
@@ -1017,7 +1020,7 @@ def forward(self, primals_1):
             """
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+""",
         ):
             new_out.sum().backward()
 
@@ -3150,6 +3153,73 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue("as_strided_scatter" in str(fw_graph_overlap1.code))
         self.assertTrue("as_strided_scatter" in str(fw_graph_overlap2.code))
 
+    def _check_merge_view_inputs_error(self, fn, make_inputs, expected_error):
+        """Compile fn with aot_eager, assert the error message from merge_view_inputs."""
+        torch._dynamo.reset()
+        try:
+            torch.compile(fn, backend="aot_eager")(*make_inputs())
+            self.fail("Expected BackendCompilerFailed")
+        except torch._dynamo.exc.BackendCompilerFailed as e:
+            self.assertExpectedInline(str(e.inner_exception), expected_error)
+
+    def test_merge_view_inputs_error_non_differentiable_views(self):
+        # Training mode (requires_grad) reaches site-1 in merge_view_inputs.
+        def make_inputs():
+            big = torch.randn(10, requires_grad=True)
+            a = big[0:5]  # _base = big
+            b = torch.empty(5)
+            b.set_(big.untyped_storage(), 0, (5,), (1,))  # _base=None
+            return [b, a]
+
+        def fn(a, b):
+            a.mul_(2)
+            return a + b
+
+        self._check_merge_view_inputs_error(
+            fn,
+            make_inputs,
+            """aot_autograd() does not yet handle non-differentiable view input mutations. input 0 (a) and input 1 (b) share storage but are not differentiable views of each other.""",
+        )
+
+    def test_merge_view_inputs_error_different_bases(self):
+        # Inference mode (no requires_grad) skips site-1, reaching site-2.
+        def make_inputs():
+            x = torch.randn(10)
+            y = torch.randn(10)
+            y.set_(x.untyped_storage(), 0, (10,), (1,))
+            v1 = x[0:5]  # _base = x
+            v2 = y[0:5]  # _base = y (different object, same storage)
+            return [v1, v2]
+
+        def fn(a, b):
+            a.mul_(2)
+            return a + b
+
+        self._check_merge_view_inputs_error(
+            fn,
+            make_inputs,
+            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have different autograd ._base tensors: input 0 (a) and input 1 (b) have ._base fields that point to different tensors.""",
+        )
+
+    def test_merge_view_inputs_error_mixed_base_states(self):
+        # Inference mode (no requires_grad) skips site-1, reaching site-3.
+        def make_inputs():
+            x = torch.randn(10)
+            v1 = x[0:5]  # _base = x
+            v2 = torch.empty(5)
+            v2.set_(x.untyped_storage(), 0, (5,), (1,))  # _base=None
+            return [v1, v2]
+
+        def fn(a, b):
+            a.mul_(2)
+            return a + b
+
+        self._check_merge_view_inputs_error(
+            fn,
+            make_inputs,
+            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have mixed autograd ._base states: ['input 0 (a)'] have ._base set, while ['input 1 (b)'] have ._base=None (and are not the synthetic base).""",
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
         # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
@@ -3246,7 +3316,7 @@ def forward(self, primals_1):
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return (as_strided_scatter, add_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
@@ -3279,7 +3349,7 @@ def forward(self, primals_1):
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
     add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return (as_strided_scatter, add_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
@@ -3310,7 +3380,7 @@ def forward(self, primals_1):
     as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_1 = torch.ops.aten.view.default(as_strided_9, [4]);  as_strided_9 = None
     return (as_strided_scatter, view_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
@@ -3347,7 +3417,7 @@ def forward(self, primals_1, primals_2):
     as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
     return (as_strided_scatter, add, view_1)""",
-        )  # noqa: B950
+        )
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -3419,7 +3489,7 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return (as_strided_scatter, add, add_1)""",
-        )  # noqa: B950
+        )
 
     @skipIfDynamoInput("Fails with dynamo")
     def test_input_mutation_aliases_bases_out_of_order(self):
@@ -3478,7 +3548,7 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
     return (as_strided_scatter, add_2, view_2, unsqueeze)""",
-        )  # noqa: B950
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
@@ -3552,7 +3622,7 @@ def forward(self, primals_1, primals_2):
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
     return (as_strided_scatter, t, view_1, t_1, unsqueeze, add)""",
-        )  # noqa: B950
+        )
 
     def test_dynamic_shape_output_not_in_bw_graph(self):
         def f(x):
@@ -3792,7 +3862,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxx(x, y),
-            """At compilation time, graph 2 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 2 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
@@ -3848,7 +3918,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxx(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
@@ -3897,7 +3967,7 @@ def forward(self, tangents_1):
         self.assertExpectedRaisesInline(
             AssertionError,
             lambda: fxz(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
         )
 
     def test_custom_autograd(self):
@@ -4216,7 +4286,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = copy_ = None
     copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = copy__1 = None
     copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = copy__2 = None
-    return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
+    return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",
         )
 
         self.assertEqual(out_ref, out_test)
@@ -4236,7 +4306,7 @@ def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem
     getitem_5 = native_batch_norm_backward[0]
     getitem_6 = native_batch_norm_backward[1]
     getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
-    return (getitem_6, getitem_7, None, None, None, getitem_5)""",  # noqa: B950
+    return (getitem_6, getitem_7, None, None, None, getitem_5)""",
         )
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
@@ -4278,7 +4348,7 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     add = torch.ops.aten.add.Tensor(clone, primals_2);  clone = primals_2 = None
     return (add, add)""",
-        )  # noqa: B950
+        )
 
         self.assertEqual(out_ref, out_test)
 
@@ -4290,7 +4360,7 @@ def forward(self, primals_1, primals_2):
             """\
 def forward(self, tangents_1):
     return (None, tangents_1)""",
-        )  # noqa: B950
+        )
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
@@ -4507,9 +4577,9 @@ def forward(self, tangents_1):
         x = torch.randn(10, 10, requires_grad=use_autograd)
         y = torch.randn(10, 10, requires_grad=use_autograd)
         out = fn(x, y)
-        self.assertFalse(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(out, "_dynamo_propagated_dynamic_indices"))
         out2 = fn2(out)
-        self.assertFalse(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(out2, "_dynamo_propagated_dynamic_indices"))
         self.assertEqual(counters["aot_autograd"]["total"], 2)
         counters.clear()
 
@@ -4517,9 +4587,9 @@ def forward(self, tangents_1):
         x = torch.randn(20, 20)
         y = torch.randn(20, 20)
         out = fn(x, y)
-        self.assertTrue(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        self.assertTrue(hasattr(out, "_dynamo_propagated_dynamic_indices"))
         out2 = fn2(out)
-        self.assertTrue(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertTrue(hasattr(out2, "_dynamo_propagated_dynamic_indices"))
         self.assertEqual(counters["aot_autograd"]["total"], 2)
         counters.clear()
         torch._dynamo.reset()
@@ -4537,9 +4607,9 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4547,9 +4617,9 @@ def forward(self, tangents_1):
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4629,9 +4699,9 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4639,9 +4709,9 @@ def forward(self, tangents_1):
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                if hasattr(activation, "_dynamo_propagated_dynamic_indices") != dynamic:
                     raise AssertionError(
-                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                        f"Expected hasattr(..., '_dynamo_propagated_dynamic_indices') to be {dynamic}"
                     )
                 return activation
 
@@ -4732,6 +4802,135 @@ def forward(self, tangents_1):
         inp = TwoTensor(a, b)
         out = f(inp)
         self.assertEqual(out.stride(), inp.stride())
+
+    def _make_model_and_input(self, hidden=1024, vocab=4096, seq_len=128):
+        """Build a small model that produces non-scalar output (like an LM head)."""
+        model = nn.Sequential(
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, vocab, bias=False),
+        ).cuda()
+        x = torch.randn(seq_len, hidden, device="cuda", requires_grad=True)
+        labels = torch.randint(0, vocab, (seq_len,), device="cuda")
+        return model, x, labels
+
+    def _make_refcount_probe(self):
+        """Create a boxed-grads probe that checks the framework holds no extra refs.
+
+        The probe uses boxed_grads_call=True so PyNode::apply moves grads
+        into a mutable list (same mechanism as CompiledFunction). After
+        removing the grad from the list, a weakref must become dead — proving
+        the framework released all its refs.
+
+        Returns (ProbeClass, result_box). After backward,
+        result_box["ref_dead"] is True if no extra refs were held."""
+        result_box = {}
+
+        class RefcountProbe(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, pred):
+                return pred.clone()
+
+            @staticmethod
+            def backward(ctx, grads):
+                grad = grads.pop(0)
+                grad_for_return = grad.clone()
+                ref = weakref.ref(grad)
+                del grad
+                result_box["ref_dead"] = ref() is None
+                return grad_for_return
+
+        return RefcountProbe, result_box
+
+    def _assert_no_extra_refs(self, result_box):
+        """Assert the framework holds no extra refs to the grad tensor."""
+        self.assertIn("ref_dead", result_box)
+        self.assertTrue(
+            result_box["ref_dead"],
+            "Framework holds extra refs to tangent: weakref still alive after "
+            "removing all user-visible references",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_and_loss(self):
+        """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
+
+        Mirrors torchtitan's simple_fsdp training loop:
+          pred = compiled_model(input)   # torch.compile(model)
+          loss = compiled_loss(pred, labels)  # torch.compile(loss_fn)
+          loss.backward()
+
+        The tangent for model backward is created internally by loss backward.
+        No user variable holds it — only the C++ pyInputs tuple on the stack.
+        The boxed calling convention alone frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_eager_loss(self):
+        """Scenario: compiled model + eager loss (common training pattern).
+
+        Similar to torchtitan but loss is not compiled. The tangent is
+        created by eager cross_entropy backward. Boxed convention frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = torch.nn.functional.cross_entropy(pred.float(), labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_user_provided_via_pop(self):
+        """Scenario: user creates tangent but releases it before backward runs.
+
+        The user wraps the tangent in a list and calls out.backward(l.pop()).
+        After pop(), no Python variable holds the tangent — same as torchtitan.
+        The boxed calling convention should free it."""
+        model, x, _labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+        _, _, labels = self._make_model_and_input()
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+
+        # Wrap loss in a list and use pop() — no user variable holds loss
+        # after this. The tangent created by loss backward has no user ref.
+        loss_list = [loss]
+        del loss
+        loss_list.pop().backward()
+
+        self._assert_no_extra_refs(refcount_box)
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -5088,7 +5287,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
 
         self.assertExpectedInline(
@@ -5105,7 +5304,7 @@ def forward(self, arg0_1):
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (cos_1,));  gt = true_graph_0 = false_graph_0 = cos_1 = None
     getitem = cond[0];  cond = None
-    return (getitem,)""",  # noqa: B950
+    return (getitem,)""",
         )
 
         self.assertExpectedInline(
@@ -5227,7 +5426,7 @@ class <lambda>(torch.nn.Module):
 
                 add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
                 return (add_1,)
-""",  # noqa: B950
+""",
         )
 
     def test_aot_export_predispatch_map_2(self):
@@ -5317,7 +5516,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
         self.assertExpectedInline(
             str(gm.true_graph_0.code).strip(),
@@ -5358,7 +5557,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     getitem = _native_batch_norm_legit_functional[0]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    return (getitem_3, getitem_4, add, getitem)""",  # noqa: B950
+    return (getitem_3, getitem_4, add, getitem)""",
         )
 
     def test_aot_export_predispatch_reshape(self):
@@ -5378,7 +5577,7 @@ def forward(self, arg0_1):
     view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(view);  view = None
     return (sum_1,)""",
-        )  # noqa: B950
+        )
 
     def test_aot_export_predispatch_contiguous(self):
         class Cont(torch.nn.Module):
@@ -5396,7 +5595,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     return (sum_1,)""",
-        )  # noqa: B950
+        )
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
@@ -5466,7 +5665,7 @@ class <lambda>(torch.nn.Module):
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -5481,19 +5680,19 @@ class <lambda>(torch.nn.Module):
         self.assertExpectedInline(
             str(signature.inputs_to_parameters),
             """{'arg0_1': 'conv.weight', 'arg1_1': 'conv.bias', 'arg2_1': 'bn.weight', 'arg3_1': 'bn.bias'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.inputs_to_buffers),
             """{'arg4_1': 'bn.running_mean', 'arg5_1': 'bn.running_var', 'arg6_1': 'bn.num_batches_tracked'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.buffers_to_mutate),
             """{'getitem_3': 'bn.running_mean', 'getitem_4': 'bn.running_var', 'add': 'bn.num_batches_tracked'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.backward_signature.gradients_to_parameters),
             """{'getitem_9': 'conv.weight', 'getitem_10': 'conv.bias', 'getitem_6': 'bn.weight', 'getitem_7': 'bn.bias'}""",
-        )  # noqa: B950
+        )
         self.assertExpectedInline(
             str(signature.backward_signature.gradients_to_user_inputs), """{}"""
         )
@@ -5540,7 +5739,7 @@ class <lambda>(torch.nn.Module):
             sum_1,  # PlainAOTOutput(idx=0)
             detach,  # PlainAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
@@ -5620,7 +5819,7 @@ def forward(self, arg0_1, arg1_1):
     sum_2 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add, add_1)""",
-        )  # noqa: B950
+        )
         self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg1_1"})
 
     def test_aot_export_forward_mutation_multiple_mut(self):
@@ -5653,7 +5852,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     sum_3 = torch.ops.aten.sum.default(add_1)
     return (add_1, add, add_2, sum_3)""",
-        )  # noqa: B950
+        )
         self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg2_1"})
         self.assertEqual(sig.buffers_to_mutate, {"add_1": "buffer1"})
 
@@ -5784,7 +5983,7 @@ def forward(self, arg0_1):
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
+    return (add, add_1)""",
         )
 
         self.assertExpectedInline(
@@ -5851,7 +6050,7 @@ def forward(self):
     full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
     full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (full_1,)""",  # noqa: B950
+    return (full_1,)""",
         )
 
     def test_aot_export_input_mutation(self):
@@ -6702,6 +6901,7 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
 
@@ -6788,6 +6988,7 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops_nested_tuple(self):
         """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
 
@@ -6909,7 +7110,6 @@ def forward(self, primals_1, tangents_1):
                 subclass_inp_meta=[],
                 subclass_fw_graph_out_meta=[],
                 subclass_tangent_meta=[],
-                is_train=False,
                 traced_tangents_descs=[],
             )
             meta.tokens = {EffectType.ORDERED: torch.tensor([])}
@@ -6937,6 +7137,569 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    def _make_effectful_op(self, name):
+        @torch.library.custom_op(f"test::{name}", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        return op
+
+    def _make_wrapper_via_post_compile(self, compiled_fn, num_tokens):
+        from torch._functorch._aot_autograd.runtime_wrappers import EffectTokensWrapper
+
+        mock_meta = SimpleNamespace(tokens=dict.fromkeys(range(num_tokens)))
+        mock_aot_config = SimpleNamespace()
+        return EffectTokensWrapper().post_compile(
+            compiled_fn, mock_aot_config, runtime_metadata=mock_meta
+        )
+
+    def test_effect_tokens_codegen_single(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_single_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+            with capture_codegen_source("effect_tokens_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.ops.test.codegen_single_effect(x)
+
+                x = torch.randn(4)
+                out = f(x)
+
+            self.assertEqual(out, x)
+            self.assertEqual(
+                len(captured),
+                1,
+                "Expected effect_tokens_wrapper codegen artifact to be emitted",
+            )
+            source = captured[0]
+            self.assertIn("None", source)
+            self.assertIn("outs[1:]", source)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_no_codegen_when_zero(self):
+        with capture_codegen_source("effect_tokens_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4)
+            out = f(x)
+
+        self.assertEqual(out, x * 2)
+        self.assertEqual(
+            len(captured),
+            0,
+            "No codegen artifact should be emitted when there are no effect tokens",
+        )
+
+    def test_effect_tokens_codegen_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_correctness_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_correctness_effect(x)
+                return y + 1
+
+            x = torch.randn(3, 3)
+            out = f(x)
+            self.assertEqual(out, x + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_with_mutation(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_mutation_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_mutation_effect(x)
+                x.add_(1)
+                return y
+
+            x = torch.randn(4)
+            x_ref = x.clone()
+            out = f(x)
+
+            self.assertEqual(out, x_ref)
+            self.assertEqual(x, x_ref + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_multiple_outputs(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_multi_out_effect")
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_multi_out_effect(x)
+                return y, x * 2, x + 1
+
+            x = torch.randn(4)
+            out1, out2, out3 = f(x)
+
+            self.assertEqual(out1, x)
+            self.assertEqual(out2, x * 2)
+            self.assertEqual(out3, x + 1)
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_training_path(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        op = self._make_effectful_op("codegen_training_effect")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return grad
+
+        op.register_autograd(backward, setup_context=setup_context)
+        handle = _register_effectful_op(op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.codegen_training_effect(x)
+                return y * 2
+
+            x = torch.randn(3, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+            self.assertEqual(out, x * 2)
+            self.assertEqual(x.grad, torch.full((3,), 2.0))
+        finally:
+            handle.destroy()
+
+    def test_effect_tokens_codegen_multiple_tokens(self):
+        call_log = []
+
+        def mock_compiled_fn(args):
+            call_log.append(list(args))
+            return list(range(len(args)))
+
+        wrapper = self._make_wrapper_via_post_compile(mock_compiled_fn, num_tokens=2)
+
+        args = [10, 20, 30]
+        result = wrapper(args)
+        self.assertEqual(len(call_log), 1)
+        self.assertEqual(call_log[0], [None, None, 10, 20, 30])
+        self.assertEqual(args, [])
+        self.assertEqual(list(result), [2, 3, 4])
+
+    def test_effect_tokens_codegen_none_output(self):
+        def mock_compiled_fn(args):
+            return None
+
+        wrapper = self._make_wrapper_via_post_compile(mock_compiled_fn, num_tokens=2)
+
+        result = wrapper([10, 20])
+        self.assertIsNone(result)
+
+    # --- FunctionalizedRngRuntimeWrapper codegen tests ---
+
+    def _make_rng_wrapper_via_post_compile(
+        self, compiled_fn, *, return_new_outs=True, num_forward_returns=1
+    ):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            FunctionalizedRngRuntimeWrapper,
+        )
+
+        mock_meta = SimpleNamespace(
+            is_rng_op_functionalized=True,
+            num_forward_returns=num_forward_returns,
+            num_outputs_rng_offset=1,
+        )
+        mock_aot_config = SimpleNamespace()
+        return FunctionalizedRngRuntimeWrapper(
+            return_new_outs=return_new_outs
+        ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_emitted(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda")
+                f(x)
+
+        self.assertEqual(
+            len(captured),
+            1,
+            "Expected functionalized_rng_wrapper codegen artifact",
+        )
+        source = captured[0]
+        self.assertIn("_get_rng_state_", source)
+        self.assertIn("_set_offset_", source)
+
+    def test_functionalized_rng_no_codegen(self):
+        with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(
+            len(captured),
+            0,
+            "No codegen should be emitted when RNG is not functionalized",
+        )
+
+    def test_functionalized_rng_no_codegen_returns_same_fn(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            FunctionalizedRngRuntimeWrapper,
+        )
+
+        sentinel = lambda args: args  # noqa: E731
+        mock_meta = SimpleNamespace(
+            is_rng_op_functionalized=False,
+            num_forward_returns=1,
+        )
+        result = FunctionalizedRngRuntimeWrapper().post_compile(
+            sentinel, SimpleNamespace(), runtime_metadata=mock_meta
+        )
+        self.assertIs(result, sentinel)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(8, device="cuda")
+            out = f(x)
+
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.device, x.device)
+        self.assertTrue((out >= 0).all() and (out <= 1).all())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_multi_output(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                noise = torch.rand_like(x)
+                return x + noise, x * 2
+
+            x = torch.randn(4, device="cuda")
+            out1, out2 = f(x)
+
+        self.assertEqual(out2, x * 2)
+        self.assertEqual(out1.shape, x.shape)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_advances_state(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(100, device="cuda")
+            out1 = f(x)
+            out2 = f(x)
+
+        self.assertFalse(
+            torch.allclose(out1, out2),
+            "Successive calls should produce different random outputs",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_source_structure(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x)
+
+                f(torch.randn(4, device="cuda"))
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _functionalized_rng_wrapper", source)
+        self.assertIn("extend", source)
+        self.assertIn("outs[", source)
+
+    def test_functionalized_rng_codegen_unit_return_new_outs(self):
+        set_offset_log = []
+
+        def mock_get_rng_state():
+            return ("seed", "offset")
+
+        def mock_set_offset(val):
+            set_offset_log.append(val)
+
+        def mock_compiled_fn(args):
+            return [f"out_{i}" for i in range(len(args))]
+
+        from unittest.mock import patch as mock_patch
+
+        with (
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                mock_get_rng_state,
+            ),
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                mock_set_offset,
+            ),
+        ):
+            wrapper = self._make_rng_wrapper_via_post_compile(
+                mock_compiled_fn, return_new_outs=True, num_forward_returns=2
+            )
+            result = wrapper(["a", "b"])
+
+        self.assertEqual(set_offset_log, ["out_2"])
+        self.assertEqual(result, ["out_0", "out_1", "out_3"])
+
+    def test_functionalized_rng_codegen_unit_no_return_new_outs(self):
+        set_offset_log = []
+
+        def mock_get_rng_state():
+            return ("seed", "offset")
+
+        def mock_set_offset(val):
+            set_offset_log.append(val)
+
+        def mock_compiled_fn(args):
+            return [f"out_{i}" for i in range(len(args))]
+
+        from unittest.mock import patch as mock_patch
+
+        with (
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                mock_get_rng_state,
+            ),
+            mock_patch(
+                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                mock_set_offset,
+            ),
+        ):
+            wrapper = self._make_rng_wrapper_via_post_compile(
+                mock_compiled_fn, return_new_outs=False, num_forward_returns=2
+            )
+            result = wrapper(["a", "b"])
+
+        self.assertEqual(set_offset_log, ["out_2"])
+        self.assertEqual(result, ["out_0", "out_1", "out_2", "out_3"])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_training(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x) * x
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+            self.assertEqual(out.shape, x.shape)
+            self.assertIsNotNone(x.grad)
+            self.assertEqual(x.grad.shape, x.shape)
+
+    def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
+
+        def f(x):
+            x.add_(1)
+            return [torch.sin(x)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2)),
+            fake_mode.from_tensor(torch.ones(2)),
+        )
+
+        keep_input_mutations_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(keep_input_mutations_meta.mutated_inp_runtime_indices, [])
+        self.assertEqual(len(keep_input_mutations_meta.subclass_fw_graph_out_meta), 1)
+        self.assertIsInstance(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+
+        out_of_graph_mutation_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(out_of_graph_mutation_meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(out_of_graph_mutation_meta.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                1
+            ].flat_tensor_start_idx,
+            2,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_metadata_only_mutation(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+
+        def f(x):
+            x.transpose_(0, 1)
+            return [TwoTensor(torch.sin(x), torch.cos(x))]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(2, 3))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(metadata.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(metadata.subclass_fw_graph_out_meta[0], PlainTensorMeta)
+        self.assertEqual(metadata.subclass_fw_graph_out_meta[0].unwrapped_idx, 0)
+        self.assertIsInstance(
+            metadata.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            metadata.subclass_fw_graph_out_meta[1].flat_tensor_start_idx,
+            1,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_intermediate_bases(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        def f(x):
+            y = x.a + x.b
+            return [y.view(-1), y.view(-1)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+        )
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+
+        self.assertEqual(metadata.num_intermediate_bases, 1)
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 3)
+        self.assertTrue(
+            all(
+                isinstance(out_meta, PlainTensorMeta)
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            )
+        )
+        self.assertEqual(
+            [
+                out_meta.unwrapped_idx
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            ],
+            [0, 1, 2],
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_in_checkpoint_accumulated_grad(self):
+        def body(y):
+            y.register_hook(lambda grad: grad * 0.5)
+            return y.clone()
+
+        def fn(x):
+            y = x * 2
+            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
+            return z + y
+
+        x = torch.randn(4, device="cuda", requires_grad=True)
+        out = fn(x)
+        out.sum().backward()
+        eager_grad = x.grad.clone()
+
+        x2 = x.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out2 = opt_fn(x2)
+        out2.sum().backward()
+        self.assertEqual(x2.grad, eager_grad)
 
 
 class TestAOTDispatch(AOTTestCase):
@@ -7099,7 +7862,7 @@ def forward(self, tangents_1, tangents_2):
             """
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+""",
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
@@ -7407,7 +8170,7 @@ metadata incorrectly.
 
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
-        # flake8: noqa: TOR901
+        # noqa: SCOPED_LIBRARY
         self.lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
         self.d = {
             torch.channels_last: 0,
@@ -8260,7 +9023,7 @@ Expected a .* tangent but got a plain Tensor.""",
         hooks,
         symbolic_tracing=True,
         pre_compile_fn=None,
-        backend="inductor",
+        backend="aot_eager",
     ):
         ctx = torch.autograd.graph.saved_tensors_hooks
         torch._dynamo.reset()
@@ -8470,122 +9233,125 @@ Expected a .* tangent but got a plain Tensor.""",
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_params(self):
-        lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
-        logged_shapes = []
-        logged_dtypes = []
-        lib.define("log(Tensor x) -> Tensor")
+        with torch.library._scoped_library("_test_aotdispatch_lib", "FRAGMENT") as lib:
+            logged_shapes = []
+            logged_dtypes = []
+            lib.define("log(Tensor x) -> Tensor")
 
-        def log_impl(x):
-            logged_shapes.append(list(x.shape))
-            logged_dtypes.append(x.dtype)
-            return x.clone()
+            def log_impl(x):
+                logged_shapes.append(list(x.shape))
+                logged_dtypes.append(x.dtype)
+                return x.clone()
 
-        def log_meta(x):
-            return x.clone()
+            def log_meta(x):
+                return x.clone()
 
-        for backend in ["CPU", "CUDA"]:
-            lib.impl(
-                "log",
-                log_impl,
-                backend,
-            )
-        lib.impl("log", log_meta, "Meta")
+            for backend in ["CPU", "CUDA"]:
+                lib.impl(
+                    "log",
+                    log_impl,
+                    backend,
+                )
+            lib.impl("log", log_meta, "Meta")
 
-        def pack_fp8_with_scale_and_log(x):
-            torch.ops._test_aotdispatch_lib.log(x)
-            return _pack_fp8_with_scale_wrap(x)
+            def pack_fp8_with_scale_and_log(x):
+                torch.ops._test_aotdispatch_lib.log(x)
+                return _pack_fp8_with_scale_wrap(x)
 
-        def unpack_fp8_with_scale_and_log(packed):
-            return _unpack_fp8_with_scale_wrap(packed)
+            def unpack_fp8_with_scale_and_log(packed):
+                return _unpack_fp8_with_scale_wrap(packed)
 
-        def m_inp_fn():
-            x = torch.ones(
-                2, 2, 2, device=device, dtype=torch.float64, requires_grad=True
-            )
-            torch._dynamo.mark_dynamic(x, 0)
-            torch._dynamo.mark_dynamic(x, 1)
-            return (x,)
+            def m_inp_fn():
+                x = torch.ones(
+                    2, 2, 2, device=device, dtype=torch.float64, requires_grad=True
+                )
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                return (x,)
 
-        class SAF0(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
+            class SAF0(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
 
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
+                @staticmethod
+                def backward(ctx, gx):
+                    (saved_x,) = ctx.saved_tensors
+                    return gx + saved_x
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(2, 2)
-                self.relu = nn.ReLU()
-                self.fc2 = nn.Linear(2, 2)
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(2, 2)
+                    self.relu = nn.ReLU()
+                    self.fc2 = nn.Linear(2, 2)
 
-            def forward(self, x):
-                x = SAF0.apply(x)
-                x = x.to(dtype=torch.float32)
-                x = self.fc1(x)
-                x = self.relu(x)
-                x = self.fc2(x)
-                return x
+                def forward(self, x):
+                    x = SAF0.apply(x)
+                    x = x.to(dtype=torch.float32)
+                    x = self.fc1(x)
+                    x = self.relu(x)
+                    x = self.fc2(x)
+                    return x
 
-        def _reset_logged():
-            logged_shapes.clear()
-            logged_dtypes.clear()
+            def _reset_logged():
+                logged_shapes.clear()
+                logged_dtypes.clear()
 
-        device = torch.device("cuda:0")
-        m = M().to(device=device)
+            device = torch.device("cuda:0")
+            m = M().to(device=device)
 
-        def _test_m():
-            self._test_pack_hooks(
-                m,
-                m_inp_fn,
-                [
-                    (
+            def _test_m():
+                self._test_pack_hooks(
+                    m,
+                    m_inp_fn,
+                    [
                         (
-                            pack_fp8_with_scale_and_log,
-                            unpack_fp8_with_scale_and_log,
-                        ),
-                        True,
-                    )
-                ],
-                pre_compile_fn=_reset_logged,
-                backend="aot_eager",
-            )
+                            (
+                                pack_fp8_with_scale_and_log,
+                                unpack_fp8_with_scale_and_log,
+                            ),
+                            True,
+                        )
+                    ],
+                    pre_compile_fn=_reset_logged,
+                    backend="aot_eager",
+                )
 
-        with patch(
-            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "donated"
-        ):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were not applied to Parameters
-            # parameters excluded
-            self.assertFalse([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            # input excluded
-            self.assertFalse(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode", "donated"
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were not applied to Parameters
+                # parameters excluded
+                self.assertFalse([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                # input excluded
+                self.assertFalse(torch.float64 in logged_dtypes)
 
-        with patch(
-            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "no_static"
-        ):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were not applied to Parameters
-            # parameters excluded
-            self.assertFalse([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            self.assertTrue(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode",
+                "no_static",
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were not applied to Parameters
+                # parameters excluded
+                self.assertFalse([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                self.assertTrue(torch.float64 in logged_dtypes)
 
-        with patch("torch._functorch.config.saved_tensors_hooks_filtering_mode", "all"):
-            _reset_logged()
-            _test_m()
-            # Check that hooks were applied to all saved tensors
-            self.assertTrue([2, 2] in logged_shapes)
-            self.assertTrue([2, 2, 2] in logged_shapes)
-            self.assertTrue(torch.float64 in logged_dtypes)
+            with patch(
+                "torch._functorch.config.saved_tensors_hooks_filtering_mode", "all"
+            ):
+                _reset_logged()
+                _test_m()
+                # Check that hooks were applied to all saved tensors
+                self.assertTrue([2, 2] in logged_shapes)
+                self.assertTrue([2, 2, 2] in logged_shapes)
+                self.assertTrue(torch.float64 in logged_dtypes)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
@@ -8832,10 +9598,10 @@ symbolic_aot_autograd_failures = {
         "nn.functional.batch_norm", ""
     ),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail(
-        "nn.functional.binary_cross_entropy", ""
-    ),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail(
         "nn.functional.cross_entropy", ""
+    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail(
+        "nn.functional.linear_cross_entropy", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "nn.functional.ctc_loss", ""
@@ -9047,8 +9813,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
-    # RuntimeError: expected int at position 0, but got: SymInt
 }
 
 

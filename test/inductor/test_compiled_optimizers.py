@@ -201,28 +201,54 @@ class KernelCounts(NamedTuple):
 KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12""") ,
     "test_nadam_foreach_weight_decay_momentum_decay_cpu": lambda x: assert_expected_inline(x, """20"""),
+    "test_adam_tensor_lr_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_tensor_lr_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_maximize_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adamw_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adam_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_adam_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """3"""),
     "test_adam_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adadelta_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adadelta_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_rmsprop_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_rmsprop_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_rmsprop_weight_decay_centered_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_rmsprop_weight_decay_centered_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_rmsprop_weight_decay_centered_momentum_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_rmsprop_weight_decay_centered_momentum_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_rmsprop_weight_decay_centered_momentum_maximize_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_rmsprop_weight_decay_centered_momentum_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
     "test_adadelta_foreach_weight_decay_maximize_cpu": lambda x: assert_expected_inline(x, """12"""),
     "test_adadelta_foreach_rho_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
     "test_adadelta_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
@@ -245,21 +271,27 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_cpu": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """7"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """7"""),
+    "test_nadam_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_maximize_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_momentum_decay_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_momentum_decay_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_momentum_decay_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_weight_decay_momentum_decay_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """10"""),
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """10"""),
     "test_sgd_tensor_lr_cpu": lambda x: assert_expected_inline(x, """2"""),
     "test_sgd_tensor_lr_cuda": lambda x: assert_expected_inline(x, """2"""),
     "test_sgd_tensor_lr_xpu": lambda x: assert_expected_inline(x, """2"""),
@@ -268,16 +300,16 @@ KERNEL_COUNT_OVERRIDES = {
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
-    Adam: KernelCounts(multitensor=2, singletensor=8),
+    Adam: KernelCounts(multitensor=3, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=8),
+    NAdam: KernelCounts(multitensor=2, singletensor=12),
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=8),
-    RAdam: KernelCounts(multitensor=2, singletensor=8),
+    RAdam: KernelCounts(multitensor=2, singletensor=12),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
 
@@ -555,10 +587,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 compiled_step()
 
             # perturb state to force recompile
-            # Adagrad doesn't reinitialize state on each step
             # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is SGD:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adagrad:
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["sum"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]]["sum"] = (
+                    torch.zeros_like(state_tensor)
+                )
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
                     opt_compiled.param_groups[0]["params"][0]
@@ -571,7 +609,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             compiled_step()
 
-        if self.check_kernel_count:
+        if self.check_kernel_count and kernel_count is not None:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
             # hence, the usual kernel count is 2
@@ -726,7 +764,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01, kernel_count=None)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=8, lr=0.01, foreach=False

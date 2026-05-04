@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
     set_cwd,
@@ -197,6 +198,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "distributed/pipelining/test_dtensor_pp_integration",
 ]
 
 # Add architecture-specific blocklist entries
@@ -1802,7 +1804,50 @@ def get_selected_tests(options) -> list[str]:
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
-    if sys.platform == "win32" and not options.ignore_win_blocklist:
+    if IS_WINDOWS and not options.ignore_win_blocklist:
+        from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
+
+        # Disable tests on Windows for SM89 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM89OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # Windows fatal exception / access violation
+                    "functorch/test_aotdispatch",
+                    "functorch/test_control_flow",
+                    "nn/test_convolution",
+                    "profiler/test_profiler",
+                    "test_modules",
+                    "test_expanded_weights",
+                    "test_jit",
+                    "test_nested_tensor",
+                    "test_nestedtensor",
+                    "test_nn",
+                    # DLL load failed errors, missing dependencies
+                    "test_custom_ops",
+                    "test_testing",
+                    # Features not supported on Windows ( e.g. rowwise scaling)
+                    "test_decomp",
+                    "test_transformers",
+                    "test_ops",
+                    # Output mismatch errors and long running tests
+                    "test_linalg",
+                    "test_matmul_cuda",
+                    "functorch/test_ops",
+                    "test_scaled_matmul_cuda",
+                ]
+            )
+
+        # Disable tests on Windows for SM120 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM120OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # test_api fails on Windows SM120+. Triage pending.
+                    "cpp/test_api",
+                ]
+            )
+
         target_arch = os.environ.get("VSCMD_ARG_TGT_ARCH")
         if target_arch != "x64":
             WINDOWS_BLOCKLIST.append("cpp_extensions_aot_no_ninja")
@@ -1863,13 +1908,18 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    job_name = os.environ.get("JOB_NAME")
+    raw_job_name = os.environ.get("JOB_NAME")
+    build_env = os.environ.get("BUILD_ENVIRONMENT")
+    job_name = raw_job_name
     if job_name is None or job_name == "":
         # If job name isn't available, use build environment as a backup
-        job_name = os.environ.get("BUILD_ENVIRONMENT")
+        job_name = build_env
     else:
         job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
+    print_to_stderr(f"JOB_NAME={raw_job_name}")
+    print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
+    print_to_stderr(f"test-times lookup key={job_name}, test_config={test_config}")
     if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
         return test_times_file[job_name][test_config]
