@@ -3746,11 +3746,13 @@ class WrapperDescriptorVariable(VariableTracker):
     def __init__(
         self,
         descriptor: types.WrapperDescriptorType,
+        owner: VariableTracker,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         assert isinstance(descriptor, types.WrapperDescriptorType)
         self.descriptor = descriptor
+        self.owner = owner
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -3779,7 +3781,7 @@ class WrapperDescriptorVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Unbound call: list.__add__([1,2], [3,4]) -- first arg is self.
-        # Mirrors wrapperdescr_call.
+        # Mirrors wrapperdescr_call which invokes the C slot directly.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L535
         if not args:
             raise_type_error(
@@ -3788,7 +3790,9 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
+        return self.owner.call_method(
+            tx, self.descriptor.__name__, [obj, *rest], kwargs
+        )
 
     def tp_descr_get_impl(
         self,
@@ -3874,11 +3878,13 @@ class MethodDescriptorVariable(VariableTracker):
     def __init__(
         self,
         descriptor: types.MethodDescriptorType,
+        owner: VariableTracker,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         assert isinstance(descriptor, types.MethodDescriptorType)
         self.descriptor = descriptor
+        self.owner = owner
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -3906,6 +3912,8 @@ class MethodDescriptorVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Mirrors methoddescr_call which invokes the C method directly.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L427
         if not args:
             raise_type_error(
                 tx,
@@ -3913,21 +3921,19 @@ class MethodDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        # Mirrors descr_check: verify the first arg is an instance of
-        # __objclass__ before calling.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L78-L91
+        name = self.descriptor.__name__
         try:
             obj_type = obj.python_type()
             if not issubclass(obj_type, self.descriptor.__objclass__):
                 raise_type_error(
                     tx,
-                    f"descriptor '{self.descriptor.__name__}' for "
+                    f"descriptor '{name}' for "
                     f"'{self.descriptor.__objclass__.__name__}' objects "
                     f"doesn't apply to a '{obj_type.__name__}' object",
                 )
         except NotImplementedError:
             pass
-        return obj.call_method(tx, self.descriptor.__name__, list(rest), kwargs)
+        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -4148,6 +4154,7 @@ class ClassMethodVariable(VariableTracker):
             self.descriptor.__func__,
             owner,
             source_fn=func_source,
+            source=self.source,
         )
 
 
@@ -4365,6 +4372,11 @@ class TupleGetterVariable(VariableTracker):
 
     def python_type(self) -> type:
         return _collections._tuplegetter
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__doc__":
+            return VariableTracker.build(tx, self.descriptor.__doc__)
+        return super().var_getattr(tx, name)
 
     def tp_descr_get_impl(
         self,
