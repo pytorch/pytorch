@@ -2580,6 +2580,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec=None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2594,6 +2595,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec=None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2609,6 +2611,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
+    shapes_spec=None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2765,6 +2768,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
+                shapes_spec=shapes_spec,
             )
 
         return fn
@@ -2823,6 +2827,7 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
+        shapes_spec=shapes_spec,
     )(model)  # type: ignore[return-value]
 
 
