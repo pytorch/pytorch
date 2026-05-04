@@ -1,5 +1,6 @@
 #include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 using namespace metal;
@@ -100,26 +101,12 @@ REGISTER_EXPONENTIAL(float);
 REGISTER_EXPONENTIAL(half);
 REGISTER_EXPONENTIAL(bfloat);
 
-// Convert a 0/1 mask bit into the output dtype. For complex types we keep
-// the mask in the real component and zero the imaginary part — matching the
-// previous MPSGraph behaviour where bool was cast to complex via "1+0j / 0+0j".
-// `static_cast<float2>(v)` would broadcast to `(v, v)`, which is wrong here.
-template <typename T>
-inline T bernoulli_to(uint v) {
-  return static_cast<T>(v);
-}
-template <>
-inline float2 bernoulli_to<float2>(uint v) {
-  return float2(static_cast<float>(v), 0.0f);
-}
-template <>
-inline half2 bernoulli_to<half2>(uint v) {
-  return half2(static_cast<half>(v), 0.0h);
-}
-
 // Bernoulli with scalar probability p. Each thread processes 4 elements,
 // amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
-// kernel becomes bandwidth-bound rather than RNG-bound.
+// kernel becomes bandwidth-bound rather than RNG-bound. The mask bit is
+// converted to T via `c10::metal::cast_to`, which routes complex destinations
+// to `T(value, 0)` — matching the previous MPSGraph behaviour where bool was
+// cast to complex as "1+0j" / "0+0j".
 template <typename T>
 kernel void bernoulli_scalar(
     device T* output [[buffer(0)]],
@@ -134,7 +121,7 @@ kernel void bernoulli_scalar(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
+    output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
   }
 }
 
@@ -156,7 +143,7 @@ kernel void bernoulli_tensor(
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     float p = probs[base + i];
-    output[base + i] = bernoulli_to<T>(u < p ? 1u : 0u);
+    output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
   }
 }
 
