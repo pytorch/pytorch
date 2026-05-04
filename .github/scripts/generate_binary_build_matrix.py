@@ -504,8 +504,7 @@ arch_version = ""
 for arch_version in CUDA_ARCHES:
     # NCCL pin is intentionally held back below the wheel version due to an
     # ongoing SEV; skip the consistency check until the pin can be advanced.
-    if arch_version != "13.0":
-        validate_nccl_dep_consistency(arch_version)
+    # validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
 del arch_version
 
