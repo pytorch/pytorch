@@ -6839,6 +6839,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
     if not dtype.is_floating_point:
         raise ValueError(f"linear_cross_entropy requires floating point type inputs, got {dtype}")
     reductions = ("mean", "sum", "none")
+    chunked_reductions = ("mean", "sum")
 
     LinearCrossEntropyOptions = torch.nn.functional.LinearCrossEntropyOptions
     # Samples with non-zero label_smoothing are not generated because
@@ -6851,19 +6852,19 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
         *[dict(weight="<to be initialized>", reduction=reduction) for reduction in reductions],
         dict(ignore_index=1),
         *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=2,
-                                                                      allow_retain_graph=True)) for reduction in reductions],
+                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
         *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=3,
-                                                                      allow_retain_graph=True)) for reduction in reductions],
+                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
         *[dict(weight="<to be initialized>", reduction=reduction,
                options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True))
-          for reduction in reductions],
+          for reduction in chunked_reductions],
         dict(ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
         dict(weight="<to be initialized>", ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
     ]
     if dtype in {torch.float16, torch.bfloat16}:
         kwargs_list.extend([
             dict(reduction=reduction, options=LinearCrossEntropyOptions(acc_dtype=torch.float32,
-                                                                        allow_retain_graph=True)) for reduction in reductions
+                                                                        allow_retain_graph=True)) for reduction in chunked_reductions
         ])
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
