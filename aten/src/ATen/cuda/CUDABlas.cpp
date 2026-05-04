@@ -1732,19 +1732,16 @@ bool gemm_and_bias(
   // - bias fusion through a matrix descriptor, then (Cdesc, c_ptr) are that
   //   of the provided bias.
   const auto get_Cdesc_params = [&]() -> std::tuple<CuBlasLtMatrixLayout, const void*> {
+    // This will set/unset epilogue parameters based on use_bias_descriptor
+    set_epilogue_attributes();
 #ifndef USE_ROCM
     auto c_ptr_val = use_bias_descriptor ? reinterpret_cast<uintptr_t>(bias) : reinterpret_cast<uintptr_t>(result_ptr);
     auto c_alignment = _getAlignment(c_ptr_val);
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
-    if (use_bias_descriptor) {
-      return std::make_tuple(CuBlasLtMatrixLayout(abType, m, n, 0), bias);
-    } else {
-      if (use_bias_epilogue) {
-        set_epilogue_attributes();
-      }
-      return std::make_tuple(CuBlasLtMatrixLayout(cType, m, n, result_ld), result_ptr);
-    }
+    return use_bias_descriptor
+      ? std::make_tuple(CuBlasLtMatrixLayout(abType, m, n, 0), bias)
+      : std::make_tuple(CuBlasLtMatrixLayout(cType, m, n, result_ld), result_ptr);
   };
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);

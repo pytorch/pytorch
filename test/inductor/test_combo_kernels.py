@@ -161,19 +161,54 @@ class ComboKernelTests(TestCase):
             c2 = torch.add(a2, b2)
             return c0, c1, c2
 
-        self.check_model_gpu(
-            fn,
-            (
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(40, 30, device=GPU_TYPE),
-                torch.rand(36, 40, device=GPU_TYPE),
-                torch.rand(30, 20, device=GPU_TYPE),
-                torch.rand(30, 40, device=GPU_TYPE).t(),
-                torch.rand(40, 36, device=GPU_TYPE).t(),
-            ),
+        inps = (
+            torch.rand(30, 20, device=GPU_TYPE),
+            torch.rand(40, 30, device=GPU_TYPE),
+            torch.rand(36, 40, device=GPU_TYPE),
+            torch.rand(30, 20, device=GPU_TYPE),
+            torch.rand(30, 40, device=GPU_TYPE).t(),
+            torch.rand(40, 36, device=GPU_TYPE).t(),
         )
-
+        self.check_model_gpu(fn, inps)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        # Verify the cpp_wrapper grid computation uses per-subkernel block sizes.
+        # Without per-subkernel block support, generate_lazy only provides shared
+        # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
+        # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
+        # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        if (
+            torch._inductor.config.cpp_wrapper
+            and self.combo_kernel_per_subkernel_blocks
+        ):
+            from torch.profiler import ProfilerActivity
+
+            fn_c = torch.compile(fn)
+            expected = fn(*inps)
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
+            with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+                with torch.profiler.profile(activities=[activity]) as prof:
+                    actual = fn_c(*inps)
+                    actual = fn_c(*inps)
+                self.assertEqual(expected, actual)
+
+                prof.export_chrome_trace(trace_file.name)
+                with open(trace_file.name) as f:
+                    trace_json = json.load(f)
+
+            combo_events = [
+                e
+                for e in trace_json["traceEvents"]
+                if "triton_poi_fused_1" in e.get("name", "")
+            ]
+            self.assertTrue(len(combo_events) > 0)
+            # With proper block sizes (>=16), the grid should be much smaller
+            # than the degenerate 30*40 + 40*36 = 2640 (block=1).
+            degenerate_grid = 30 * 40 + 40 * 36
+            for e in combo_events:
+                grid = e.get("args", {}).get("grid")
+                if grid:
+                    self.assertLess(grid[0], degenerate_grid)
 
     @requires_gpu_and_triton
     def test_persistent_reduction_size_hint(self):

@@ -5,5 +5,5 @@
 #include <metal_stdlib>
 
 using namespace metal;
-
 #include <ATen/native/mps/kernels/DecodeAttention.h>
+#include <ATen/native/mps/kernels/PrefillAttention.h>
