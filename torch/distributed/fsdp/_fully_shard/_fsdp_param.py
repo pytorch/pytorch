@@ -7,21 +7,12 @@ from enum import auto, Enum
 from typing import Any, cast
 
 import torch
+import torch.distributed.spmd_types as spmd
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
-from torch.distributed.spmd_types import (
-    assert_type as spmd_assert_type,
-    get_local_type,
-    has_local_type,
-    I,
-    MeshAxis,
-    R,
-    S,
-    V,
-)
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
@@ -271,7 +262,11 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
-        self.is_spmd_types = has_local_type(param) and not isinstance(param, DTensor)
+        self.is_spmd_types = (
+            spmd.is_available()
+            and spmd.has_local_type(param)
+            and not isinstance(param, DTensor)
+        )
         if self.is_spmd_types:
             param = self._spmd_types_to_dtensor(param, mesh_info)
         self.is_dtensor = isinstance(param, DTensor)
@@ -357,23 +352,19 @@ class FSDPParam:
                 "(pass dp_mesh_dims to fully_shard)"
             )
 
-        local_type = get_local_type(param)
+        local_type = spmd.get_local_type(param)
         self._spmd_types_orig_type = dict(local_type)
 
         placements: list[Placement] = []
         for name in spmd_mesh.mesh_dim_names:
-            axis = MeshAxis.of(spmd_mesh.get_group(name))
+            axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
             axis_type = local_type.get(axis)
-            if axis_type is None or axis_type is I or axis_type is R:
+            if axis_type is None or axis_type is spmd.I or axis_type is spmd.R:
                 placements.append(Replicate())
-            elif isinstance(axis_type, S):
+            elif isinstance(axis_type, spmd.S):
                 placements.append(Shard(axis_type.dim))
-            elif axis_type is V:
-                from spmd_types.runtime import (  # pyrefly: ignore[missing-import]
-                    get_partition_spec,
-                )
-
-                spec = get_partition_spec(param)
+            elif axis_type is spmd.V:
+                spec = spmd.get_partition_spec(param)
                 if spec is not None:
                     from spmd_types.types import (  # pyrefly: ignore[missing-import]
                         partition_spec_get_shard,
@@ -406,7 +397,7 @@ class FSDPParam:
             return
         orig_type = self._spmd_types_orig_type
         if orig_type:
-            spmd_assert_type(tensor, orig_type)
+            spmd.assert_type(tensor, orig_type)
 
     def _init_sharding_spec(
         self,

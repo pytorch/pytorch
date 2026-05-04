@@ -7,6 +7,7 @@ from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+import torch.distributed.spmd_types as spmd
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import (
@@ -14,7 +15,6 @@ from torch.distributed.fsdp._common_utils import (
     collect_grad_tensors,
     replace_grad_tensors,
 )
-from torch.distributed.spmd_types import no_typecheck
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
@@ -518,7 +518,7 @@ class FSDPParamGroup:
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
-        with no_typecheck(), record_function(self._with_fqn("FSDP::pre_forward")):
+        with spmd.no_typecheck(), record_function(self._with_fqn("FSDP::pre_forward")):
             # FORWARD at entry means another module in the grouped
             # ``fully_shard([a, b])`` already registered post_backward this
             # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
@@ -533,7 +533,7 @@ class FSDPParamGroup:
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
-        with no_typecheck(), record_function(self._with_fqn("FSDP::post_forward")):
+        with spmd.no_typecheck(), record_function(self._with_fqn("FSDP::post_forward")):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
             # it shouldn't change post_forward_order
             if not is_bw():
@@ -554,7 +554,7 @@ class FSDPParamGroup:
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
         logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
-        with no_typecheck(), record_function(self._with_fqn("FSDP::pre_backward")):
+        with spmd.no_typecheck(), record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
@@ -562,7 +562,7 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     @_dynamo_disable
-    @no_typecheck()
+    @spmd.no_typecheck()
     def post_backward(self, *unused: Any):
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)

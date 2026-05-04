@@ -19,3 +19,10 @@ def is_available() -> bool:
 
 if _HAS_SPMD_TYPES:
     from spmd_types import *  # noqa: F403  # pyrefly: ignore[missing-import]
+else:
+    import contextlib as _contextlib
+
+    @_contextlib.contextmanager
+    def no_typecheck():
+        """No-op stub when spmd_types is not installed."""
+        yield
