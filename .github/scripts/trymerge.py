@@ -1463,6 +1463,23 @@ def read_merge_rules(repo: GitRepo | None, org: str, project: str) -> list[Merge
         return [MergeRule(**x) for x in rc]
 
 
+def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]:
+    """Return files that do not match the given patterns.
+
+    Patterns prefixed with '-' are exclusions: a file matches the rule if it
+    matches at least one positive pattern AND does not match any negative one.
+    """
+    positive = [p for p in patterns if not p.startswith("-")]
+    negative = [p[1:] for p in patterns if p.startswith("-")]
+    patterns_re = patterns_to_regex(positive)
+    exclude_re = patterns_to_regex(negative) if negative else None
+    return [
+        f
+        for f in files
+        if not patterns_re.match(f) or (exclude_re is not None and exclude_re.match(f))
+    ]
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: GitRepo | None = None,
@@ -1523,13 +1540,7 @@ def find_matching_merge_rule(
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
-        patterns_re = patterns_to_regex(rule.patterns)
-        non_matching_files = []
-
-        # Does this rule apply to all the files?
-        for fname in changed_files:
-            if not patterns_re.match(fname):
-                non_matching_files.append(fname)
+        non_matching_files = _find_non_matching_files(rule.patterns, changed_files)
         if len(non_matching_files) > 0:
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
