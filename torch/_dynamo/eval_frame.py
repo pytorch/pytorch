@@ -1066,10 +1066,11 @@ class _TorchDynamoContext:
                     if fullgraph_count_enabled and call_succeeded:
                         count = set_fullgraph_compiled_frame_count(-1)
                         if count == 0:
-                            raise RuntimeError(
+                            torch._dynamo.utils.warn_once(
                                 "torch.compile with fullgraph=True found no compiled frames. "
                                 "The frame was likely skipped (e.g., a non-infra torch dispatch "
-                                "mode was active, dynamo was disabled, or the frame was skipped."
+                                "mode was active, dynamo was disabled, or the frame was skipped. "
+                                "This may become an error in the future."
                             )
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)

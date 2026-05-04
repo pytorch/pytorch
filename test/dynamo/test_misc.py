@@ -412,7 +412,7 @@ graph():
         self.assertEqual(len(backend.graphs), 0)
 
         with YoloMode():
-            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+            with self.assertWarnsRegex(UserWarning, "found no compiled frames"):
                 torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
 
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
