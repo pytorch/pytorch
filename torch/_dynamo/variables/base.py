@@ -721,9 +721,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
             # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
             if hasattr(self, "tp_descr_get_impl"):
-                descriptor = getattr(self, "descriptor", None)
-                descr_name = getattr(descriptor, "__name__", "__get__")
-                return self.tp_descr_get_impl(tx, args[0], descr_name)
+                obj = args[0]
+                owner = args[1] if len(args) > 1 else obj.var_getattr(tx, "__class__")
+                return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561

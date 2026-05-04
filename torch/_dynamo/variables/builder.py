@@ -764,7 +764,7 @@ class VariableBuilder:
         obj_source = self.source and AttrSource(self.source, "__self__")
         obj_vt = VariableTracker.build(self.tx, obj, obj_source)
         return BoundBuiltinMethodVariable(
-            descriptor, obj_vt, value.__name__, source=self.source
+            descriptor, obj_vt, source=self.source
         )
 
     def _wrap(self, value: Any) -> VariableTracker:
@@ -1571,7 +1571,7 @@ class VariableBuilder:
                 obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, obj, obj_source)
             return MethodWrapperVariable(
-                descriptor, obj_vt, value.__name__, source=self.source
+                descriptor, obj_vt, source=self.source
             )
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
@@ -4416,7 +4416,7 @@ class SourcelessBuilder:
                     break
             assert isinstance(descriptor, types.WrapperDescriptorType)
             obj_vt = SourcelessBuilder.create(tx, obj)
-            return MethodWrapperVariable(descriptor, obj_vt, value.__name__)
+            return MethodWrapperVariable(descriptor, obj_vt)
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
