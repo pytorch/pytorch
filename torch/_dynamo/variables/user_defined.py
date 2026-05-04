@@ -1244,7 +1244,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 dict_arg = dict_arg._base_vt
             if isinstance(dict_arg, ConstDictVariable):
                 return variables.MappingProxyVariable(dict_arg)
-        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
+        elif SideEffects.cls_supports_mutation_side_effects(self.value):
             with do_not_convert_to_tracable_parameter():
                 result = tx.inline_user_function_return(
                     VariableTracker.build(
