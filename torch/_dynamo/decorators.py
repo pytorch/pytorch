@@ -523,34 +523,33 @@ def leaf_function(
 
         **register_multi_grad_hook (optional)**:
         You can register a backward hook via ``@fn.register_multi_grad_hook``
-        to run code when gradients have been computed
-        for all requires_grad tensor inputs during backward. The hook fires exactly once
-        per backward pass. The hook function has the same signature as the leaf function;
-        each requires_grad tensor argument receives the corresponding gradient instead
-        of the original tensor. Non-tensor arguments and tensors without requires_grad
-        are passed through unchanged. The hook must return ``None``. The hook is called
-        as a leaf function itself, so it is also opaque to the compiler.
+        to run code when gradients have been computed for all requires_grad
+        tensor inputs during backward. The hook fires exactly once per
+        backward pass. The hook receives only the gradients of the leaf
+        function's requires_grad tensor inputs, in the order they appeared;
+        non-tensor arguments and tensors without ``requires_grad`` are not
+        forwarded to the hook. The hook must return ``None``. The hook is
+        called as a leaf function itself, so it is also opaque to the
+        compiler.
 
         Example::
 
             >>> @leaf_function
-            ... def debug_log(t, tag):
-            ...     print(f"[{tag}][fwd] norm={t.norm().item()}")
+            ... def debug_log(t):
             ...     return None
             ...
             >>> @debug_log.register_fake
-            ... def debug_log_fake(t, tag):
+            ... def debug_log_fake(t):
             ...     return None
             ...
             >>> @debug_log.register_multi_grad_hook
-            ... def debug_log_hook(t_grad, tag):
-            ...     print(f"[{tag}][bwd] norm={t_grad.norm().item()}")
+            ... def debug_log_hook(t_grad):
+            ...     print(f"[bwd] norm={t_grad.norm().item()}")
             ...
             >>> x = torch.randn(4, requires_grad=True)
-            >>> debug_log(x, "intermediate")  # no assignment needed
-            [intermediate][fwd] norm=...
+            >>> debug_log(x)  # no assignment needed
             >>> (x * 2).sum().backward()
-            [intermediate][bwd] norm=...
+            [bwd] norm=...
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
