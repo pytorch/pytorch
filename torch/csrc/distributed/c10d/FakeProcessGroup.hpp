@@ -168,37 +168,65 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& /* opts */ = ScatterOptions()) override {
     checkCollectiveError();
+    if (!inputTensors.empty()) {
+      TORCH_CHECK(
+          static_cast<int>(inputTensors[0].size()) == size_,
+          "Incorrect input list size ",
+          inputTensors[0].size(),
+          ". Input list size should be ",
+          size_,
+          ", same as size of the process group.");
+      outputTensors[0].copy_(inputTensors[0][rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      TORCH_CHECK(
+          static_cast<int>(inputTensors[i].size()) == size_,
+          "invalid input tensor list size, must be world size");
+      outputTensors[i].copy_(inputTensors[i][rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    TORCH_CHECK(
+        inputBuffer.numel() == outputBuffer.numel() * size_,
+        "input tensor must be the same size as output size times world size");
+    auto chunks = inputBuffer.chunk(size_);
+    outputBuffer.copy_(chunks[rank_]);
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
-      std::vector<at::Tensor>& /* outputs */,
-      std::vector<at::Tensor>& /* inputs */,
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      TORCH_CHECK(
+          inputs[i].numel() == outputs[i].numel() * size_,
+          "input tensor must be the same size as output size times world size");
+      auto chunks = inputs[i].chunk(size_);
+      outputs[i].copy_(chunks[rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 

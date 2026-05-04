@@ -197,13 +197,13 @@ class TestCommMode(TestCase):
 
         # tests c10d reduce_scatter_
         with comm_mode:
-            dist.reduce_scatter(all_gather_out, [inp])
+            dist.reduce_scatter(inp, [inp.clone() for _ in range(self.world_size)])
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_, 1, 1)
 
         # tests c10d reduce_scatter_tensor_coalesced
         with comm_mode, dist._coalescing_manager():
-            dist.reduce_scatter_tensor(all_gather_out, inp)
+            dist.reduce_scatter_tensor(inp, all_gather_out)
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_tensor_coalesced_, 1, 1)
 
