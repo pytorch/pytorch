@@ -13,6 +13,7 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import platform
 import threading
 import traceback
 import warnings
@@ -319,14 +320,28 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
 }
 
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases (union of x86_64 and aarch64
-# build matrices). Keep in sync with .ci/manywheel/build_cuda.sh and
-# .github/scripts/generate_binary_build_matrix.py:CUDA_ARCHES.
-PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 75, 80, 86, 90},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
-    "13.2": {75, 80, 86, 90, 100, 110, 120},
+# TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
+# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# .github/scripts/generate_binary_build_matrix.py.
+PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
+
+
+def _host_arch_key() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine == "aarch64" else "x86_64"
 
 
 def _code_compatible_with_device(device_cc: int, code_cc: int):
@@ -343,8 +358,10 @@ def _code_compatible_with_device(device_cc: int, code_cc: int):
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
     name = get_device_name(device_index)
 
+    arch = _host_arch_key()
     compatible_releases: list[str] = []
-    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+    for cuda, by_arch in PYTORCH_RELEASES_CODE_CC.items():
+        build_ccs = by_arch.get(arch, set())
         if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
             compatible_releases.append(cuda)
 
@@ -357,11 +374,23 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
-        lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
         )
+        lines.append(
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
 
     warnings.warn("\n".join(lines), stacklevel=2)
 
