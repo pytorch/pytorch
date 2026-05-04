@@ -30,6 +30,7 @@ inline std::ostream& operator<<(std::ostream& stream, at::BlasBackend backend) {
 
 namespace blas {
 
+// When adding a new value, update docs/source/nn.functional.rst
 enum class ScalingType : std::uint8_t {
   TensorWise, // fp32 scales
   RowWise, // fp32 scales
