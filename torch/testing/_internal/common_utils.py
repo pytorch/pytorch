@@ -2169,6 +2169,12 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
 
+        if isinstance(fn, type):
+            if TEST_WITH_ROCM:
+                fn.__unittest_skip__ = True  # type: ignore[attr-defined]
+                fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
+            return fn
+
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if TEST_WITH_ROCM:
