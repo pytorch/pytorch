@@ -47,7 +47,10 @@ enum class CuBLASReductionOption : uint8_t {
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
-enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
+// DEFAULT is an internal-only sentinel meaning "use legacy backend default
+// unless a parent setting overrides it". NONE means "explicitly set to
+// inherit/no-op".
+enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16, DEFAULT };
 
 enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 
@@ -430,6 +433,9 @@ class TORCH_API Context {
   void setWarnOnAccumulateGradStreamMismatch(bool enabled);
   bool warnOnAccumulateGradStreamMismatch() const;
 
+  void setOverrideStaleCaptureStream(bool enabled);
+  bool overrideStaleCaptureStream() const;
+
   bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
@@ -527,6 +533,7 @@ class TORCH_API Context {
 #endif
   bool display_vmap_fallback_warnings_ = false;
   bool warn_on_accumulate_grad_stream_mismatch_ = true;
+  bool override_stale_capture_stream_ = false;
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
@@ -539,8 +546,8 @@ class TORCH_API Context {
       {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
       {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
-      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
-      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::DEFAULT},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::DEFAULT},
       {{Float32Backend::CUDA, Float32Op::MATMUL},
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE
