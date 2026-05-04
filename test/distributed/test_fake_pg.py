@@ -172,12 +172,12 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        out_tensor = torch.ones(3, 3)
-        in_tensor = torch.ones(3, 3)
-        output_split = [1, 1]
-        input_split = [1, 1]
+        out_tensor = torch.ones(4, 3)
+        in_tensor = torch.ones(4, 3)
+        output_split = [2, 2]
+        input_split = [2, 2]
         dist.all_to_all_single(out_tensor, in_tensor, output_split, input_split)
-        self.assertEqual(tuple(out_tensor.shape), (3, 3))
+        self.assertEqual(tuple(out_tensor.shape), (4, 3))
 
     def test_send(self):
         store = FakeStore()
@@ -262,24 +262,25 @@ class TestFakePG(TestCase):
         self.assertEqual(output, to_scatter[0])
 
     @parametrize("rank", [0, 1])
-    def test_reduce_scatter_base_copy_semantics(self, rank):
+    def test_alltoall_copy_semantics(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        in_buf = torch.arange(12.0).reshape(6, 2)
-        out_buf = torch.empty(3, 2)
-        dist._reduce_scatter_base(out_buf, in_buf)
-        self.assertEqual(out_buf, in_buf.chunk(2)[rank])
+        input_list = [torch.ones(3, 3) * i for i in range(2)]
+        output_list = [torch.empty(3, 3) for _ in range(2)]
+        dist.all_to_all(output_list, input_list)
+        for i in range(2):
+            self.assertEqual(output_list[i], input_list[i])
 
     @parametrize("rank", [0, 1])
-    def test_reduce_scatter_tensor_copy_semantics(self, rank):
+    def test_alltoall_base_copy_semantics(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
         in_tensor = torch.arange(8.0).reshape(4, 2)
-        out_tensor = torch.empty(2, 2)
-        dist.reduce_scatter_tensor(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor.chunk(2)[rank])
+        out_tensor = torch.empty(4, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
 
     @parametrize("rank", [0, 1])
     def test_allgather_copy_semantics(self, rank):
@@ -313,6 +314,26 @@ class TestFakePG(TestCase):
         for i, output_list in enumerate(output_lists):
             for out in output_list:
                 self.assertEqual(out, inputs[i])
+
+    @parametrize("rank", [0, 1])
+    def test_reduce_scatter_base_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        in_buf = torch.arange(12.0).reshape(6, 2)
+        out_buf = torch.empty(3, 2)
+        dist._reduce_scatter_base(out_buf, in_buf)
+        self.assertEqual(out_buf, in_buf.chunk(2)[rank])
+
+    @parametrize("rank", [0, 1])
+    def test_reduce_scatter_tensor_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(2, 2)
+        dist.reduce_scatter_tensor(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.chunk(2)[rank])
 
     def test_error_on_collective(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
