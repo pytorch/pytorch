@@ -107,10 +107,10 @@ SUPPORTED_OPS = {
 }
 
 SUPPORTED_METHOD_OPS = {
-    "mul_": torch.ops.aten.mul.Tensor,
-    "add_": torch.ops.aten.add.Tensor,
-    "sub_": torch.ops.aten.sub.Tensor,
-    "div_": torch.ops.aten.div.Tensor,
+    "mul_": torch.ops.aten.mul_.Tensor,
+    "add_": torch.ops.aten.add_.Tensor,
+    "sub_": torch.ops.aten.sub_.Tensor,
+    "div_": torch.ops.aten.div_.Tensor,
 }
 
 
@@ -314,12 +314,12 @@ def _tensorify_impl(
             # Look for functions to convert
 
             replacement_op = None
-            reinplace = False
+            is_inplace_method = False
             if node.op == "call_function":
                 replacement_op = SUPPORTED_OPS.get(node.target)
             elif node.op == "call_method":
                 replacement_op = SUPPORTED_METHOD_OPS.get(node.target)
-                reinplace = replacement_op is not None
+                is_inplace_method = replacement_op is not None
 
             if replacement_op is not None:
                 # Pure SymFloat/SymBool expression nodes are scalar intermediates,
@@ -376,17 +376,15 @@ def _tensorify_impl(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
-                    if compute_dtype != node.meta["val"].dtype:
+                    if (
+                        compute_dtype != node.meta["val"].dtype
+                        and not is_inplace_method
+                    ):
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
                                 replacement_proxy,
                                 node.meta["val"].dtype,
                             )
-                        )
-
-                    if reinplace:
-                        replacement_proxy = torch.ops.aten.copy_.default(
-                            args[0], replacement_proxy
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)

@@ -5,9 +5,7 @@ from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
-from torch.nn.functional import (
-    LinearCrossEntropyOptions,  # pyrefly: ignore [missing-module-attribute]
-)
+from torch.nn.functional import LinearCrossEntropyOptions
 
 from .distance import PairwiseDistance
 from .linear import Linear
@@ -1450,7 +1448,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             Default: :math:`0.0`.
         options (LinearCrossEntropyOptions, optional): Specify
             chunking strategy options, see
-            :class:`~torch.nn.functional.LinearCrossEntropyOptions`
+            :class:`~torch.nn.LinearCrossEntropyOptions`
             for more details. To enable reference implementation of
             linear_cross_entropy with chunking disabled, use
             `options=None`.
@@ -1553,7 +1551,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         linear_weight = self.linear.weight.reshape(
             (self.num_classes, *self.out_features, self.linear.in_features)
         )
-        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
+        return F.linear_cross_entropy(
             input,
             linear_weight,
             target,
@@ -1561,7 +1559,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
-            options=self.options,  # pyrefly: ignore [unexpected-keyword]
+            options=self.options,
         )
 
     def extra_repr(self) -> str:

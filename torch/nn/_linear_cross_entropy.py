@@ -1,12 +1,6 @@
 import torch
 
 
-def ensure_size(input, dim, size):
-    if input.shape[dim] != size:
-        return input.narrow(dim, 0, size)
-    return input
-
-
 def chunk_iter(total_size, chunk_size):
     for start in range(0, total_size, chunk_size):
         if start + chunk_size > total_size:
@@ -15,32 +9,28 @@ def chunk_iter(total_size, chunk_size):
             yield start, chunk_size
 
 
-def linear_cross_entropy_batch_chunking_cls_setup_context(ctx, inputs, output):
-    ctx.grad_inplace, ctx.compute_input_grad, ctx.compute_linear_weight_grad = inputs[
-        -3:
-    ]
+_NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS = 13
+
+
+def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
+    assert len(inputs) == _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS  # noqa: S101
+    *_, grad_inplace, compute_input_grad, compute_linear_weight_grad = inputs
+    ctx.grad_inplace = grad_inplace
+    ctx.compute_input_grad = compute_input_grad
+    ctx.compute_linear_weight_grad = compute_linear_weight_grad
     _, grad_input, grad_linear_weight = output
-    save_indices: list[int | None] = [None, None]
-    saved = []
-    if ctx.compute_input_grad:
-        save_indices[0] = len(saved)
-        saved.append(grad_input)
-    if ctx.compute_linear_weight_grad:
-        save_indices[1] = len(saved)
-        saved.append(grad_linear_weight)
-    if saved:
-        ctx.save_indices = save_indices
-        ctx.save_for_backward(*saved)
+    ctx._gi = grad_input if compute_input_grad else None
+    ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
 
 
 @torch.library.custom_op(
-    "torch_nn::linear_cross_entropy_batch_chunking_cls", mutates_args=()
+    "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
 )
-def linear_cross_entropy_batch_chunking_cls(
+def _linear_cross_entropy_batch_chunked(
     input: torch.Tensor,
     linear_weight: torch.Tensor,
     target: torch.Tensor,
-    weight: torch.Tensor,
+    weight: torch.Tensor | None,
     reduction: str,
     ignore_index: int,
     label_smoothing: float,
@@ -57,58 +47,53 @@ def linear_cross_entropy_batch_chunking_cls(
     num_classes, _ = linear_weight.shape
 
     if dtype != acc_dtype and not (
-        dtype in {torch.float16, torch.bfloat16}
-        and acc_dtype == torch.float32
-        and input.is_cuda
+        dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
     ):
         raise RuntimeError(
-            "linear_cross_entropy_batch_chunking_cls supports float32 acc_dtype on a CUDA device with"
-            f" float16/bfloat16 inputs, but got {acc_dtype} acc_type and {dtype} inputs on a {device.type.upper()} device."
+            "linear_cross_entropy supports float32 acc_dtype with"
+            f" float16/bfloat16 inputs, but got {acc_dtype} acc_dtype and {dtype} inputs."
         )
-    use_acc_dtype = dtype != acc_dtype and input.is_cuda
+    use_acc_dtype = dtype != acc_dtype
 
     if target.dtype != torch.int64:
         raise TypeError(
-            f"linear_cross_entropy_batch_chunking_cls: target dtype must be torch.int64, got {target.dtype}."
+            f"linear_cross_entropy: target dtype must be torch.int64, got {target.dtype}."
         )
+
     mask = target == ignore_index
     if ignore_index < 0 or ignore_index >= num_classes:
         # map out-of-range ignore_index to 0:
         target = torch.where(mask, 0, target)
-        # The correctness of this mapping is subtle: mask contains the
-        # original target that ensures that selected weights are
-        # masked from out-of-range ignore_index mapping correctly.
-    neg_weight_target = torch.where(mask, 0, weight.index_select(0, target))
+        # The correctness of this mapping is subtle: mask contains
+        # the original target that ensures that selected weights
+        # are masked from out-of-range ignore_index mapping
+        # correctly.
+    if weight is None:
+        # Uniform weight=1
+        neg_weight_target = (~mask).to(dtype)
+    else:
+        neg_weight_target = torch.where(mask, 0, weight.index_select(0, target))
 
     if reduction == "mean":
         d = neg_weight_target.sum()
-        if d == 0:
-            # ensure compatibility with cross_entropy
-            neg_weight_target.fill_(torch.nan)
-        else:
-            neg_weight_target.div_(-d)
+        neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
     elif reduction == "sum":
         neg_weight_target.neg_()
     else:
-        raise NotImplementedError(
-            f"linear_cross_entropy_batch_chunking_cls does not support {reduction=}"
-        )
+        raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
 
     if label_smoothing > 0.0:
         raise NotImplementedError(
-            "linear_cross_entropy_batch_chunking_cls does not support label smoothing"
+            "linear_cross_entropy does not support label smoothing"
         )
 
     if use_acc_dtype:
-        m = dict(T=dtype, A=acc_dtype)
         dtypes = dict(
-            output=m[acc_policy[0]],
-            grad_input=m[acc_policy[1]],
-            grad_linear_weight=m[acc_policy[2]],
-            X=m[acc_policy[3]],
-            G=m["A" if "A" in acc_policy[4:] else "T"],
-            GX=m[acc_policy[4]],
-            GL=m[acc_policy[5]],
+            output=acc_dtype if dtype == torch.float16 else dtype,
+            grad_input=dtype if acc_policy == "memory" else acc_dtype,
+            grad_linear_weight=dtype,
+            X=dtype if dtype == torch.float16 and acc_policy == "memory" else acc_dtype,
+            GL=acc_dtype,
         )
     else:
         dtypes = dict(
@@ -116,67 +101,51 @@ def linear_cross_entropy_batch_chunking_cls(
             grad_input=dtype,
             grad_linear_weight=dtype,
             X=dtype,
-            G=dtype,
-            GX=dtype,
             GL=dtype,
         )
 
     # A chunk buffer used to hold logits, softmax of logits:
-
     X = torch.empty(
         (batch_chunk_size, num_classes),
         device=device,
         dtype=dtypes["X"],
         requires_grad=False,
     )
-
-    if compute_input_grad and use_acc_dtype:
-        linear_weight_ = linear_weight.to(X.dtype)
-    else:
-        linear_weight_ = linear_weight
-
-    grad_input_shape = input.shape if compute_input_grad else (0,)
-    grad_linear_weight_shape = (
-        linear_weight.shape if compute_linear_weight_grad else (0,)
+    X_acc = torch.empty(
+        (batch_chunk_size, num_classes)
+        if (compute_linear_weight_grad and not input.is_cuda and X.dtype != acc_dtype)
+        else (0, 0),
+        device=device,
+        dtype=acc_dtype,
+        requires_grad=False,
     )
 
-    grad_input = torch.zeros(  # TODO: use empty?
-        grad_input_shape, dtype=dtypes["grad_input"], device=device, requires_grad=False
+    linear_weight_ = (
+        linear_weight.to(X.dtype)
+        if use_acc_dtype and (compute_input_grad or not input.is_cuda)
+        else linear_weight
+    )
+
+    grad_input = torch.empty(
+        input.shape if compute_input_grad else (0,),
+        dtype=dtypes["grad_input"],
+        device=device,
+        requires_grad=False,
     )
     grad_linear_weight = torch.zeros(
-        grad_linear_weight_shape,
+        linear_weight.shape if compute_linear_weight_grad else (0,),
         dtype=dtypes["grad_linear_weight"],
         device=device,
         requires_grad=False,
     )
-
-    # Allocate junk buffers used in grad_input and grad_linear_weight computations:
-    tmp_size = (
-        max(
-            (batch_chunk_size * dtypes["GX"].itemsize) // dtypes["G"].itemsize
-            if compute_input_grad
-            else 0,
-            (num_classes * dtypes["GL"].itemsize) // dtypes["G"].itemsize
-            if compute_linear_weight_grad
-            else 0,
-            1 if (compute_input_grad or compute_linear_weight_grad) else 0,
-        )
-        * in_features
+    GL = torch.empty(
+        (num_classes, in_features) if compute_linear_weight_grad else (0, 0),
+        device=device,
+        dtype=dtypes["GL"],
+        requires_grad=False,
     )
-    tmp = torch.empty(tmp_size, device=device, dtype=dtypes["G"], requires_grad=False)
-    GX = (
-        torch.narrow(tmp.view(dtypes["GX"]), 0, 0, batch_chunk_size * in_features).view(
-            (batch_chunk_size, in_features)
-        )
-        if compute_input_grad
-        else tmp
-    )
-    GL = (
-        torch.narrow(tmp.view(dtypes["GL"]), 0, 0, num_classes * in_features).view(
-            (num_classes, in_features)
-        )
-        if compute_linear_weight_grad
-        else tmp
+    tmp = torch.empty(
+        batch_chunk_size, device=device, dtype=dtypes["X"], requires_grad=False
     )
 
     if reduction in {"mean", "sum"}:
@@ -184,25 +153,29 @@ def linear_cross_entropy_batch_chunking_cls(
             (), device=device, dtype=dtypes["output"], requires_grad=False
         )
     else:
-        raise NotImplementedError(
-            f"linear_cross_entropy_batch_chunking_cls does not support {reduction=}"
-        )
+        raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
     # chunking along batches dimension:
     for bchunk_start, bchunk_size in chunk_iter(num_batches, batch_chunk_size):
         x = input.narrow(0, bchunk_start, bchunk_size)
-        x_ = x.to(acc_dtype)
         t = target.narrow(0, bchunk_start, bchunk_size)
         neg_weight_t = neg_weight_target.narrow(0, bchunk_start, bchunk_size)
         neg_weight_t_ = neg_weight_t.to(X.dtype)
-        X_ = ensure_size(X, 0, bchunk_size)
+        X_ = X.narrow(0, 0, bchunk_size) if X.shape[0] != bchunk_size else X
+        x_ = x.to(acc_dtype) if use_acc_dtype and compute_linear_weight_grad else x
+
         # Compute output.
 
         if use_acc_dtype:
-            torch.mm(x, linear_weight.T, out_dtype=X.dtype, out=X_)
+            if input.is_cuda:
+                torch.mm(x, linear_weight.T, out_dtype=X.dtype, out=X_)
+            else:
+                torch.mm(x.to(X.dtype), linear_weight_.T, out=X_)
         else:
             torch.mm(x, linear_weight.T, out=X_)
 
-        Xmax = X_.max(dim=1, keepdim=True)[0]
+        Xmax = tmp.narrow(0, 0, bchunk_size).unsqueeze(1)
+        torch.amax(X_, dim=1, keepdim=True, out=Xmax)
+
         X_.sub_(Xmax)
 
         output.add_(neg_weight_t_.dot(X_.gather(1, t.unsqueeze(1)).squeeze(1)))
@@ -212,79 +185,46 @@ def linear_cross_entropy_batch_chunking_cls(
         expXsum = X_.sum(dim=1)
 
         if compute_input_grad or compute_linear_weight_grad:
-            X_.mul_((neg_weight_t_ / expXsum).unsqueeze(1))
+            tmp_chunk = tmp.narrow(0, 0, bchunk_size)
+            torch.div(neg_weight_t_, expXsum, out=tmp_chunk)
+            X_.mul_(tmp_chunk.unsqueeze(1))
 
         expXsum.log_()
         output.sub_(neg_weight_t_.dot(expXsum))
 
         # Compute gradients.
 
-        if compute_input_grad or compute_linear_weight_grad:
-            if compute_input_grad:
-                grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
-                if use_acc_dtype:
-                    GX_ = ensure_size(GX, 0, bchunk_size)
-                    if X.dtype == GX.dtype:
-                        torch.mm(X_, linear_weight_, GX_.dtype, out=GX_)
-                    else:
-                        GX_[:] = torch.mm(X_, linear_weight_)
-                    if grad_x.dtype == dtype:
-                        # addcmul+sub_ and sub_+addcmul lead to different results!
-                        # TODO: use the order with better accuracy
-                        torch.addcmul(
-                            grad_x,
-                            torch.index_select(linear_weight, 0, t),
-                            neg_weight_t.unsqueeze(1),
-                            out=grad_x,
-                        )
-                        grad_x.sub_(GX_)
-                    else:
-                        # no accuracy difference between addcmul+sub_ and sub_+addcmul
-                        torch.addcmul(
-                            grad_x,
-                            torch.index_select(linear_weight_, 0, t),
-                            neg_weight_t_.unsqueeze(1),
-                            out=grad_x,
-                        )
-                        grad_x.sub_(GX_)
-                else:
-                    torch.addcmul(
-                        grad_x,
-                        torch.index_select(linear_weight, 0, t),
-                        neg_weight_t.unsqueeze(1),
-                        out=grad_x,
-                    )
-                    torch.addmm(grad_x, X_, linear_weight, alpha=-1, out=grad_x)
+        if compute_input_grad:
+            grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
+            torch.mul(
+                torch.index_select(linear_weight_, 0, t),
+                neg_weight_t_.unsqueeze(1),
+                out=grad_x,
+            )
+            torch.addmm(grad_x, X_, linear_weight_, alpha=-1, out=grad_x)
 
-            if compute_linear_weight_grad:
-                # avoids zero_ call and a new allocation from x_ * neg_weight_t_
-                if X.dtype == GL.dtype:
-                    if X.dtype == dtype:
-                        torch.mm(X_.T, x, out=GL)
-                    else:
-                        torch.mm(X_.T, x_, out=GL)
-                else:
-                    if X.dtype == dtype:
-                        GL[:] = torch.mm(X_.T, x)
-                    else:
-                        GL[:] = torch.mm(X_.T, x_)
-                if dtype == acc_dtype:
-                    GL.index_add_(0, t, x_ * neg_weight_t_.unsqueeze(1), alpha=-1)
-                else:
-                    # x_ is a copy of input slice, so we can
-                    # change it inplace to reduce memory usage
-                    x_.mul_(neg_weight_t_.unsqueeze(1))
-                    if GL.dtype == dtype:
-                        GL.index_add_(0, t, x, alpha=-1)
-                    else:
-                        GL.index_add_(0, t, x_, alpha=-1)
+        if compute_linear_weight_grad:
+            if X.dtype == GL.dtype:
+                torch.mm(X_.T, x_, out=GL)
+            elif input.is_cuda:
+                torch.mm(X_.T, x, out_dtype=GL.dtype, out=GL)
+            else:
+                X_acc_chunk = X_acc.narrow(0, 0, bchunk_size)
+                X_acc_chunk.copy_(X_)
+                torch.mm(X_acc_chunk.T, x_, out=GL)
+            if use_acc_dtype:
+                # x_ is a copy of input slice, so we can
+                # change it inplace to reduce memory usage
+                x_.mul_(neg_weight_t_.unsqueeze(1))
+                GL.index_add_(0, t, x_, alpha=-1)
+            else:
+                GL.index_add_(0, t, x_ * neg_weight_t_.unsqueeze(1), alpha=-1)
+            grad_linear_weight.sub_(GL)
 
-                grad_linear_weight.sub_(GL)
-
-    return output.to(dtype), grad_input.to(dtype), grad_linear_weight.to(dtype)
+    return output.to(dtype), grad_input.to(dtype), grad_linear_weight
 
 
-@linear_cross_entropy_batch_chunking_cls.register_fake
+@_linear_cross_entropy_batch_chunked.register_fake
 def _(
     input,
     linear_weight,
@@ -303,9 +243,7 @@ def _(
     if reduction in {"mean", "sum"}:
         result = torch.empty((), dtype=input.dtype, device=input.device)
     else:
-        raise NotImplementedError(
-            f"linear_cross_entropy_batch_chunking_cls does not support {reduction=}"
-        )
+        raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
     grad_input_shape = input.shape if compute_input_grad else (0,)
     grad_linear_weight_shape = (
         linear_weight.shape if compute_linear_weight_grad else (0,)
@@ -326,40 +264,69 @@ def _(
     return result, grad_input, grad_linear_weight
 
 
-def linear_cross_entropy_batch_chunking_cls_backward(ctx, *grads):
-    grad_output = grads[0]
-    result = [None] * 13
+@_linear_cross_entropy_batch_chunked.register_vmap
+def _vmap(info, in_dims, *args):
+    """vmap rule: loop over the vmap dimension and stack outputs.
 
-    if ctx.compute_input_grad or ctx.compute_linear_weight_grad:
-        saved = ctx.saved_tensors
-        if ctx.grad_inplace:
-            # With grad_inplace, the memory usage size is reduced
-            # 2x when reusing pre-computed grad_input and
-            # grad_linear_weight storages. However, gradcheck does
-            # not like that.
-            if ctx.compute_input_grad:
-                grad_input = saved[ctx.save_indices[0]]
-                grad_input.mul_(grad_output)
-                result[0] = grad_input
-            if ctx.compute_linear_weight_grad:
-                grad_linear_weight = saved[ctx.save_indices[1]]
-                grad_linear_weight.mul_(grad_output)
-                result[1] = grad_linear_weight
+    Each slice runs an independent op invocation, so per-sample input
+    and linear_weight gradients flow naturally through autograd — the
+    common ``vmap(grad(linear_cross_entropy))`` pattern produces
+    per-sample weight gradients without extra plumbing.
+
+    A fold-into-num_batches optimization for the common case (vmap
+    over input, shared linear_weight) would require
+    ``reduction="none"`` support inside the chunked op, which is not
+    currently implemented. Until then, loop.
+    """
+    batch_size = info.batch_size
+
+    def slice_arg(arg, in_dim, i):
+        if in_dim is None or not isinstance(arg, torch.Tensor):
+            return arg
+        return arg.movedim(in_dim, 0)[i]
+
+    outputs = [
+        _linear_cross_entropy_batch_chunked(
+            *[slice_arg(arg, in_dim, i) for arg, in_dim in zip(args, in_dims)]
+        )
+        for i in range(batch_size)
+    ]
+
+    losses = torch.stack([o[0] for o in outputs])
+    grad_inputs = torch.stack([o[1] for o in outputs])
+    grad_linear_weights = torch.stack([o[2] for o in outputs])
+    return (losses, grad_inputs, grad_linear_weights), (0, 0, 0)
+
+
+def _linear_cross_entropy_batch_chunked_backward(ctx, grad_output, _gi_grad, _gw_grad):
+    result = [None] * _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS
+    if ctx.compute_input_grad:
+        if not ctx.grad_inplace:
+            result[0] = ctx._gi * grad_output
         else:
-            # gradcheck-friendly backward:
-            if ctx.compute_input_grad:
-                grad_input = saved[ctx.save_indices[0]]
-                # creates a new tensor that increases memory usage size
-                result[0] = grad_input * grad_output
-            if ctx.compute_linear_weight_grad:
-                grad_linear_weight = saved[ctx.save_indices[1]]
-                # creates a new tensor that increases memory usage size
-                result[1] = grad_linear_weight * grad_output
+            gi, ctx._gi = ctx._gi, None
+            if gi is None:
+                raise RuntimeError(
+                    "linear_cross_entropy chunked backward called twice; "
+                    "retain_graph=True / double backward are not supported."
+                )
+            result[0] = gi.mul_(grad_output)
 
+    if ctx.compute_linear_weight_grad:
+        if not ctx.grad_inplace:
+            result[1] = ctx._gw * grad_output
+        else:
+            gw, ctx._gw = ctx._gw, None
+            if gw is None:
+                raise RuntimeError(
+                    "linear_cross_entropy chunked backward called twice; "
+                    "retain_graph=True / double backward are not supported."
+                )
+            result[1] = gw.mul_(grad_output)
     return tuple(result)
 
 
-linear_cross_entropy_batch_chunking_cls.register_autograd(
-    linear_cross_entropy_batch_chunking_cls_backward,
-    setup_context=linear_cross_entropy_batch_chunking_cls_setup_context,
+_linear_cross_entropy_batch_chunked.register_autograd(
+    _linear_cross_entropy_batch_chunked_backward,
+    setup_context=_linear_cross_entropy_batch_chunked_setup_context,
 )

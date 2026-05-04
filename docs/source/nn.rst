@@ -307,6 +307,7 @@ Loss Functions
     nn.MSELoss
     nn.CrossEntropyLoss
     nn.LinearCrossEntropyLoss
+    nn.LinearCrossEntropyOptions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss

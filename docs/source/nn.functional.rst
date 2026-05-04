@@ -232,12 +232,3 @@ Low-Precision functions
     grouped_mm
     scaled_mm
     scaled_grouped_mm
-
-Miscellaneous
--------------
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    LinearCrossEntropyOptions

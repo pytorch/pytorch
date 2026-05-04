@@ -5,7 +5,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from typing import Any as _Any, Optional, TYPE_CHECKING
+from typing import Any as _Any, Literal, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -3656,70 +3656,127 @@ def binary_cross_entropy_with_logits(
 
 @dataclasses.dataclass(slots=True, frozen=True)
 class LinearCrossEntropyOptions:
-    """Options for controlling chunking strategy in linear cross
-    entropy operation.
+    """Configuration for the chunked implementation of
+    :func:`linear_cross_entropy`.
+
+    The chunked implementation processes the batch dimension in
+    pieces, so the full ``(num_batches, num_classes)`` logits tensor
+    is never materialized at once. The trade-off is a small amount of
+    kernel-launch overhead in exchange for substantially lower peak
+    memory — useful when ``num_classes`` is large relative to
+    ``in_features`` (e.g. an LLM vocabulary head against a
+    comparatively small hidden state).
+
+    Pass ``options=None`` to :func:`linear_cross_entropy` to use the
+    reference implementation (full ``logits = linear(input, weight)``
+    followed by :func:`cross_entropy`). Pass an instance of this class
+    to opt into the chunked path.
+
+    The chunked path supports a subset of
+    :func:`linear_cross_entropy`'s features: ``reduction`` must be
+    ``"mean"`` or ``"sum"``, ``label_smoothing`` must be ``0.0``,
+    ``target`` must contain class indices (``torch.int64``), and the
+    loss must be 2-D (no ``out_features``). If any of those does not
+    hold, the call falls through to the reference implementation
+    regardless of ``options``.
+
+    Example::
+
+        options = LinearCrossEntropyOptions(
+            chunking_method="aspect_ratio:2",
+            acc_dtype=torch.float32,
+        )
+        loss = linear_cross_entropy(
+            input,
+            weight,
+            target,
+            reduction="sum",
+            options=options,
+        )
     """
 
-    grad_inplace: bool = False
-    """When True, backward will use inplace multiplication to compute
-    the gradients to save extra storage space but
-    torch.autograd.gradcheck will likely fail and the operation will
-    not be composite compliant.  Default is False.
+    allow_retain_graph: bool = False
+    """Allow ``retain_graph=True`` on backward.
+
+    When ``False`` (default), backward consumes pre-computed gradient
+    buffers in place; a second ``.backward()`` raises ``RuntimeError``.
+
+    When ``True``, the buffers are preserved at the cost of one extra
+    gradient-sized allocation per call.
+
+    Higher-order autograd (gradgrad, forward-mode AD) is unsupported.
     """
 
     batch_chunk_size: int | None = None
-    """Chunk size along the batches dimension. The specified value may
-    be overridden by the computed value from chunking method. By
-    default, the chunk size is maximal.
+    """Number of batch rows processed per chunk.
 
-    Warning: Specifying a smaller chunk size reduces memory consumption
-    but it may also reduce the performance of the operation.
+    The op loops over ``ceil(num_batches / batch_chunk_size)`` chunks.
+    Smaller values reduce peak memory but launch more kernels; the
+    default ``None`` means a single chunk (no actual chunking). If
+    :attr:`chunking_method` is also set and disagrees, its computed
+    value wins and a warning is emitted.
     """
 
     chunking_method: str | None = None
-    """A method for computing chunk sizes. By default, the chunk sizes
-    are maximal.
+    """Heuristic for selecting :attr:`batch_chunk_size` from input sizes.
 
-    The following methods are supported for computing chunk sizes:
+    Supported methods:
 
-    - "liger" - use the same heuristics as in
-        `<https://github.com/linkedin/Liger-Kernel>`__ for computing
-        the batch chunk size. Specified ``batch_chunk_size`` will be
-        overridden.
-    - "liger:<factor>" - same as "liger" with initial
-        ``batch_chunk_size`` multiplied by ``2 ** factor``. If
-        ``factor == -1`` and ``acc_policy == "TTTTTA"``, the memory
-        usage will be comparable to one when using Liger-Kernel.
+    - ``"aspect_ratio"`` — picks the chunk size so that each chunk's
+      logits volume ``batch_chunk_size * num_classes`` is roughly the
+      same order as the input volume ``num_batches *
+      in_features``. Suitable when ``num_classes`` is much larger than
+      ``in_features`` (LLM heads).
+    - ``"aspect_ratio:N"`` for ``N >= 1`` — same heuristic, then
+      divides the chunk size by ``N``. Reduces peak memory roughly by
+      a factor of ``N`` at the cost of more chunks.
+    - ``None`` (default) — use :attr:`batch_chunk_size` directly.
     """
 
-    acc_policy: str = "TTTTTA"
-    """Define a finer control of using acc_dtype in internal variables.
+    acc_policy: Literal["memory", "accurate"] = "memory"
+    """Internal-precision policy when :attr:`acc_dtype` differs from
+    the input dtype.
 
-    acc_policy must be a string with length 6 and it must contain only
-    characters 'T' or 'A' that encode the usage of dtype or acc_dtype,
-    respectively. The 6 characters in the acc_policy value correspond
-    to the following internal variables:
-    - output - accumulator of operator output
-    - grad_input - accumulator of input gradients
-    - grad_linear_weight - accumulator of linear_weight gradients
-    - X - a workspace for softmax computations
-    - GX - a workspace for grad_input computations
-    - GL - a workspace for grad_linear_weight computations
+    Controls which intermediate tensors (softmax workspace,
+    input-gradient accumulator) are stored in :attr:`acc_dtype` versus
+    the input dtype:
 
-    For instance, acc_policy == "AATAAA" means that all internal
-    variables except grad_linear_weight use acc_dtype dtype while the
-    latter uses dtype.
+    - ``"memory"`` (default) — uses :attr:`acc_dtype` only where it's
+      needed for gradient correctness. Lower peak memory.
+    - ``"accurate"`` — uses :attr:`acc_dtype` for more intermediates,
+      noticeably improving input-gradient accuracy when the chunk size
+      is large relative to ``num_classes``. Higher peak memory.
 
-    Warning: this is an experimental feature that may change or be
-    removed in future.
+    Has no effect when :attr:`acc_dtype` equals the input dtype.
     """
 
     acc_dtype: torch.dtype | None = None
-    """A dtype used in accumulating computation results to increase
-    numerical accuracy. By default, use the same as input dtype.
+    """Dtype for internal accumulation. Defaults to the input dtype.
+
+    Mixed-precision is currently limited to ``torch.float16``
+    or ``torch.bfloat16`` input and ``acc_dtype=torch.float32``.
     """
 
-    def adjust(self, num_batches, in_features, num_classes, dtype):
+    def __post_init__(self):
+        if self.acc_policy not in {"memory", "accurate"}:
+            raise ValueError(
+                f"acc_policy must be 'memory' or 'accurate', got {self.acc_policy!r}"
+            )
+        if self.chunking_method is not None:
+            if not self.chunking_method.startswith("aspect_ratio"):
+                raise ValueError(
+                    f"chunking_method must be 'aspect_ratio', 'aspect_ratio:N' for a positive integer N, or None, "
+                    f"got {self.chunking_method!r}"
+                )
+
+            if ":" in self.chunking_method:
+                factor = self.chunking_method.split(":", 1)[1]
+                if not factor.isdigit() or int(factor) == 0:
+                    raise ValueError(
+                        f"aspect_ratio factor must be a positive integer, got {factor!r}"
+                    )
+
+    def _adjust(self, num_batches, in_features, num_classes, dtype):
         """Adjust options to input sizes and dtype.
 
         Return a new LinearCrossEntropyOptions object with default
@@ -3731,42 +3788,25 @@ class LinearCrossEntropyOptions:
             batch_chunk_size = min(self.batch_chunk_size, num_batches)
 
         if self.chunking_method is not None:
-            if self.chunking_method.startswith("liger"):
-                # A modified heuristics used in
-                # liger_kernel.transformers.LigerFusedLinearCrossEntropyLoss:
-                #
-                #   next_pow_of_2(cdiv(num_batches, cdiv(num_classes, in_features))) * 2 ** factor
-                #
-                # where factor is integer.
-                if ":" in self.chunking_method:
-                    factor = int(self.chunking_method.split(":", 1)[1])
-                else:
-                    factor = 0
-                batch_chunk_size = (
-                    1
-                    << (
-                        -(num_batches // (num_classes // -in_features)) - 1
-                    ).bit_length()
-                )
-                if factor < 0:
-                    batch_chunk_size = max(batch_chunk_size // 2**-factor, 1)
-                else:
-                    batch_chunk_size *= 2**factor
-
-                if (
-                    self.batch_chunk_size is not None
-                    and self.batch_chunk_size != batch_chunk_size
-                ):
-                    warnings.warn(
-                        f"Specified batch_chunk_size (={self.batch_chunk_size}) is different"
-                        f" from one (={batch_chunk_size}) computed using chunking method"
-                        f" ('{self.chunking_method}'). Using the latter.",
-                        stacklevel=2,
-                    )
+            if ":" in self.chunking_method:
+                factor = int(self.chunking_method.split(":", 1)[1])
             else:
-                raise ValueError(
-                    f"Unknown chunking method: '{self.chunking_method}'."
-                    " Supported methods: 'liger' or None."
+                factor = 1
+
+            batch_chunk_size = (
+                1 << (-(num_batches // (num_classes // -in_features)) - 1).bit_length()
+            )
+            batch_chunk_size = max(batch_chunk_size // factor, 1)
+
+            if (
+                self.batch_chunk_size is not None
+                and self.batch_chunk_size != batch_chunk_size
+            ):
+                warnings.warn(
+                    f"Specified batch_chunk_size (={self.batch_chunk_size}) is different"
+                    f" from one (={batch_chunk_size}) computed using chunking method"
+                    f" ('{self.chunking_method}'). Using the latter.",
+                    stacklevel=3,
                 )
 
         if self.acc_dtype is None:
@@ -3837,7 +3877,7 @@ def linear_cross_entropy(
             Default: :math:`0.0`.
         options (LinearCrossEntropyOptions, optional): Specify
             chunking strategy options, see
-            :class:`~torch.nn.functional.LinearCrossEntropyOptions`
+            :class:`~torch.nn.LinearCrossEntropyOptions`
             for more details. Enabling chunking will decrease the
             memory usage.  To enable reference implementation of
             ``linear_cross_entropy``, use `options=None`. Default:
@@ -3918,18 +3958,16 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    if out_features:
-        # reshape linear_weight to 2D required by linear
-        linear_weight = linear_weight.reshape(
-            (math.prod(out_features, start=num_classes), in_features)
-        )
-
+    # K-dim loss (out_features != ()) falls back to the reference
+    # cross_entropy: the chunked op runs softmax over the full
+    # linear_weight.shape[0], not per-position over the num_classes
+    # axis.
     if (
         options is not None
         and reduction in {"mean", "sum"}
         and label_smoothing == 0.0
         and target.dtype == torch.int64
-        and not out_features  # TODO: remove this, requires target reshape
+        and not out_features
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -3940,20 +3978,12 @@ def linear_cross_entropy(
             input = input.unsqueeze(0)
             target = target.unsqueeze(0)
 
-        if weight is None:
-            weight = torch.ones(
-                (),
-                device=input.device,
-                dtype=input.dtype,
-                requires_grad=False,
-            ).expand(num_classes)
-
-        options = options.adjust(num_batches, in_features, num_classes, input.dtype)
+        options = options._adjust(num_batches, in_features, num_classes, input.dtype)
 
         # global import results a likely circular import
         import torch.nn._linear_cross_entropy as m
 
-        result = m.linear_cross_entropy_batch_chunking_cls(
+        result = m._linear_cross_entropy_batch_chunked(
             input,
             linear_weight,
             target,
@@ -3964,7 +3994,7 @@ def linear_cross_entropy(
             options.batch_chunk_size,
             options.acc_policy,
             options.acc_dtype,
-            options.grad_inplace,
+            not options.allow_retain_graph,
             input.requires_grad,
             linear_weight.requires_grad,
         )[0]
@@ -3972,6 +4002,11 @@ def linear_cross_entropy(
         if not has_batches:
             result = result.squeeze(0)
         return result
+
+    if out_features:
+        linear_weight = linear_weight.reshape(
+            (math.prod(out_features, start=num_classes), in_features)
+        )
 
     logits = linear(input, linear_weight)
     # recover logits shape that corresponds to the shape of specified
@@ -6658,7 +6693,7 @@ def multi_head_attention_forward(
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
+            be ignored by the attention. This is a binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
             Default: `True`

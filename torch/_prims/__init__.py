@@ -355,7 +355,7 @@ def _make_prim(
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
 
-        # dont inadvertently add to prim ops
+        # don't inadvertently add to prim ops
         tags_intersection.discard(torch.Tag.core)
         # causes errors with python ref executor tests, none of the
         # data dependent pytorch ops actually decompose to prims
