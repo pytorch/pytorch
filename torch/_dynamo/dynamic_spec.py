@@ -41,6 +41,7 @@ __all__ = [
     "IntSpec",
     "TensorSpec",
     "ObjectSpec",
+    "DictSpec",
     "ParamsSpec",
     "ShapesSpec",
     "lookup_spec_from_dynamo_source",
@@ -513,11 +514,19 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
       (the root of any walk).
     - ``AttrSource(base, member)`` — attribute access; matched against
       ``ObjectSpec.field(member, ...)``.
+    - ``DictGetItemSource(base, str_key)`` / ``GetItemSource(base,
+      str_key)`` — dict subscript; matched against
+      ``DictSpec.entry(str_key, ...)``.
 
-    Other source kinds (globals, ``GetItemSource``, etc.) return
-    ``None`` — later container PRs extend this dispatch.
+    Other source kinds (globals, ``GetItemSource`` with non-str keys,
+    etc.) return ``None`` — later container PRs extend this dispatch.
     """
-    from torch._dynamo.source import AttrSource, LocalSource
+    from torch._dynamo.source import (
+        AttrSource,
+        DictGetItemSource,
+        GetItemSource,
+        LocalSource,
+    )
 
     if shapes_spec is None or shapes_spec.params is None:
         return None
@@ -528,6 +537,8 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
     while not isinstance(cur, LocalSource):
         if isinstance(cur, AttrSource):
             path.append(("attr", cur.member))
+        elif isinstance(cur, (DictGetItemSource, GetItemSource)):
+            path.append(("item", cur.index))
         else:
             return None
         cur = cur.base
@@ -544,6 +555,11 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
             if not isinstance(spec, ObjectSpec):
                 return None
             spec = spec._fields.get(key)
+        elif kind == "item":
+            if isinstance(spec, DictSpec) and isinstance(key, str):
+                spec = spec._entries.get(key)
+            else:
+                return None
     return spec
 
 
@@ -552,8 +568,8 @@ class ObjectSpec:
 
     Models attribute access on a Python object (e.g., an ``nn.Module``'s
     parameters / buffers / submodules; ``self`` inside an instance
-    method). Each ``.field`` entry corresponds to a ``GetAttrKey`` on
-    the pytree keypath, matching ``AttrSource`` in the dynamo builder.
+    method). Each ``.field`` entry corresponds to an ``AttrSource`` in
+    the dynamo builder.
 
     Construct fluently or via dict-form::
 
@@ -602,7 +618,7 @@ class ObjectSpec:
 
         - ``torch.Tensor``         → ``TensorSpec(obj.ndim)``
         - ``int`` (not ``bool``)   → ``IntSpec.static()``
-        - ``dict``                 → native ``dict`` of ``match(v)`` per entry
+        - ``dict``                 → ``DictSpec`` with one entry per key
         - ``list`` / ``tuple``     → native container of ``match(v)`` per entry
         - ``torch.nn.Module``      → ``ObjectSpec`` with ``.field`` per
                                      child module / parameter / buffer
@@ -615,7 +631,10 @@ class ObjectSpec:
         if isinstance(obj, int):
             return IntSpec.static()
         if isinstance(obj, dict):
-            return {k: cls.match(v) for k, v in obj.items()}
+            ds = DictSpec()
+            for k, v in obj.items():
+                ds.entry(k, cls.match(v))
+            return ds
         if isinstance(obj, (list, tuple)):
             return type(obj)(cls.match(v) for v in obj)
         if isinstance(obj, torch.nn.Module):
@@ -633,3 +652,53 @@ class ObjectSpec:
 
     # No ``__eq__`` / ``__hash__``: same call as :class:`IntSpec` /
     # :class:`TensorSpec`.
+
+
+class DictSpec:
+    """Spec for a Python ``dict`` argument.
+
+    Keys are guarded by dynamo's ``DICT_KEYS_MATCH`` — they are static
+    structural identifiers and cannot be dynamic. Only the values can
+    carry dynamic specs.
+
+    Each ``.entry`` corresponds to a ``MappingKey`` on the keypath,
+    matching ``LocalSource`` / ``GetItemSource`` shapes in the dynamo
+    builder.
+
+    Construct fluently or via dict-form::
+
+        DictSpec({"x": TensorSpec([IntSpec.backed("batch")])})
+        DictSpec().entry("x", TensorSpec([IntSpec.backed("batch")]))
+    """
+
+    def __init__(self, entries: dict[str, Any] | None = None) -> None:
+        self._entries: dict[str, Any] = dict(entries or {})
+
+    def entry(self, key: str, spec: Any) -> "DictSpec":
+        """Set the spec at dict key ``key``; returns ``self``."""
+        self._entries[key] = spec
+        return self
+
+    def __getitem__(self, key: str) -> Any:
+        return self._entries[key]
+
+    def __setitem__(self, key: str, spec: Any) -> None:
+        self._entries[key] = spec
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def items(self) -> Any:
+        return self._entries.items()
+
+    def __repr__(self) -> str:
+        entries = ", ".join(f"{key!r}: {spec!r}" for key, spec in self._entries.items())
+        return f"DictSpec({{{entries}}})"
+
+    # No ``__eq__`` / ``__hash__``: matches the rest of the spec types.

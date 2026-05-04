@@ -8,6 +8,7 @@ import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
 from torch._dynamo.dynamic_spec import (
+    DictSpec,
     IntSpec,
     IntSpecType,
     ObjectSpec,
@@ -1172,7 +1173,7 @@ class TestObjectSpecMatch(TestCase):
 
     def test_match_dict(self):
         result = ObjectSpec.match({"x": torch.randn(2, 3), "n": 4})
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, DictSpec)
         self.assertIsInstance(result["x"], TensorSpec)
         self.assertEqual(result["x"]._dim, 2)
         self.assertIsInstance(result["n"], IntSpec)
@@ -1251,9 +1252,11 @@ class TestObjectSpecMatch(TestCase):
         self.assertIs(spec._type, IntSpecType.STATIC)
 
     def test_match_dict_repr(self):
-        # Native dict carries through; structural check on the leaves.
+        # ``match`` produces a ``DictSpec`` containing an anonymous
+        # ``IntSpec`` whose auto-name is process-dependent; structural
+        # check on the leaves rather than exact repr.
         result = ObjectSpec.match({"x": torch.randn(2), "n": 4})
-        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result, DictSpec)
         self.assertEqual(repr(result["x"]), "TensorSpec([None])")
         self.assertIsInstance(result["n"], IntSpec)
         self.assertIs(result["n"]._type, IntSpecType.STATIC)
@@ -1302,6 +1305,148 @@ class TestObjectSpecMatch(TestCase):
             ".bias: TensorSpec([None])"
             "})",
         )
+
+
+class TestDictSpec(TestCase):
+    """``DictSpec`` — dict-keyed entries, MappingKey paths."""
+
+    def test_empty(self):
+        ds = DictSpec()
+        self.assertEqual(len(ds), 0)
+
+    def test_dict_construction(self):
+        spec_x = TensorSpec([IntSpec.backed("batch")])
+        spec_n = IntSpec.backed("n")
+        ds = DictSpec({"x": spec_x, "n": spec_n})
+        self.assertEqual(len(ds), 2)
+        self.assertIs(ds["x"], spec_x)
+        self.assertIs(ds["n"], spec_n)
+
+    def test_fluent_entry(self):
+        spec_x = TensorSpec([IntSpec.backed("batch")])
+        ds = DictSpec().entry("x", spec_x)
+        self.assertIs(ds["x"], spec_x)
+
+    def test_setitem(self):
+        ds = DictSpec()
+        spec = IntSpec.backed("n")
+        ds["n"] = spec
+        self.assertIs(ds["n"], spec)
+
+    def test_iter_and_items(self):
+        spec_x = IntSpec.static()
+        spec_n = IntSpec.backed("n")
+        ds = DictSpec({"x": spec_x, "n": spec_n})
+        self.assertEqual(list(ds), ["x", "n"])
+        self.assertEqual(list(ds.items()), [("x", spec_x), ("n", spec_n)])
+
+    def test_repr(self):
+        ds = DictSpec({"x": IntSpec.static("x")})
+        self.assertEqual(
+            repr(ds),
+            "DictSpec({'x': IntSpec(name='x', type=STATIC)})",
+        )
+
+
+class TestDictSpecLookup(TestCase):
+    """``lookup_spec_from_dynamo_source`` walks a ``GetItemSource(str)``
+    chain against a ``DictSpec`` and returns the matching leaf."""
+
+    def _local(self, name):
+        from torch._dynamo.source import LocalSource
+
+        return LocalSource(name, is_input=True)
+
+    def _item(self, base, index):
+        from torch._dynamo.source import GetItemSource
+
+        return GetItemSource(base, index)
+
+    def test_str_key_descends_into_dictspec(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        leaf = TensorSpec([IntSpec.backed("h")])
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("kwargs", DictSpec({"x": leaf}))
+        )
+        result = lookup_spec_from_dynamo_source(
+            self._item(self._local("kwargs"), "x"), shapes_spec
+        )
+        self.assertIs(result, leaf)
+
+    def test_missing_key_returns_none(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("kwargs", DictSpec({"x": TensorSpec(2)}))
+        )
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._item(self._local("kwargs"), "missing"), shapes_spec
+            )
+        )
+
+    def test_int_key_against_dictspec_returns_none(self):
+        # DictSpec only matches str keys; int subscript falls through.
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("kwargs", DictSpec({"x": TensorSpec(2)}))
+        )
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._item(self._local("kwargs"), 0), shapes_spec
+            )
+        )
+
+    def test_objectspec_attr_then_dictspec_item(self):
+        # Mixed walk: obj.config["batch_size"]
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+        from torch._dynamo.source import AttrSource
+
+        leaf = IntSpec.backed("bs")
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg(
+                "obj",
+                ObjectSpec().field("config", DictSpec({"batch_size": leaf})),
+            )
+        )
+        src = self._item(AttrSource(self._local("obj"), "config"), "batch_size")
+        self.assertIs(lookup_spec_from_dynamo_source(src, shapes_spec), leaf)
+
+
+@skipIfTorchDynamo()
+class TestDictSpecCompile(TestCase):
+    """End-to-end: ``shapes_spec`` routes through ``DictSpec`` so a
+    ``TensorSpec`` reaches the dynamo builder for a dict-keyed tensor
+    arg."""
+
+    def test_dict_value_dim_backed(self):
+        def fn(d):
+            return d["x"] + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec().arg(
+                    "d",
+                    DictSpec({"x": TensorSpec([IntSpec.backed("h"), None])}),
+                )
+            ),
+        )
+
+        compiled({"x": torch.randn(4, 3)})
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Different dim 0 — backed absorbs it, no recompile.
+        compiled({"x": torch.randn(8, 3)})
+        self.assertEqual(len(backend.graphs), 1)
+
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
 
 
 if __name__ == "__main__":
