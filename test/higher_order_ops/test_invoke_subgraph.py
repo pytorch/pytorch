@@ -4276,8 +4276,9 @@ class GraphModule(torch.nn.Module):
         # ``repeated_subgraph0._tensor_constant0``, even though the tensor
         # actually lives inside the subgraph submodule rather than in the
         # top-level ``state_dict`` or ``constants``. Verify that export,
-        # decomposition, verification, and ``named_buffers`` all handle that
-        # shape.
+        # decomposition, verification, ``named_buffers``, and direct
+        # invocation (``ep(x)`` via ``_graph_module_flat_inputs``) all handle
+        # that shape.
         @nested_compile_region
         def block(x):
             w = torch.tensor([1.0, 2.0, 3.0, 4.0])
@@ -4292,6 +4293,15 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(4)
 
         ep = torch.export.export(M(), (x,), strict=self.strict)
+
+        # _graph_module_flat_inputs resolves all buffer inputs including
+        # subgraph-owned lifted constants; call it directly to verify no
+        # KeyError is raised and the flat inputs are well-formed.
+        flat_inputs = ep._graph_module_flat_inputs((x,), {})
+        self.assertIsInstance(flat_inputs, tuple)
+        # x must be the last element; preceding entries are the constants/buffers
+        self.assertIs(flat_inputs[-1], x)
+
         ep = ep.run_decompositions({})
 
         # The inner tensor constant should be exposed as a subgraph-scoped
@@ -4299,8 +4309,7 @@ class GraphModule(torch.nn.Module):
         buffer_names = list(ep.graph_signature.buffers)
         self.assertTrue(
             any(
-                name.startswith("repeated_subgraph")
-                and "._tensor_constant" in name
+                name.startswith("repeated_subgraph") and "._tensor_constant" in name
                 for name in buffer_names
             ),
             f"Expected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
