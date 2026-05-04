@@ -4116,11 +4116,16 @@ class ClassMethodVariable(VariableTracker):
         # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
         func_source = AttrSource(self.source, "__func__") if self.source else None
+        bound_source = (
+            AttrSource(owner.source, self.descriptor.__func__.__name__)
+            if owner.source
+            else None
+        )
         return UserMethodVariable(
             self.descriptor.__func__,
             owner,
             source_fn=func_source,
-            source=self.source,
+            source=bound_source,
         )
 
 
