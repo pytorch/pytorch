@@ -259,8 +259,8 @@ class TestUtils(TestCase):
         # Create SizeVarAllocator directly (no V.graph!)
         allocator = SizeVarAllocator(shape_env)
         # Create real SymPy symbols
-        s0 = sympy.Symbol("s0", positive=True, integer=True)
-        s1 = sympy.Symbol("s1", positive=True, integer=True)
+        s0 = Symbol("s0", positive=True, integer=True)
+        s1 = Symbol("s1", positive=True, integer=True)
         # Tell ShapeEnv that s1 is divisible by 16
         shape_env._add_divisible(Mod(s1, 16))
 
