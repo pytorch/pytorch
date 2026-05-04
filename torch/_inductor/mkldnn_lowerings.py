@@ -165,7 +165,7 @@ def grouped_gemm_lowering(
     )
 
     assert len(choices) != 0
-    result = autotune_select_algorithm(
+    result, _ = autotune_select_algorithm(
         "grouped_gemm",
         choices,
         input_nodes,
@@ -386,7 +386,7 @@ def register_onednn_fusion_ops():
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
             }
-            result = autotune_select_algorithm(
+            result, _ = autotune_select_algorithm(
                 "linear_unary",
                 choices,
                 [x, w] if b is None else [x, w, b],
@@ -450,7 +450,7 @@ def register_onednn_fusion_ops():
             input_gen_fns = {
                 2: lambda x: V.graph.constants[x.get_name()],
             }
-            result = autotune_select_algorithm(
+            result, _ = autotune_select_algorithm(
                 "linear_binary",
                 choices,
                 [x, y, w] if b is None else [x, y, w, b],
@@ -742,7 +742,7 @@ def register_onednn_fusion_ops():
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to
-            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577  # noqa: B950
+            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
             if w_zp is None:
                 # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
@@ -974,7 +974,7 @@ def register_onednn_fusion_ops():
             ):
                 input_gen_fns[2] = lambda x: V.graph.constants[x.get_name()]
 
-            result = autotune_select_algorithm(
+            result, _ = autotune_select_algorithm(
                 "qlinear_unary",
                 choices,
                 [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
@@ -1055,7 +1055,7 @@ def register_onednn_fusion_ops():
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to
-            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577  # noqa: B950
+            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
             w_scale.realize()
             w_zp.realize()
             if w_zp.get_dtype() != torch.int32 and isinstance(
@@ -1304,7 +1304,7 @@ def register_onednn_fusion_ops():
             }
             if bias is not None:
                 input_gen_fns[7] = lambda x: V.graph.constants[x.get_name()]  # For bias
-            result = autotune_select_algorithm(
+            result, _ = autotune_select_algorithm(
                 "qlinear_binary",
                 choices,
                 [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
@@ -1384,7 +1384,8 @@ def register_onednn_fusion_ops():
                     1: lambda x: V.graph.constants[x.get_name()],
                     2: lambda x: V.graph.constants[x.get_name()],
                 }
-                result: TensorBox = autotune_select_algorithm(
+                result: TensorBox  # annotation on separate line since tuple unpacking doesn't support inline annotation
+                result, _ = autotune_select_algorithm(
                     "packed_linear",
                     choices,
                     [x, packed_w, orig_w],

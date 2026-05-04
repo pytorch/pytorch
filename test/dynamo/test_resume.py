@@ -13,7 +13,7 @@ def fn_creator():
         torch._dynamo.graph_break()
         x = x + var1
 
-        def inner_fn():  # noqa: F841
+        def inner_fn():
             return var2
 
         return x
@@ -26,10 +26,13 @@ class ResumeFunctionTests(torch._dynamo.test_case.TestCase):
         fn = fn_creator()
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(10))
-        codes = [v for k, v in list(globals().items()) if k.startswith("__resume_at")]
-        self.assertEqual(len(codes), 1)
+        entries = [v for k, v in list(globals().items()) if k.startswith("__resume_at")]
+        self.assertEqual(len(entries), 1)
+        # When freevars are present, install_resume_function_global stores a
+        # factory that closes over the code object (first closure cell).
+        code = entries[0].__closure__[0].cell_contents
         # co_freevars of resume functions, are sorted concatenation of the original function's co_freevars and co_cellvars
-        self.assertEqual(codes[0].co_freevars, ("var1", "var2"))
+        self.assertEqual(code.co_freevars, ("var1", "var2"))
 
 
 if __name__ == "__main__":

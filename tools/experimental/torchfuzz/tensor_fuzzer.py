@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import random
-from typing import NamedTuple, Union
+from typing import NamedTuple, TypeAlias
 
 import torch
 
@@ -30,8 +30,7 @@ class ScalarSpec(NamedTuple):
     )
 
 
-# Union type for specs
-Spec = Union[TensorSpec, ScalarSpec]
+Spec: TypeAlias = TensorSpec | ScalarSpec
 
 
 def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
@@ -44,31 +43,10 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
     Returns:
         torch.dtype: A randomly selected PyTorch tensor data type based on template constraints
     """
+    # Import here to avoid circular imports
+    from torchfuzz.codegen import make_template
 
-    # Get template-specific dtypes
-    if template == "dtensor":
-        # Import here to avoid circular imports
-        from torchfuzz.codegen import DTensorFuzzTemplate
-
-        fuzz_template = DTensorFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
-    elif template == "dtensor_placements":
-        # Import here to avoid circular imports
-        from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
-
-        fuzz_template = DTensorFuzzPlacementsTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
-    elif template == "unbacked":
-        # Import here to avoid circular imports
-        from torchfuzz.codegen import UnbackedFuzzTemplate
-
-        fuzz_template = UnbackedFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
-    else:
-        from torchfuzz.codegen import DefaultFuzzTemplate
-
-        fuzz_template = DefaultFuzzTemplate()
-        tensor_dtypes = fuzz_template.supported_dtypes()
+    tensor_dtypes = make_template(template).supported_dtypes()
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)

@@ -2,7 +2,7 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (
     distribute_module,
     distribute_tensor,
@@ -15,6 +15,7 @@ from torch.distributed.tensor._api import (
     zeros,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -63,6 +64,7 @@ torch.serialization.add_safe_globals(
         Partial,
         Replicate,
         Shard,
+        _StridedShard,
     ]
 )
 

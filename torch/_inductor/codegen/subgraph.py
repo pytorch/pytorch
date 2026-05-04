@@ -11,6 +11,11 @@ import torch
 import torch._inductor.config as config
 from torch._dynamo.utils import counters
 from torch._inductor import ir
+from torch._inductor.autotune_process import (
+    SubgraphCPUBenchmarkRequest,
+    SubgraphGPUBenchmarkRequest,
+    TensorMeta,
+)
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -112,6 +117,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
+        # Cache benchmark request for async autotuning
+        self._bmreq: (
+            SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest | None
+        ) = None
+
+        # Pre-compile only if using async pipelined autotuning
+        # Must happen in __init__ because compilation requires virtualized context (V.graph, V.debug)
+        if config.pipeline_max_autotune_gemm:
+            with V.fake_mode:
+                self._compiled_module = self._compile_for_benchmarking()
+                self._bmreq = self._create_benchmark_request()
 
     def _compute_sym_input_values(self) -> list[int]:
         """Extract concrete dimension values for sym_inputs from benchmark_inputs.
@@ -141,8 +157,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             if isinstance(sym_var, sympy.Symbol) and sym_var.name in sym_name_to_value:
                 result.append(sym_name_to_value[sym_var.name])
             else:
-                hint = V.graph.sizevars.shape_env.size_hint(sym_var)
-                result.append(int(hint) if hint is not None else 1)
+                hint = V.graph.sizevars.shape_env.optimization_hint(sym_var, fallback=1)
+                result.append(int(hint))
         return result
 
     def cache_decomposition(
@@ -169,6 +185,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
+        assert self.gm is not None
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -192,17 +209,57 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 "max_autotune": False,
                 "max_autotune_gemm": False,
                 "max_autotune_gemm_backends": "ATEN",
+                "benchmark_fusion": False,
+                "pipeline_max_autotune_gemm": False,
                 **self.config_patches,
             }
             with config.patch(benchmark_config):
                 bm_graph_lowering.run(*compile_inputs)
                 return bm_graph_lowering.compile_to_module()
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """Regular benchmarking: compile and use benchmarker with warmup/rep."""
+    def _create_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create a benchmark request for async autotuning."""
+        assert self._compiled_module is not None, (
+            "Module must be compiled before creating benchmark request"
+        )
+        input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+        output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+
+        if self.layout.device.type == "cpu":
+            bmreq_cls = SubgraphCPUBenchmarkRequest
+        else:
+            bmreq_cls = SubgraphGPUBenchmarkRequest
+
+        return bmreq_cls(
+            kernel_name=self.name,
+            input_tensor_meta=input_tensor_meta,
+            output_tensor_meta=output_tensor_meta,
+            extra_args=tuple(),
+            module_path=self._compiled_module.__file__,
+            module_cache_key=self._compiled_module.key,
+            sym_input_values=self.sym_input_values,
+        )
+
+    @property
+    def bmreq(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Benchmark request for async autotuning. Pre-compiled when pipeline_max_autotune_gemm is enabled."""
+        assert self._bmreq is not None, (
+            "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
+        )
+        return self._bmreq
+
+    def _ensure_compiled(self) -> None:
+        """Ensure the module is compiled. Used for lazy compilation in non-async path."""
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Regular benchmarking: compile if needed, then use benchmarker."""
+        self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
 
@@ -221,12 +278,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
-        if self._compiled_module is None:
-            self._compiled_module = self._compile_for_benchmarking()
-
+        self._ensure_compiled()
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
+        assert self.gm is not None
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -237,6 +293,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
+        assert self.gm is not None
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

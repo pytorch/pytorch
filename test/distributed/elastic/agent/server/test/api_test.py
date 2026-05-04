@@ -485,6 +485,47 @@ class SimpleElasticAgentTest(unittest.TestCase):
         record_events_mock.assert_called_once()
         shutdown_mock.assert_called_once()
 
+    def test_exit_barrier_sets_and_clears_flag(self):
+        """Verify _in_exit_barrier is set before barrier and cleared after."""
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        agent._worker_group.state = WorkerState.SUCCEEDED
+        agent._worker_group.group_world_size = 1
+        agent._store = MagicMock()
+
+        flag_during_barrier = []
+
+        def mock_barrier(**kwargs):
+            flag_during_barrier.append(agent._in_exit_barrier)
+
+        with patch(
+            "torch.distributed.elastic.utils.store.barrier",
+            side_effect=mock_barrier,
+        ):
+            agent._exit_barrier()
+
+        # Flag was True during barrier call
+        self.assertTrue(flag_during_barrier[0])
+        # Flag is False after barrier completes
+        self.assertFalse(agent._in_exit_barrier)
+
+    def test_exit_barrier_clears_flag_on_timeout(self):
+        """Verify _in_exit_barrier is cleared even if barrier times out."""
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        agent._worker_group.state = WorkerState.SUCCEEDED
+        agent._worker_group.group_world_size = 1
+        agent._store = MagicMock()
+
+        with patch(
+            "torch.distributed.elastic.utils.store.barrier",
+            side_effect=Exception("wait timeout"),
+        ):
+            agent._exit_barrier()
+
+        # Flag must be cleared even on timeout
+        self.assertFalse(agent._in_exit_barrier)
+
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     def test_record_metrics_success_no_retries(self, put_metric_mock):
         spec = self._get_worker_spec(max_restarts=1)

@@ -405,6 +405,7 @@ def create_submodule_from_subgraph(
                         new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
+                        # pyrefly: ignore [bad-argument-type]
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f"arg of type {type(arg)} not handled yet")

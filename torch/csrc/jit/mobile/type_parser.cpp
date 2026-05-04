@@ -158,7 +158,6 @@ TypePtr TypeParser::parse() {
         " is not supported in the parser, ",
         "or the token is in wrong format.");
   }
-  return nullptr;
 }
 
 // NamedTuple custom type will be following structure:
@@ -243,7 +242,6 @@ TypePtr TypeParser::parseCustomType() {
       TORCH_CHECK(
           false, "Can't find definition for the type: ", qualified_name);
     }
-    return nullptr;
   }
 }
 
