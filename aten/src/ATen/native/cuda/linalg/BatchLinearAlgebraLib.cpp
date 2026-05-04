@@ -972,7 +972,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   int n_32 = cuda_int_cast(n, "n");
   int lda_32 = cuda_int_cast(lda, "lda");
   at::cuda::solver::geqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(), m_32, n_32, A_data, lda_32, &lwork);
+      at::cuda::getCurrentCUDASolverDnHandle(true), m_32, n_32, A_data, lda_32, &lwork);
 #endif // USE_CUSOLVER_64_BIT
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -1663,7 +1663,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
-    const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    const auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
