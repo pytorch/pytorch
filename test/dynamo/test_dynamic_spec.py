@@ -11,6 +11,7 @@ from torch._dynamo.dynamic_spec import (
     DictSpec,
     IntSpec,
     IntSpecType,
+    ListSpec,
     ObjectSpec,
     ParamsSpec,
     ShapesSpec,
@@ -1442,6 +1443,155 @@ class TestDictSpecCompile(TestCase):
 
         # Different dim 0 — backed absorbs it, no recompile.
         compiled({"x": torch.randn(8, 3)})
+        self.assertEqual(len(backend.graphs), 1)
+
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+
+
+class TestListSpec(TestCase):
+    """``ListSpec`` — positional entries, SequenceKey paths."""
+
+    def test_int_construction(self):
+        ls = ListSpec(3)
+        self.assertEqual(len(ls), 3)
+        for spec in ls:
+            self.assertIsNone(spec)
+
+    def test_list_construction(self):
+        spec_a = TensorSpec([IntSpec.backed("a")])
+        spec_b = IntSpec.static()
+        ls = ListSpec([spec_a, None, spec_b])
+        self.assertEqual(len(ls), 3)
+        self.assertIs(ls[0], spec_a)
+        self.assertIsNone(ls[1])
+        self.assertIs(ls[2], spec_b)
+
+    def test_tuple_construction(self):
+        spec = TensorSpec([IntSpec.backed("a")])
+        ls = ListSpec((spec,))
+        self.assertEqual(len(ls), 1)
+        self.assertIs(ls[0], spec)
+
+    def test_dict_construction(self):
+        spec_a = IntSpec.backed("a")
+        spec_b = IntSpec.static()
+        ls = ListSpec({0: spec_a, 2: spec_b})
+        self.assertEqual(len(ls), 3)
+        self.assertIs(ls[0], spec_a)
+        self.assertIsNone(ls[1])
+        self.assertIs(ls[2], spec_b)
+
+    def test_fluent_index(self):
+        spec = TensorSpec([IntSpec.backed("a")])
+        ls = ListSpec(2).index(0, spec)
+        self.assertIs(ls[0], spec)
+        self.assertIsNone(ls[1])
+
+    def test_setitem(self):
+        ls = ListSpec(2)
+        spec = IntSpec.static()
+        ls[0] = spec
+        self.assertIs(ls[0], spec)
+
+    def test_iter(self):
+        spec = IntSpec.static()
+        ls = ListSpec([spec, None])
+        items = list(ls)
+        self.assertEqual(len(items), 2)
+        self.assertIs(items[0], spec)
+        self.assertIsNone(items[1])
+
+    def test_repr(self):
+        ls = ListSpec([IntSpec.static("x"), None])
+        self.assertEqual(
+            repr(ls),
+            "ListSpec([IntSpec(name='x', type=STATIC), None])",
+        )
+
+    def test_unsupported_input_type_rejected(self):
+        with self.assertRaisesRegex(TypeError, "expects int / list / tuple / dict"):
+            ListSpec("not a spec")  # type: ignore[arg-type]
+
+
+class TestListSpecLookup(TestCase):
+    """``lookup_spec_from_dynamo_source`` walks ``GetItemSource(int)``
+    against a ``ListSpec`` and returns the leaf at that position."""
+
+    def _local(self, name):
+        from torch._dynamo.source import LocalSource
+
+        return LocalSource(name, is_input=True)
+
+    def _item(self, base, index):
+        from torch._dynamo.source import GetItemSource
+
+        return GetItemSource(base, index)
+
+    def test_int_index_descends_into_listspec(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        leaf = TensorSpec([IntSpec.backed("h")])
+        shapes_spec = ShapesSpec(params=ParamsSpec().arg("xs", ListSpec([leaf, None])))
+        result = lookup_spec_from_dynamo_source(
+            self._item(self._local("xs"), 0), shapes_spec
+        )
+        self.assertIs(result, leaf)
+
+    def test_out_of_range_returns_none(self):
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("xs", ListSpec([TensorSpec(2)]))
+        )
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._item(self._local("xs"), 5), shapes_spec
+            )
+        )
+
+    def test_str_key_against_listspec_returns_none(self):
+        # ListSpec only matches int keys; str subscript falls through.
+        from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
+
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec().arg("xs", ListSpec([TensorSpec(2)]))
+        )
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._item(self._local("xs"), "0"), shapes_spec
+            )
+        )
+
+
+@skipIfTorchDynamo()
+class TestListSpecCompile(TestCase):
+    """End-to-end: ``shapes_spec`` routes through ``ListSpec`` so a
+    ``TensorSpec`` reaches the dynamo builder for a positionally-indexed
+    list arg."""
+
+    def test_list_element_dim_backed(self):
+        def fn(xs):
+            return xs[0] + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec().arg(
+                    "xs",
+                    ListSpec([TensorSpec([IntSpec.backed("h"), None])]),
+                )
+            ),
+        )
+
+        compiled([torch.randn(4, 3)])
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Different dim 0 — backed absorbs it, no recompile.
+        compiled([torch.randn(8, 3)])
         self.assertEqual(len(backend.graphs), 1)
 
         shape = _tensor_placeholder_shape(backend.graphs[-1])

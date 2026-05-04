@@ -42,6 +42,7 @@ __all__ = [
     "TensorSpec",
     "ObjectSpec",
     "DictSpec",
+    "ListSpec",
     "ParamsSpec",
     "ShapesSpec",
     "lookup_spec_from_dynamo_source",
@@ -517,9 +518,11 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
     - ``DictGetItemSource(base, str_key)`` / ``GetItemSource(base,
       str_key)`` — dict subscript; matched against
       ``DictSpec.entry(str_key, ...)``.
+    - ``GetItemSource(base, int_key)`` — list/tuple positional access;
+      matched against ``ListSpec.index(int_key, ...)``.
 
-    Other source kinds (globals, ``GetItemSource`` with non-str keys,
-    etc.) return ``None`` — later container PRs extend this dispatch.
+    Other source kinds (globals, mismatched key kinds, etc.) return
+    ``None``.
     """
     from torch._dynamo.source import (
         AttrSource,
@@ -558,6 +561,8 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
         elif kind == "item":
             if isinstance(spec, DictSpec) and isinstance(key, str):
                 spec = spec._entries.get(key)
+            elif isinstance(spec, ListSpec) and isinstance(key, int):
+                spec = spec[key] if 0 <= key < len(spec) else None
             else:
                 return None
     return spec
@@ -700,5 +705,67 @@ class DictSpec:
     def __repr__(self) -> str:
         entries = ", ".join(f"{key!r}: {spec!r}" for key, spec in self._entries.items())
         return f"DictSpec({{{entries}}})"
+
+    # No ``__eq__`` / ``__hash__``: matches the rest of the spec types.
+
+
+class ListSpec:
+    """Spec for a Python ``list`` / ``tuple`` argument.
+
+    Each ``.index`` corresponds to a ``SequenceKey`` (positional access)
+    in the dynamo source chain. Construction mirrors :class:`TensorSpec`:
+
+    - ``int`` — length; all entries start as ``None``.
+    - ``list`` / ``tuple`` — length and entries inferred from input.
+    - ``dict[int, spec]`` — sparse positional spec; length = ``max(keys) + 1``.
+
+    Example::
+
+        ListSpec(3)  # length 3, all None
+        ListSpec([TensorSpec([...]), None])  # length 2
+        ListSpec({0: TensorSpec([...])})  # length 1
+        ListSpec(2).index(0, TensorSpec([...]))
+    """
+
+    def __init__(
+        self,
+        arg: int | list[Any] | tuple[Any, ...] | dict[int, Any],
+    ) -> None:
+        if isinstance(arg, int):
+            self._length = arg
+            self._entries: list[Any] = [None] * arg
+        elif isinstance(arg, (list, tuple)):
+            self._length = len(arg)
+            self._entries = list(arg)
+        elif isinstance(arg, dict):
+            self._length = max(arg.keys()) + 1
+            self._entries = [None] * self._length
+            for k, v in arg.items():
+                self._entries[k] = v
+        else:
+            raise TypeError(
+                f"ListSpec expects int / list / tuple / dict, got {type(arg).__name__}"
+            )
+
+    def index(self, idx: int, spec: Any) -> "ListSpec":
+        """Set the spec at position ``idx``; returns ``self``."""
+        self._entries[idx] = spec
+        return self
+
+    def __getitem__(self, idx: int) -> Any:
+        return self._entries[idx]
+
+    def __setitem__(self, idx: int, spec: Any) -> None:
+        self._entries[idx] = spec
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._entries)
+
+    def __repr__(self) -> str:
+        entries = ", ".join(repr(spec) for spec in self._entries)
+        return f"ListSpec([{entries}])"
 
     # No ``__eq__`` / ``__hash__``: matches the rest of the spec types.
