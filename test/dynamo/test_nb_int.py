@@ -2,8 +2,8 @@
 """Tests for nb_int_impl: unified __int__ / int() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbIntTests(TestCase):
@@ -172,7 +172,7 @@ class NbIntTests(TestCase):
     def test_int_returning_non_int_raises(self):
         class Bad:
             def __int__(self):
-                return "not an int"  # noqa: PLE0305
+                return "not an int"
 
         obj = Bad()
 

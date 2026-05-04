@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: pt2"]
-# flake8: noqa: B950
 
 import unittest
 from functools import partial
@@ -15,9 +14,10 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
 )
 from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, serialTest, TestCase
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -329,7 +329,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
 
     def test_offload_reload_fake_tensor(self):
         """Test fake tensor implementations for offload, reload, and wait_tensor."""
-        import torch._functorch._activation_offloading.offload_ops  # noqa: F401
+        import torch._functorch._activation_offloading.offload_ops
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():

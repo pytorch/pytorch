@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from typing_extensions import TypeIs
 
@@ -78,10 +79,10 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_cppgen  # type: ignore[import-not-found]
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
-            log.warning(  # noqa: G200
+            log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
                 e,
             )
@@ -163,15 +164,15 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401, F811
-            import cutlass_library.generator  # noqa: F401
-            import cutlass_library.library  # noqa: F401
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_library.generator
+            import cutlass_library.library
             import cutlass_library.manifest  # noqa: F401
             import pycute  # type: ignore[import-not-found]  # noqa: F401
 
             return True
         except ImportError as e:
-            log.debug(  # noqa: G200
+            log.debug(
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 e,
             )
@@ -534,3 +535,59 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         ):
             return alignment
     return 1
+
+
+class CUTLASSCompileSourceCapturingContext:
+    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
+    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+
+    def __init__(self, device_type: str):
+        self.sources = []
+        self._compile_patch = None
+        self.device_type = device_type
+
+    def __enter__(self, *args, **kwargs):
+        import unittest.mock as mock
+
+        import torch._inductor.codecache
+
+        codecache_cls = (
+            torch._inductor.codecache.XPUCodeCache
+            if self.device_type == "xpu"
+            else torch._inductor.codecache.CUDACodeCache
+        )
+        _compile_method_orig = codecache_cls.compile
+
+        def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
+            self.sources.append(source_code)
+            return _compile_method_orig(source_code, dst_file_ext)
+
+        # pyrefly: ignore [bad-assignment]
+        self._compile_patch = mock.patch(
+            f"torch._inductor.codecache.{codecache_cls.__name__}.compile", my_compile
+        )
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+
+
+def cutlass_standalone_runner_compile_command(
+    device_type: str, srcpath: Path, exepath: Path
+):
+    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
+    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
+
+    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
+    if device_type != "xpu":
+        extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
+    cutlass_compile_command = (
+        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
+        if device_type == "xpu"
+        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
+    )
+    compile_command = cutlass_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    )
+    return compile_command

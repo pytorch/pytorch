@@ -597,13 +597,13 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
 
 DECLARE_GRAD_FN = CodeTemplate(
     """\
-std::shared_ptr<${op}> grad_fn;
+c10::intrusive_ptr<${op}> grad_fn;
 """
 )
 
 DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
-std::vector<std::shared_ptr<${op}>> grad_fns;
+std::vector<c10::intrusive_ptr<${op}>> grad_fns;
 """
 )
 
@@ -632,7 +632,7 @@ if (compute_requires_grad( ${args_to_check} )) {
 
 ASSIGN_GRAD_FN = CodeTemplate(
     """\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+grad_fn = c10::make_intrusive<${op}>(${op_ctor});
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
@@ -644,11 +644,11 @@ ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
 for (const auto& i : c10::irange( ${irange} )) {
   const auto ith_requires_grad = compute_requires_grad(${args_with_derivatives});
   check_inplace(self[i], ith_requires_grad);
-  grad_fns.push_back([&]() -> std::shared_ptr<${op}> {
+  grad_fns.push_back([&]() -> c10::intrusive_ptr<${op}> {
       if (!ith_requires_grad) {
           return nullptr;
       } else {
-          auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+          auto grad_fn = c10::make_intrusive<${op}>(${op_ctor});
           grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
           return grad_fn;
       }
@@ -1903,14 +1903,12 @@ def emit_body(
                                 )
                             )
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
                                 req_inp=inp_name + "[i]"
                             )
                         )
                     else:
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp_name)
                         )
 

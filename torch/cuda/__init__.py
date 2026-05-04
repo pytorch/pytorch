@@ -319,11 +319,13 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
 }
 
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases
+# TORCH_CUDA_ARCH_LIST for PyTorch releases (union of x86_64 and aarch64
+# build matrices). Keep in sync with .ci/manywheel/build_cuda.sh and
+# .github/scripts/generate_binary_build_matrix.py:CUDA_ARCHES.
 PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 80, 86, 90},
-    "12.8": {70, 80, 86, 90, 100, 120},
+    "12.6": {50, 60, 70, 75, 80, 86, 90},
     "13.0": {75, 80, 86, 90, 100, 110, 120},
+    "13.2": {75, 80, 86, 90, 100, 110, 120},
 }
 
 
@@ -1138,7 +1140,7 @@ def device_count() -> int:
 
 def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
     if arch_flags is None:

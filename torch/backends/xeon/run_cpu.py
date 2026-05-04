@@ -345,7 +345,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge gperftools" to install {{0}}'
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -353,7 +353,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge jemalloc" to install {{0}}'
-                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
+                logger.warning(msg.format("Jemalloc", "jemalloc"))
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env(
@@ -426,7 +426,7 @@ Value applied: %s. Value ignored: %s",
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f'{self.msg_lib_notfound} you can use "conda install mkl" to install {{0}}'
-                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
+                logger.warning(msg.format("iomp", "iomp5"))
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:

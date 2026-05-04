@@ -2,13 +2,8 @@
 """Tests for nb_float_impl: unified __float__ / float() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-    run_tests,
-    skipIfCrossRef,
-    TestCase,
-)
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test, skipIfCrossRef
 
 
 class NbFloatTests(TestCase):
@@ -171,7 +166,7 @@ class NbFloatTests(TestCase):
     def test_float_returning_non_float_raises(self):
         class Bad:
             def __float__(self):
-                return "not a float"  # noqa: PLE0305
+                return "not a float"
 
         obj = Bad()
 

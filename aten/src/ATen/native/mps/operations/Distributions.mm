@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -16,6 +17,8 @@
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/cauchy_native.h>
+#include <ATen/ops/clamp.h>
+#include <ATen/ops/cumsum.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
@@ -23,9 +26,11 @@
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
+#include <ATen/ops/rand.h>
 #include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
 #include <ATen/ops/randperm_native.h>
+#include <ATen/ops/searchsorted.h>
 #include <ATen/ops/topk.h>
 #include <ATen/ops/uniform_native.h>
 #include <ATen/ops/view_as_real.h>
@@ -237,33 +242,6 @@ static Tensor& normal_mps_impl(Tensor& self,
                                  random_op_block);
 }
 
-static Tensor& bernoulli_mps_impl(Tensor& self,
-                                  const Tensor& prob_t,
-                                  std::optional<Generator> gen,
-                                  std::string op_name) {
-  TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
-              op_name,
-              ": probability and self tensor should be of the same shape")
-
-  RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob_t);
-    return [mpsGraph lessThanWithPrimaryTensor:randomTensor
-                               secondaryTensor:castMPSTensor(mpsGraph, cachedGraph->stdTensor, [randomTensor dataType])
-                                          name:nil];
-  };
-  // Bernoulli generates binary output so we use bool type
-  return mps::random_mps_impl<bool>(self,
-                                    0.0,
-                                    1.0,
-                                    std::nullopt,
-                                    prob_t,
-                                    MPSGraphRandomDistributionUniform,
-                                    gen,
-                                    op_name + getTensorsStringKey({prob_t}),
-                                    random_op_block);
-}
-
 } // namespace mps
 
 Tensor& uniform_mps_(Tensor& self, double from, double to, std::optional<Generator> gen) {
@@ -335,21 +313,6 @@ Tensor& normal_mps_out(double mean, const Tensor& std, std::optional<Generator> 
 Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, std::optional<Generator> gen, Tensor& self) {
   TORCH_CHECK(mean.numel() == std.numel(), "normal_mps_out: mean and std must have same number of elements")
   return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
-}
-
-Tensor& bernoulli_out_mps(const Tensor& p_, std::optional<Generator> gen, Tensor& result) {
-  result.resize_(p_.sizes());
-  return mps::bernoulli_mps_impl(result, p_, gen, __func__);
-}
-
-Tensor& bernoulli_mps_(Tensor& self, double p, std::optional<Generator> gen) {
-  TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
-  Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
-  return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
-}
-
-Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
-  return mps::bernoulli_mps_impl(self, p_, gen, __func__);
 }
 
 // random_.from
@@ -477,6 +440,80 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
 
   return self;
 }
+
+// Tensor-p Bernoulli: dispatches the Metal `bernoulli_tensor` kernel with a
+// flat float32 probability buffer matching `self.numel()`.
+static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
+  if (self.numel() == 0) {
+    return self;
+  }
+  TORCH_CHECK(p_.is_same_size(self) || p_.dim() == 0,
+              "bernoulli_mps_: probability and self tensor should be of the same shape");
+
+  using namespace mps;
+
+  // 0-dim p is a scalar — go through the scalar path.
+  if (p_.dim() == 0) {
+    double p_val = p_.item<double>();
+    TORCH_CHECK(0.0 <= p_val && p_val <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p_val);
+    return distribution_kernel_mps_impl(self, p_val, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+  }
+
+  // Both `to` and `contiguous` short-circuit when no work is needed.
+  auto p_float = p_.to(kFloat).contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto needs_copy = !self.is_contiguous();
+  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("bernoulli_tensor_" + scalarToMetalTypeString(output));
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + output.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        auto numel = static_cast<uint32_t>(output.numel());
+        mtl_setArgs(computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset});
+        mtl_setBytes(computeEncoder, numel, 3);
+        mtl_dispatch1DJob(computeEncoder, pso, (numel + 3) / 4);
+      }
+    });
+  }
+
+  if (needs_copy) {
+    self.copy_(output);
+  }
+  return self;
+}
+
+// Stub-style entry points so MPS shares the dispatch template with CPU/CUDA.
+// `const TensorBase&` mirrors the stub signature; the underlying storage is
+// still the inplace target (TensorIterator uses the same idiom).
+static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
+  // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  distribution_kernel_mps_impl(self_t, p, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+}
+
+static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  const Tensor& p_t = static_cast<const Tensor&>(p_);
+  bernoulli_tensor_mps_impl(self_t, p_t, gen);
+}
+
+REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
+REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
@@ -606,124 +643,15 @@ static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
                                                        const int64_t n_sample,
                                                        std::optional<Generator> generator,
                                                        Tensor& result) {
-  using namespace mps;
-
-  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
-  int inputSize = self.dim();
-  int numDist = inputSize == 1 ? 1 : self.size(0);
-  int numCategories = inputSize == 1 ? self.size(0) : self.size(1);
-
-  // Restructure data for 2d
-  auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
-  auto result_v = inputSize == 1 ? result.view({numDist, n_sample}) : result;
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "multinomial_with_replacement:" + getTensorsStringKey({self}) + ":" + std::to_string(n_sample);
-    auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSShape* prob_shape = getMPSShape(self_v);
-      newCachedGraph->stateTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @7 ]);
-
-      auto prob_dtype = getMPSDataType(self_v);
-
-      // This is probability weights
-      newCachedGraph->probTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self_v), prob_shape);
-
-      MPSGraphTensor* sumProbs = [mpsGraph reductionSumWithTensor:newCachedGraph->probTensor axis:-1 name:nil];
-
-      MPSGraphTensor* normalizedProbs = [mpsGraph divisionWithPrimaryTensor:newCachedGraph->probTensor
-                                                            secondaryTensor:sumProbs
-                                                                       name:nil];
-
-      auto ns_numCategories = [NSNumber numberWithInt:numCategories];
-      auto ns_numDist = [NSNumber numberWithInt:numDist];
-      auto ns_n_sample = [NSNumber numberWithInt:n_sample];
-
-      MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0f
-                                                    shape:@[ ns_numCategories, ns_numCategories ]
-                                                 dataType:prob_dtype];
-      auto zeroTensor = [mpsGraph constantWithScalar:0.0f dataType:MPSDataTypeInt32];
-      auto minusOneTensor = [mpsGraph constantWithScalar:-1.0f dataType:MPSDataTypeInt32];
-
-      MPSGraphTensor* upperTriangle = [mpsGraph bandPartWithTensor:ones
-                                                    numLowerTensor:zeroTensor
-                                                    numUpperTensor:minusOneTensor
-                                                              name:nil];
-      MPSGraphTensor* upperProbRange = [mpsGraph matrixMultiplicationWithPrimaryTensor:normalizedProbs
-                                                                       secondaryTensor:upperTriangle
-                                                                                  name:nil];
-
-      MPSGraphTensor* lowerProbRange = [mpsGraph subtractionWithPrimaryTensor:upperProbRange
-                                                              secondaryTensor:normalizedProbs
-                                                                         name:nil];
-
-      upperProbRange = [mpsGraph reshapeTensor:upperProbRange withShape:@[ ns_numDist, @1, ns_numCategories ] name:nil];
-      lowerProbRange = [mpsGraph reshapeTensor:lowerProbRange withShape:@[ ns_numDist, @1, ns_numCategories ] name:nil];
-
-      MPSGraphRandomOpDescriptor* descriptor =
-          [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionUniform dataType:prob_dtype];
-      NSArray<MPSGraphTensor*>* generatorTensors = [mpsGraph randomTensorWithShape:@[ ns_numDist, ns_n_sample, @1 ]
-                                                                        descriptor:descriptor
-                                                                       stateTensor:newCachedGraph->stateTensor
-                                                                              name:nil];
-      MPSGraphTensor* randomTensor = generatorTensors[0];
-
-      auto broadcastShape = @[ ns_numDist, ns_n_sample, ns_numCategories ];
-      int broadcastShapeVals[3] = {numDist, static_cast<int>(n_sample), numCategories};
-      MPSGraphTensor* broadcastShapeTensor =
-          [mpsGraph constantWithData:[NSData dataWithBytes:broadcastShapeVals length:sizeof(int) * broadcastShape.count]
-                               shape:@[ [NSNumber numberWithUnsignedInteger:broadcastShape.count] ]
-                            dataType:MPSDataTypeUInt32];
-
-      MPSGraphTensor* samplesTensor = [mpsGraph broadcastTensor:randomTensor toShape:broadcastShape name:nil];
-      MPSGraphTensor* sampleAbove = [mpsGraph greaterThanWithPrimaryTensor:samplesTensor
-                                                           secondaryTensor:lowerProbRange
-                                                                      name:nil];
-      MPSGraphTensor* sampleBelow = [mpsGraph lessThanWithPrimaryTensor:samplesTensor
-                                                        secondaryTensor:upperProbRange
-                                                                   name:nil];
-      MPSGraphTensor* sampleWithin = [mpsGraph logicalANDWithPrimaryTensor:sampleAbove
-                                                           secondaryTensor:sampleBelow
-                                                                      name:nil];
-      MPSGraphTensor* sampleMask = [mpsGraph castTensor:sampleWithin toType:MPSDataTypeInt32 name:@"sampleMask"];
-      MPSGraphTensor* categoriesTensor = [mpsGraph coordinateAlongAxis:-1
-                                                       withShapeTensor:broadcastShapeTensor
-                                                                  name:nil];
-      MPSGraphTensor* binnedSamplesTensor = [mpsGraph multiplicationWithPrimaryTensor:categoriesTensor
-                                                                      secondaryTensor:sampleMask
-                                                                                 name:nil];
-      MPSGraphTensor* reducedTensor = [mpsGraph reductionSumWithTensor:binnedSamplesTensor axis:-1 name:nil];
-      MPSGraphTensor* reshapeTensor = [mpsGraph reshapeTensor:reducedTensor
-                                                    withShape:@[ ns_numDist, ns_n_sample ]
-                                                         name:nil];
-      newCachedGraph->resultTensor = [mpsGraph castTensor:reshapeTensor
-                                                   toType:getMPSDataType(result)
-                                                     name:@"resultTensor"];
-    });
-    // update the Philox state values on each run of the same graph
-    MPSNDArrayDescriptor* stateDesc =
-        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
-    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      // update the Philox state values on each run
-      mps_gen->update_philox_counters();
-      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
-    }
-    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
-
-    auto probPlaceholder = Placeholder(cachedGraph->probTensor, self_v);
-    auto outputPlaceholder = Placeholder(cachedGraph->resultTensor, result_v);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      cachedGraph->stateTensor : stateTensorData,
-      probPlaceholder.getMPSGraphTensor() : probPlaceholder.getMPSGraphTensorData()
-    };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return result;
+  auto numCategories = self.size(-1);
+  // CDF accumulated in float32 since bfloat16/float16 lose precision summing many small probabilities.
+  // Sample u from U[0, total) and search the unnormalized CDF,
+  // equivalent to normalizing then sampling u from U[0, 1)
+  auto cdf = self.cumsum(-1, /*dtype=*/kFloat);
+  auto uniform = at::rand(result.sizes(), generator, self.options().dtype(kFloat))
+                     .mul_(cdf.select(-1, numCategories - 1).unsqueeze(-1));
+  at::searchsorted_out(result, cdf, uniform);
+  return result.clamp_(0, numCategories - 1);
 }
 
 /* The largest consecutive integer representable in float32 (2^24) */
