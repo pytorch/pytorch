@@ -378,51 +378,6 @@ supported domains only; other collectives (e.g., ``all_gather``) and
 inter-node communication are not affected.
 :::
 
-## Rendezvous at Scale
-
-By default, `rendezvous` exchanges metadata via the TCPStore. Each rank in the
-symmetric memory group issues one store set and N-1 store gets (where N is the
-group size, typically 8–72 for NVLink domains). At large world sizes the
-TCPStore (~200k QPS capacity) becomes a bottleneck: for example, with 72-rank
-NVLink groups at 10k total ranks, a single rendezvous takes ~3.6s via TCPStore;
-at 100k ranks this grows to ~36s.
-
-To use the process group's NCCL allgather instead, set
-`use_pg_for_symm_mem_rendezvous` in the process group options:
-
-```python
-opts = dist.ProcessGroupNCCL.Options()
-opts.use_pg_for_symm_mem_rendezvous = True
-pg = dist.new_group(ranks, pg_options=opts)
-
-t = symm_mem.empty(size, device=device)
-hdl = symm_mem.rendezvous(t, group=pg)
-```
-
-If the process group is only used for symmetric memory and won't be used for
-regular collectives afterwards (e.g., an expert-parallelism group), you can
-release the NCCL communicator after rendezvous via ``abort()``. The symmetric
-memory handle remains usable since it only depends on the mapped memory, not the
-communicator:
-
-```python
-opts = dist.ProcessGroupNCCL.Options()
-opts.use_pg_for_symm_mem_rendezvous = True
-ep_pg = dist.new_group(ep_ranks, pg_options=opts)
-
-t = symm_mem.empty(size, device=device)
-hdl = symm_mem.rendezvous(t, group=ep_pg)
-
-# Release the NCCL communicator since ep_pg won't be used for collectives.
-# The symm_mem handle is still usable — it only needs the mapped memory.
-ep_pg.abort()
-```
-
-:::{note}
-Enabling `use_pg_for_symm_mem_rendezvous` will lazily create the NCCL
-communicator for the process group if it doesn't already exist.
-:::
-
 ## API Reference
 
 ```{eval-rst}
