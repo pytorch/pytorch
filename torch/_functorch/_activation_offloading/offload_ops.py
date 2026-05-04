@@ -10,12 +10,13 @@ module-level registry, so ``ao.wait_tensor`` takes only the tensor itself
 
 Offload pattern:
     cpu_tensor = ao.offload(gpu_tensor)
-    cpu_tensor = ao.wait_tensor(cpu_tensor, gpu_tensor)
-                               (keepalive arg extends gpu_tensor lifetime past the async D2H copy)
+    cpu_tensor = ao.wait_tensor(cpu_tensor, keepalive=gpu_tensor)
+        keepalive frees the GPU tensor's storage after the D2H copy completes.
 
 Reload pattern:
     gpu_tensor = ao.reload(cpu_tensor, device)
-    gpu_tensor = ao.wait_tensor(gpu_tensor)
+    gpu_tensor = ao.wait_tensor(gpu_tensor, keepalive=cpu_tensor)
+        keepalive frees the CPU tensor's storage after the H2D copy completes.
 """
 
 import torch
@@ -141,26 +142,21 @@ def _(
 # Synchronization details (completion event, device) are looked up from
 # ``_wait_registry`` keyed on ``tensor.data_ptr()``.
 #
-# ``keepalive`` serves two purposes: (1) it creates a graph dependency that
-# extends the GPU tensor's lifetime until the compute stream has waited on
-# the D2H completion event, and (2) when present, the op frees the GPU
-# tensor's storage after the wait, since all forward consumers have already
-# finished reading it.
-#
-# ``dep`` is an optional scheduling dependency: it is not read by the op,
-# but creates a graph edge that prevents graph-reordering passes (e.g.
-# bucketing) from moving this wait before the last forward consumer.
+# ``keepalive`` is the source tensor of the async transfer. It creates a
+# graph dependency that extends the source tensor's lifetime until the
+# compute stream has waited on the transfer completion event. After the
+# wait, the op frees the source tensor's storage via ``resize_(0)`` since
+# it is no longer needed:
+#   - Offload (D2H): keepalive is the GPU tensor; freed after the D2H copy.
+#   - Reload (H2D): keepalive is the CPU tensor; freed after the H2D copy.
 _lib = torch.library.Library("ao", "DEF")
-_lib.define(
-    "wait_tensor(Tensor(a) tensor, Tensor? keepalive=None, Tensor? dep=None) -> Tensor(a)"
-)
+_lib.define("wait_tensor(Tensor(a) tensor, Tensor? keepalive=None) -> Tensor(a)")
 
 
 @torch.library.impl("ao::wait_tensor", "CompositeExplicitAutograd")
 def _ao_wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
-    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     completion_event, device = _pop_wait(tensor)
     current_stream = torch.accelerator.current_stream(device)
@@ -177,7 +173,6 @@ def _ao_wait_tensor(
 def _ao_wait_tensor_fake(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
-    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return tensor
 
@@ -188,7 +183,6 @@ has_side_effect(torch.ops.ao.wait_tensor.default)
 def wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
-    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Callable wrapper so ``wait_tensor`` can be imported by name for op registration."""
-    return torch.ops.ao.wait_tensor.default(tensor, keepalive, dep)
+    return torch.ops.ao.wait_tensor.default(tensor, keepalive)

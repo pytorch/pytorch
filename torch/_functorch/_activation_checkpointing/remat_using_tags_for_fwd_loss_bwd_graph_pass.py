@@ -157,9 +157,9 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     def _ensure_in_env(node: fx.Node) -> fx.Node:
         """Eagerly copy a backward node and its dependencies into the new graph.
 
-        When CPU offloading runs before remat, offloaded forward nodes carry
-        ``cpu_offload_reload_node`` metadata pointing to their backward reload
-        chain (ao.reload -> ao.wait_tensor). Recomputed nodes need the
+        The CPU offloading pass must run before remat. Offloaded forward nodes
+        carry ``cpu_offload_reload_node`` metadata pointing to their backward
+        reload chain (ao.reload -> ao.wait_tensor). Recomputed nodes need the
         reloaded tensor, but the reload chain may not have been copied into
         ``env`` yet (e.g. layer-boundary nodes whose reload is in a later
         backward region). This helper copies the chain on demand.
