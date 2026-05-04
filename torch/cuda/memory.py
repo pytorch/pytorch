@@ -1274,6 +1274,24 @@ def _get_module_counters() -> dict:
     return torch._C._cuda_getModuleCounters()
 
 
+def _enable_collective_buffer_tracking() -> None:
+    """Enable collective buffer tracking.
+
+    Registers a ``RecordFunctionCallback`` on ``RecordScope::FUNCTION`` that
+    detects NCCL collective operations (via ``RECORD_PARAM_COMMS``) and tags
+    their allocations as ``COLLECTIVE_BUFFER``. This covers DDP, FSDP, TP,
+    PP, and any other strategy that uses ProcessGroup collectives.
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_enableCollectiveBufferTracking()
+
+
+def _disable_collective_buffer_tracking() -> None:
+    """Disable collective buffer tracking."""
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_disableCollectiveBufferTracking()
+
+
 def _save_segment_usage(filename="output.svg", snapshot=None):
     if snapshot is None:
         snapshot = _snapshot()

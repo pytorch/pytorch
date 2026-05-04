@@ -1272,6 +1272,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::isModuleTrackingEnabled();
   });
 
+  m.def("_cuda_enableCollectiveBufferTracking", []() {
+    torch::cuda::_enableCollectiveBufferTracking();
+  });
+
+  m.def("_cuda_disableCollectiveBufferTracking", []() {
+    torch::cuda::_disableCollectiveBufferTracking();
+  });
+
   m.def("_cuda_getModuleCounters", []() {
     return moduleCountersToPyDict(
         c10::cuda::CUDACachingAllocator::getModuleCounters());
