@@ -915,6 +915,9 @@ MPSPinnedAllocator& _getPinnedAllocator() {
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator() {
+  if (!at::mps::is_available()) {
+    return nullptr;
+  }
   auto& sa = _getSharedAllocator();
   if (sa.isSharedStorageSupported()) {
     return &sa;
@@ -923,6 +926,9 @@ IMPSAllocator* getIMPSAllocator() {
 }
 
 Allocator* getMPSPinnedAllocator() {
+  if (!at::mps::is_available()) {
+    return nullptr;
+  }
   auto& sa = _getSharedAllocator();
   if (sa.isSharedStorageSupported()) {
     return &_getPinnedAllocator();
@@ -935,6 +941,9 @@ Allocator* getMPSPinnedAllocator() {
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
 bool isMPSPinnedPtr(const void* data) {
+  if (!at::mps::is_available()) {
+    return false;
+  }
   return at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 
