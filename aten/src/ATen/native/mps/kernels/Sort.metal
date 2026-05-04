@@ -26,6 +26,41 @@ inline bool sort_compare(T a, T b, bool desc) {
   return desc ? c10::metal::less(b, a) : c10::metal::less(a, b);
 }
 
+template <
+    bool STABLE,
+    typename T,
+    typename IdxT,
+    ::metal::enable_if_t<STABLE, bool> = true>
+inline bool bitonic_lt(
+    T vi,
+    IdxT ii,
+    T vp,
+    IdxT ip,
+    bool /*i_am_low*/,
+    bool desc) {
+  if (sort_compare(vi, vp, desc))
+    return true;
+  if (sort_compare(vp, vi, desc))
+    return false;
+  return ii < ip;
+}
+
+template <
+    bool STABLE,
+    typename T,
+    typename IdxT,
+    ::metal::enable_if_t<!STABLE, bool> = true>
+inline bool bitonic_lt(
+    T vi,
+    IdxT /*ii*/,
+    T vp,
+    IdxT /*ip*/,
+    bool i_am_low,
+    bool desc) {
+  return sort_compare(vi, vp, desc) ||
+      (!sort_compare(vp, vi, desc) && i_am_low);
+}
+
 // Padding value for out-of-range slots. Chosen to sort to the end of the
 // output (largest for asc, smallest for desc) so padding never lands among
 // real data. Floats use NaN on asc because c10::metal::less puts NaNs last.
@@ -155,6 +190,7 @@ template <
     short TN,
     int K,
     int OFFSET,
+    bool STABLE,
     ::metal::enable_if_t<(OFFSET < TN), bool> = true>
 inline void bitonic_substage(
     thread T (&v)[TN],
@@ -169,7 +205,8 @@ inline void bitonic_substage(
       bool ascending = (global_p & K) == 0;
       T vi = v[i], vp = v[pi];
       IdxT ii = idx[i], ip = idx[pi];
-      bool vi_first = sort_compare(vi, vp, desc);
+      bool vi_first =
+          bitonic_lt<STABLE>(vi, ii, vp, ip, /*i_am_low=*/false, desc);
       bool do_swap = ascending ? !vi_first : vi_first;
       v[i] = do_swap ? vp : vi;
       v[pi] = do_swap ? vi : vp;
@@ -185,6 +222,7 @@ template <
     short TN,
     int K,
     int OFFSET,
+    bool STABLE,
     ::metal::enable_if_t<(OFFSET >= TN), bool> = true>
 inline void bitonic_substage(
     thread T (&v)[TN],
@@ -201,57 +239,58 @@ inline void bitonic_substage(
     IdxT ip = sort_shuffle_xor(ii, LANE_OFFSET);
     int global_p = int(lane) * TN + i;
     bool ascending = (global_p & K) == 0;
-    // Tie-break by lane so the two lanes agree on which keeps which element.
-    // without this, equal values make both lanes grab the same one (duplicate
-    // indices)
-    bool vi_first =
-        sort_compare(vi, vp, desc) || (!sort_compare(vp, vi, desc) && i_am_low);
+    // STABLE=false uses i_am_low so the two lanes agree on which element
+    // each keeps (without it, equal values make both lanes grab the same
+    // one and we get duplicate indices).
+    // STABLE=true ignores i_am_low and uses the lower original index - both
+    // lanes still agree because their (ii vs ip) views are mirror images.
+    bool vi_first = bitonic_lt<STABLE>(vi, ii, vp, ip, i_am_low, desc);
     bool should_take = vi_first != (ascending == i_am_low);
     v[i] = should_take ? vp : vi;
     idx[i] = should_take ? ip : ii;
   }
 }
 
-template <typename T, typename IdxT>
+template <typename T, typename IdxT, bool STABLE>
 inline void simd_bitonic_sort4(
     thread T (&v)[4],
     thread IdxT (&idx)[4],
     uint lane,
     bool desc) {
-  bitonic_substage<T, IdxT, 4, 2, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 2, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 4, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 4, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 4, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 4, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 8, 4>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 8, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 8, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 8, 4, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 8, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 8, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 16, 8>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 16, 4>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 16, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 16, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 16, 8, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 16, 4, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 16, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 16, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 32, 16>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 32, 8>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 32, 4>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 32, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 32, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 32, 16, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 32, 8, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 32, 4, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 32, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 32, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 64, 32>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 64, 16>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 64, 8>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 64, 4>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 64, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 64, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 32, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 16, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 8, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 4, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 64, 1, STABLE>(v, idx, lane, desc);
 
-  bitonic_substage<T, IdxT, 4, 128, 64>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 32>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 16>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 8>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 4>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 2>(v, idx, lane, desc);
-  bitonic_substage<T, IdxT, 4, 128, 1>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 64, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 32, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 16, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 8, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 4, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 2, STABLE>(v, idx, lane, desc);
+  bitonic_substage<T, IdxT, 4, 128, 1, STABLE>(v, idx, lane, desc);
 }
 
 // -----------------------------------------------------------------------------
@@ -262,7 +301,7 @@ inline void simd_bitonic_sort4(
 // stages double the merged run size up to TPTG.
 // -----------------------------------------------------------------------------
 
-template <typename T, typename IdxT, short TPTG, short TN>
+template <typename T, typename IdxT, short TPTG, short TN, bool STABLE>
 inline void block_merge_sort(
     threadgroup T* tv,
     threadgroup IdxT* ti,
@@ -278,7 +317,7 @@ inline void block_merge_sort(
     li[i] = ti[base + i];
   }
 
-  simd_bitonic_sort4<T, IdxT>(lv, li, lid & 31u, desc);
+  simd_bitonic_sort4<T, IdxT, STABLE>(lv, li, lid & 31u, desc);
 
   if (TPTG >= 64) {
     constexpr int mt_first = 64;
@@ -343,7 +382,7 @@ inline void block_merge_sort(
 // by the host when size <= TPTG*TN for the largest available TPTG.
 // =============================================================================
 
-template <typename T, short TPTG, short TN>
+template <typename T, short TPTG, short TN, bool STABLE>
 kernel void sort_block(
     const device T* inp [[buffer(0)]],
     device T* out_vals [[buffer(1)]],
@@ -367,7 +406,7 @@ kernel void sort_block(
     tgi[i] = i;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  block_merge_sort<T, uint, TPTG, TN>(tgv, tgi, lid.x, desc);
+  block_merge_sort<T, uint, TPTG, TN, STABLE>(tgv, tgi, lid.x, desc);
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (int i = lid.x; i < size; i += TPTG) {
     out_vals[base_out + i] = tgv[i];
@@ -376,17 +415,21 @@ kernel void sort_block(
 }
 
 // TODO: reuse DEFAULT_ILP from c10/metal/common.h for TN
-#define INSTANTIATE_SORT(T, TPTG, TN)                    \
-  template [[host_name("sort_block_" #T "_tptg" #TPTG)]] \
-  kernel void sort_block<T, TPTG, TN>(                   \
-      const device T*,                                   \
-      device T*,                                         \
-      device long*,                                      \
-      constant int&,                                     \
-      constant long2&,                                   \
-      constant bool&,                                    \
-      uint3,                                             \
+#define INSTANTIATE_SORT_VARIANT(T, TPTG, TN, STABLE, SUFFIX)              \
+  template[[host_name("sort_block_" #T "_tptg" #TPTG SUFFIX)]] kernel void \
+  sort_block<T, TPTG, TN, STABLE>(                                         \
+      const device T*,                                                     \
+      device T*,                                                           \
+      device long*,                                                        \
+      constant int&,                                                       \
+      constant long2&,                                                     \
+      constant bool&,                                                      \
+      uint3,                                                               \
       uint3);
+
+#define INSTANTIATE_SORT(T, TPTG, TN)              \
+  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, false, "") \
+  INSTANTIATE_SORT_VARIANT(T, TPTG, TN, true, "_stable")
 
 #define INSTANTIATE_ALL_TPTG(T) \
   INSTANTIATE_SORT(T, 32, 4)    \
