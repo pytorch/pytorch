@@ -7,6 +7,29 @@ using namespace metal;
 
 constant constexpr float eps = 1.19209e-07f;
 
+// Box-Muller transform: turn two pairs of uniforms `(u1a, u2a)` and
+// `(u1b, u2b)` from (0, 1) into 4 independent N(0, 1) samples. `sincos` is a
+// fused intrinsic that returns sin and writes cos in one call, avoiding the
+// duplicate angle computation of separate `sin` / `cos`.
+inline void box_muller(
+    float u1a,
+    float u2a,
+    float u1b,
+    float u2b,
+    thread float (&z)[4]) {
+  float ra = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1a));
+  float rb = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1b));
+  float ta = 2.0f * M_PI_F * u2a;
+  float tb = 2.0f * M_PI_F * u2b;
+  float ca, cb;
+  float sa = ::metal::precise::sincos(ta, ca);
+  float sb = ::metal::precise::sincos(tb, cb);
+  z[0] = ra * ca;
+  z[1] = ra * sa;
+  z[2] = rb * cb;
+  z[3] = rb * sb;
+}
+
 // Cauchy, geometric, and log_normal each draw 4 samples per thread from a
 // single Philox-4x32-10 round, matching the existing exponential / bernoulli
 // pattern. This eliminates the bit-level waste that was 75% of the philox
@@ -46,25 +69,16 @@ kernel void log_normal(
   uint base = tid * 4;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  // Box-Muller turns each (u1, u2) pair into two independent N(0,1) samples
-  // via (R cos theta, R sin theta) with R = sqrt(-2 ln u1), theta = 2 pi u2.
-  // One philox round therefore yields 4 standard normals from two pairs.
+  // Box-Muller turns each (u1, u2) pair into two independent N(0,1) samples;
+  // one Philox round therefore yields 4 standard normals from two pairs.
   float u1a = clamp(
       c10::metal::detail::uint32_to_uniform_float(raw[0]), eps, 1.0f - eps);
   float u2a = c10::metal::detail::uint32_to_uniform_float(raw[1]);
   float u1b = clamp(
       c10::metal::detail::uint32_to_uniform_float(raw[2]), eps, 1.0f - eps);
   float u2b = c10::metal::detail::uint32_to_uniform_float(raw[3]);
-  float ra = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1a));
-  float rb = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1b));
-  float ta = 2.0f * M_PI_F * u2a;
-  float tb = 2.0f * M_PI_F * u2b;
-  float z[4] = {
-      ra * ::metal::precise::cos(ta),
-      ra * ::metal::precise::sin(ta),
-      rb * ::metal::precise::cos(tb),
-      rb * ::metal::precise::sin(tb),
-  };
+  float z[4];
+  box_muller(u1a, u2a, u1b, u2b, z);
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     output[base + i] =
