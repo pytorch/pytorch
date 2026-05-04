@@ -4029,18 +4029,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 #ifdef USE_C10D_NCCL
   // NCCLXStub: minimal C++ Backend for testing custom backend plugins
   // (simulates ncclx-like backends that register via extended_api=True).
-  intrusive_ptr_class_<::c10d::NCCLXStub>(
-      module, "NCCLXStub", backend)
+  intrusive_ptr_class_<::c10d::NCCLXStub>(module, "NCCLXStub", backend)
       .def(
-          py::init(
-              [](const c10::intrusive_ptr<::c10d::Store>& store,
-                 int rank,
-                 int size,
-                 c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
-                     options) {
-                return c10::make_intrusive<::c10d::NCCLXStub>(
-                    store, rank, size, std::move(options));
-              }),
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
+                          options) {
+            return c10::make_intrusive<::c10d::NCCLXStub>(
+                store, rank, size, std::move(options));
+          }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
