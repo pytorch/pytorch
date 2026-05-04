@@ -252,10 +252,6 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   });
 }
 
-static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
-  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
-}
-
 static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }

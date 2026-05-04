@@ -22226,7 +22226,11 @@ op_db: list[OpInfo] = [
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.complex64),
+        # The MPS kernel handles complex64 (matching the forward dropout op),
+        # but autograd does not support complex backward of
+        # native_dropout_backward, so OpInfo tests cannot exercise it through
+        # the standard requires_grad path.
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
