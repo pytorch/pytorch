@@ -107,6 +107,10 @@ class TestCase(TorchTestCase):
             torch.set_grad_enabled(self._prior_is_grad_enabled)
         config.nested_graph_breaks = self._prior_nested_graph_breaks
 
+    def before_cuda_memory_leak_check(self) -> None:
+        reset()
+        utils.counters.clear()
+
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if (
             config.debug_disable_compile_counter

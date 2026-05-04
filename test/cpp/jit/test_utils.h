@@ -5,6 +5,23 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
+#include <filesystem>
+
+// Resolve a test data file path relative to a source file's directory.
+// Falls back to the executable's directory when the source tree is absent
+// (e.g. when running from an installed wheel in CI).
+static inline std::string resolveTestDataFile(
+    const char* sourceFile,
+    const char* relative) {
+  std::string srcDir(sourceFile);
+  srcDir = srcDir.substr(0, srcDir.find_last_of("/\\") + 1);
+  auto candidate = srcDir + relative;
+  if (std::filesystem::exists(candidate))
+    return candidate;
+  auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
+  return (exeDir / relative).string();
+}
+
 namespace {
 static inline void trim(std::string& s) {
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {

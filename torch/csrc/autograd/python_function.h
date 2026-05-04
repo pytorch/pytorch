@@ -41,6 +41,7 @@ struct PyNode : public Node {
       const SwapSavedVariables& saved);
 
   void release_variables() override;
+  void release_resources() override;
   std::string name() const override;
   bool is_traceable() override;
 
@@ -60,9 +61,9 @@ struct PyNode : public Node {
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
     // If python is already dead, leak the wrapped python objects
-    if (Py_IsInitialized()) {
+    if (obj && Py_IsInitialized()) {
       pybind11::gil_scoped_acquire gil;
-      Py_DECREF(obj);
+      Py_CLEAR(obj);
     }
   }
 };
@@ -120,6 +121,14 @@ struct THPFunction {
   // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
   bool materialize_non_diff_grads;
 
+  // When true, PyNode::apply passes grads as a single mutable list argument
+  // instead of individual args in an immutable tuple, allowing backward to
+  // free individual grads mid-execution and reduce peak memory.
+  // Used by pt2 compiled AutogradFunctions: the standard calling convention
+  // keeps a reference to all grads (via the immutable args tuple) for the
+  // entire backward, preventing deallocation after last use.
+  bool boxed_grads_call = false;
+
   PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
@@ -146,7 +155,8 @@ struct THPFunction {
   // for it.  We can't enforce this directly in the constructor of
   // THPFunction though, because there's no way to keep it live long enough
   // to save an owning reference to PyNode into the grad_fn of a Variable.
-  std::weak_ptr<torch::autograd::PyNode> cdata;
+  c10::weak_intrusive_ptr<torch::autograd::PyNode> cdata{
+      c10::intrusive_ptr<torch::autograd::PyNode>()};
 };
 
 bool THPFunction_initModule(PyObject* module);

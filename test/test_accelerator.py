@@ -12,13 +12,14 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
 
 if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
 
@@ -261,6 +262,10 @@ class TestAccelerator(TestCase):
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
 
+    @unittest.skipIf(
+        TEST_XPU,
+        "bare-bones/opaque bit-field dtypes cause undefined behavior on XPU, see https://github.com/pytorch/pytorch/issues/179888",
+    )
     def test_device_capability_supported_dtypes(self):
         try:
             caps = torch.accelerator.get_device_capability()

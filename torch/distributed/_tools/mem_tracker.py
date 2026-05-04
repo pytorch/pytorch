@@ -794,7 +794,7 @@ class MemTracker(TorchDispatchMode):
         This method should be called before the ``MemTracker`` is used. Any tensors that are not module parameters, buffers,
         gradients activations, or optimizer states will be categorized as ``Other``. If you want them categorized with a
         custom name, please file a GitHub issue. Any tensors created outside the MemTracker and not supplied to this
-        method will not be be tracked by ``MemTracker``.
+        method will not be tracked by ``MemTracker``.
 
         Args:
             *external (Union[nn.Module, optim.Optimizer, torch.Tensor]): The external modules, optimizers, and

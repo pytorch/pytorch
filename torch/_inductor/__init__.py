@@ -9,7 +9,7 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact  # noqa: TC001
+from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -407,9 +407,7 @@ def standalone_compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
     *,
-    dynamic_shapes: Literal[
-        "from_example_inputs", "from_tracing_context", "from_graph"
-    ] = "from_graph",
+    dynamic_shapes: DynamicShapesType = "from_graph",
     options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,

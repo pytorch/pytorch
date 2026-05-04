@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/node.h>
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
@@ -48,8 +49,6 @@ namespace torch::autograd {
 inline bool isDifferentiableType(at::ScalarType t) {
   return isFloatingType(t) || isComplexType(t);
 }
-
-struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -124,19 +123,19 @@ TORCH_API AutogradMeta* materialize_autograd_meta(
 /// leaf variables. Interior variables should call `set_gradient_edge()`.
 TORCH_API void set_grad_accumulator(
     const Variable& /*self*/,
-    std::weak_ptr<Node> grad_accumulator);
+    c10::weak_intrusive_ptr<Node> grad_accumulator);
 
 /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
 /// if it still exists. If the gradient accumulator function has been
 /// destroyed, returns a `nullptr`.
-TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
     const Variable& /*self*/);
-TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
     const at::TensorBase& /*self*/);
 
 /// Gets the gradient accumulator of the `Variable` if it has one, or else
 /// create one on the fly and return it.
-TORCH_API std::shared_ptr<Node> grad_accumulator(const Variable& /*self*/);
+TORCH_API c10::intrusive_ptr<Node> grad_accumulator(const Variable& /*self*/);
 
 /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
 /// gradient function if this is an interior `Variable`, or the gradient
@@ -228,8 +227,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
-  std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  c10::intrusive_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_accumulator_;
 
   // This field is used to store all the forward AD gradients
   // associated with this AutogradMeta (and the Tensor it corresponds to)
@@ -333,7 +332,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-
+        grad_accumulator_(c10::intrusive_ptr<Node>()),
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
@@ -961,7 +960,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const at::TensorBase& /*self*/ /*unused*/) const override;
   at::TensorBase variable_data(
       const at::TensorBase& /*self*/ /*unused*/) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn(
       const at::TensorBase& /*self*/ /*unused*/) const override;
   unsigned _register_hook(
       const at::TensorBase& /*self*/ /*unused*/,

@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_MKL,
@@ -700,6 +699,13 @@ if TEST_WITH_ROCM:
         {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
     )
 
+# Ops whose backward uses exact comparisons (e.g. eq) on values that were
+# cast to a lower-precision dtype.  Without emulate_precision_casts the
+# rounding that would happen at a buffer store is skipped when the cast is
+# inlined, causing the comparison to fail and producing NaN gradients.
+inductor_emulate_precision_casts = {
+    ("linalg.norm", f16),
+}
 
 # Test with one sample only for following ops
 inductor_one_sample = defaultdict(dict)
@@ -1225,7 +1231,6 @@ class TestInductorOpInfo(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
-    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     @_ops(op_db[START:END])
     @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
@@ -1272,7 +1277,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1284,7 +1289,7 @@ class TestInductorOpInfo(TestCase):
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
@@ -1408,7 +1413,12 @@ class TestInductorOpInfo(TestCase):
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
-                    with context_fn():
+                    precision_ctx = (
+                        torch._inductor.config.patch("emulate_precision_casts", True)
+                        if (op_name, dtype) in inductor_emulate_precision_casts
+                        else contextlib.nullcontext()
+                    )
+                    with context_fn(), precision_ctx:
                         # Base kwargs
                         adjusted_kwargs = {
                             "check_lowp": False,

@@ -656,7 +656,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
     throw_python_error();
   }
 
-  if (logger == Py_None) {
+  if (Py_IsNone(logger)) {
     python_verbose_logger = nullptr;
   } else {
     python_verbose_logger = logger;
@@ -886,7 +886,7 @@ static SizeInput::DynType get_default_dyn_type() {
 
 // Only call this function while holding GIL
 static CacheNode* _compiled_autograd_impl(
-    const std::shared_ptr<Node>& graph_root,
+    const c10::intrusive_ptr<Node>& graph_root,
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges,
@@ -900,7 +900,7 @@ static CacheNode* _compiled_autograd_impl(
   std::unordered_map<Node*, int> visited_dependencies;
   visited_dependencies.reserve(dependencies.size());
 
-  std::vector<std::shared_ptr<Node>> worklist{graph_root};
+  std::vector<c10::intrusive_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
@@ -919,7 +919,7 @@ static CacheNode* _compiled_autograd_impl(
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   std::optional<std::string> compile_reason;
   while (!worklist.empty()) {
-    std::shared_ptr<Node> fn = std::move(worklist.back());
+    c10::intrusive_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     ordered_calls.emplace_back(&call);
@@ -1000,7 +1000,7 @@ static CacheNode* _compiled_autograd_impl(
       THPObjectPtr set_node_origin(
           PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
       PyObject* pyobj = Py_None;
-      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+      if (auto pynode = dynamic_cast<PyNode*>(call.node.get())) {
         pyobj = pynode->obj;
       }
       check(PyObject_CallFunction(
@@ -1198,7 +1198,7 @@ struct LockGuardWithErrorLogs {
 };
 
 static variable_list compiled_autograd(
-    const std::shared_ptr<Node>& graph_root,
+    const c10::intrusive_ptr<Node>& graph_root,
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
@@ -1261,7 +1261,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   PyObject* prior_compiler = the_autograd_compiler;
   PyObject* prior_dynamic = default_dyn_type_int == 0 ? Py_False : Py_True;
   default_dyn_type_int = b;
-  if (obj == Py_None) { // disable
+  if (Py_IsNone(obj)) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`
     Engine::set_compiled_autograd(nullptr);
   } else { // enable

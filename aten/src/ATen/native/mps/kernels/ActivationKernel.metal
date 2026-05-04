@@ -61,10 +61,6 @@ REGISTER_UNARY_OP(relu, char, char);
 REGISTER_UNARY_OP(relu, uchar, uchar);
 REGISTER_UNARY_OP(relu, bool, bool);
 
-REGISTER_UNARY_VEC4_OP(relu, float, float);
-REGISTER_UNARY_VEC4_OP(relu, half, half);
-REGISTER_UNARY_VEC4_OP(relu, bfloat, bfloat);
-
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -218,10 +214,6 @@ REGISTER_UNARY_OP(silu, short, short);
 REGISTER_UNARY_OP(silu, char, char);
 REGISTER_UNARY_OP(silu, uchar, uchar);
 REGISTER_UNARY_OP(silu, bool, bool);
-
-REGISTER_UNARY_VEC4_OP(silu, float, float);
-REGISTER_UNARY_VEC4_OP(silu, half, half);
-REGISTER_UNARY_VEC4_OP(silu, bfloat, bfloat);
 
 struct silu_backward_functor {
   template <typename T>

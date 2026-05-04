@@ -281,17 +281,17 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_s
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
-    return (to_local,)""",  # noqa: B950
+    return (to_local,)""",
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            """\
+            f"""\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg3_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg3_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",  # noqa: B950
+    return (view_1,)""",
         )
 
     @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
@@ -331,7 +331,7 @@ def forward(self, args_0):
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
-    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",  # noqa: B950
+    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",
         )
 
         with tracing(tracing_context):
@@ -353,7 +353,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",  # noqa: B950
+    return (view_1,)""",
         )
 
     def test_placement_compile(self):
@@ -1451,7 +1451,7 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
     redistribute = dt.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
@@ -1482,7 +1482,7 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
     redistribute = dt.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
 
         # This should not throw a BypassAOTAutogradCache error
@@ -1792,7 +1792,7 @@ class outer_fn(torch.nn.Module):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-            return (wait_tensor, arg2_1)""",  # noqa: B950
+            return (wait_tensor, arg2_1)""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -2405,6 +2405,62 @@ class outer_fn(torch.nn.Module):
         opt = torch.optim.Adam([param], lr=1e-3)
         compiled_step = torch.compile(opt.step, backend="aot_eager")
         compiled_step()
+
+    def test_pad_tensor_no_guard_on_symbolic_pad_size(self):
+        """pad_tensor must not create a guard that concretizes symbolic pad sizes.
+
+        When tracing with make_fx in symbolic mode, pad_size may be a SymInt
+        (e.g., for uneven DTensor sharding where local shard sizes vary by
+        rank). guard_or_false(pad_size == 0) must not be evaluated during
+        tracing, otherwise it creates a guard that collapses the SymInt to its
+        hint value, making the graph rank-specific instead of rank-independent.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
+        from torch.distributed.tensor._collective_utils import pad_tensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env, static_shapes=False)
+
+        with unset_fake_temporarily():
+            real = torch.empty(400, 15, device="meta")
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC, DimDynamic.DYNAMIC]
+        )
+        x = fake_mode.from_tensor(real, symbolic_context=sym_ctx)
+        with fake_mode:
+            x = x.to("cpu")
+
+        # Verify the symbol is alive before tracing
+        self.assertTrue(isinstance(x.shape[1], torch.SymInt))
+        self.assertFalse(x.shape[1].node.expr.is_number)
+
+        def fn(t):
+            pad_size = 15 - t.size(1)
+            return pad_tensor(t, 1, pad_size)
+
+        with fake_mode:
+            gm = make_fx(fn, tracing_mode="symbolic")(x)
+
+        # The symbol must survive — not be guarded to a concrete value
+        self.assertFalse(
+            x.shape[1].node.expr.is_number,
+            f"pad_tensor created a guard that concretized the symbolic dim: "
+            f"expr={x.shape[1].node.expr}",
+        )
+
+        # The traced graph should have a symbolic pad size, not concrete 0
+        placeholder = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        val = placeholder.meta["val"]
+        self.assertTrue(
+            isinstance(val.shape[1], torch.SymInt),
+            "Placeholder dim should be symbolic",
+        )
 
 
 @instantiate_parametrized_tests

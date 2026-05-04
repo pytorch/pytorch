@@ -106,7 +106,7 @@ def _try_except_tf_mode_template(dummy: Any, stack_var_name: Any) -> None:
     global __import_torch_dot__dynamo_dot_utils
     try:
         dummy
-    except:  # noqa: E722, B001
+    except:
         __import_torch_dot__dynamo_dot_utils.set_torch_function_mode_stack(  # type: ignore[name-defined]
             stack_var_name
         )

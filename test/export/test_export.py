@@ -79,8 +79,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
+    skipIfTorchDynamo,
     skipIfXpu,
-    TEST_TRANSFORMERS,
     TEST_WITH_CROSSREF,
     TestCase as TorchTestCase,
 )
@@ -611,6 +611,136 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    @skipIfCrossRef  # CrossRefMode interferes with functorch ops
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_gradient_tracking_tensors(self) -> None:
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        output_before = JVP()(*inp)
+        ep = torch.export.export(JVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_complex_dtype(self) -> None:
+        class ComplexJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    return x * x
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (
+            torch.randn(3, 3, dtype=torch.complex64),
+            torch.randn(3, 3, dtype=torch.complex64),
+        )
+
+        output_before = ComplexJVP()(*inp)
+        ep = torch.export.export(ComplexJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_inplace_ops(self) -> None:
+        class InplaceJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    y = x.clone()
+                    y.mul_(2.0)
+                    y.add_(1.0)
+                    return y
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
+
+        output_before = InplaceJVP()(*inp)
+        ep = torch.export.export(InplaceJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_nested(self) -> None:
+        class NestedJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def outer_fn(x: torch.Tensor) -> torch.Tensor:
+                    def inner_fn(x: torch.Tensor) -> torch.Tensor:
+                        return torch.sin(x)
+
+                    primal, tangent = torch.func.jvp(inner_fn, (x,), (x,))
+                    return primal + tangent
+
+                return torch.func.jvp(outer_fn, (x,), (v,))
+
+        inp = (torch.randn(3, 3), torch.randn(3, 3))
+
+        output_before = NestedJVP()(*inp)
+        ep = torch.export.export(NestedJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_multiple_outputs(self) -> None:
+        class MultiOutputJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[
+                tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]
+            ]:
+                def fn(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+                    return torch.sin(x), torch.cos(x)
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
+
+        output_before = MultiOutputJVP()(*inp)
+        ep = torch.export.export(MultiOutputJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        # Check primals
+        self.assertTrue(torch.allclose(output_after[0][0], output_before[0][0]))
+        self.assertTrue(torch.allclose(output_after[0][1], output_before[0][1]))
+        # Check tangents
+        self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
+        self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
+
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
@@ -684,8 +814,6 @@ class TestExport(TestCase):
                 self.assertTrue("custom" in node.meta)
                 self.assertTrue(node.meta["custom"] != {})
 
-    @testing.expectedFailureSerDer  # can't serialize functorch ops
-    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     def test_vmap_to_assert(self):
         class VmapToAssert(torch.nn.Module):
             def forward(self, x, y):
@@ -3617,8 +3745,6 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureSerDer  # can't serialize functorch ops
-    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     @testing.expectedFailureCppRuntime
     def test_vmap(self):
         class Vmap(torch.nn.Module):
@@ -15333,6 +15459,39 @@ def forward(self, x, y):
             FooModel(), (Foo(torch.ones(4, 4), torch.ones(4, 4)),), strict=False
         )
 
+    def test_custom_pytree_run_decompositions(self):
+        class MyContainer:
+            def __init__(self, t1, t2):
+                self.t1 = t1
+                self.t2 = t2
+
+        torch.utils._pytree.register_pytree_node(
+            MyContainer,
+            lambda mc: ([mc.t1, mc.t2], None),
+            lambda vals, _: MyContainer(vals[0], vals[1]),
+            flatten_with_keys_fn=lambda mc: (
+                [
+                    (torch.utils._pytree.MappingKey("t1"), mc.t1),
+                    (torch.utils._pytree.MappingKey("t2"), mc.t2),
+                ],
+                None,
+            ),
+            serialized_type_name=f"{MyContainer.__module__}.{MyContainer.__qualname__}",
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, mc):
+                return self.linear(mc.t1) + self.linear(mc.t2) + torch.tensor(1.0)
+
+        m = M()
+        mc = MyContainer(torch.randn(4, 4), torch.randn(4, 4))
+        ep = torch.export.export(m, (mc,), strict=False)
+        ep.run_decompositions()
+
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):
@@ -17877,30 +18036,35 @@ add: USER_INPUT_MUTATION target='x'
 add_2: USER_OUTPUT""",
         )
 
-    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
     def test_hf_logging_logger(self):
-        import transformers
+        # Replicate the HF transformers logging pattern (stdlib logging.Logger
+        # with a monkey-patched warning_once) without importing transformers,
+        # whose import can hang in CI on HF Hub I/O.
+        @functools.lru_cache(None)
+        def warning_once(self, *args, **kwargs):
+            self.warning(*args, **kwargs)
 
-        logger = transformers.utils.logging.get_logger(__name__)
+        with patch.object(logging.Logger, "warning_once", warning_once, create=True):
+            logger = logging.getLogger(__name__)
 
-        class M(torch.nn.Module):
-            def forward(self, x):
-                logger.warning_once("start")
-                x1 = x + x
-                x2 = x1 * x1
-                x3 = x2 + x2
-                return (x1, x3)
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    logger.warning_once("start")
+                    x1 = x + x
+                    x2 = x1 * x1
+                    x3 = x2 + x2
+                    return (x1, x3)
 
-        gm = export(M(), (torch.randn(3, 3),)).graph_module
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+            gm = export(M(), (torch.randn(3, 3),)).graph_module
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self, x):
     add = torch.ops.aten.add.Tensor(x, x);  x = None
     mul = torch.ops.aten.mul.Tensor(add, add)
     add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
     return (add, add_1)""",
-        )
+            )
 
     def test_warning(self):
         class M(torch.nn.Module):

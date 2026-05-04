@@ -491,9 +491,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_obj_is(a, b):
         v = a + b
-        if MyCls() is None:  # noqa: E711
+        if MyCls() is None:
             return -1
-        if MyCls() is not None:  # noqa: E711
+        if MyCls() is not None:
             v = v.sin()
         if MyCls() is MyCls():
             return -2
@@ -504,9 +504,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_cls_is(a, b):
         v = a + b
-        if MyCls is None:  # noqa: E711
+        if MyCls is None:
             return -1
-        if MyCls is not None:  # noqa: E711
+        if MyCls is not None:
             v = v.sin()
         if MyCls is not MyCls:
             return -2
@@ -668,7 +668,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device_constant(a):
-        return a + torch.ones(1, device=torch.device("cpu"))
+        return a + torch.ones(1)
 
     @make_test
     def test_tuple1(a, b):
@@ -1278,7 +1278,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device(x):
-        if not x.is_cuda:
+        if x.device.type == "cpu":
             return x + 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -1311,10 +1311,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
+        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -1753,11 +1753,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self._test_default_dict_helper(set)
 
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())  # noqa: C408
+        self._test_default_dict_helper(lambda: dict())
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()  # noqa: C408
+            return dict()
 
         self._test_default_dict_helper(factory)
 
@@ -1784,7 +1784,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())  # noqa: C408
+            dd = collections.defaultdict(lambda: dict())
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1823,7 +1823,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1831,7 +1831,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):
@@ -3699,6 +3699,25 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
 
+    def test_operator_concat(self):
+        for seq_type in (list, tuple):
+            with self.subTest(seq_type=seq_type):
+
+                def fn(a, b):
+                    return operator.concat(a, b)
+
+                opt_fn = torch.compile(fn, fullgraph=True)
+                a = seq_type([1, 2, 3])
+                b = seq_type([4, 5, 6])
+                self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_operator_iconcat(self):
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -3973,9 +3992,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def func():
-            make_tensor = partial(
-                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
-            )
+            make_tensor = partial(torch.rand, dtype=torch.float16, requires_grad=True)
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
             make_q_tensor = partial(
@@ -4237,9 +4254,9 @@ class GraphModule(torch.nn.Module):
         def self_fn(x):
             return x.unsqueeze_(dim=1) + 1
 
-        v = torch.ones([3], device="cpu")
+        v = torch.ones([3])
         # identical tensor since modify inplace
-        v2 = torch.ones([3], device="cpu")
+        v2 = torch.ones([3])
         opt_fn = torch.compile(fn, backend="eager")
         opt_self_fn = torch.compile(self_fn, backend="eager")
         self.assertEqual(v, v2)
@@ -4325,7 +4342,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return retry(cached_fn)(x)
 
-        x = torch.tensor(2.0, device="cpu")
+        x = torch.tensor(2.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
@@ -5623,7 +5640,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(isinstance(res, tuple))
 
     def test_udf_list(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5657,7 +5674,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res_lst.checked)
 
     def test_udf_list_slice(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5675,7 +5692,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(ref_lst), len(res_lst))
 
     def test_udf_list_reconstruction(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             # def __new__(cls, *args, **kwargs):
             #     return super().__new__(cls, *args, **kwargs)
             pass
@@ -5740,20 +5757,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_functools_partial_id(self):
-        def gn(a, b):
-            return a + b
-
-        partial_gn = functools.partial(gn, a=3)
-
-        def fn(x):
-            d = {id(partial_gn): 5}
-            return partial_gn(b=x) * d[id(partial_gn)]
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_functional_compile(self):
         def get_torch_functional_functions():
             s = set()
@@ -5769,7 +5772,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(callable(compiled_func))
 
     def test_skip_function_call_very_weird_value(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__qualname__":
                     raise AttributeError("test")

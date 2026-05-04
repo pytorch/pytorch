@@ -141,8 +141,7 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
-      bool supports_vec4 = false);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
@@ -194,6 +193,13 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
     getLibrary();
   }
   ~DynamicMetalShaderLibrary() override;
+};
+
+class PrecompiledMetalShaderLibrary : public MetalShaderLibrary {
+ public:
+  explicit PrecompiledMetalShaderLibrary(std::vector<uint8_t> data);
+  explicit PrecompiledMetalShaderLibrary(const std::string& path);
+  ~PrecompiledMetalShaderLibrary() override;
 };
 
 } // namespace at::native::mps

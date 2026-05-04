@@ -572,6 +572,24 @@ class StorageAliasingTracker:
         return True
 
 
+def taint_filtered_vt(vt: VariableTracker) -> None:
+    """Mark a VT as filtered due to aliasing so it raises a clear error if used."""
+    original_as_proxy = vt.as_proxy
+
+    def tainted_as_proxy() -> Any:
+        proxy = original_as_proxy()
+        raise RuntimeError(
+            f"An intermediate tensor '{proxy.node.name}' created inside a "
+            f"higher-order op subgraph aliases an input or output, so it was "
+            f"not included in the subgraph outputs. However, it is being used "
+            f"in the outer graph (e.g., via a side effect like list.append). "
+            f"To fix this, clone the tensor before capturing it "
+            f"(e.g., use tensor.clone() instead of tensor)."
+        )
+
+    vt.as_proxy = tainted_as_proxy  # type: ignore[method-assign]
+
+
 def collect_intermediate_outputs(
     tx: "InstructionTranslator",
     subtracer: "SubgraphTracer",
@@ -604,12 +622,11 @@ def collect_intermediate_outputs(
         else:
             # Filter out intermediates that alias with inputs or outputs.
             # This is needed for HOPs like invoke_subgraph that don't support aliasing.
-            # TODO: If a filtered intermediate is captured by side effects (e.g., appended
-            # to a list), it will fail later with "does not belong to this Graph" error
-            # when the outer graph tries to use it. See test_side_effect_with_aliased_intermediate.
             assert tracker is not None
             if tracker.check_and_track(proxy.node):
                 extra_outputs.append(out)
+            else:
+                taint_filtered_vt(out)
 
     return extra_outputs
 
@@ -835,11 +852,36 @@ def _call_while_loop(
         source_target=self.value,
         set_subgraph_inputs="flatten_manual",
         should_flatten_outputs=True,
-        supports_input_mutation=False,
-        supports_aliasing=False,
+        supports_input_mutation=self.supports_input_mutation,
+        supports_aliasing=self.supports_aliasing,
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
+    cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
+    body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
+
+    def _mutated_tensor_storages(
+        graph: torch.fx.Graph, mutated_input_indices: set[int]
+    ) -> set[StorageWeakRef]:
+        placeholders = [node for node in graph.nodes if node.op == "placeholder"]
+        storages: set[StorageWeakRef] = set()
+        for idx in mutated_input_indices:
+            assert idx < len(placeholders), (
+                f"mutated input index {idx} out of range for {len(placeholders)} placeholders"
+            )
+            placeholder = placeholders[idx]
+            example_value = placeholder.meta.get(
+                "example_value", placeholder.meta.get("val", None)
+            )
+            assert isinstance(example_value, torch.Tensor), (
+                "The mutated input must be a tensor"
+            )
+            storages |= get_tensor_storages(example_value)
+        return storages
+
+    mutated_input_storages = _mutated_tensor_storages(
+        cond_graph, cond_mutated_inputs
+    ) | _mutated_tensor_storages(body_graph, body_mutated_inputs)
 
     # We set include contiguity=False because we have vmap x HOP tests, where if
     # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
@@ -873,6 +915,28 @@ def _call_while_loop(
     # Note: cond_shared and body_shared refer to the same proxy in parent graph
     # so using either of them is OK. Use cond_shared as it doesn't matter.
     additional_lifted_inputs = cond_shared + cond_unique + body_unique
+    all_while_loop_inputs: list[VariableTracker | Proxy] = (
+        list(operands_seq)
+        + list(additional_inputs_seq)
+        + list(additional_lifted_inputs)
+    )
+    mutated_inputs = []
+    for idx, inp in enumerate(all_while_loop_inputs):
+        example_value = None
+        if isinstance(inp, VariableTracker):
+            if inp.is_tensor():
+                example_value = inp.as_proxy().node.meta.get("example_value", None)
+        else:
+            assert isinstance(inp, Proxy)
+            example_value = inp.node.meta.get("example_value", inp.node.meta.get("val"))
+
+        if isinstance(example_value, torch.Tensor):
+            for storage in get_tensor_storages(example_value):
+                if storage in mutated_input_storages:
+                    mutated_inputs.append(idx)
+                    break
+
+    mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
     body_nn_modules = dict(tx.output.nn_modules)
 
@@ -894,11 +958,16 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
+    hop_kwargs = (
+        {"mutated_arg_indices": mutated_arg_indices}
+        if not stack_output and mutated_arg_indices
+        else {}
+    )
     return _call_function_and_unflatten_output(
         tx,
         self.value,
         p_args,
-        {},
+        hop_kwargs,
         None,
         body_treespec,
         body_r,
@@ -1401,7 +1470,16 @@ def trace_hop_function(
     if restore_side_effects:
         prev_side_effects = tx.output.side_effects.clone()
 
-    with autograd_ctx, side_effects_ctx:
+    # When restoring side effects, defer outer-scope mutation checks so
+    # context managers that flip-flop a flag don't fail immediately. After
+    # tracing, we validate that all deferred mutations were nullified.
+    deferred_ctx = (
+        tx.output.side_effects.defer_side_effect_checks()
+        if restore_side_effects
+        else contextlib.nullcontext()
+    )
+
+    with autograd_ctx, side_effects_ctx, deferred_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     if restore_side_effects:
@@ -1434,7 +1512,13 @@ def trace_hop_function_with_auto_output_flattening(
         else contextlib.nullcontext()
     )
 
-    with autograd_ctx, side_effects_ctx:
+    deferred_ctx = (
+        tx.output.side_effects.defer_side_effect_checks()
+        if not allow_side_effects
+        else contextlib.nullcontext()
+    )
+
+    with autograd_ctx, side_effects_ctx, deferred_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     return output
@@ -1842,7 +1926,7 @@ def speculate_subgraph_with_auto_output_flattening(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -2016,6 +2100,10 @@ def speculate_subgraph(
                     supports_aliasing,
                     source_target,
                 )
+                mutation_info = subtracer.has_input_mutation()
+                graph._dynamo_mutated_input_indices = (  # pyrefly: ignore[missing-attribute]
+                    mutation_info.mutated_input_indices
+                )
 
                 return (
                     (
@@ -2042,7 +2130,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -2495,7 +2583,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 def validate_subgraph_output_types(
     output: VariableTracker | Sequence[VariableTracker],
 ) -> None:
-    """Verify that that the output of the subgraph is a tensor,
+    """Verify that the output of the subgraph is a tensor,
     int, bool, SymBool, or SymInt.
     """
     from . import TensorVariable
@@ -2537,6 +2625,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         assert self._HOP_NAME is not None
+        self.supports_input_mutation = not torch.is_grad_enabled()
         return _call_while_loop(
             self, tx, args, kwargs, stack_output=False, hop_name=self._HOP_NAME
         )
@@ -2719,7 +2808,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 gb_type="torch.associative_scan: mismatched input/output tree structure",
                 context=f"xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
-                explanation="The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got "
+                explanation="The tree structure of the xs and the outs of the combine_fn are expected to be identical, but got "
                 f"xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
                 hints=[
                     *graph_break_hints.USER_ERROR,
@@ -4765,6 +4854,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 enable_grad=None,
                 set_subgraph_inputs="automatic",
                 allow_side_effects=True,
+                filter_aliased_intermediates=True,
                 tracer=fwd_tracer,
             )
         )
@@ -5668,7 +5758,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         return out
 
 
-from .invoke_subgraph import InvokeSubgraphHigherOrderVariable  # noqa: E402
+from .invoke_subgraph import InvokeSubgraphHigherOrderVariable
 
 
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()

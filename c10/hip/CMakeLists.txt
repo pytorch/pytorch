@@ -17,14 +17,14 @@ configure_file(
 
 # c10/hip is host-only: it calls into the HIP runtime via hip::host but contains
 # no device kernels. All sources compile as CXX with HIP_CXX_FLAGS defines.
-file(GLOB C10_HIP_SRCS
+file(GLOB C10_HIP_SRCS CONFIGURE_DEPENDS
         *.cpp
         *.cc
         impl/*.cpp
         impl/*.cc
         )
 
-file(GLOB_RECURSE C10_HIP_HEADERS *.h)
+file(GLOB_RECURSE C10_HIP_HEADERS CONFIGURE_DEPENDS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
   add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
