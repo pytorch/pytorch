@@ -1549,6 +1549,27 @@ class TestMPS(TestCaseMPS):
         second = F.linear(x, w).clone()
         self.assertEqual(first, second, atol=0, rtol=0)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("shape", [(2, 13, 1024), (6, 6, 634), (1, 3, 28, 315),
+                           (1, 12, 4, 512), (1, 1, 5, 6, 1024)])
+    def test_linear_nd_backward_determinism(self, dtype, shape):
+        # Regression test for backward pass of
+        # https://github.com/pytorch/pytorch/issues/180776
+        h = shape[-1]
+        x = torch.randn(shape, dtype=dtype, device="mps")
+        w = torch.randn(h, h, dtype=dtype, device="mps")
+        grad = torch.randn(shape, dtype=dtype, device="mps")
+
+        def backward_test():
+            x0 = x.clone().requires_grad_()
+            y = F.linear(x0, w)
+            y.backward(grad)
+            return x0.grad.clone()
+
+        first = backward_test()
+        second = backward_test()
+        self.assertEqual(first, second, atol=0, rtol=0)
+
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()

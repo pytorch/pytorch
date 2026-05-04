@@ -244,7 +244,9 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
 
       // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
       // See https://github.com/pytorch/pytorch/issues/114942 for more details
-      bool needReshape = grad_output.dim() > 4;
+      // Non-deterministic results for >2D fp16/bf16 on Apple10+
+      // See https://github.com/pytorch/pytorch/issues/180776
+      bool needReshape = grad_output.dim() > 4 || needs_nd_workaround(grad_output);
       auto gradOutputTensor = needReshape
           ? [mpsGraph flatten2DTensor:newCachedGraph->gradOutputTensor_ axis:-1 name:nil]
           : newCachedGraph->gradOutputTensor_;
