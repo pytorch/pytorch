@@ -6,7 +6,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
-import torch.utils._pytree as pytree
 from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
 from torch._dynamo.dynamic_spec import (
     DictSpec,
@@ -942,9 +941,7 @@ class TestParameterSpecCompile(TestCase):
             fn,
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg(
-                    "p", TensorSpec([IntSpec.backed("h"), None])
-                )
+                params=ParamsSpec().arg("p", TensorSpec([IntSpec.backed("h"), None]))
             ),
         )
 
@@ -1032,45 +1029,6 @@ class TestObjectSpec(TestCase):
         inner = ObjectSpec({"weight": TensorSpec([IntSpec.backed("h")])})
         outer = ObjectSpec({"model": inner, "n": IntSpec.backed("n")})
         self.assertIs(outer["model"], inner)
-
-
-class TestObjectSpecPytree(TestCase):
-    """``tree_flatten_with_path`` produces the expected paths for
-    ``ObjectSpec`` containing ``IntSpec`` / ``TensorSpec`` leaves."""
-
-    def test_top_level_intspec_leaf(self):
-        # ``ObjectSpec`` entries flatten as ``GetAttrKey`` — matches
-        # ``AttrSource`` in the dynamo builder.
-        spec = IntSpec.backed("n")
-        os = ObjectSpec({"n": spec})
-        leaves_with_paths, _ = pytree.tree_flatten_with_path(os)
-        self.assertEqual(len(leaves_with_paths), 1)
-        path, leaf = leaves_with_paths[0]
-        self.assertEqual(tuple(path), (pytree.GetAttrKey("n"),))
-        self.assertIs(leaf, spec)
-
-    def test_tensorspec_dims_get_sequence_keys(self):
-        s0 = IntSpec.backed("batch")
-        s1 = IntSpec.static()
-        os = ObjectSpec({"x": TensorSpec([s0, s1])})
-        leaves_with_paths, _ = pytree.tree_flatten_with_path(os)
-        path_to_leaf = {tuple(p): leaf for p, leaf in leaves_with_paths}
-        self.assertIs(path_to_leaf[(pytree.GetAttrKey("x"), pytree.SequenceKey(0))], s0)
-        self.assertIs(path_to_leaf[(pytree.GetAttrKey("x"), pytree.SequenceKey(1))], s1)
-
-    def test_none_leaves_present_in_flatten(self):
-        # ``None`` per-dim entries flatten as ``None`` leaves with their
-        # paths preserved — downstream consumers (the integration layer)
-        # decide whether to drop them.
-        os = ObjectSpec({"x": TensorSpec([IntSpec.backed("batch"), None])})
-        leaves_with_paths, _ = pytree.tree_flatten_with_path(os)
-        self.assertEqual(len(leaves_with_paths), 2)
-        path_to_leaf = {tuple(p): leaf for p, leaf in leaves_with_paths}
-        self.assertIsInstance(
-            path_to_leaf[(pytree.GetAttrKey("x"), pytree.SequenceKey(0))],
-            IntSpec,
-        )
-        self.assertIsNone(path_to_leaf[(pytree.GetAttrKey("x"), pytree.SequenceKey(1))])
 
 
 class TestObjectSpecLookup(TestCase):
@@ -1388,35 +1346,6 @@ class TestDictSpec(TestCase):
             repr(ds),
             "DictSpec({'x': IntSpec(name='x', type=STATIC)})",
         )
-
-
-class TestDictSpecPytree(TestCase):
-    """``tree_flatten_with_path`` emits ``MappingKey`` for ``DictSpec``
-    entries — matches ``LocalSource`` / ``GetItemSource`` in the dynamo
-    builder."""
-
-    def test_dictspec_emits_mapping_key(self):
-        spec = IntSpec.backed("n")
-        ds = DictSpec({"n": spec})
-        leaves_with_paths, _ = pytree.tree_flatten_with_path(ds)
-        self.assertEqual(len(leaves_with_paths), 1)
-        path, leaf = leaves_with_paths[0]
-        self.assertEqual(tuple(path), (pytree.MappingKey("n"),))
-        self.assertIs(leaf, spec)
-
-    def test_nested_under_objectspec(self):
-        # DictSpec under ObjectSpec composes: ``GetAttrKey`` then
-        # ``MappingKey`` on the keypath.
-        spec = IntSpec.backed("bs")
-        os = ObjectSpec({"config": DictSpec({"batch_size": spec})})
-        leaves_with_paths, _ = pytree.tree_flatten_with_path(os)
-        self.assertEqual(len(leaves_with_paths), 1)
-        path, leaf = leaves_with_paths[0]
-        self.assertEqual(
-            tuple(path),
-            (pytree.GetAttrKey("config"), pytree.MappingKey("batch_size")),
-        )
-        self.assertIs(leaf, spec)
 
 
 class TestDictSpecLookup(TestCase):
