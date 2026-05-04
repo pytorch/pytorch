@@ -163,23 +163,6 @@ def type_implements_tp_iternext(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
-def type_implements_tp_descr_get(obj_type: type) -> bool:
-    _, _, _, type_slot = _get_cached_slots(obj_type)
-    return has_slot(type_slot, PyTypeSlots.TP_DESCR_GET)
-
-
-def type_implements_tp_descr_set(obj_type: type) -> bool:
-    _, _, _, type_slot = _get_cached_slots(obj_type)
-    return has_slot(type_slot, PyTypeSlots.TP_DESCR_SET)
-
-
-def is_data_descriptor_type(obj_type: type) -> bool:
-    """A data descriptor has both tp_descr_get and tp_descr_set."""
-    return type_implements_tp_descr_get(obj_type) and type_implements_tp_descr_set(
-        obj_type
-    )
-
-
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
