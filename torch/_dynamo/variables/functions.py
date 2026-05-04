@@ -21,6 +21,7 @@ The variable trackers here work together with the rest of Dynamo to enable
 accurate graph capture while handling Python's various function-related behaviors.
 """
 
+import _collections  # type: ignore[import-not-found]
 import builtins
 import functools
 import importlib.metadata
@@ -700,9 +701,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # the function to an instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
-        return UserMethodVariable(
-            self.fn, obj, source_fn=self.source, source=source
-        )
+        return UserMethodVariable(self.fn, obj, source_fn=self.source, source=source)
 
     def call_function(
         self,
@@ -3797,7 +3796,9 @@ class MethodWrapperVariable(VariableTracker):
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
-        return f"MethodWrapperVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
+        return (
+            f"MethodWrapperVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
+        )
 
     def python_type(self) -> type:
         return types.MethodWrapperType
@@ -3808,9 +3809,7 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(
-            tx, self.descriptor.__name__, list(args), kwargs
-        )
+        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
@@ -3906,9 +3905,7 @@ class MethodDescriptorVariable(VariableTracker):
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        return BoundBuiltinMethodVariable(
-            self.descriptor, obj, source=self.source
-        )
+        return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -3963,13 +3960,11 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(
-            tx, self.descriptor.__name__, list(args), kwargs
-        )
+        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.name))
+        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
 
 class ClassMethodDescriptorVariable(VariableTracker):
@@ -4029,9 +4024,7 @@ class ClassMethodDescriptorVariable(VariableTracker):
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        return BoundBuiltinMethodVariable(
-            self.descriptor, owner, source=self.source
-        )
+        return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
 class StaticMethodVariable(VariableTracker):
@@ -4182,7 +4175,9 @@ class MemberDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj.value).__name__}' object has no attribute '{self.descriptor.__name__}'"],  # type: ignore[attr-defined]
+                args=[
+                    f"'{type(obj.value).__name__}' object has no attribute '{self.descriptor.__name__}'"  # type: ignore[attr-defined]
+                ],
             )
         result_source = obj.source and AttrSource(obj.source, self.descriptor.__name__)
         return VariableTracker.build(tx, resolved, result_source)
@@ -4253,7 +4248,9 @@ class GetSetDescriptorVariable(VariableTracker):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"],
+                args=[
+                    f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
+                ],
             )
         result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
@@ -4302,3 +4299,49 @@ class PropertyVariable(VariableTracker):
             tx, self.descriptor.fget, source=fget_source, realize=True
         )
         return fget_vt.call_function(tx, [obj], {})
+
+
+class TupleGetterVariable(VariableTracker):
+    """_tuplegetter descriptor used by namedtuple for field access.
+
+    _tuplegetter is a C data descriptor that stores an index and returns
+    self[index] on instance access. When accessed on the class (obj=None),
+    it returns the descriptor itself.
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2365
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: "_collections._tuplegetter",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, _collections._tuplegetter)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        _, (idx, doc) = self.descriptor.__reduce__()
+        return f"TupleGetterVariable(index={idx}, doc={doc!r})"
+
+    def python_type(self) -> type:
+        return _collections._tuplegetter
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+        if obj is None:
+            return self
+        _, (idx, _) = self.descriptor.__reduce__()
+        return obj.call_method(
+            tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
+        )

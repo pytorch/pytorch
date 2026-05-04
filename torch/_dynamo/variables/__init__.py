@@ -88,6 +88,7 @@ from .functions import (
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     TritonSetAllocatorVariable,
+    TupleGetterVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperDescriptorVariable,
