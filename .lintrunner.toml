@@ -1853,3 +1853,16 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'DNNL_ARG_CONST'
+include_patterns = [
+    'aten/src/ATen/native/mkldnn/**/*.cpp',
+    'aten/src/ATen/native/mkldnn/**/*.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/dnnl_arg_const_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
