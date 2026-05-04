@@ -249,6 +249,33 @@ class TestUtils(TestCase):
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 
+class TestRuntimeEstimation(TestCase):
+    def test_get_compute_time_units(self):
+        """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
+        from unittest.mock import patch
+
+        from torch.utils._runtime_estimation import get_compute_time
+
+        M, K, N = 64, 64, 64
+        known_tflops = 1000.0
+        a = torch.randn(M, K)
+        b = torch.randn(K, N)
+        out = torch.mm(a, b)
+
+        with patch(
+            "torch.utils._runtime_estimation.get_device_tflops",
+            return_value=known_tflops,
+        ):
+            result_ns = get_compute_time(
+                torch.ops.aten.mm, (a, b), {}, out, {torch.float32}
+            )
+
+        # mm flops = 2*M*K*N, divided by 2 for MACs, then time = macs / (0.75 * peak) * 1e9
+        expected_macs = 2 * M * K * N / 2
+        expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9
+        self.assertAlmostEqual(result_ns, expected_ns)
+
+
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
