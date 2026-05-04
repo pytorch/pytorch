@@ -323,7 +323,6 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
 # TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
 # Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
 # .github/scripts/generate_binary_build_matrix.py.
-PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
     "12.6": {
         "x86_64": {50, 60, 70, 75, 80, 86, 90},
         "aarch64": {80, 90},
@@ -336,6 +335,7 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+>>>>>>> a3143e10c67 (Fix `PYTORCH_RELEASES_CODE_CC`)
 }
 
 

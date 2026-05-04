@@ -245,7 +245,7 @@ def _extract_arch_list_block() -> str:
     """Extract the self-contained arch-list logic from build_cuda.sh."""
     text = _BUILD_CUDA_SH.read_text()
     start_marker = "# Function to remove architectures from a list"
-    end_marker = 'export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}'
+    end_marker = "export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}"
     start = text.index(start_marker)
     end = text.index(end_marker)
     return text[start:end]
@@ -283,9 +283,7 @@ def _read_runtime_release_table() -> dict[str, dict[str, set[int]]]:
             and node.value is not None
         ):
             return ast.literal_eval(node.value)
-    raise RuntimeError(
-        "PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py"
-    )
+    raise RuntimeError("PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py")
 
 
 def validate_runtime_release_table_consistency() -> None:
