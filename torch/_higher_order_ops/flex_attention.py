@@ -91,6 +91,37 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     return new_out
 
 
+def _bmm_4d(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """``a @ b`` for 4-D ``(B, H, M, K) × (B, H, K, N) → (B, H, M, N)``.
+
+    Equivalent to ``a @ b`` but skips ``aten.matmul``'s 4-D specialization
+    (``expand → view → bmm → _unsafe_view``) by reshaping to 3-D and calling
+    ``aten.bmm`` directly. Saves ~2 ATen dispatches per call vs the operator
+    form, which adds up across the 5 matmul sites in the flex-attention math
+    backward (see ``sdpa_dense_backward``).
+
+    Both inputs must already be 4-D with matching outer (batch, head) dims.
+    """
+    B, H, M, _ = a.shape
+    out3 = torch.bmm(a.reshape(B * H, M, -1), b.reshape(B * H, b.size(-2), b.size(-1)))
+    return out3.reshape(B, H, M, b.size(-1))
+
+
+def _bmm_4d_T(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """``a @ b.transpose(-2, -1)`` for 4-D inputs.
+
+    Same dispatch saving as :func:`_bmm_4d` (skip ``aten.matmul``'s
+    ``expand`` / ``_unsafe_view`` decomposition) for the common pattern
+    where the second operand wants a trailing transpose.
+    """
+    B, H, M, _ = a.shape
+    out3 = torch.bmm(
+        a.reshape(B * H, M, -1),
+        b.reshape(B * H, b.size(-2), b.size(-1)).transpose(-2, -1),
+    )
+    return out3.reshape(B, H, M, b.size(-2))
+
+
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_attention", cacheable=True)
@@ -187,7 +218,7 @@ def _math_attention_inner(
 
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
-    scores = query.to(working_precision) @ key.to(working_precision).transpose(-2, -1)
+    scores = _bmm_4d_T(query.to(working_precision), key.to(working_precision))
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -1044,11 +1075,12 @@ def sdpa_dense_backward(
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
     softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
-    grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
+    grad_value = _bmm_4d(softmax_scores.to(query.dtype).transpose(-2, -1), grad_out)
 
-    grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
-        dtype=softmax_scores.dtype
-    ).transpose(-2, -1)
+    grad_softmax_scores = _bmm_4d_T(
+        grad_out.to(dtype=softmax_scores.dtype),
+        value.to(dtype=softmax_scores.dtype),
+    )
 
     sum_scores = torch.sum(
         out.to(dtype=softmax_scores.dtype) * grad_out.to(dtype=softmax_scores.dtype),
@@ -1094,8 +1126,8 @@ def sdpa_dense_backward(
             mask_scores, grad_scores, torch.tensor(0, dtype=query.dtype)
         )
 
-    grad_query = grad_scores @ key
-    grad_key = grad_scores.transpose(-2, -1) @ query
+    grad_query = _bmm_4d(grad_scores, key)
+    grad_key = _bmm_4d(grad_scores.transpose(-2, -1), query)
 
     # Reduce DK, DV along broadcasted heads.
     grad_key = grad_key.view(
