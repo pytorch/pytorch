@@ -266,7 +266,10 @@ int munmap(void* addr, size_t length) {
 #include <unistd.h>
 #endif // _WIN32
 
+#include <chrono>
+#include <cstdlib>
 #include <fcntl.h>
+#include <iostream>
 #include <optional>
 #include <regex>
 #include <stdexcept>
@@ -288,6 +291,14 @@ int munmap(void* addr, size_t length) {
 #endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
+#define AOTI_LOG_LOADING(msg)                                              \
+  do {                                                                     \
+    static const bool _aoti_log_ =                                         \
+        std::getenv("AOTI_LOG_LOADING") != nullptr;                        \
+    if (_aoti_log_) {                                                      \
+      std::cerr << "[AOTI_LOAD] " << msg << std::endl;                     \
+    }                                                                      \
+  } while (0)
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
 // symbol and link it into the final .so.
@@ -583,6 +594,7 @@ class AOTInductorModelBase {
   }
 
   void load_constants(bool force = false) {
+    auto _lc_start = std::chrono::steady_clock::now();
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -600,6 +612,11 @@ class AOTInductorModelBase {
         constants_internal_offset,
         aux_cpu_blob_size,
         aux_cpu_constants_internal_offset);
+    AOTI_LOG_LOADING(
+        "load_constants: num_constants="
+        << (num_constants - num_folded_constants)
+        << " blob_size=" << blob_size
+        << " secondary_cpu_blob_size=" << secondary_cpu_blob_size);
 
     if (!force && !include_weights) {
       return;
@@ -607,11 +624,18 @@ class AOTInductorModelBase {
 
     // Allocate main blob
     if (blob_size > 0) {
+      auto _malloc_start = std::chrono::steady_clock::now();
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
       constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
       constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
+      auto _malloc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - _malloc_start)
+                            .count();
+      AOTI_LOG_LOADING(
+          "load_constants: malloc " << blob_size << " bytes took " << _malloc_ms
+                                    << " ms");
     }
 
     // Allocate secondary blob on CPU
@@ -622,6 +646,7 @@ class AOTInductorModelBase {
     size_t bytes_read = 0;
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
+    auto _copy_start = std::chrono::steady_clock::now();
 
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
@@ -705,9 +730,47 @@ class AOTInductorModelBase {
           opaque_metadata_size));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
+    auto _copy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - _copy_start)
+                        .count();
+    AOTI_LOG_LOADING(
+        "load_constants: H2D copy + tensor creation took " << _copy_ms
+                                          << " ms, " << bytes_read
+                                          << " bytes across "
+                                          << (num_constants - num_folded_constants)
+                                          << " constants");
     if (constants_map_) {
       this->update_constants_array_from_map();
     }
+
+#if !defined(_WIN32) && (defined(USE_CUDA) || defined(USE_XPU))
+    // After copying constants to GPU, advise the kernel to drop the
+    // file-backed pages from page cache. The constants binary is embedded
+    // in the .so via objcopy and gets mmap'd by dlopen. Without this,
+    // the page cache retains the entire constants blob (can be 100+ GB)
+    // even though the data now lives in GPU HBM.
+    {
+      auto* start = _binary_constants_bin_start;
+      auto* end = _binary_constants_bin_end;
+      size_t len = end - start;
+      if (len > 0) {
+        auto page_size = sysconf(_SC_PAGESIZE);
+        auto* aligned =
+            reinterpret_cast<uint8_t*>(
+                reinterpret_cast<uintptr_t>(start) & ~(page_size - 1));
+        size_t aligned_len = (end - aligned + page_size - 1) & ~(page_size - 1);
+        int ret = madvise(aligned, aligned_len, MADV_DONTNEED);
+        AOTI_LOG_LOADING(
+            "load_constants: madvise(MADV_DONTNEED) on constants blob "
+            << aligned_len / (1024 * 1024) << " MB, ret=" << ret);
+      }
+    }
+#endif
+
+    auto _lc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - _lc_start)
+                      .count();
+    AOTI_LOG_LOADING("load_constants: total time " << _lc_ms << " ms");
   }
 
   RAIIDataPtr&& release_constant_blob() {

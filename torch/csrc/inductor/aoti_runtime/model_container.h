@@ -46,12 +46,21 @@ class AOTInductorModelContainer {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
 
+    auto _ctor_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "ModelContainer: creating " << num_models << " model instances");
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
+      auto _mi_start = std::chrono::steady_clock::now();
       models_.push_back(AOTInductorModel::Create(
           constants_map_, constants_array_, device_str, cubin_dir));
       available_models_.push_back(models_.back().get());
+      auto _mi_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - _mi_start)
+                        .count();
+      AOTI_LOG_LOADING(
+          "ModelContainer: instance " << i << " created in " << _mi_ms << " ms");
     }
 
     // Note that the all following fields (input_names_, output_names,
@@ -62,6 +71,14 @@ class AOTInductorModelContainer {
     //   * reduce information fragmentation and duplication
     //   * the initialization process below is done only once when the container
     //     is constructed, so it would have little performance impact
+    {
+      auto _dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - _ctor_start)
+                     .count();
+      AOTI_LOG_LOADING(
+          "ModelContainer: " << num_models << " instances created in " << _dt
+                             << " ms");
+    }
     auto* model = available_models_[0];
     size_t num_inputs = model->num_inputs();
     input_names_.reserve(num_inputs);
@@ -74,7 +91,15 @@ class AOTInductorModelContainer {
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
     }
+    AOTI_LOG_LOADING("ModelContainer: starting load_constants");
+    auto _lc_start = std::chrono::steady_clock::now();
     model->load_constants();
+    {
+      auto _dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - _lc_start)
+                     .count();
+      AOTI_LOG_LOADING("ModelContainer: load_constants completed in " << _dt << " ms");
+    }
     constant_blob_ = model->release_constant_blob();
     aux_cpu_constant_blob_ = model->release_aux_cpu_constant_blob();
     constants_internal_offset_.resize(
@@ -86,6 +111,10 @@ class AOTInductorModelContainer {
         constants_internal_offset_,
         aux_cpu_blob_size_,
         aux_cpu_constants_internal_offset_);
+    AOTI_LOG_LOADING(
+        "ModelContainer: blob_size=" << blob_size_
+                                     << " secondary_cpu_blob_size="
+                                     << secondary_cpu_blob_size_);
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
@@ -94,6 +123,12 @@ class AOTInductorModelContainer {
 
     in_spec_ = model->get_in_spec();
     out_spec_ = model->get_out_spec();
+    {
+      auto _dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - _ctor_start)
+                     .count();
+      AOTI_LOG_LOADING("ModelContainer: constructor completed in " << _dt << " ms");
+    }
   }
 
   void run(
@@ -112,13 +147,13 @@ class AOTInductorModelContainer {
     ConstantState& const_folded =
         use_secondary_ ? constant_folded_secondary_ : constant_folded_;
     if (const_folded == ConstantState::INITIALIZED) {
-      // At this point, constant is not ready yet. We need to call constant
-      // folding before we execute the model. We obtain a unique lock at this
-      // point to make sure constant is ready for all.
+      // Constant not ready yet. Obtain unique lock for constant folding.
+      AOTI_LOG_LOADING("ModelContainer::run: constant folding needed");
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
+      // Double-checked locking: only run constant folding once.
       if (const_folded == ConstantState::INITIALIZED) {
+        auto _cf_start = std::chrono::steady_clock::now();
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
@@ -126,6 +161,12 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
+        auto _cf_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - _cf_start)
+                          .count();
+        AOTI_LOG_LOADING(
+            "ModelContainer::run: constant folding completed in " << _cf_ms
+                                                                  << " ms");
       }
       constants_folding_lk.unlock();
       model_lk.lock();
