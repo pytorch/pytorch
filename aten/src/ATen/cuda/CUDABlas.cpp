@@ -1732,7 +1732,7 @@ bool gemm_and_bias(
   // - bias fusion through a matrix descriptor, then (Cdesc, c_ptr) are that
   //   of the provided bias.
   const auto get_Cdesc_params = [&]() -> std::tuple<CuBlasLtMatrixLayout, const void*> {
-    // This will set/unset epilogue parameters based on use_bias_descriptor
+    // This will set/unset epilogue parameters based on use_bias_epilogue
     set_epilogue_attributes();
 #ifndef USE_ROCM
     auto c_ptr_val = use_bias_descriptor ? reinterpret_cast<uintptr_t>(bias) : reinterpret_cast<uintptr_t>(result_ptr);
