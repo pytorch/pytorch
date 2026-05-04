@@ -174,7 +174,9 @@ class TestEnvironment:
     #     implied_by_fn (Callable): Thunk returning a bool to imply this flag as enabled
     #         by something outside of its primary environment variable setting. For example,
     #         this can be useful if the value of another environment variable implies the flag
-    #         as enabled. Default: Lambda returning False to indicate no implications.
+    #         as enabled. If the primary env var is set explicitly (to any value, including
+    #         "0"), the env var wins and implied_by_fn is not consulted. Default: Lambda
+    #         returning False to indicate no implications.
     @staticmethod
     def def_flag(
         name,
@@ -190,8 +192,10 @@ class TestEnvironment:
         if env_var is not None:
             env_var_val = os.getenv(env_var)
             enabled = enabled_fn(env_var_val, default)
-        implied = implied_by_fn()
-        enabled = enabled or implied
+        implied = False
+        if env_var_val is None:
+            implied = implied_by_fn()
+            enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
             TestEnvironment.repro_env_vars[env_var] = env_var_val
 
@@ -6045,9 +6049,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
-    # Normalize caret-only lines by stripping leading whitespace, since
-    # col_offset in bytecode positions can vary across Python point releases
-    s = re.sub(r"^[ ]+(\^+)$", r"\1", s, flags=re.MULTILINE)
     return s
 
 
