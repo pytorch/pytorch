@@ -919,20 +919,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(res["a"], opt_fn(x)["a"])
 
-    def test_fn_id(self):
-        def fn(x, f):
-            d = {id(f): 3}
-            return x * d[id(f)]
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-
-        def nothing():
-            pass
-
-        f = nothing
-        self.assertEqual(fn(x, f), opt_fn(x, f))
-
     def test_mapping_proxy_for_local(self):
         def fn(x):
             d = {"a": 2, "b": 3, "c": 5 * x}

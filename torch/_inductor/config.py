@@ -519,15 +519,6 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
-# When enabled, the autotuner captures each candidate kernel in a CUDA graph
-# and benchmarks graph replay instead of eager kernel launches. This eliminates
-# host-side dispatch overhead from timing measurements, giving results that are
-# representative of CUDA graph replay execution. Useful when the compiled output
-# will run under external CUDA graph capture.
-autotune_cudagraph_benchmarking: bool = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
-)
-
 
 # Modifies the number of autotuning choices displayed, set to None for all
 def _autotune_num_choices_displayed_default() -> int | None:
@@ -2097,6 +2088,14 @@ class aot_inductor:
     Settings for Ahead-Of-Time Inductor Compilation
     """
 
+    # When True, each kernel in the autotune code allocates fresh tensors,
+    # runs, then immediately dels all tensors. Shared tensors are re-allocated
+    # for each consumer kernel. This prevents OOM from simultaneous live
+    # tensors in star-shaped graphs at the cost of more allocations during
+    # autotuning. When False (default), tensors are shared across kernels
+    # and del'd at their last consumer (faster but higher peak memory).
+    autotune_per_kernel_alloc: bool = False
+
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
@@ -2110,7 +2109,7 @@ class aot_inductor:
 
     # Enable frame pointers for profiling tools (e.g. strobelight)
     enable_frame_pointer = (
-        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
