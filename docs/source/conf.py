@@ -617,6 +617,8 @@ coverage_ignore_functions = [
     "get_tensor_meta",
     # torch.fx.passes.split_module
     "split_module",
+    "split_module_simple",
+    "_decompose_size_nodes",
     # torch.fx.passes.split_utils
     "getattr_recursive",
     "split_by_tags",
