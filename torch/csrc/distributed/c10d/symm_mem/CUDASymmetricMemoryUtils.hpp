@@ -5,7 +5,10 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <cstdint>
 #include <cstring>
+#include <sstream>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -110,10 +113,7 @@ class StoreExchange {
     ++seq_id_;
 
     {
-      std::vector<uint8_t> payload(
-          reinterpret_cast<uint8_t*>(&val),
-          reinterpret_cast<uint8_t*>(&val) + sizeof(T));
-      store->set(peer_keys[rank], payload);
+      store->set(peer_keys[rank], to_payload(val));
     }
 
     auto payloads = store->multiGet(peer_keys);
@@ -121,12 +121,44 @@ class StoreExchange {
     std::vector<T> peer_vals;
     peer_vals.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
-      TORCH_CHECK(payloads[r].size() == sizeof(T));
-      T peer_val{};
-      std::memcpy(&peer_val, payloads[r].data(), sizeof(T));
-      peer_vals.push_back(peer_val);
+      peer_vals.push_back(from_payload<T>(payloads[r]));
     }
     return peer_vals;
+  }
+
+  template <typename T>
+  T broadcast(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      int rank,
+      int world_size,
+      int src_rank,
+      T val) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    TORCH_CHECK(
+        rank >= 0 && rank < world_size,
+        "StoreExchange::broadcast: rank ",
+        rank,
+        " is out of range for world_size ",
+        world_size,
+        ".");
+    TORCH_CHECK(
+        src_rank >= 0 && src_rank < world_size,
+        "StoreExchange::broadcast: source rank ",
+        src_rank,
+        " is out of range for world_size ",
+        world_size,
+        ".");
+
+    std::ostringstream oss;
+    oss << store_prefix_ << '/' << seq_id_ << '/' << src_rank;
+    ++seq_id_;
+    auto key = oss.str();
+
+    if (rank == src_rank) {
+      store->set(key, to_payload(val));
+      return val;
+    }
+    return from_payload<T>(store->get(key));
   }
 
   void barrier(
@@ -141,6 +173,22 @@ class StoreExchange {
   }
 
  private:
+  template <typename T>
+  static std::vector<uint8_t> to_payload(const T& val) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    auto begin = reinterpret_cast<const uint8_t*>(&val);
+    return std::vector<uint8_t>(begin, begin + sizeof(T));
+  }
+
+  template <typename T>
+  static T from_payload(const std::vector<uint8_t>& payload) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    TORCH_CHECK(payload.size() == sizeof(T));
+    T val{};
+    std::memcpy(&val, payload.data(), sizeof(T));
+    return val;
+  }
+
   const std::string store_prefix_;
   size_t seq_id_ = 0;
 };
