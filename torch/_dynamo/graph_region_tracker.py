@@ -183,7 +183,8 @@ class BackwardBfsArgIter:
         it.add_children(origin)
         # pop the origin node, since it is the origin of
         # the region and does not need to be considered for addition
-        assert it.next()
+        if not it.next():
+            raise AssertionError("expected origin node to be popped from iterator")
         return it
 
     def next(self) -> Node | None:
@@ -381,7 +382,8 @@ class RegionWrapper:
     def __init__(
         self, region: Region, node_to_recursive_ancestors: dict[Node, set[Node]]
     ) -> None:
-        assert len(region) == 1, "all regions should start with one node"
+        if len(region) != 1:
+            raise AssertionError("all regions should start with one node")
         node = region[0]
         self.node_to_recursive_ancestors = node_to_recursive_ancestors
         self.iter = BackwardBfsArgIter.create(node)
@@ -417,7 +419,8 @@ def fully_expand_region_group(
     debug_log("expanding new region group: %s", regions)
 
     # All regions should start with 1 node
-    assert all(len(region) == 1 for region in regions)
+    if not all(len(region) == 1 for region in regions):
+        raise AssertionError("all regions should start with one node")
     region_wrappers = [
         RegionWrapper(region, node_to_recursive_ancestors) for region in regions
     ]
@@ -469,9 +472,10 @@ def fully_expand_region_group(
             debug_log("--------------------")
 
         if add_to_all_regions:
-            assert len(region_wrappers) == len(nodes_to_add), (
-                "Number of nodes to add must equal the number of regions"
-            )
+            if len(region_wrappers) != len(nodes_to_add):
+                raise AssertionError(
+                    "Number of nodes to add must equal the number of regions"
+                )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)
                 debug_log("adding %s's children", node)
