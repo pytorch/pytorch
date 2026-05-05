@@ -57,6 +57,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
+from .control_dependencies import preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
@@ -109,9 +110,35 @@ def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
-def post_grad_passes(
-    gm: torch.fx.GraphModule, is_inference: bool, is_subgraph: bool = False
-):
+def _is_nondeterministic_seeded_node(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and torch.Tag.nondeterministic_seeded in node.target.tags
+    )
+
+
+def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
+    """Chain nondeterministic_seeded ops with control_deps to preserve program order.
+
+    When fallback_random=True, random ops use the global CUDA RNG and must
+    execute in their original program order.
+    """
+    if not config.fallback_random:
+        return
+
+    random_nodes = [n for n in graph.nodes if _is_nondeterministic_seeded_node(n)]
+    if len(random_nodes) < 2:
+        return
+
+    additional_deps_map: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
+    for i in range(1, len(random_nodes)):
+        additional_deps_map[random_nodes[i]] = OrderedSet([random_nodes[i - 1]])
+
+    preserve_node_ordering(graph, additional_deps_map)
+
+
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -227,6 +254,11 @@ def post_grad_passes(
             post_grad_custom_post_pass
         )
 
+    if config.fallback_random:
+        GraphTransformObserver(gm, "chain_random_ops_ordering").apply_graph_pass(
+            _chain_random_ops_for_ordering
+        )
+
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
@@ -242,14 +274,9 @@ def post_grad_passes(
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    # SPMD verification — before collective reordering passes.
-    # Only at top level: spmd_check uses all_gather_object (a collective
-    # matched by call order). Running it per-subgraph would create N+1
-    # collectives; if ranks have different subgraph counts (non-SPMD),
-    # call sequences mismatch → deadlock. The top-level check hashes
-    # subgraphs recursively, so full coverage with a single collective.
+    # Top-level only: per-subgraph collectives deadlock when ranks have different subgraph counts.
     if (
-        not is_subgraph
+        not gm.meta.get("is_subgraph", False)
         and config.aten_distributed_optimizations.spmd_check
         and _needs_spmd_graph_preservation()
     ):
@@ -1039,6 +1066,8 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
+        and isinstance(val1, torch.Tensor)
+        and isinstance(val2, torch.Tensor)
         and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype

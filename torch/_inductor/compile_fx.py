@@ -566,9 +566,7 @@ def _recursive_joint_graph_passes(
         return out_gm
 
 
-def _recursive_post_grad_passes(
-    gm: GraphModule, is_inference: bool = False, _is_subgraph: bool = False
-) -> None:
+def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
     with dynamo_timed(
         "_recursive_post_grad_passes",
         log_pt2_compile_event=True,
@@ -579,8 +577,9 @@ def _recursive_post_grad_passes(
 
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference, _is_subgraph=True)
-        post_grad_passes(gm, is_inference, is_subgraph=_is_subgraph)
+            subgraph.meta["is_subgraph"] = True
+            _recursive_post_grad_passes(subgraph, is_inference)
+        post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -2266,6 +2265,13 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
+    *,
+    # When set, replaces the default partitioner (`config.custom_partitioner_fn`
+    # or `min_cut_rematerialization_partition`) while still running Inductor's
+    # joint-graph passes first. Used by `_get_partition_fn` so HOP subgraphs
+    # go through the same joint-pass + raw-partitioner pipeline as the outer
+    # Inductor compile.
+    partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2283,6 +2289,14 @@ def partition_fn(
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
     )
+
+    if partitioner_fn_override is not None:
+        return partitioner_fn_override(
+            gm,
+            joint_inputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
 
     if config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(

@@ -1,14 +1,8 @@
 # Owner(s): ["module: inductor"]
-"""Test that spmd_check doesn't deadlock on recursive subgraph post_grad_passes.
+"""Tests for spmd_check subgraph handling.
 
-The bug: _recursive_post_grad_passes calls post_grad_passes for each
-subgraph, and each call hits spmd_check → all_gather_object. Collectives
-are matched by call order; if ranks have different subgraph counts
-(non-SPMD), call sequences mismatch → deadlock.
-
-The fix: post_grad_passes accepts is_subgraph=True and skips spmd_check
-for subgraph-level calls. The top-level spmd_check hashes subgraphs
-recursively for full coverage with a single collective.
+Verifies that spmd_check runs only at top level (via gm.meta["is_subgraph"])
+and hashes subgraphs recursively, avoiding per-subgraph collective deadlocks.
 """
 
 from unittest.mock import MagicMock, patch
@@ -18,14 +12,9 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestSpmdCheckSubgraph(TestCase):
-    def test_recursive_passes_threads_is_subgraph(self):
-        """_recursive_post_grad_passes passes is_subgraph=True to subgraph calls."""
+    def test_recursive_passes_sets_subgraph_meta(self):
+        """_recursive_post_grad_passes sets meta['is_subgraph'] on subgraphs."""
         from torch._inductor.compile_fx import _recursive_post_grad_passes
-
-        calls = []
-
-        def mock_post_grad(gm, is_inference, is_subgraph=False):
-            calls.append({"gm_id": id(gm), "is_subgraph": is_subgraph})
 
         main_gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         sub_gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
@@ -37,33 +26,24 @@ class TestSpmdCheckSubgraph(TestCase):
         main_gm.graph.lint()
 
         with (
-            patch(
-                "torch._inductor.compile_fx.post_grad_passes",
-                side_effect=mock_post_grad,
-            ),
+            patch("torch._inductor.compile_fx.post_grad_passes"),
             patch("torch._inductor.compile_fx.config") as mock_config,
         ):
             mock_config.use_post_grad_passes = True
             _recursive_post_grad_passes(main_gm, is_inference=False)
 
-        self.assertEqual(len(calls), 2, f"Expected 2 calls, got {len(calls)}")
         self.assertTrue(
-            calls[0]["is_subgraph"],
-            "Subgraph call should have is_subgraph=True",
+            sub_gm.meta.get("is_subgraph", False),
+            "Subgraph should have meta['is_subgraph'] = True",
         )
         self.assertFalse(
-            calls[1]["is_subgraph"],
-            "Top-level call should have is_subgraph=False",
+            main_gm.meta.get("is_subgraph", False),
+            "Top-level should not have meta['is_subgraph']",
         )
 
     def test_nested_subgraphs_all_marked(self):
-        """Deeply nested subgraphs should all be marked is_subgraph=True."""
+        """Deeply nested subgraphs should all have meta['is_subgraph'] = True."""
         from torch._inductor.compile_fx import _recursive_post_grad_passes
-
-        calls = []
-
-        def mock_post_grad(gm, is_inference, is_subgraph=False):
-            calls.append(is_subgraph)
 
         main_gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         mid_gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
@@ -83,27 +63,23 @@ class TestSpmdCheckSubgraph(TestCase):
         main_gm.graph.lint()
 
         with (
-            patch(
-                "torch._inductor.compile_fx.post_grad_passes",
-                side_effect=mock_post_grad,
-            ),
+            patch("torch._inductor.compile_fx.post_grad_passes"),
             patch("torch._inductor.compile_fx.config") as mock_config,
         ):
             mock_config.use_post_grad_passes = True
             _recursive_post_grad_passes(main_gm, is_inference=False)
 
-        # 3 calls: leaf (sub), mid (sub), main (top)
-        self.assertEqual(len(calls), 3)
-        self.assertIs(calls[0], True, "Leaf should be is_subgraph=True")
-        self.assertIs(calls[1], True, "Mid should be is_subgraph=True")
-        self.assertIs(calls[2], False, "Main should be is_subgraph=False")
+        self.assertTrue(leaf_gm.meta.get("is_subgraph", False))
+        self.assertTrue(mid_gm.meta.get("is_subgraph", False))
+        self.assertFalse(main_gm.meta.get("is_subgraph", False))
 
     def test_spmd_check_skipped_for_subgraph(self):
-        """post_grad_passes skips spmd_check when is_subgraph=True."""
+        """post_grad_passes skips spmd_check when meta['is_subgraph'] is True."""
         from torch._inductor.fx_passes.post_grad import post_grad_passes
 
         gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         gm.graph.output(None)
+        gm.meta["is_subgraph"] = True
 
         mock_spmd = MagicMock()
 
@@ -119,11 +95,11 @@ class TestSpmdCheckSubgraph(TestCase):
                 }
             ),
         ):
-            post_grad_passes(gm, is_inference=False, is_subgraph=True)
+            post_grad_passes(gm, is_inference=False)
             mock_spmd.assert_not_called()
 
     def test_spmd_check_called_for_top_level(self):
-        """post_grad_passes calls spmd_check when is_subgraph=False."""
+        """post_grad_passes calls spmd_check when meta['is_subgraph'] is absent."""
         from torch._inductor.fx_passes.post_grad import post_grad_passes
 
         gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
@@ -143,7 +119,7 @@ class TestSpmdCheckSubgraph(TestCase):
                 }
             ),
         ):
-            post_grad_passes(gm, is_inference=False, is_subgraph=False)
+            post_grad_passes(gm, is_inference=False)
             mock_spmd.assert_called_once()
 
     def test_hash_bundle_includes_subgraphs(self):
