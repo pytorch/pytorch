@@ -370,6 +370,7 @@ def create_hop_fw_bw(
             node.meta.pop("autograd_backward", None)
         for node in new_bw_gm.graph.nodes:
             node.meta["partitioner_tag"] = "is_backward"
+            node.meta["autograd_backward"] = True
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs

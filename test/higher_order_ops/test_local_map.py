@@ -930,6 +930,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mm_nodes[1].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[2].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[3].meta["custom"]["inside_local_map"], 0)
+        for node in joint_gm_inlined.graph.nodes:
+            if node.meta.get("partitioner_tag") == "is_backward":
+                self.assertTrue(node.meta.get("autograd_backward", False))
 
     @unittest.skipIf(*get_skip_reasons())
     def test_no_autograd_backward_metadata_on_inlined_forward_nodes(self):
