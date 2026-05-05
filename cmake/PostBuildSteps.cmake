@@ -22,6 +22,7 @@ install(CODE "
     COMMAND \"${_python_exe}\"
       \"${_project_src}/tools/wrap_headers.py\"
       \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_INCLUDE_DIR}\"
+    COMMAND_ERROR_IS_FATAL ANY
   )
 ")
 
