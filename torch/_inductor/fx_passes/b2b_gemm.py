@@ -461,6 +461,7 @@ def _make_unoptimized_b2b_gemm_choice(
 
     return SubgraphChoiceCaller(
         name=f"unoptimized_b2b_gemm_{tag}",
+        # pyrefly: ignore [bad-argument-type]
         input_nodes=input_nodes,
         layout=layout,
         description=f"unoptimized b2b_gemm ({tag}-associative)",
