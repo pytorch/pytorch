@@ -3505,6 +3505,8 @@ make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
+# Needs efficentzerotensor
+make_fallback(aten._efficientzerotensor)
 
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -4141,11 +4143,6 @@ def copy_strided(x, stride):
 def full(size, fill_value, **kwargs):
     assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
-
-
-@register_lowering(aten._efficientzerotensor)
-def _efficientzerotensor(size, **kwargs):
-    return tensor_constructor(0)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
@@ -8367,12 +8364,15 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
 
     dep_names = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
-        if isinstance(dep, IRNode):
-            dep.realize()
-            dep_names.append(dep.get_name())
-        elif isinstance(orig_node, torch.fx.Node):
-            # Void op (e.g. record_event returns None): look up the buffer
-            # names stored when it was previously lowered.
+        dep_ir_nodes = [
+            dep_leaf
+            for dep_leaf in pytree.tree_leaves(dep)
+            if isinstance(dep_leaf, IRNode)
+        ]
+        for dep_ir_node in dep_ir_nodes:
+            dep_ir_node.realize()
+            dep_names.append(dep_ir_node.get_name())
+        if isinstance(orig_node, torch.fx.Node):
             found = V.graph._void_ctrl_dep_op_names.get(orig_node, [])
             dep_names.extend(found)
 
