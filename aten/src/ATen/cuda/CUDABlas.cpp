@@ -1740,8 +1740,8 @@ bool gemm_and_bias(
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
     return use_bias_descriptor
-      ? std::make_tuple(CuBlasLtMatrixLayout(abType, m, n, 0), bias)
-      : std::make_tuple(CuBlasLtMatrixLayout(cType, m, n, result_ld), result_ptr);
+      ? std::make_tuple(CuBlasLtMatrixLayout(abType, m, n, 0), static_cast<const void*>(bias))
+      : std::make_tuple(CuBlasLtMatrixLayout(cType, m, n, result_ld), static_cast<const void*>(result_ptr));
   };
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
