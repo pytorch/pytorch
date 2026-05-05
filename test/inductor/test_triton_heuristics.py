@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
-    skipIfRocm,
     skipIfRocm_BUGGY,
     skipIfXpu,
 )
