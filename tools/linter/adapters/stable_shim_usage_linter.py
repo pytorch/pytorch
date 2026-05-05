@@ -13,38 +13,21 @@ import json
 import logging
 import re
 import sys
-from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
 
 
 # Add repo root to sys.path so we can import from tools
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.linter.adapters.stable_shim_version_linter import PreprocessorTracker
+from tools.linter.adapters._stable_shim_utils import (
+    LintMessage,
+    LintSeverity,
+    PreprocessorTracker,
+)
 
 
 LINTER_CODE = "STABLE_SHIM_USAGE"
-
-
-class LintSeverity(str, Enum):
-    ERROR = "error"
-    WARNING = "warning"
-    ADVICE = "advice"
-    DISABLED = "disabled"
-
-
-class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
-    code: str
-    severity: LintSeverity
-    name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
 
 
 def get_shim_functions(
