@@ -306,6 +306,10 @@ class TestConcatenate(TestCase):
         if b[0, 0] == a[0, 0]:
             raise AssertionError("concatenate should return a copy")
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_exceptions(self):
         # test axis must be in bounds
         for ndim in [1, 2, 3]:

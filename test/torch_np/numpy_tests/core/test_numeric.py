@@ -1107,6 +1107,10 @@ class TestNonzeroAndCountNonzero(TestCase):
                 np.concatenate((np.arange(10 + i, 20 + i), [20 + i * 2])),
             )
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_count_nonzero_axis(self):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
@@ -2656,6 +2660,10 @@ class TestRollaxis(TestCase):
         (3, 4): (1, 2, 3, 4),
     }
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_exceptions(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4)
         assert_raises(np.AxisError, np.rollaxis, a, -5, 0)
@@ -2749,6 +2757,10 @@ class TestMoveaxis(TestCase):
             actual = np.moveaxis(x, source, destination).shape
             assert_(actual, expected)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_errors(self):
         x = np.random.randn(1, 2, 3)
         assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
@@ -2853,6 +2865,10 @@ class TestCross(TestCase):
         assert_equal(np.cross(v.T, u), -z)
         assert_equal(np.cross(u, u), 0)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_broadcasting_shapes(self):
         u = np.ones((2, 1, 3))
         v = np.ones((5, 3))

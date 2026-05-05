@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import numpy
 import functools
 import sys
 from unittest import expectedFailure as xfail, skipIf as skipif
@@ -96,6 +97,10 @@ class TestTakeAlongAxis(TestCase):
                 ai_func = argfunc(a, axis=axis, **kwargs)
                 assert_equal(a_func, take_along_axis(a, ai_func, axis=axis))
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_invalid(self):
         """Test it errors when indices has too few dimensions"""
         a = np.ones((10, 10))
@@ -328,6 +333,10 @@ class TestExpandDims(TestCase):
                 f"Expected shape (1, 1, 3, 1, 3, 3), got {np.expand_dims(a, axis=(0, -3, -5)).shape}"
             )
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_axis_out_of_range(self):
         s = (2, 3, 4, 5)
         a = np.empty(s)
