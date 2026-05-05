@@ -260,8 +260,28 @@ result tensor will be created from symmetric memory too.
         y = torch.mm(x, w)
 ```
 
-As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
-support of the `NCCL` backend is in progress.
+As of torch 2.11, the `CUDA`, `NVSHMEM`, and `NIXL` backends support MemPool.
+MemPool support of the `NCCL` backend is in progress.
+
+## NIXL Backend
+
+The optional `NIXL` backend enables one-sided `put` and `get` operations through
+the NVIDIA Inference Transfer Library. It is built only when PyTorch is
+configured with `USE_NIXL=1` and NIXL headers and libraries are found. At
+runtime, the backend requires the NIXL UCX plugin and CUDA-aware UCX transports.
+
+```python
+import torch.distributed._symmetric_memory as symm_mem
+
+if symm_mem.is_nixl_available():
+    symm_mem.set_backend("NIXL")
+```
+
+The current backend follows the symmetric memory rendezvous model: participants
+are fixed by the process group, and the host-side NIXL transfer path is intended
+for coarse one-sided movement rather than fine-grained barriers. GPU-initiated
+NIXL transfers require NIXL device API headers and CUDA-aware UCX device headers
+from the runtime container.
 
 (copy-engine-collectives)=
 
@@ -439,6 +459,10 @@ communicator for the process group if it doesn't already exist.
 
 ```{eval-rst}
 .. autofunction:: is_nvshmem_available
+```
+
+```{eval-rst}
+.. autofunction:: is_nixl_available
 ```
 
 ```{eval-rst}

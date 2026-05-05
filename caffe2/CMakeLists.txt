@@ -1075,15 +1075,16 @@ elseif(USE_CUDA)
   if(USE_NIXL)
     message(STATUS "NIXL_HOME set to: '$ENV{NIXL_HOME}'")
     message(STATUS "NIXL pip dir: '${NIXL_PY_DIR}'")
-    # Search order: NIXL_HOME env var, then NIXL_PY_DIR (pip), then system paths
+    # Search order: explicit env overrides, NIXL_HOME, NIXL_PY_DIR (pip),
+    # then system paths.
     find_library(NIXL_LIB
       NAMES nixl
-      HINTS $ENV{NIXL_HOME} ${NIXL_PY_DIR}
+      HINTS $ENV{NIXL_LIBRARY_DIR} $ENV{NIXL_HOME} ${NIXL_PY_DIR}
       PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu lib/aarch64-linux-gnu
       DOC "The location of NIXL library.")
     find_path(NIXL_INCLUDE_DIR
       NAMES nixl.h
-      HINTS $ENV{NIXL_HOME}/include ${NIXL_PY_DIR}/include
+      HINTS $ENV{NIXL_INCLUDE_DIR} $ENV{NIXL_HOME}/include ${NIXL_PY_DIR}/include
       DOC "The location of NIXL headers.")
     message(STATUS "NIXL_LIB: '${NIXL_LIB}'")
     message(STATUS "NIXL_INCLUDE_DIR: '${NIXL_INCLUDE_DIR}'")

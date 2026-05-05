@@ -23,9 +23,10 @@ static std::mutex g_agent_mutex;
 static std::unique_ptr<nixlAgent> g_agent;
 static nixlBackendH* g_ucx_backend = nullptr;
 static std::string g_agent_name;
-// Maps peer PID (from agent name) to NIXL agent name. Used to
-// invalidate stale remote metadata before reloading.
-static std::map<int, std::string> g_peer_agent_names_by_rank;
+// Tracks the last remote NIXL agent name seen for a process-group rank.
+// Group scoping avoids invalidating metadata for unrelated subgroups that
+// reuse the same rank index.
+static std::map<std::pair<std::string, int>, std::string> g_peer_agent_names;
 
 nixlAgent& ensure_nixl_agent() {
   std::lock_guard<std::mutex> lock(g_agent_mutex);
@@ -34,6 +35,7 @@ nixlAgent& ensure_nixl_agent() {
   gethostname(hostname, sizeof(hostname));
   g_agent_name = std::string("pt_nixl_") + hostname + "_" + std::to_string(getpid());
   nixlAgentConfig cfg;
+  cfg.useProgThread = true;
   cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_STRICT;
   g_agent = std::make_unique<nixlAgent>(g_agent_name, cfg);
   nixl_b_params_t params;
@@ -102,6 +104,29 @@ struct NIXLRendezvousInfo {
   int device_idx;
 };
 
+static size_t nixl_channel_signal_offset(int world_size, int channel, int rank) {
+  TORCH_CHECK(channel >= 0, "NIXL: channel must be non-negative, got ", channel);
+  TORCH_CHECK(rank >= 0 && rank < world_size, "NIXL: invalid rank ", rank);
+  return kNixlChannelSignalOffset +
+      (size_t(world_size) * size_t(channel) + size_t(rank)) * sizeof(uint32_t);
+}
+
+static void check_nixl_signal_pad_capacity(int world_size, int channel) {
+  const auto required =
+      nixl_channel_signal_offset(world_size, channel, world_size - 1) +
+      sizeof(uint32_t);
+  TORCH_CHECK(
+      required <= get_signal_pad_size(),
+      "NIXL: signal pad is too small for world_size=",
+      world_size,
+      ", channel=",
+      channel,
+      ". Required ",
+      required,
+      " bytes, but signal pad size is ",
+      get_signal_pad_size());
+}
+
 struct NIXLAllocation {
   void* ptr;
   size_t buffer_size, signal_pad_offset, block_size;
@@ -130,10 +155,11 @@ struct NIXLAllocation {
 class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NIXLPeerAllocInfo(NIXLAllocation* a, const std::string& gn)
-      : buffer_size_(a->buffer_size), device_idx_(a->device_idx) {
+      : group_name_(gn), buffer_size_(a->buffer_size), device_idx_(a->device_idx) {
     c10::cuda::CUDAGuard guard(device_idx_);
     auto group = c10d::resolve_process_group(gn);
     rank_ = group->getRank(); world_size_ = group->getSize();
+    check_nixl_signal_pad_capacity(world_size_, 0);
     auto store = group->getStore();
     auto& agent = ensure_nixl_agent();
     if (!a->registered) {
@@ -172,10 +198,10 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
       auto md_st = agent.loadRemoteMD(mds[r], rn);
       if (md_st != NIXL_SUCCESS) {
         std::lock_guard<std::mutex> lk(g_agent_mutex);
-        auto it = g_peer_agent_names_by_rank.find(r);
-        if (it != g_peer_agent_names_by_rank.end()) {
+        auto it = g_peer_agent_names.find({group_name_, r});
+        if (it != g_peer_agent_names.end()) {
           agent.invalidateRemoteMD(it->second);
-          g_peer_agent_names_by_rank.erase(it);
+          g_peer_agent_names.erase(it);
         }
         md_st = agent.loadRemoteMD(mds[r], rn);
       }
@@ -185,10 +211,16 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
       // Proactively establish UCX connection so that later transfers
       // don't need to do the handshake inline (which requires both
       // sides to progress UCX simultaneously).
-      agent.makeConnection(rn);
+      auto conn_st = agent.makeConnection(rn);
+      TORCH_CHECK(
+          conn_st == NIXL_SUCCESS,
+          "NIXL makeConnection failed for rank ",
+          r,
+          ", status=",
+          static_cast<int>(conn_st));
       {
         std::lock_guard<std::mutex> lk(g_agent_mutex);
-        g_peer_agent_names_by_rank[r] = rn;
+        g_peer_agent_names[{group_name_, r}] = rn;
       }
       peer_agent_names_.push_back(rn);
       buffers_.push_back(nullptr); signal_pads_.push_back(nullptr);
@@ -198,12 +230,20 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
     signal_pads_dev_ = (void**)c10::cuda::CUDACachingAllocator::raw_alloc(as);
     AT_CUDA_CHECK(cudaMemcpy(buffers_dev_, buffers_.data(), as, cudaMemcpyHostToDevice));
     AT_CUDA_CHECK(cudaMemcpy(signal_pads_dev_, signal_pads_.data(), as, cudaMemcpyHostToDevice));
-    AT_CUDA_CHECK(cudaMalloc(&signal_staging_, 64));
-    AT_CUDA_CHECK(cudaMemset(signal_staging_, 0, 64));
+    AT_CUDA_CHECK(cudaMalloc(&signal_staging_, kNixlSignalStagingBytes));
+    AT_CUDA_CHECK(cudaMemset(signal_staging_, 0, kNixlSignalStagingBytes));
     uint32_t one = 1;
-    AT_CUDA_CHECK(cudaMemcpy(signal_staging_, &one, 4, cudaMemcpyHostToDevice));
+    AT_CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(signal_staging_) + kNixlChannelSignalOffset,
+        &one,
+        sizeof(one),
+        cudaMemcpyHostToDevice));
     nixl_reg_dlist_t sr(VRAM_SEG);
-    sr.addDesc(nixlBlobDesc(reinterpret_cast<uintptr_t>(signal_staging_), 64, uint64_t(device_idx_), ""));
+    sr.addDesc(nixlBlobDesc(
+        reinterpret_cast<uintptr_t>(signal_staging_),
+        kNixlSignalStagingBytes,
+        uint64_t(device_idx_),
+        ""));
     TORCH_CHECK(agent.registerMem(sr) == NIXL_SUCCESS, "staging reg failed");
     staging_reg_ = true;
   }
@@ -213,7 +253,11 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
       std::lock_guard<std::mutex> lk(g_agent_mutex);
       if (g_agent) {
         nixl_reg_dlist_t d(VRAM_SEG);
-        d.addDesc(nixlBlobDesc(reinterpret_cast<uintptr_t>(signal_staging_), 64, uint64_t(device_idx_), ""));
+        d.addDesc(nixlBlobDesc(
+            reinterpret_cast<uintptr_t>(signal_staging_),
+            kNixlSignalStagingBytes,
+            uint64_t(device_idx_),
+            ""));
         g_agent->deregisterMem(d);
       }
     }
@@ -225,33 +269,67 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
     if (signal_pads_dev_) c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
   }
  private:
+  std::string group_name_;
   size_t buffer_size_; int rank_, world_size_, device_idx_;
   std::vector<void*> buffers_, signal_pads_;
-  void** buffers_dev_; void** signal_pads_dev_;
+  void** buffers_dev_ = nullptr; void** signal_pads_dev_ = nullptr;
   std::vector<std::string> peer_agent_names_;
   std::vector<NIXLRendezvousInfo> peer_infos_;
   void* signal_staging_ = nullptr; bool staging_reg_ = false;
   friend class NIXLSymmetricMemory;
 };
 
-static void nixl_transfer(nixl_xfer_op_t op,
+class NIXLXferRequest {
+ public:
+  explicit NIXLXferRequest(nixlAgent& agent) : agent_(agent) {}
+  NIXLXferRequest(const NIXLXferRequest&) = delete;
+  NIXLXferRequest& operator=(const NIXLXferRequest&) = delete;
+  ~NIXLXferRequest() {
+    if (req_) {
+      agent_.releaseXferReq(req_);
+    }
+  }
+
+  nixlXferReqH*& out() {
+    return req_;
+  }
+
+  nixlXferReqH* get() const {
+    return req_;
+  }
+
+ private:
+  nixlAgent& agent_;
+  nixlXferReqH* req_ = nullptr;
+};
+
+void nixl_transfer(nixl_xfer_op_t op,
     uintptr_t la, size_t ls, uint64_t ld,
     uintptr_t ra, size_t rs, uint64_t rd, const std::string& rn) {
+  if (ls == 0 && rs == 0) {
+    return;
+  }
+  TORCH_CHECK(ls == rs, "NIXL transfer size mismatch: local=", ls, ", remote=", rs);
+  TORCH_CHECK(!rn.empty(), "NIXL transfer requires a remote agent name");
   auto& agent = ensure_nixl_agent();
   nixl_xfer_dlist_t ll(VRAM_SEG); ll.addDesc(nixlBasicDesc(la, ls, ld));
   nixl_xfer_dlist_t rl(VRAM_SEG); rl.addDesc(nixlBasicDesc(ra, rs, rd));
-  nixlXferReqH* req = nullptr;
-  auto s = agent.createXferReq(op, ll, rl, rn, req);
+  NIXLXferRequest req(agent);
+  auto s = agent.createXferReq(op, ll, rl, rn, req.out());
   TORCH_CHECK(s == NIXL_SUCCESS, "NIXL createXferReq failed, status=", static_cast<int>(s));
-  s = agent.postXferReq(req);
+  s = agent.postXferReq(req.get());
   TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG, "NIXL postXferReq failed, status=", static_cast<int>(s));
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (agent.getXferStatus(req) == NIXL_IN_PROG) {
+  auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(kNixlTransferTimeoutSeconds);
+  while (s == NIXL_IN_PROG) {
     TORCH_CHECK(std::chrono::steady_clock::now() < deadline,
-        "NIXL transfer timed out after 30s");
+        "NIXL transfer timed out after ",
+        kNixlTransferTimeoutSeconds,
+        "s");
     std::this_thread::yield();
+    s = agent.getXferStatus(req.get());
   }
-  agent.releaseXferReq(req);
+  TORCH_CHECK(s == NIXL_SUCCESS, "NIXL transfer failed, status=", static_cast<int>(s));
 }
 
 NIXLSymmetricMemory::NIXLSymmetricMemory(c10::intrusive_ptr<NIXLPeerAllocInfo> p, size_t o)
@@ -270,14 +348,19 @@ void* NIXLSymmetricMemory::get_multicast_ptr() { return nullptr; }
 void NIXLSymmetricMemory::put_signal(int dst, int ch, size_t) {
   TORCH_CHECK(dst >= 0 && dst < pai_->world_size_ && dst != pai_->rank_,
       "put_signal: invalid dst_rank ", dst);
+  check_nixl_signal_pad_capacity(pai_->world_size_, ch);
   c10::cuda::CUDAGuard g(device_idx_);
   AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream()));
-  size_t off = (size_t(pai_->world_size_) * ch + pai_->rank_) * 4;
-  nixl_transfer(NIXL_WRITE, reinterpret_cast<uintptr_t>(pai_->signal_staging_), 4, uint64_t(device_idx_),
-      pai_->peer_infos_[dst].signal_pad_addr + off, 4, uint64_t(pai_->peer_infos_[dst].device_idx),
+  size_t off = nixl_channel_signal_offset(pai_->world_size_, ch, pai_->rank_);
+  nixl_transfer(NIXL_WRITE,
+      reinterpret_cast<uintptr_t>(pai_->signal_staging_) + kNixlChannelSignalOffset, sizeof(uint32_t), uint64_t(device_idx_),
+      pai_->peer_infos_[dst].signal_pad_addr + off, sizeof(uint32_t), uint64_t(pai_->peer_infos_[dst].device_idx),
       pai_->peer_agent_names_[dst]);
 }
 void NIXLSymmetricMemory::wait_signal(int src, int ch, size_t tmo) {
+  TORCH_CHECK(src >= 0 && src < pai_->world_size_ && src != pai_->rank_,
+      "wait_signal: invalid src_rank ", src);
+  check_nixl_signal_pad_capacity(pai_->world_size_, ch);
   nixl_launch_wait_signal_kernel(pai_->signal_pads_dev_, src, ch, pai_->rank_, pai_->world_size_, tmo, device_idx_);
 }
 void NIXLSymmetricMemory::barrier(int ch, size_t tmo) {

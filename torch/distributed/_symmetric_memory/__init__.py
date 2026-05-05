@@ -2022,7 +2022,20 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
-def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
+def is_nixl_available() -> bool:
+    r"""
+    is_nixl_available() -> bool
+
+    Check if the NIXL symmetric memory backend was registered in the current
+    build.
+    """
+    try:
+        return bool(_SymmetricMemory.is_backend_available("NIXL"))
+    except (AttributeError, RuntimeError):
+        return False
+
+
+def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL", "NIXL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
     and affects all subsequent calls to
@@ -2031,7 +2044,7 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
 
     Args:
         backend (str): the backend for symmetric memory allocation. Currently,
-            only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
+            only `"NVSHMEM"`, `"CUDA"`, `"NCCL"`, `"NIXL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
 
@@ -2159,6 +2172,7 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     put_signal(src, hdl, peer) -> None
 
     Put data to a peer's symmetric memory and signal the peer.
+    Currently this helper dispatches only to the NCCL backend.
 
     Args:
         src (torch.Tensor): the source tensor to read data from.
@@ -2182,6 +2196,7 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     wait_signal(hdl, peer) -> None
 
     Wait for a signal from a peer.
+    Currently this helper dispatches only to the NCCL backend.
 
     Args:
         hdl (SymmetricMemory): the symmetric memory handle on which to wait for a signal.

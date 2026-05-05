@@ -3,6 +3,7 @@
 
 #include <torch/custom_class.h>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 
@@ -67,6 +68,16 @@ class AllocatorMap {
       TORCH_CHECK(!in_use_, "Backend can not be changed after use.");
     }
     map_[device_type] = it->second;
+  }
+
+  bool is_backend_available(const std::string& name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (avail_map_.find(name) != avail_map_.end()) {
+      return true;
+    }
+    return std::any_of(map_.begin(), map_.end(), [&](const auto& item) {
+      return item.second->name() == name;
+    });
   }
 
   std::optional<std::string> get_backend(c10::DeviceType device_type) {
@@ -209,6 +220,10 @@ void register_availability(
 
 void set_backend(const std::string& name) {
   return AllocatorMap::get().set_backend(name);
+}
+
+bool is_backend_available(const std::string& name) {
+  return AllocatorMap::get().is_backend_available(name);
 }
 
 std::optional<std::string> get_backend(c10::Device device) {

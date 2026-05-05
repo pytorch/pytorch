@@ -1,6 +1,7 @@
 # Owner(s): ["module: c10d"]
 
 import os
+import pathlib
 import unittest
 
 import torch
@@ -17,64 +18,67 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _nixl_compiled() -> bool:
+if "NIXL_PLUGIN_DIR" not in os.environ:
     try:
-        symm_mem.set_backend("NIXL")
-        return True
-    except RuntimeError:
-        return False
+        import importlib.util
+
+        for package, lib_dir in [
+            ("nixl_cu13", ".nixl-cu13.mesonpy.libs"),
+            ("nixl_cu12", ".nixl-cu12.mesonpy.libs"),
+            ("nixl", ".nixl.mesonpy.libs"),
+        ]:
+            spec = importlib.util.find_spec(package)
+            if not spec or not spec.origin:
+                continue
+            candidate = pathlib.Path(spec.origin).parent.parent / lib_dir / "plugins"
+            if candidate.is_dir():
+                os.environ["NIXL_PLUGIN_DIR"] = str(candidate)
+                break
+    except (ImportError, AttributeError, TypeError):
+        pass
+
+
+def _path_entries(env_var: str) -> list[pathlib.Path]:
+    return [pathlib.Path(p) for p in os.environ.get(env_var, "").split(":") if p]
+
+
+def _has_file_in_dirs(filename: str, dirs: list[pathlib.Path]) -> bool:
+    return any((d / filename).exists() for d in dirs)
 
 
 def _nixl_vram_functional() -> bool:
     """Check if NIXL can register VRAM.
 
-    The pip-installed NIXL (nixl_cu12) bundles its own UCX without CUDA
-    memory support, so VRAM registration hangs. A source-built NIXL
-    linked against the system UCX (which has libuct_cuda.so) works.
+    The NIXL backend needs the UCX plugin and CUDA-aware UCX transports at
+    runtime. The CUDA DL / DLFW containers provide NIXL, but source builds
+    must point LD_LIBRARY_PATH and NIXL_PLUGIN_DIR at matching UCX/NIXL
+    prefixes.
     """
-    if not _nixl_compiled() or not torch.cuda.is_available():
+    if not symm_mem.is_nixl_available() or not torch.cuda.is_available():
         return False
-    import pathlib
 
-    ucx_has_cuda = any(
-        pathlib.Path(d, "libuct_cuda.so").exists()
-        for d in ["/opt/hpcx/ucx/lib/ucx", "/usr/lib/ucx", "/usr/local/lib/ucx"]
-    )
-    if not ucx_has_cuda:
+    ucx_dirs = _path_entries("LD_LIBRARY_PATH") + [
+        pathlib.Path("/opt/hpcx/ucx/lib"),
+        pathlib.Path("/opt/hpcx/ucx/lib/ucx"),
+        pathlib.Path("/usr/lib/ucx"),
+        pathlib.Path("/usr/local/lib/ucx"),
+    ]
+    if not _has_file_in_dirs("libuct_cuda.so", ucx_dirs):
         return False
-    try:
-        import nixl_cu12  # noqa: F401
-        # pip-installed — bundled UCX lacks CUDA support
-        return False
-    except ImportError:
-        # Not pip-installed — assume source build with system UCX
-        return True
+
+    plugin_dirs = _path_entries("NIXL_PLUGIN_DIR") + [
+        d / "plugins" for d in _path_entries("LD_LIBRARY_PATH")
+    ]
+    return _has_file_in_dirs("libplugin_UCX.so", plugin_dirs)
 
 
-NIXL_COMPILED = _nixl_compiled()
+NIXL_COMPILED = symm_mem.is_nixl_available()
 NIXL_FUNCTIONAL = _nixl_vram_functional()
 
 requires_nixl = unittest.skipUnless(NIXL_COMPILED, "NIXL backend not compiled")
 requires_nixl_functional = unittest.skipUnless(
     NIXL_FUNCTIONAL, "NIXL not functional (UCX may lack CUDA support)"
 )
-
-if "NIXL_PLUGIN_DIR" not in os.environ:
-    try:
-        import importlib.util
-        import pathlib
-
-        spec = importlib.util.find_spec("nixl_cu12")
-        if spec and spec.origin:
-            for c in [
-                pathlib.Path(spec.origin).parent.parent / ".nixl_cu12.mesonpy.libs" / "plugins",
-            ]:
-                if c.is_dir():
-                    os.environ["NIXL_PLUGIN_DIR"] = str(c)
-                    break
-    except (ImportError, AttributeError, TypeError):
-        pass
-
 
 @requires_cuda_p2p_access()
 class NixlSymmetricMemoryTest(MultiProcContinuousTest):
@@ -147,12 +151,54 @@ class NixlSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertIsNotNone(sig)
         self.assertGreater(sig.numel(), 0)
 
-    # nixl_put/nixl_get work when run in isolation (verified: 12s, OK)
-    # but block in the full 8-rank suite because UCX connection handshake
-    # requires both sides to progress, and the remote side is in a NCCL
-    # barrier. Needs NIXL progress thread or device-side API.
-    # Run standalone: python test/distributed/test_nixl_symmetric_memory.py \
-    #   NixlSymmetricMemoryTest.test_nixl_put
+
+@requires_cuda_p2p_access()
+class NixlPairSymmetricMemoryTest(NixlSymmetricMemoryTest):
+    world_size = 2
+
+    @requires_nixl_functional
+    @skip_if_lt_x_gpu(2)
+    def test_nixl_put_pair(self):
+        self._init()
+        self._shared_t.fill_(float(self.rank + 1))
+        torch.cuda.synchronize(self.device)
+        dist.barrier()
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nixl_put(self._shared_t, 1)
+        dist.barrier()
+        self.assertEqual(self._shared_t, torch.full_like(self._shared_t, 1.0))
+
+    @requires_nixl_functional
+    @skip_if_lt_x_gpu(2)
+    def test_nixl_get_pair(self):
+        self._init()
+        self._shared_t.fill_(float(self.rank + 1))
+        torch.cuda.synchronize(self.device)
+        dist.barrier()
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nixl_get(self._shared_t, 1)
+            self.assertEqual(self._shared_t, torch.full_like(self._shared_t, 2.0))
+        else:
+            self.assertEqual(self._shared_t, torch.full_like(self._shared_t, 2.0))
+        dist.barrier()
+
+    @requires_nixl_functional
+    @skip_if_lt_x_gpu(2)
+    def test_nixl_put_with_signal_pair(self):
+        self._init()
+        self._shared_hdl.get_signal_pad(self.rank, (1,), torch.uint64).zero_()
+        self._shared_t.fill_(float(self.rank + 1))
+        torch.cuda.synchronize(self.device)
+        dist.barrier()
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nixl_put_with_signal(self._shared_t, 123, 1)
+        else:
+            torch.ops.symm_mem.nixl_wait_for_signal(self._shared_t, 123)
+            self.assertEqual(self._shared_t, torch.full_like(self._shared_t, 1.0))
+        dist.barrier()
 
 
 class NixlSingleProcTest(TestCase):
@@ -160,6 +206,8 @@ class NixlSingleProcTest(TestCase):
         if not NIXL_COMPILED:
             with self.assertRaises(RuntimeError):
                 symm_mem.set_backend("NIXL")
+        else:
+            self.assertTrue(symm_mem.is_nixl_available())
 
     @requires_nixl
     def test_nixl_single_process_alloc(self):

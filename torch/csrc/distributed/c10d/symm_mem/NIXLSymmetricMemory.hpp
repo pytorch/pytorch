@@ -2,10 +2,17 @@
 
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <nixl.h>
+
 class nixlAgent;
 
 namespace c10d {
 namespace symmetric_memory {
+
+inline constexpr size_t kNixlValueSignalOffset = 0;
+inline constexpr size_t kNixlChannelSignalOffset = 8;
+inline constexpr size_t kNixlSignalStagingBytes = 64;
+inline constexpr size_t kNixlTransferTimeoutSeconds = 30;
 
 class NIXLPeerAllocInfo;
 
@@ -52,8 +59,8 @@ class NIXLSymmetricMemory : public SymmetricMemory {
   int get_local_device_idx() const;
 
   // Registered VRAM staging buffer for signal writes.
-  // Layout: [0..3] uint32_t(1) for channel-based put_signal,
-  //         [8..15] uint64_t slot for value-based put_with_signal.
+  // Layout: [0..7] uint64_t slot for value-based put_with_signal,
+  //         [8..11] uint32_t(1) for channel-based put_signal.
   void* get_signal_staging_ptr() const;
 
  private:
@@ -65,6 +72,16 @@ class NIXLSymmetricMemory : public SymmetricMemory {
 // Global NIXL agent singleton (defined in NIXLSymmetricMemory.cpp).
 nixlAgent& ensure_nixl_agent();
 const std::string& nixl_agent_name();
+
+void nixl_transfer(
+    nixl_xfer_op_t op,
+    uintptr_t local_addr,
+    size_t local_size,
+    uint64_t local_device,
+    uintptr_t remote_addr,
+    size_t remote_size,
+    uint64_t remote_device,
+    const std::string& remote_agent_name);
 
 // CUDA kernel launcher for channel-based wait_signal.
 // Defined in NIXLSymmetricMemoryOps.cu, called from NIXLSymmetricMemory.cpp.

@@ -282,7 +282,6 @@ class CMake:
         # detection are passed here.
 
         build_options: dict[str, CMakeValue] = {
-            "CMAKE_INSTALL_PREFIX": install_dir,
             "BUILD_PYTHON": build_python,
             "BUILD_TEST": build_test,
         }
@@ -306,7 +305,8 @@ class CMake:
         # NIXL
         # The pip wheel ships shared libs but not C++ headers. Users must
         # set NIXL_HOME to a prefix with both include/ and lib/, or point
-        # NIXL_INCLUDE_DIR at the headers separately.
+        # NIXL_INCLUDE_DIR/NIXL_LIBRARY_DIR at the headers and libraries
+        # separately.
         for candidate in [
             py_lib_path + "/.nixl.mesonpy.libs",
             py_lib_path + "/.nixl-cu12.mesonpy.libs",

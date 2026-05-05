@@ -198,6 +198,8 @@ TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor);
 
 TORCH_API void set_backend(const std::string& name);
 
+TORCH_API bool is_backend_available(const std::string& name);
+
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
 
 // Get the current signal pad size for symmetric memory allocations.

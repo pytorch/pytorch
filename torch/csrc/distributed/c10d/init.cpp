@@ -1169,6 +1169,9 @@ Example:
           "has_multicast_support",
           &::c10d::symmetric_memory::has_multicast_support)
       .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
+      .def_static(
+          "is_backend_available",
+          &::c10d::symmetric_memory::is_backend_available)
       .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
       .def_static(
           "is_symm_mem_tensor",
