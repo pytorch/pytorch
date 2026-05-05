@@ -432,9 +432,9 @@ def is_b2b_gemm_good_on(
 def _make_unoptimized_b2b_gemm_choice(
     is_left_assoc: bool,
     subgraph: Subgraph,
-    input_nodes: tuple[TensorBox, TensorBox, TensorBox],
+    input_nodes: list[TensorBox],
     layout: FixedLayout,
-) -> "SubgraphChoiceCaller":
+):  # -> SubgraphChoiceCaller (local import)
     from ..codegen.subgraph import SubgraphChoiceCaller
 
     tag = "left" if is_left_assoc else "right"
@@ -461,7 +461,7 @@ def _make_unoptimized_b2b_gemm_choice(
 
     return SubgraphChoiceCaller(
         name=f"unoptimized_b2b_gemm_{tag}",
-        input_nodes=list(input_nodes),
+        input_nodes=input_nodes,
         layout=layout,
         description=f"unoptimized b2b_gemm ({tag}-associative)",
         make_fx_graph=make_fx_graph,
@@ -581,7 +581,7 @@ def tuned_b2b_gemm(
             )
     # add the unoptimized choice to mitigate performance degradation
     choices.append(
-        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, (A, B, C), layout)
+        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
     )
     # autotune
     node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
