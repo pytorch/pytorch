@@ -270,7 +270,6 @@ def _package_aoti_files(
     ] = {}  # model_name -> (weight_name -> (filename, shape, stride, offset))
 
     for model_name, files in aoti_files.items():
-        num_so_files = 0
         weights_configs[model_name] = {}
 
         for file in files:
@@ -281,14 +280,8 @@ def _package_aoti_files(
                 all_weights[model_name] = file
                 continue
 
-            if file.endswith(".so"):
-                num_so_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
+            # Note: Previously we rejected multiple .so cases. But Triton CPU AOTI
+            # has multiple .so files per model (wrapper, launcher, kernel).
 
             filename = os.path.basename(file)
             if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
