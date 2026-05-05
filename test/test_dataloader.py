@@ -1105,10 +1105,10 @@ def _test_get_worker_info():
         worker_init_fn=_test_worker_info_init_fn,
     )
     it = iter(dataloader)
+    worker_pids = [w.pid for w in it._workers]
     data = []
     for d in it:
         data.append(d)  # noqa: PERF402
-    worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
