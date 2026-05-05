@@ -153,6 +153,34 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
 
+    def test_wait_futures_timeout(self):
+        """A compile future that doesn't finish within
+        compile_worker_wait_timeout causes _wait_futures to raise
+        RuntimeError naming the kernel.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Use an Event so the worker thread exits promptly once the assertion
+        # passes. A plain time.sleep here would keep the interpreter alive
+        # until it completes.
+        release = threading.Event()
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            hanging_future = pool.submit(release.wait)
+            scope = {"kernel_that_hangs": hanging_future}
+            with config.patch(compile_worker_wait_timeout=1):
+                async_compile = AsyncCompile()
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"compile-worker future for 'kernel_that_hangs' did not "
+                    r"complete within",
+                ):
+                    async_compile._wait_futures(scope)
+        finally:
+            release.set()
+            pool.shutdown(wait=True)
+
 
 if __name__ == "__main__":
     run_tests()

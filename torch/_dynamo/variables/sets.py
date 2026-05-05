@@ -43,6 +43,10 @@ if TYPE_CHECKING:
 # see steps outlined for ConstDictVariable
 
 
+def pyanyset_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), (set, frozenset))
+
+
 class SetVariable(VariableTracker):
     """Represents a Python set during symbolic execution."""
 
@@ -77,6 +81,8 @@ class SetVariable(VariableTracker):
                 # VariableTracker - realize to install guards, then wrap
                 # pyrefly: ignore [bad-argument-type]
                 hashable_items.append(HashableTracker(item.realize()))
+        # Internal representation as dict allows for simple integration with
+        # OrderedSet, notably polyfills. Using set moves complexity to OrderedSet
         self.items = dict.fromkeys(hashable_items, SetVariable._default_value())
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
@@ -119,18 +125,12 @@ class SetVariable(VariableTracker):
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
     def __contains__(self, vt: VariableTracker) -> bool:
-        assert isinstance(vt, VariableTracker)
+        if not isinstance(vt, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
-        return key in self.items and not isinstance(
-            self.items[key], variables.DeletedVariable
-        )
-
-    def len(self) -> int:
-        return sum(
-            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
-        )
+        return key in self.items
 
     def has_new_items(self) -> bool:
         return self.should_reconstruct_all or any(
@@ -149,6 +149,12 @@ class SetVariable(VariableTracker):
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
+        from torch._dynamo.variables.base import AttributeMutationNew, ValueMutationNew
+
+        if isinstance(
+            kwargs.get("mutation_type"), (ValueMutationNew, AttributeMutationNew)
+        ):
+            kwargs["source"] = None
         return super().clone(**kwargs)
 
     def is_python_hashable(self) -> bool:
@@ -394,10 +400,9 @@ class SetVariable(VariableTracker):
             return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
-        elif name in ("__and__", "__or__", "__xor__", "__sub__"):
+        elif name in ("__and__", "__xor__", "__sub__"):
             m = {
                 "__and__": "intersection",
-                "__or__": "union",
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
@@ -417,12 +422,12 @@ class SetVariable(VariableTracker):
                         f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
                     ],
                 )
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected set method name: {name}")
             return self.call_method(tx, m, args, kwargs)
-        elif name in ("__rand__", "__ror__", "__rxor__", "__rsub__"):
+        elif name in ("__rand__", "__rxor__", "__rsub__"):
             m = {
                 "__rand__": "__and__",
-                "__ror__": "__or__",
                 "__rxor__": "__xor__",
                 "__rsub__": "__sub__",
             }.get(name)
@@ -442,7 +447,8 @@ class SetVariable(VariableTracker):
                         f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
                     ],
                 )
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected reverse set method name: {name}")
             return args[0].call_method(tx, m, [self], kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(
@@ -467,7 +473,8 @@ class SetVariable(VariableTracker):
                 "__ixor__": "symmetric_difference_update",
                 "__isub__": "difference_update",
             }.get(name)
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected inplace set method name: {name}")
             self.call_method(tx, m, args, kwargs)
             return self
         elif name == "__eq__":
@@ -571,6 +578,32 @@ class SetVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return SetIterator(self.items)
 
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1318-L1338
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        result = self_.call_method(tx, "copy", [], {})
+        if self_ is other_:
+            return result
+        result.items.update(other_.items)  # type: ignore[missing-attribute]
+        return result
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1340-L1350
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        tx.output.side_effects.mutation(self)
+        self.items.update(other.items)  # type: ignore[missing-attribute]
+        return self
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -672,6 +705,13 @@ class OrderedSetVariable(SetVariable):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
         codegen.extend_output(create_call_function(1, False))
+
+    def nb_or_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_or_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "union", [other], {})
 
 
 class FrozensetVariable(SetVariable):

@@ -2,7 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import random
 import re
+import threading
 import unittest
 import warnings
 
@@ -26,7 +28,15 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    np,
+    run_tests,
+    SEED,
+    suppress_warnings,
+    TEST_NUMPY,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -250,8 +260,6 @@ dtensor_fails = {
 }
 
 dtensor_multi_threaded_fails = {
-    xfail("index_fill"),
-    xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     xfail("nn.functional.huber_loss"),
@@ -410,6 +418,7 @@ dtensor_fails_no_strategy = {
     xfail("masked_scatter"),
     xfail("nanquantile"),
     xfail("nn.functional.bilinear"),
+    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.multi_margin_loss"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
@@ -502,13 +511,46 @@ class TestDTensorOps(TestCase):
 
             yield args, kwargs
 
-    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
+    def run_opinfo_test(
+        self, dtype, op, requires_grad=True, sample_filter=None, sample_lock=None
+    ):
         self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
+        def valid_samples():
+            return self.iter_valid_samples(
+                op,
+                dtype,
+                requires_grad=requires_grad,
+                sample_filter=sample_filter,
+            )
+
+        def iter_samples():
+            if sample_lock is None:
+                yield from valid_samples()
+                return
+
+            # Threaded ranks share process-global RNG state. Materialize samples
+            # with a fixed RNG state so non-tensor args match across ranks.
+            with sample_lock:
+                python_rng_state = random.getstate()
+                numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
+                try:
+                    with freeze_rng_state():
+                        torch.manual_seed(SEED)
+                        random.seed(SEED)
+                        if TEST_NUMPY:
+                            np.random.seed(SEED)
+                        samples = list(valid_samples())
+                finally:
+                    random.setstate(python_rng_state)
+                    if numpy_rng_state is not None:
+                        np.random.set_state(numpy_rng_state)
+
+            dist.barrier()
+            yield from samples
+
         def test():
-            for args, kwargs in self.iter_valid_samples(
-                op, dtype, requires_grad=requires_grad, sample_filter=sample_filter
-            ):
+            for args, kwargs in iter_samples():
                 self.run_dtensor_crossref(op.op, args, kwargs)
 
         self.check_dtensor_func(test, op)
@@ -698,6 +740,7 @@ class TestDTensorOps(TestCase):
 
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
+    _op_db_sample_lock = threading.Lock()
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
@@ -708,7 +751,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         dtensor_fails | dtensor_multi_threaded_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, op)
+        self.run_opinfo_test(dtype, op, sample_lock=self.__class__._op_db_sample_lock)
 
     def test_mean(self):
         self.run_mean()
