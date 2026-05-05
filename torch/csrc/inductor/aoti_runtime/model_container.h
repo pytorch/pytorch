@@ -107,18 +107,19 @@ class AOTInductorModelContainer {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
-    auto* model = get_available_model();
 
     ConstantState& const_folded =
         use_secondary_ ? constant_folded_secondary_ : constant_folded_;
     if (const_folded == ConstantState::INITIALIZED) {
-      // At this point, constant is not ready yet. We need to call constant
-      // folding before we execute the model. We obtain a unique lock at this
-      // point to make sure constant is ready for all.
+      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Holding a model across the upgrade causes a deadlock when another
+      // thread holds a shared lock and waits for the model.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
+        auto* model = get_available_model();
+        // TODO: add try catch block to handle exception.
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
@@ -126,6 +127,11 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
+        {
+          std::lock_guard lk(models_mutex_);
+          pending_models_.push_back(model);
+        }
+        pending_models_available_.notify_one();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -133,6 +139,8 @@ class AOTInductorModelContainer {
       throw std::runtime_error(
           "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
+
+    auto* model = get_available_model();
 
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
