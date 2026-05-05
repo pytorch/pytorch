@@ -2001,6 +2001,14 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOps(TestCase):
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
+        # as_strided_partial_views feeds tensors that are slices of a larger
+        # storage and uses storage_offset values that reference data outside
+        # the visible slice. Cloning the input produces a fresh, smaller
+        # storage, so the redispatched call observes different memory than
+        # the direct call.
+        if op.name == "as_strided_partial_views":
+            self.skipTest("clone changes storage layout; not comparable for this op")
+
         def wrap(x):
             if isinstance(x, torch.Tensor):
                 return RedispatchTensor(x.detach().clone())
