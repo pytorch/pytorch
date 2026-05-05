@@ -64,6 +64,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_10-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
             desired_cuda: "cu126"
@@ -72,6 +73,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_10-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu130"
@@ -80,6 +82,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_10-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu132"
@@ -88,6 +91,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_10-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "rocm7.1"
@@ -96,6 +100,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_10-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
             desired_cuda: "rocm7.2"
@@ -104,6 +109,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_10-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
             desired_cuda: "xpu"
@@ -112,6 +118,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_10-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.11"
             desired_cuda: "cpu"
@@ -120,6 +127,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_11-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "cu126"
@@ -128,6 +136,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_11-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu130"
@@ -136,6 +145,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_11-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu132"
@@ -144,6 +154,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_11-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "rocm7.1"
@@ -152,6 +163,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_11-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "rocm7.2"
@@ -160,6 +172,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_11-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "xpu"
@@ -168,6 +181,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_11-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.12"
             desired_cuda: "cpu"
@@ -176,6 +190,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_12-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
             desired_cuda: "cu126"
@@ -184,6 +199,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_12-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu130"
@@ -192,6 +208,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_12-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu132"
@@ -200,6 +217,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_12-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "rocm7.1"
@@ -208,6 +226,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_12-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
             desired_cuda: "rocm7.2"
@@ -216,6 +235,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_12-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
             desired_cuda: "xpu"
@@ -224,6 +244,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_12-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.13"
             desired_cuda: "cpu"
@@ -232,6 +253,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_13-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
             desired_cuda: "cu126"
@@ -240,6 +262,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_13-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu130"
@@ -248,6 +271,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_13-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu132"
@@ -256,6 +280,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "rocm7.1"
@@ -264,6 +289,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_13-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
             desired_cuda: "rocm7.2"
@@ -272,6 +298,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_13-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
             desired_cuda: "xpu"
@@ -280,6 +307,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_13-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.13t"
             desired_cuda: "cpu"
@@ -288,6 +316,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_13t-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13t"
             desired_cuda: "cu126"
@@ -296,6 +325,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_13t-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "cu130"
@@ -304,6 +334,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_13t-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "cu132"
@@ -312,6 +343,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13t-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "rocm7.1"
@@ -320,6 +352,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_13t-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13t"
             desired_cuda: "rocm7.2"
@@ -328,6 +361,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_13t-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13t"
             desired_cuda: "xpu"
@@ -336,6 +370,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_13t-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.14"
             desired_cuda: "cpu"
@@ -344,6 +379,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_14-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
             desired_cuda: "cu126"
@@ -352,6 +388,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu130"
@@ -360,6 +397,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu132"
@@ -368,6 +406,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "rocm7.1"
@@ -376,6 +415,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_14-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
             desired_cuda: "rocm7.2"
@@ -384,6 +424,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
             desired_cuda: "xpu"
@@ -392,6 +433,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
@@ -400,6 +442,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cpu"
             build_name: "manywheel-py3_14t-cpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
             desired_cuda: "cu126"
@@ -408,6 +451,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14t-cuda12_6"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu130"
@@ -416,6 +460,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14t-cuda13_0"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu132"
@@ -424,6 +469,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14t-cuda13_2"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "rocm7.1"
@@ -432,6 +478,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.1"
             build_name: "manywheel-py3_14t-rocm7_1"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
             desired_cuda: "rocm7.2"
@@ -440,6 +487,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "rocm7.2"
             build_name: "manywheel-py3_14t-rocm7_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
             desired_cuda: "xpu"
@@ -448,6 +496,7 @@ jobs:
             docker_image: "manylinux2_28-builder"
             docker_image_tag_prefix: "xpu"
             build_name: "manywheel-py3_14t-xpu"
+            timeout_minutes: 240
             pytorch_extra_install_requirements: "intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0"
     with:
       PYTORCH_ROOT: /pytorch
@@ -463,7 +512,7 @@ jobs:
       use_container_directive: true
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
-      timeout-minutes: 240
+      timeout-minutes: ${{ matrix.timeout_minutes }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-binary-manywheel
     secrets:
