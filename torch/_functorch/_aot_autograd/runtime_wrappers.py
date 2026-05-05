@@ -2814,7 +2814,9 @@ def _codegen_backward_prologue(
         globals_dict["_chain_"] = itertools.chain.from_iterable
 
         lines.append("    _tangents = all_args[_ts:_te]")
-        lines.append(f"    if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:")
+        lines.append(
+            f"    if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:"
+        )
         lines.append(
             "        raise RuntimeError("
             "'The grad inputs should be same number as forward output tangents')"
@@ -2836,7 +2838,9 @@ def _codegen_backward_prologue(
         lines.append(f"    for j in range({num_flat_bw_args_with_grads}):")
         lines.append("        _i = _ts + j")
         lines.append("        all_args[_i] = _process_tangent_(all_args[_i],")
-        lines.append("            _tangent_metas_[j], j, _tangent_descs_[j], _compile_id_,")
+        lines.append(
+            "            _tangent_metas_[j], j, _tangent_descs_[j], _compile_id_,"
+        )
         lines.append("            _stack_traces_[j] if _stack_traces_ else None)[0]")
 
     if has_mutations_in_bw:
