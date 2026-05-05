@@ -859,6 +859,7 @@ def _record_memory_history_legacy(
     compile_context=False,
     global_record_annotations=False,
     skip_actions=None,
+    record_host=False,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -872,6 +873,7 @@ def _record_memory_history_legacy(
         global_record_annotations,
         # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
+        record_host,
     )
 
 
@@ -960,6 +962,10 @@ def _record_memory_history(
             `skip_actions=["free_requested"]`
 
             Defaults to None (record all actions).
+        record_host (bool, optional): If True, also record memory history for
+            the CPU pinned memory (host) allocator. Host allocator traces will
+            appear in the ``host_segments`` and ``host_traces`` keys of the
+            snapshot returned by :func:`_snapshot`. Defaults to False.
 
     """
     if isinstance(enabled, bool):
@@ -978,6 +984,7 @@ def _record_memory_history_impl(
     compile_context: bool = False,
     global_record_annotations: bool = False,
     skip_actions: list[str] | None = None,
+    record_host: bool = False,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -989,6 +996,7 @@ def _record_memory_history_impl(
         global_record_annotations,
         # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
+        record_host,
     )
 
 

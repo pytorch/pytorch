@@ -24,6 +24,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
@@ -959,11 +960,53 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   }
   allocator_settings[roundup_power2_divisions_s] = roundup_settings;
 
+  // Collect host allocator data
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  py::list host_segments_list;
+  py::list host_traces_list;
+  if (host_alloc && host_alloc->is_history_enabled()) {
+    c10::ApproximateClockToUnixTimeConverter host_clock_converter;
+    auto host_tsc_to_ns = host_clock_converter.makeConverter();
+    auto host_tsc_to_us = [=](c10::approx_time_t t_approx) {
+      return host_tsc_to_ns(t_approx) / 1000;
+    };
+
+    auto host_segs = host_alloc->get_segments();
+    for (const auto& segmentInfo : host_segs) {
+      host_segments_list.append(segmentInfoToDict(segmentInfo));
+    }
+
+    auto host_trace_entries = host_alloc->get_traces();
+    for (auto& te : host_trace_entries) {
+      te.time_.t_ = host_tsc_to_us(te.time_.approx_t_);
+    }
+    for (const auto& te : host_trace_entries) {
+      py::dict trace_entry;
+      if (te.context_) {
+        auto sc = getCapturedTracebackFromContext(te.context_);
+        to_gather_frames.emplace_back(sc);
+        to_gather_dest.emplace_back(trace_entry);
+      }
+      trace_entry[action_s] = action_to_str(te.action_);
+      trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
+          te.addr_;
+      trace_entry[size_s] = te.size_;
+      trace_entry[stream_s] = int64_t(te.stream_);
+      trace_entry[time_us_s] = te.time_.t_;
+      trace_entry[compile_context_s] = te.compile_context_;
+      trace_entry[user_metadata_s] = te.user_metadata_;
+      trace_entry[pool_id_s] = te.mempool_;
+      host_traces_list.append(trace_entry);
+    }
+  }
+
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
   result["external_annotations"] = external_annotations;
+  result["host_segments"] = host_segments_list;
+  result["host_traces"] = host_traces_list;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -1165,7 +1208,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
+          const std::vector<std::string>&,
+          bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1178,7 +1222,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           bool,
-          const std::vector<std::string>&)>(
+          const std::vector<std::string>&,
+          bool)>(
           torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
