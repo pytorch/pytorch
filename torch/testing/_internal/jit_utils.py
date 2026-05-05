@@ -737,7 +737,7 @@ def get_module_method(m, module, method):
     return m._c.getattr(module)._get_method(method)
 
 def attrs_with_prefix(module, prefix):
-    return [x for x, _ in module._modules._c.items()
+    return [x for x in module._modules._c
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
