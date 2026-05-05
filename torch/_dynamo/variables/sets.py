@@ -125,7 +125,8 @@ class SetVariable(VariableTracker):
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
     def __contains__(self, vt: VariableTracker) -> bool:
-        assert isinstance(vt, VariableTracker)
+        if not isinstance(vt, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
@@ -421,7 +422,8 @@ class SetVariable(VariableTracker):
                         f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
                     ],
                 )
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected set method name: {name}")
             return self.call_method(tx, m, args, kwargs)
         elif name in ("__rand__", "__rxor__", "__rsub__"):
             m = {
@@ -445,7 +447,8 @@ class SetVariable(VariableTracker):
                         f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
                     ],
                 )
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected reverse set method name: {name}")
             return args[0].call_method(tx, m, [self], kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(
@@ -470,7 +473,8 @@ class SetVariable(VariableTracker):
                 "__ixor__": "symmetric_difference_update",
                 "__isub__": "difference_update",
             }.get(name)
-            assert m is not None
+            if m is None:
+                raise AssertionError(f"Unexpected inplace set method name: {name}")
             self.call_method(tx, m, args, kwargs)
             return self
         elif name == "__eq__":
