@@ -1,11 +1,5 @@
-"""Dynamic shape specification types.
-
-Provides `ShapeVar` and `IntVar` to declare that a dimension size or scalar
-integer argument is dynamic. This API is unbacked-first: the underlying
-symbolic shapes will be unbacked (no guards, no 0/1 specialization).
-
-For more info on backed vs. unbacked see
-https://dev-discuss.pytorch.org/t/backed-to-unbacked-from-guardable-to-guardless-shapes-in-pytorch/3333.
+"""Spec types for controlling what is dynamic in compiled/exported code.
+Currently only supports unbacked dynamic shapes.
 """
 
 from __future__ import annotations

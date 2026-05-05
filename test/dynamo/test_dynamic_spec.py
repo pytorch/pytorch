@@ -40,6 +40,7 @@ def _apply_spec_to_tensor(tensor, shape_spec):
 def _compile_with_dynamic_shapes(fn, dynamic_spec, **compile_kwargs):
     """Compile ``fn`` and apply ``dynamic_spec`` specs on every call."""
 
+    compile_kwargs.setdefault("dynamic", False)
     compiled = torch.compile(fn, **compile_kwargs)
     sig = inspect.signature(fn)
 
@@ -247,7 +248,6 @@ class TestShapeVarCompile(TestCase):
             lambda x: x + 1,
             {"x": ts},
             backend=backend,
-            dynamic=False,
         )
 
         fn(torch.randn(4, 3))
