@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfHpu,
+    skipIfHpu_BUGGY,
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
@@ -93,7 +94,7 @@ def new_subgroups(group_size: int, pg_tag=None):
     return cur_subgroup, subgroups
 
 
-@skipIfHpu
+@skipIfHpu_BUGGY
 class TestExpand(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -183,7 +184,7 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual(2, group_size)
 
 
-@skipIfHpu
+@skipIfHpu_BUGGY
 class TestPgTag(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -260,7 +261,7 @@ class TestPgTag(MultiThreadedTestCase):
 
 
 @instantiate_parametrized_tests
-@skipIfHpu
+@skipIfHpu_BUGGY
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -406,7 +407,7 @@ class TestMetaCollectives(TestCase):
         self.assertEqual(x.size(), out.size())
 
 
-@skipIfHpu
+@skipIfHpu_BUGGY
 class TestGradCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -693,7 +694,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
 
 
 @instantiate_parametrized_tests
-@skipIfHpu
+@skipIfHpu_BUGGY
 class TestFunctionalAutograd(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()

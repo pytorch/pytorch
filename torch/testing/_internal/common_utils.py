@@ -2195,6 +2195,21 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
     decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
+def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
+    """Old skipIfRocm that silently drops classes from discovery. Migrate to skipIfRocm."""
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
 def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
 
@@ -2245,6 +2260,21 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
     return decorator(func) if func is not None else decorator
 
+def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
+    """Old skipIfXpu that silently drops classes from discovery. Migrate to skipIfXpu."""
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
 def skipIfMPS(fn):
     reason = "test doesn't currently work with MPS"
     # Class-level skip falls back to the global TEST_MPS check; the wrapper
@@ -2285,6 +2315,16 @@ def skipIfMPS(fn):
 
 def skipIfHpu(fn):
     return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+
+def skipIfHpu_BUGGY(fn):
+    """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def getRocmVersion() -> tuple[int, int]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
