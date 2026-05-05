@@ -1730,40 +1730,14 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
-
-def lazy_skip_if(condition_fn, reason):
-    """Skip a test (function or class) when ``condition_fn()`` is true.
-
-    For function targets the condition is evaluated each time the test
-    runs, matching the historical PyTorch convention of checking skip
-    flags inside a wrapper. For class targets the condition is evaluated
-    once at class-decoration time and the standard ``__unittest_skip__``
-    attributes are set, since unittest's TestLoader makes class-level
-    skip decisions before instantiation.
-
-    Prefer this helper over hand-rolled ``@wraps + raise SkipTest``
-    wrappers, which silently drop classes from discovery when applied at
-    class scope.
-    """
-
-    def decorator(fn):
-        if isinstance(fn, type):
-            if condition_fn():
-                fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-                fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
-            return fn
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if condition_fn():
-                raise unittest.SkipTest(reason)
-            return fn(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
 def skipIfCrossRef(fn):
-    return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_CROSSREF:
+            raise unittest.SkipTest("test doesn't currently with crossref")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -2192,8 +2166,19 @@ def skipIfNNModuleInlined(
     return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
-    return decorator(func) if func is not None else decorator
+    def dec_fn(fn):
+        reason = f"skipIfRocm: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_ROCM:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
@@ -2205,10 +2190,15 @@ def isRocmArchAnyOf(arch: tuple[str, ...]):
     return any(x in rocmArch for x in arch)
 
 def skipIfRocmArch(arch: tuple[str, ...]):
-    return lazy_skip_if(
-        lambda: TEST_WITH_ROCM and isRocmArchAnyOf(arch),
-        f"skipIfRocm: test skipped on {arch}",
-    )
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM and isRocmArchAnyOf(arch):
+                reason = f"skipIfRocm: test skipped on {arch}"
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
 
 def runOnRocm(fn):
     @wraps(fn)
@@ -2242,19 +2232,21 @@ def xfailIf(condition):
     return wrapper
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
-    return decorator(func) if func is not None else decorator
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def skipIfMPS(fn):
-    reason = "test doesn't currently work with MPS"
-    # Class-level skip falls back to the global TEST_MPS check; the wrapper
-    # below inspects args[0].device_type, which is only available per-method.
-    if isinstance(fn, type):
-        if TEST_MPS:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
-        return fn
-
     sig = inspect.signature(fn)
     has_device_arg = "device" in sig.parameters
 
@@ -2275,16 +2267,22 @@ def skipIfMPS(fn):
                     slf, "device", None
                 )
                 if isinstance(device_type, str) and device_type == "mps":
-                    raise unittest.SkipTest(reason)
+                    raise unittest.SkipTest("test doesn't currently work with MPS")
         elif TEST_MPS:
-            raise unittest.SkipTest(reason)
+            raise unittest.SkipTest("test doesn't currently work with MPS")
         return fn(*args, **kwargs)
 
     return wrapper
 
 
 def skipIfHpu(fn):
-    return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def getRocmVersion() -> tuple[int, int]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
@@ -2293,32 +2291,56 @@ def getRocmVersion() -> tuple[int, int]:
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
-    def _should_skip():
-        if not TEST_WITH_ROCM:
-            return False
-        rocm_version_tuple = getRocmVersion()
-        return (
-            rocm_version_tuple is None
-            or version is None
-            or rocm_version_tuple < tuple(version)
-        )
-    return lazy_skip_if(_should_skip, f"ROCm version less than {version} required")
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                rocm_version_tuple = getRocmVersion()
+                if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                    reason = f"ROCm {rocm_version_tuple} is available but {version} required"
+                    raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
 
 def skipIfNotMiopenSuggestNHWC(fn):
-    return lazy_skip_if(
-        lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
-        "test doesn't currently work without MIOpen NHWC activation",
-    )(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_MIOPEN_SUGGEST_NHWC:
+            raise unittest.SkipTest("test doesn't currently work without MIOpen NHWC activation")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
-    return decorator(func) if func is not None else decorator
+    def dec_fn(fn):
+        reason = f"skipIfWindows: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(
-        lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
-    )
-    return decorator(func) if func is not None else decorator
+    def dec_fn(fn):
+        reason = f"skipIfWindowsXPU: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS and torch.xpu.is_available():
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -2522,10 +2544,19 @@ def skipIfCompiledWithoutNumpy(fn):
     numpy_support = TEST_NUMPY
     if numpy_support:
         try:
+            # The numpy module is present, verify that PyTorch is compiled with
+            # numpy support
             torch.from_numpy(np.array([2, 2]))
         except RuntimeError:
             numpy_support = False
-    return unittest.skipIf(not numpy_support, "PyTorch was compiled without numpy support")(fn)
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not numpy_support:
+            raise unittest.SkipTest("PyTorch was compiled without numpy support")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def _test_function(fn, device):
     def run_test_function(self):
@@ -2533,13 +2564,22 @@ def _test_function(fn, device):
     return run_test_function
 
 def skipIfNoXNNPACK(fn):
-    return lazy_skip_if(
-        lambda: not torch.backends.xnnpack.enabled,  # type: ignore[attr-defined]
-        "XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
-    )(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:  # type: ignore[attr-defined]
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
-    return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch._C.has_lapack:
+            raise unittest.SkipTest('PyTorch compiled without Lapack')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
@@ -2555,15 +2595,31 @@ def skipIfNotRegistered(op_name, message):
     return unittest.skip("Pytorch is compiled without Caffe2")
 
 def skipIfNoSciPy(fn):
-    return lazy_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skip_if_pytest(fn):
-    return lazy_skip_if(
-        lambda: "PYTEST_CURRENT_TEST" in os.environ, "does not work under pytest"
-    )(fn)
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
 
 def skipIfNoXPU(fn):
-    return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_XPU:
+            raise unittest.SkipTest("test required PyTorched compiled with XPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def slowTest(fn):
     @wraps(fn)
@@ -6125,9 +6181,16 @@ def recover_orig_fp32_precision(fn):
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
-    return lazy_skip_if(
-        lambda: not predicate(vi.major, vi.minor, vi.micro), "Python version mismatch"
-    )
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if predicate(vi.major, vi.minor, vi.micro):
+                return fn(self, *args, **kwargs)
+            else:
+                raise unittest.SkipTest("Python version mismatch")
+        return wrap_fn
+    return dec_fn
 
 # Decorator to patch multiple test class members for the duration of the subtest
 def patch_test_members(updates: dict[str, Any]):
