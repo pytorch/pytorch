@@ -3366,6 +3366,7 @@ BUILTIN_SKIPLIST = (
     copy,
     importlib,
     random,
+    re,
     linecache,
 )
 
