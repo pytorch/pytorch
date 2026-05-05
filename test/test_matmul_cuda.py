@@ -220,7 +220,12 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
-            self.cublas_addmm(size, dtype, True)
+            # 2D bias
+            self.cublas_addmm(size, dtype, True, bias_shape_modifier=lambda shape: shape)
+            # 1D bias which is row-broadcast to 2D
+            self.cublas_addmm(size, dtype, True, bias_shape_modifier=lambda shape: (1, shape[-1]))
+            # 1D bias which row-broadcasts
+            self.cublas_addmm(size, dtype, True, bias_shape_modifier=lambda shape: (shape[-1],))
 
 
     @onlyCUDA
