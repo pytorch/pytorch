@@ -2907,6 +2907,31 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
+        def test_param_ptr_churn_does_not_count_toward_rerecord_limit(self):
+            # Distinct nn parameter pointers across calls trigger
+            # StaticInputIdxMismatch each time. Those mismatches re-record but
+            # must not count against cudagraph_unexpected_rerecord_limit, since
+            # parameter identity churn is expected under inline_inbuilt_nn_modules.
+            def fn(x, y):
+                return x * y
+
+            with torch.device("cuda"):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                # Burn through more distinct params than the limit (1) allows
+                # if they were counted.
+                for _ in range(5):
+                    p = torch.nn.Parameter(torch.rand([2, 2]))
+                    self._assert_equal_multi_loop(p, fn, fn_compiled)
+
+            # No fallback to eager triggered by re-record limit.
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            # Counter never bumped for any (node, function).
+            for fn_to_count in self.get_manager().num_rerecord.values():
+                for count in fn_to_count.values():
+                    self.assertEqual(count, 0)
+
+        @torch._dynamo.config.patch("error_on_recompile", True)
         def test_no_rerecord_with_mark_static_address(self):
             class Mod(torch.nn.Module):
                 def __init__(self):
