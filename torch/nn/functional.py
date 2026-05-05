@@ -4,7 +4,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from typing import Any as _Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -45,9 +45,6 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
-
-
-_T = TypeVar("_T")
 
 
 conv1d = _add_docstr(
@@ -6943,7 +6940,7 @@ def grouped_mm(
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
 
 
-def _expand_single_value(v: _T | list[_T] | None) -> list[_T]:
+def _expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
     if v is None:
         return []
     elif not isinstance(v, list):
@@ -6952,7 +6949,7 @@ def _expand_single_value(v: _T | list[_T] | None) -> list[_T]:
         return v
 
 
-def _list_or_empty(l: list[_T] | None) -> list[_T]:
+def _list_or_empty(l: list[_Any] | None) -> list[_Any]:
     """Convert None to a list for native_functions list arguments.
 
     native_functions cannot pass std::optional<ArrayRef<T>>, but can pass an
