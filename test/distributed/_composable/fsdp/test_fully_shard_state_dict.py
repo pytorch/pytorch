@@ -3,7 +3,6 @@
 import copy
 import functools
 from contextlib import nullcontext
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -47,7 +46,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if 16 % self.world_size == 0:
             # TODO: remove this evenness check when FSDP2 supports uneven sharding
-            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361
             self.run_subtests(
                 {
                     "mlp_dim": [16],
@@ -82,7 +81,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             MLP(mlp_dim),
         )
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:

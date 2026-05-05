@@ -8,6 +8,11 @@ import click
 import spin
 
 
+CWD = Path(__file__).absolute().parent.parent
+sys.path.insert(0, str(CWD))  # this only affects the current process
+from tools.clean import clean as _clean
+
+
 def file_digest(file, algorithm: str):
     try:
         return hashlib.file_digest(file, algorithm)
@@ -133,7 +138,6 @@ def regenerate_clangtidy_files():
 #: These linters are expected to need less than 3s cpu time total
 VERY_FAST_LINTERS = {
     "ATEN_CPU_GPU_AGNOSTIC",
-    "BAZEL_LINTER",
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
@@ -160,6 +164,7 @@ VERY_FAST_LINTERS = {
     "PYPROJECT",
     "RAWCUDA",
     "RAWCUDADEVICE",
+    "RAWTHROW",
     "ROOT_LOGGING",
     "TABS",
     "TESTOWNERS",
@@ -193,11 +198,13 @@ SLOW_LINTERS = {
     "CODESPELL",
     "FLAKE8",
     "GB_REGISTRY",
+    "GENERATED_SHIMS_VERSION",
     "PYFMT",
     "STABLE_SHIM_USAGE",
     "STABLE_SHIM_VERSION",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
+    "SCOPED_LIBRARY",
 }
 
 
@@ -236,16 +243,14 @@ def _check_linters():
     unknown_linters = linters - ALL_LINTERS
     missing_linters = ALL_LINTERS - linters
     if unknown_linters:
-        click.secho(
+        raise click.ClickException(
             f"Unknown linters found; please add them to the correct category "
-            f"in .spin/cmds.py: {', '.join(unknown_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(unknown_linters))}"
         )
     if missing_linters:
-        click.secho(
+        raise click.ClickException(
             f"Missing linters found; please update the corresponding category "
-            f"in .spin/cmds.py: {', '.join(missing_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(missing_linters))}"
         )
     return unknown_linters, missing_linters
 
@@ -439,6 +444,12 @@ def quicklint(ctx, *, lintrunner_args, apply_patches, **kwargs):
 def quickfix(ctx, *, lintrunner_args, **kwargs):
     """Autofix changed files."""
     ctx.invoke(quicklint, apply_patches=True)
+
+
+@click.command()
+def clean():
+    """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
+    _clean()
 
 
 @click.command()

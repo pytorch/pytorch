@@ -91,11 +91,6 @@ export PYTORCH_BUILD_NUMBER=$build_number
 export CMAKE_LIBRARY_PATH="/opt/intel/lib:/lib:$CMAKE_LIBRARY_PATH"
 export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
 
-if [[ -e /opt/openssl ]]; then
-    export OPENSSL_ROOT_DIR=/opt/openssl
-    export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
-fi
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
@@ -118,6 +113,9 @@ retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
+  cp314*)
+    retry pip install -q --pre numpy==2.3.4
+    ;;
   cp31*)
     retry pip install -q --pre numpy==2.1.0
     ;;

@@ -12,6 +12,7 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -20,15 +21,14 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
 )
 
 
 # Decorator
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nvshmem_available(),
-        "test_nvshmem requires NVSHMEM, skipping tests",
+        not PLATFORM_SUPPORTS_SYMM_MEM or not symm_mem.is_nvshmem_available(),
+        "test_nvshmem requires NVSHMEM with SymmMem platform support, skipping tests",
     )
 
 
@@ -73,7 +73,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_alloc(self) -> None:
         self._init_device()
 
@@ -91,7 +90,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(out, group=group_name)
 
-    @skipIfRocm
     def test_alloc_without_device_context(self) -> None:
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
@@ -103,7 +101,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(out.device, self.device)
         symm_mem.rendezvous(out, group=group_name)
 
-    @skipIfRocm
     def test_mempool_tensor_factory(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -128,7 +125,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
-    @skipIfRocm
     def test_mempool_tensor_w_collective(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -151,7 +147,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             tensor, torch.ones(numel, dtype=dtype, device=self.device) * self.world_size
         )
 
-    @skipIfRocm
     def test_mempool_compute_ops(self) -> None:
         """
         Apply MemPool context to a compute op that creates input to collective.
@@ -176,7 +171,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 
-    @skipIfRocm
     def test_handle_offset(self) -> None:
         """
         Test if handle offset is correctly set.
@@ -254,7 +248,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
-    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -276,7 +269,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
 
-    @skipIfRocm
     def test_nvshmem_get(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -313,7 +305,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
         self._init_device()
 
@@ -337,7 +328,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out, expected)
 
-    @skipIfRocm
     def test_all_to_all_vdev(self) -> None:
         self._init_device()
 
@@ -398,7 +388,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out[:out_numel], expected)
 
-    @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
@@ -507,7 +496,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
 
-    @skipIfRocm
     def test_all_to_all_vdev_2d_offset(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -718,7 +706,6 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -743,9 +730,6 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
-    # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
-    # failure
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """
@@ -777,7 +761,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
@@ -814,7 +797,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
 
         torch.testing.assert_close(full_out, expected)
 
-    @skipIfRocm
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize(
