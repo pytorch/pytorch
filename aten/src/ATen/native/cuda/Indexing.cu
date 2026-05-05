@@ -39,7 +39,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IntegerDivider.cuh>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
@@ -999,10 +998,6 @@ static size_t getSliceSize(const Tensor & dst,
   return dstSliceSize;
 }
 
-inline bool indexFuncVectorizedDisabled() {
-  return c10::utils::check_env("TORCH_DISABLE_INDEX_ADD_VECTORIZED") == true;
-}
-
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
@@ -1278,8 +1273,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
     if ((IDX_IS_MAJOR) &&                                                    \
         innerSizeVal >= static_cast<TYPE>(at::cuda::warp_size()) &&          \
-        largeIndexBlock.x % at::cuda::warp_size() == 0 &&                    \
-        !indexFuncVectorizedDisabled()) {                                    \
+        largeIndexBlock.x % at::cuda::warp_size() == 0) {                    \
       indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                   \
                           SELF_DIM, SOURCE_DIM, IDX_DIM,                     \
                           IDX_IS_MAJOR, 4>                                   \
@@ -1473,8 +1467,7 @@ void index_reduce_func_cuda_impl(
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
     if ((IDX_IS_MAJOR) &&                                                                 \
         innerSizeVal >= static_cast<TYPE>(at::cuda::warp_size()) &&                       \
-        largeIndexBlock.x % at::cuda::warp_size() == 0 &&                                  \
-        !indexFuncVectorizedDisabled()) {                                                 \
+        largeIndexBlock.x % at::cuda::warp_size() == 0) {                                  \
       indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                \
                           SELF_DIM, SOURCE_DIM, IDX_DIM,                                  \
                           IDX_IS_MAJOR, 4>                                                \
