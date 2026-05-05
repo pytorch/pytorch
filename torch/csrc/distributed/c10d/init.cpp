@@ -32,6 +32,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #endif
@@ -209,7 +210,7 @@ class PythonStore : public ::c10d::Store {
   using ::c10d::Store::Store;
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that we can call the Python-side
   // function with a std::string instead of a std::vector<uint8_t>.
   void set(const std::string& key, const std::vector<uint8_t>& value) override {
@@ -222,7 +223,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that the Python-side function can
   // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> get(const std::string& key) override {
@@ -239,7 +240,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that the Python-side function can
   // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> compareSet(
@@ -260,37 +261,37 @@ class PythonStore : public ::c10d::Store {
   }
 
   int64_t add(const std::string& key, int64_t value) override {
-    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
+    PYBIND11_OVERRIDE_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
   int64_t getNumKeys() override {
-    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
+    PYBIND11_OVERRIDE_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
   bool deleteKey(const std::string& key) override {
-    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+    PYBIND11_OVERRIDE_PURE(bool, ::c10d::Store, deleteKey, key);
   }
 
   bool check(const std::vector<std::string>& keys) override {
-    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
+    PYBIND11_OVERRIDE_PURE(bool, ::c10d::Store, check, keys);
   }
 
   void wait(const std::vector<std::string>& keys) override {
-    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys);
+    PYBIND11_OVERRIDE_PURE(void, ::c10d::Store, wait, keys);
   }
 
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
-    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
+    PYBIND11_OVERRIDE_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
   c10::intrusive_ptr<Store> clone() override {
-    PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
+    PYBIND11_OVERRIDE_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that we can call the Python-side
   // function with a std::string instead of a std::vector<uint8_t>.
   void append(const std::string& key, const std::vector<uint8_t>& value)
@@ -339,7 +340,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   bool hasExtendedApi() const override {
-    PYBIND11_OVERLOAD_NAME(
+    PYBIND11_OVERRIDE_NAME(
         bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
   }
 };
@@ -815,11 +816,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
-  // TODO(crcrpar): Hardening `ReduceOp`.
-  //    While keeping most op types as enum value,
-  //    making `PREMUL_SUM` callable, i.e., allowing for
-  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
-  // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
       module,
       "ReduceOp",
@@ -836,9 +832,9 @@ using the ``NCCL`` backend.
 and only for NCCL versions 2.10 or later.
 
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
-``PREMUL_SUM`` is only available with the ``NCCL`` backend,
-and only available for NCCL versions 2.11 or later. Users are supposed to
-use ``torch.distributed._make_nccl_premul_sum``.
+``PREMUL_SUM`` is available with the ``NCCL`` backend (NCCL versions 2.11 or later)
+and the ``XCCL`` backend. It can be used by calling ``ReduceOp.PREMUL_SUM(factor)``
+where factor is a float or a single-element Tensor.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -890,14 +886,14 @@ This class does not support ``__members__`` property.)");
             return ::c10d::ReduceOp(self);
           })
       .def(py::pickle(
-          [](const ::c10d::ReduceOp& r) {
+          [](const ::c10d::ReduceOp& r) -> py::tuple {
             // __getstate__
             if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
               return py::make_tuple(r.op_, py::none());
             }
             TORCH_CHECK(r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
             const auto* preMulSupplement =
-                reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
+                reinterpret_cast<::c10d::PreMulSumSupplement*>(
                     r.supplement_.get());
             if (!preMulSupplement->tensor_factor.defined()) {
               return py::make_tuple(r.op_, preMulSupplement->double_factor);
@@ -915,9 +911,9 @@ This class does not support ``__members__`` property.)");
             }
             const auto preMulSupplement_factor = t[1];
             if (py::isinstance<py::float_>(preMulSupplement_factor)) {
-              return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
+              return ::c10d::makePreMulSum(t[1].cast<double>());
             } else {
-              return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
+              return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
             }
           }));
 
@@ -931,7 +927,39 @@ This class does not support ``__members__`` property.)");
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
       .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
-      .export_values();
+      .export_values()
+      .def(
+          "__call__",
+          [](const ::c10d::ReduceOp::RedOpType& self,
+             const py::object& factor) -> ::c10d::ReduceOp {
+            TORCH_CHECK(
+                self == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
+                "Only PREMUL_SUM supports calling with a factor, got ",
+                py::str(py::cast(self)).cast<std::string>());
+            if (py::isinstance<py::float_>(factor) ||
+                py::isinstance<py::int_>(factor)) {
+              return ::c10d::makePreMulSum(factor.cast<double>());
+            } else {
+              return ::c10d::makePreMulSum(factor.cast<at::Tensor>());
+            }
+          },
+          py::arg("factor"),
+          R"(Create a PREMUL_SUM ReduceOp with the given factor.
+
+Only ``PREMUL_SUM`` supports this callable interface. Other reduction
+operations will raise an error if called.
+
+Args:
+    factor: A scalar (float, int) or a single-element Tensor to multiply
+            inputs by before reduction.
+
+Returns:
+    A ReduceOp configured for PREMUL_SUM with the specified factor.
+
+Example:
+    >>> op = ReduceOp.PREMUL_SUM(2.0)
+    >>> dist.all_reduce(tensor, op)
+)");
 
   // note(crcrpar): This could be removed because users will not pass
   // `RedOpType` to reduce collective ops Ref: [Implicit
@@ -943,13 +971,13 @@ This class does not support ``__members__`` property.)");
   module
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makeNCCLPreMulSum<double>,
+          &::c10d::makePreMulSum<double>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makeNCCLPreMulSum<at::Tensor>,
+          &::c10d::makePreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
@@ -1143,6 +1171,10 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::has_multicast_support)
       .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
       .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
+      .def_static(
+          "is_symm_mem_tensor",
+          &::c10d::symmetric_memory::is_symm_mem_tensor,
+          py::arg("tensor"))
       .def_property_static(
           "signal_pad_size",
           [](py::object /* self */) {
@@ -1559,7 +1591,7 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Append the key-value pair into the store based on the supplied ``key`` and
-``value``. If ``key`` does not exists in the store, it will be created.
+``value``. If ``key`` does not exist in the store, it will be created.
 
 Arguments:
     key (str): The key to be appended to the store.
@@ -2160,6 +2192,7 @@ communication mechanism.
               py::arg("opts") = std::nullopt,
               py::arg("group_name") = std::nullopt,
               py::arg("group_desc") = std::nullopt,
+              py::arg("device_types") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
@@ -2748,6 +2781,10 @@ Arguments:
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
               &::c10d::ProcessGroup::setBoundDeviceId)
+          .def_property(
+              "use_pg_for_symm_mem_rendezvous",
+              &::c10d::ProcessGroup::getUsePgForSymmMemRendezvous,
+              &::c10d::ProcessGroup::setUsePgForSymmMemRendezvous)
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -2800,6 +2837,10 @@ Arguments:
               &::c10d::Backend::shutdown,
               py::call_guard<py::gil_scoped_release>(),
               "shutdown the backend")
+          .def(
+              "setUsePgForSymmMemRendezvous",
+              &::c10d::Backend::setUsePgForSymmMemRendezvous,
+              py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -3584,6 +3625,9 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite(
+          "use_pg_for_symm_mem_rendezvous",
+          &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
       .def(
           "__copy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self) {
@@ -3981,6 +4025,25 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
+
+#ifdef USE_C10D_NCCL
+  // NCCLXStub: minimal C++ Backend for testing custom backend plugins
+  // (simulates ncclx-like backends that register via extended_api=True).
+  intrusive_ptr_class_<::c10d::NCCLXStub>(module, "NCCLXStub", backend)
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
+                          options) {
+            return c10::make_intrusive<::c10d::NCCLXStub>(
+                store, rank, size, std::move(options));
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
+#endif
 
   auto pythonCallbackWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::PythonCallbackWork>(

@@ -4,6 +4,7 @@ import unittest
 
 import torch
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing import make_tensor
@@ -826,38 +827,186 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_slice_on_unbacked_plus_constant(self, device):
-        """
-        Test slicing on a tensor whose size is (unbacked + constant).
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_slice_unbacked_bindings_with_later_constraint(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166460
+        # When slicing with an unbacked symint end index (e.g. x[:total] where
+        # total = sum of data-dependent values), dynamo may allocate a fresh
+        # unbacked symbol for the output size because it can't prove bounds at
+        # trace time. Later operations (e.g. new_zeros with padding) may
+        # establish constraints that make the bounds provable at inductor time.
+        # Inductor must still define the unbacked symbol even when taking the
+        # efficient SliceView path.
+        def fn(x, sizes):
+            sizes_list = sizes.tolist()
+            total = sum(sizes_list)
+            num_padding = x.shape[0] - total
+            sliced = x[:total]
+            splits = torch.split(sliced, sizes_list, dim=0)
+            out = torch.cat([s * 2 for s in splits], dim=0)
+            out = torch.vstack((out, out.new_zeros((num_padding, out.shape[-1]))))
+            return out
 
-        When we have:
-        - repeat_interleave creates unbacked symbol u0
-        - cat creates size u0 + 1
-        - slice [1:] produces size u0 (existing symbol, not fresh)
+        example_inputs = (
+            torch.randn(64, 16, device=device, dtype=torch.bfloat16),
+            torch.tensor([8, 8], device=device, dtype=torch.int64),
+        )
 
-        The lowering should handle this case where the output uses an existing
-        unbacked symbol rather than creating a new one.
-        """
-
-        def fn(x: torch.Tensor, repeats: list[int]):
-            repeats_t = torch.tensor(repeats, device=x.device, dtype=torch.long)
-
-            # repeat_interleave with tensor repeats -> unbacked size u0
-            vals = torch.repeat_interleave(x, repeats_t)
-
-            # cat with fixed-size tensor -> size becomes u0 + 1
-            vals = torch.cat([torch.zeros(1, device=x.device, dtype=x.dtype), vals])
-
-            # slice on u0 + 1 sized tensor -> should produce size u0
-            return vals[1:]
-
-        x = torch.tensor([10, 20, 30], device=device, dtype=torch.int32)
-        repeats = [2, 3, 1]
-
-        actual = torch.compile(fn, fullgraph=True)(x, repeats)
-        expected = fn(x, repeats)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_eager(self, device):
+        """Test that override_optimization_hint updates var_to_hint_override eagerly."""
+        t = torch.tensor([5], device=device)
+        torch._dynamo.decorators.mark_unbacked(t, 0)
+
+        def fn(x):
+            u = x.item()
+            torch._dynamo.override_optimization_hint(u, 42)
+            return u + 1
+
+        result = fn(t)
+        self.assertEqual(result, 6)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_compiled(self, device):
+        """Test override_optimization_hint inside a compiled function with fullgraph=True."""
+
+        def fn(x):
+            u = x.item()
+            torch._dynamo.override_optimization_hint(u, 42)
+            return u + 1
+
+        t = torch.tensor([5], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, 6)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_compiled_tolist(self, device):
+        """Test that override_optimization_hint is a no-op on concrete ints from tolist()."""
+
+        def fn(x):
+            vals = x.tolist()
+            for v in vals:
+                torch._dynamo.override_optimization_hint(v, 99)
+            return x.sum()
+
+        t = torch.tensor([3, 4, 5], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, t.sum())
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_multiple_items(self, device):
+        """Test override_optimization_hint on multiple unbacked symbols from separate .item() calls."""
+
+        def fn(x, y):
+            u = x.item()
+            v = y.item()
+            torch._dynamo.override_optimization_hint(u, 128)
+            torch._dynamo.override_optimization_hint(v, 256)
+            return u + v
+
+        tx = torch.tensor([10], device=device)
+        ty = torch.tensor([20], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(tx, ty)
+        self.assertEqual(result, 30)
+
+    def test_override_optimization_hint_concrete_int_noop(self, device):
+        """Test that override_optimization_hint on a plain int is a no-op."""
+        torch._dynamo.override_optimization_hint(42, 100)
+
+    def test_override_optimization_hint_rejects_wrong_type(self, device):
+        """Test that override_optimization_hint raises TypeError on non-int/non-SymInt."""
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint(3.14, 100)
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint("hello", 100)
+
+    def test_override_optimization_hint_rejects_non_int_val(self, device):
+        """Test that override_optimization_hint rejects non-int val."""
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, 3.14)
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, "hello")
+
+    def test_override_optimization_hint_rejects_derived_expression(self, device):
+        """Test that override_optimization_hint rejects derived expressions like u0 + 1."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        v = u + 1  # derived expression: u0 + 1
+        with self.assertRaisesRegex(ValueError, "single unbacked symbol"):
+            torch._dynamo.override_optimization_hint(v, 42)
+
+    def test_override_optimization_hint_rejects_backed_symbol(self, device):
+        """Test that override_optimization_hint rejects backed (non-unbacked) symbols."""
+
+        def fn(t):
+            s = t.size(0)  # backed symbol inside compile
+            torch._dynamo.override_optimization_hint(s, 42)
+            return t.sum()
+
+        t = torch.randn(5, device=device)
+        torch._dynamo.mark_dynamic(t, 0)
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "expects an unbacked symbol",
+        ):
+            torch.compile(fn, fullgraph=True)(t)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_in_fx_pass(self, device):
+        """Test using override_optimization_hint in a custom FX pass (backend).
+
+        This shows the intended use case: a custom backend or FX pass walks
+        the graph, finds unbacked symbols from .item() calls, and sets
+        optimization hints on them before handing the graph to inductor.
+        """
+
+        def fx_pass_backend(gm, example_inputs):
+            # Walk the graph and set hints on unbacked SymInts
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.item.default
+                ):
+                    # The node's example value is a SymInt from .item()
+                    sym_val = node.meta.get("example_value", None)
+                    if sym_val is not None and isinstance(sym_val, torch.SymInt):
+                        torch._dynamo.override_optimization_hint(sym_val, 512)
+
+            # Verify the hint was set on shape_env
+            shape_env = None
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.item.default
+                ):
+                    sym_val = node.meta.get("example_value", None)
+                    if sym_val is not None and isinstance(sym_val, torch.SymInt):
+                        shape_env = sym_val.node.shape_env
+                        expr = sym_val.node.expr
+                        if expr not in shape_env.var_to_hint_override:
+                            raise AssertionError("hint not set on shape_env")
+                        if shape_env.var_to_hint_override[expr] != 512:
+                            raise AssertionError("hint value mismatch")
+
+            return gm
+
+        def fn(x):
+            u = x.item()
+            return u + 1
+
+        t = torch.tensor([7], device=device)
+        compiled_fn = torch.compile(fn, backend=fx_pass_backend, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, 8)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)

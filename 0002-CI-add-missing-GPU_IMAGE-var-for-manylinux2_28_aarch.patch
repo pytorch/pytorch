@@ -1,0 +1,41 @@
+From 4a8f65cf3f4c486ce91196d221410a7dc835dc56 Mon Sep 17 00:00:00 2001
+From: Keanu Czirjak <keanu.czirjak@arm.com>
+Date: Tue, 31 Mar 2026 12:02:24 +0100
+Subject: [LOW RISK] [CI] add missing GPU_IMAGE var for manylinux2_28_aarch64-builder CUDA case
+
+This commit adds the GPU_IMAGE var to fix the manylinux2_28_aarch64-builder:cuda* image build errors in CI.
+This is because the build.sh script uses 'set -u' (nounset), hence GPU_IMAGE must be set.
+
+Self-assessment: LOW RISK
+      1. Do you have any doubt about letting this patch go outside Arm, or do you think others in the team might? No
+      2. Is the patch based on a previously IP approved patch with trivial changes? No
+      3. Are all changes in this patch either written by yourself or copy-pasted from the same project? Yes
+      4. Is the contribution in Arm’s commercial Interest? Yes
+      5. Is this the first time that Arm has made a significant modification to any of the files changed in this patch or does it add a new file? No
+      6. Does this patch disclose anything that is not the public knowledge? No
+      7. Does the patch mention any company name other than Arm? No
+      8. Does the patch contain any inappropriate use of trademarks? No
+      9. Does the patch contribute beyond the scope that has been approved? No
+      10. Does the patch contain a patentable idea for which a patent has not yet been filed? No
+      11. Does the patch disclose any aspects of micro-architecture of any Arm HW IP? No
+      12. Does the patch use HW architecture features not previously used in the project? No
+      13. Does the patch contain generative AI output? No
+---
+ .ci/docker/manywheel/build.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.ci/docker/manywheel/build.sh b/.ci/docker/manywheel/build.sh
+index ea05ae30b91..57029edbc26 100755
+--- a/.ci/docker/manywheel/build.sh
++++ b/.ci/docker/manywheel/build.sh
+@@ -76,6 +76,7 @@ case ${image} in
+         ;;
+     manylinux2_28_aarch64-builder:cuda*)
+         TARGET=cuda_final
++        GPU_IMAGE=arm64v8/almalinux:8
+         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
+         DOCKERFILE_SUFFIX="_cuda_aarch64"
+         ;;
+--
+2.46.0
+

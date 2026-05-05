@@ -1,0 +1,74 @@
+From 8d815a900ac6ba1480006be9002f1da1a1640afa Mon Sep 17 00:00:00 2001
+From: Keanu Czirjak <keanu.czirjak@arm.com>
+Date: Tue, 5 May 2026 12:00:44 +0100
+Subject: [TRIVIAL] [CI] resolve merge conflict with upstream in build-manywheel-images.yml
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+resolve merge conflict between the local branch and upstream/main in
+.github/workflows/build-manywheel-images.yml
+
+Upstream changes that caused the conflict:
+- Dropped cuda12.8 and cuda12.9 aarch64 build matrix entries (PRs #179158, #181273)
+- Changed the aarch64 CUDA runner from linux.arm64.2xlarge.ephemeral to
+  linux.arm64.m7g.4xlarge.ephemeral (PR #179158)
+
+Resolution:
+- Drop the local manylinux2_28_aarch64-builder cuda12.8 and cuda12.9 entries
+  to match upstream's surviving CUDA aarch64 set (cuda13.2, cuda13.0, cuda12.6)
+- Update the local manylinux2_28_aarch64-builder cuda* entries to use the new
+  larger runner (linux.arm64.m7g.4xlarge.ephemeral) introduced upstream
+
+Self-assessment: TRIVIAL
+      1. Do you have any doubt about letting this patch go outside Arm, or do you think others in the team might? No
+      2. Is the patch based on a previously IP approved patch with trivial changes? Yes
+      3. Are all changes in this patch either written by yourself or copy-pasted from the same project? Yes
+      4. Is the contribution in Arm’s commercial Interest? Yes
+      5. Is this the first time that Arm has made a significant modification to any of the files changed in this patch or does it add a new file? No
+      6. Does this patch disclose anything that is not the public knowledge? No
+      7. Does the patch mention any company name other than Arm? No
+      8. Does the patch contain any inappropriate use of trademarks? No
+      9. Does the patch contribute beyond the scope that has been approved? No
+      10. Does the patch contain a patentable idea for which a patent has not yet been filed? No
+      11. Does the patch disclose any aspects of micro-architecture of any Arm HW IP? No
+      12. Does the patch use HW architecture features not previously used in the project? No
+      13. Does the patch contain generative AI output? No
+---
+ .github/workflows/build-manywheel-images.yml | 19 ++++++-------------
+ 1 file changed, 6 insertions(+), 13 deletions(-)
+
+diff --git a/.github/workflows/build-manywheel-images.yml b/.github/workflows/build-manywheel-images.yml
+index 0b7efd15908..27dcddd6231 100644
+--- a/.github/workflows/build-manywheel-images.yml
++++ b/.github/workflows/build-manywheel-images.yml
+@@ -48,20 +48,13 @@ jobs:
+         include: [
+           { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "linux.9xlarge.ephemeral" },
+-          { name: "manylinux2_28-builder",          tag: "cuda12.8",          runner: "linux.9xlarge.ephemeral" },
+-          { name: "manylinux2_28-builder",          tag: "cuda12.9",          runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
+-          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinuxaarch64-builder",       tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.2",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.0",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
+-          { name: "manylinux2_28-builder",          tag: "rocm7.0",           runner: "linux.9xlarge.ephemeral" },
++          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
++          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
++          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.2",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda13.0",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
++          { name: "manylinux2_28_aarch64-builder",  tag: "cuda12.6",          runner: "linux.arm64.m7g.4xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "linux.9xlarge.ephemeral" },
+           { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
+--
+2.46.0
+

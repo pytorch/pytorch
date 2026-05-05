@@ -62,6 +62,7 @@ PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 SKIP_OPS: dict[str, str] = {
     "bernoulli": "non-deterministic (random sampling)",
     "empty_like": "uninitialized memory",
+    "exponential": "non-deterministic (random sampling)",
     "new_empty": "uninitialized memory",
     "new_empty_strided": "uninitialized memory",
     "nn.functional.dropout": "non-deterministic (random masking)",
@@ -158,6 +159,7 @@ def is_fully_replicated(placements: tuple[Placement, ...]) -> bool:
 
 def is_trivial_shard(p: Placement, tensor_shape: tuple[int, ...]) -> bool:
     """Check if placement is a Shard on a size-1 dimension."""
+    # NOTE: isinstance(_, Shard) does not match _StridedShard; see _is_shard_like().
     return (
         isinstance(p, Shard) and p.dim < len(tensor_shape) and tensor_shape[p.dim] == 1
     )
@@ -553,9 +555,12 @@ def validate_combination(
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
     mask_shift: int = 0,
-) -> tuple[bool, str]:
+) -> tuple[bool | None, str]:
     """
     Validate a single placement combination against ground truth.
+
+    Returns (True, "") if valid, (False, error_msg) if invalid, or
+    (None, reason) if the combination cannot be tested (e.g. uneven shards).
 
     The validation logic:
     1. Shard inputs according to input placements to get local tensors
@@ -581,6 +586,14 @@ def validate_combination(
         if mesh is None:
             device = tensors[0][1].device.type if tensors else "cpu"
             mesh = init_device_mesh(device, (world_size,))
+
+        # Uneven shards produce SymInt in LocalTensor's wrapper shape,
+        # which breaks C++ overload resolution before __torch_dispatch__
+        # can intercept. Return None to signal "untestable".
+        for (name, tensor), placement in zip(tensors, combination[0]):
+            if isinstance(placement, Shard):
+                if tensor.size(placement.dim) % world_size != 0:
+                    return None, "uneven shard"
 
         local_tensors = _shard_tensors(
             tensors, combination[0], world_size, mesh, mask_shift
@@ -652,17 +665,24 @@ def validate_aten_combination(
     world_size: int,
     mesh: DeviceMesh,
     mask_shift: int = 0,
-) -> tuple[bool, str]:
+) -> tuple[bool | None, str]:
     """Validate a placement combination using aten-level captured args.
 
     Works directly with aten op args/kwargs instead of SampleInput pytrees.
     Replaces tensors in the flat args/kwargs with sharded LocalTensors,
     calls the aten op, and compares output.
+
+    Returns (True, ""), (False, error_msg), or (None, reason) if untestable.
     """
     try:
         tensors = extract_tensors_from_args(captured_args, captured_kwargs)
         if not tensors:
             return False, "No tensor args in captured aten call"
+
+        for (name, tensor), placement in zip(tensors, combination[0]):
+            if isinstance(placement, Shard):
+                if tensor.size(placement.dim) % world_size != 0:
+                    return None, "uneven shard"
 
         local_tensors = _shard_tensors(
             tensors, combination[0], world_size, mesh, mask_shift
@@ -1192,12 +1212,17 @@ def _validate_with_mitigations(
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _FalsePositiveMitigations,
-) -> bool:
-    """Validate a combination, including false positive mitigation re-checks."""
+) -> bool | None:
+    """Validate a combination, including false positive mitigation re-checks.
+
+    Returns True (valid), False (invalid), or None (untestable).
+    """
     combo: PlacementCombination = (input_placements, output_placements)
     is_valid, _ = validate_combination(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
+    if is_valid is None:
+        return None
 
     # Flipped-mask mitigation: the checkerboard mask that controls offset
     # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
@@ -1332,8 +1357,11 @@ def _validate_aten_with_mitigations(
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _AtenFalsePositiveMitigations,
-) -> bool:
-    """Validate an aten-level combination with false positive mitigations."""
+) -> bool | None:
+    """Validate an aten-level combination with false positive mitigations.
+
+    Returns True (valid), False (invalid), or None (untestable).
+    """
     combo: PlacementCombination = (input_placements, output_placements)
     is_valid, _ = validate_aten_combination(
         aten_op,
@@ -1344,6 +1372,8 @@ def _validate_aten_with_mitigations(
         world_size,
         mesh,
     )
+    if is_valid is None:
+        return None
 
     if is_valid and has_any_partial(input_placements, output_placements):
         is_valid, _ = validate_aten_combination(
@@ -1405,10 +1435,13 @@ def _compare_rules(
     variant: str,
     stats: ComparisonStats,
     sample: SampleInput | None = None,
+    untestable: set[ComboKey] | None = None,
 ) -> None:
     """Compare ground truth valid rules against DTensor claimed rules, updating stats."""
     if not dtensor_rules:
         return
+    if untestable is None:
+        untestable = set()
 
     _assert_keys_normalized(ground_truth_valid, input_shapes, output_shapes)
     _assert_keys_normalized(dtensor_rules, input_shapes, output_shapes)
@@ -1420,7 +1453,7 @@ def _compare_rules(
             stats.true_positives_by_op[op_str] = (
                 stats.true_positives_by_op.get(op_str, 0) + 1
             )
-        else:
+        elif combo_key not in untestable:
             stats.false_negatives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
@@ -1437,7 +1470,7 @@ def _compare_rules(
             )
 
     for combo_key in dtensor_rules:
-        if combo_key not in ground_truth_valid:
+        if combo_key not in ground_truth_valid and combo_key not in untestable:
             stats.false_positives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
@@ -1717,6 +1750,8 @@ def _validate_aten_op_for_sample(
                         (input_placements, output_placements, combo_key)
                     )
 
+        untestable: set[ComboKey] = set()
+
         for (
             input_placements,
             output_placements,
@@ -1735,7 +1770,12 @@ def _validate_aten_op_for_sample(
                 mitigations,
             )
 
-            if is_valid:
+            if is_valid is None:
+                normalized_key = normalize_combo_key(
+                    combo_key, input_shapes, output_shapes
+                )
+                untestable.add(normalized_key)
+            elif is_valid:
                 normalized_key = normalize_combo_key(
                     combo_key, input_shapes, output_shapes
                 )
@@ -1756,6 +1796,7 @@ def _validate_aten_op_for_sample(
         variant,
         stats,
         sample,
+        untestable,
     )
 
     if verbose:

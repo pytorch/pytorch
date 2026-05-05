@@ -31,6 +31,7 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
@@ -287,6 +288,56 @@ class CudaReproTests(TestCase):
 
             self.assertEqual(out, f(*inputs))
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mha_mem_eff_attention_backward_large_batch_compile(self):
+        torch.manual_seed(0)
+
+        eager = nn.MultiheadAttention(
+            embed_dim=8,
+            num_heads=1,
+            batch_first=True,
+            device=device_type,
+            dtype=torch.float16,
+        )
+        compiled = copy.deepcopy(eager)
+        compiled = torch.compile(compiled)
+
+        q = torch.rand(2**16, 1, 8, device=device_type, dtype=torch.float16)
+        kv = torch.rand(2**16, 2, 8, device=device_type, dtype=torch.float16)
+        mask = torch.randint(0, 2, (2**16, 2), device=device_type, dtype=torch.bool)
+
+        eager_q = q.detach().clone().requires_grad_(True)
+        eager_kv = kv.detach().clone().requires_grad_(True)
+        compiled_q = q.detach().clone().requires_grad_(True)
+        compiled_kv = kv.detach().clone().requires_grad_(True)
+
+        eager_out = eager(
+            query=eager_q,
+            key=eager_kv,
+            value=eager_kv,
+            key_padding_mask=mask,
+            attn_mask=None,
+            need_weights=False,
+        )[0]
+        eager_out.sum().backward()
+
+        compiled_out = compiled(
+            query=compiled_q,
+            key=compiled_kv,
+            value=compiled_kv,
+            key_padding_mask=mask,
+            attn_mask=None,
+            need_weights=False,
+        )[0]
+        compiled_out.sum().backward()
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_q.grad, eager_q.grad)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad)
+
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -453,6 +504,48 @@ class CudaReproTests(TestCase):
         x = x.reshape([256, 256, 256, 2]).to(memory_format=torch.channels_last)
 
         self._test_split_reduction_impl(x)
+
+    def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
+        class Repro(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(num_embeddings=128, embedding_dim=32)
+                self.linear = nn.Linear(32, 96)
+                self.conv = nn.Conv2d(3, 16, 3, padding=1)
+
+            def forward(self, x, indices):
+                embedded = self.embedding(indices)
+                linear_out = self.linear(embedded)
+                conv_out = self.conv(x)
+                batch_size = conv_out.shape[0]
+                conv_flat = conv_out.view(batch_size, -1)
+                seq_out = linear_out[:, -1, :]
+                combined = torch.cat([seq_out, conv_flat], dim=1)
+                chunks = torch.ops.aten.split_with_sizes.default(
+                    combined, split_sizes=[32, 64, combined.size(1) - 96], dim=1
+                )
+                chunk0_reshaped = torch.ops.aten.reshape.default(
+                    chunks[0], (batch_size, 4, 8)
+                )
+                chunk1_reshaped = torch.ops.aten.reshape.default(
+                    chunks[1], (batch_size, 8, 8)
+                )
+                chunk2_reshaped = torch.ops.aten.reshape.default(
+                    chunks[2], (batch_size, -1, 8)
+                )
+                return torch.ops.aten.cat.default(
+                    [chunk0_reshaped, chunk1_reshaped, chunk2_reshaped], dim=1
+                )
+
+        model = Repro().to(device_type)
+        x = torch.randn(2, 3, 32, 32, dtype=torch.float32, device=device_type)
+        indices = torch.randint(0, 128, (2, 10), dtype=torch.long, device=device_type)
+
+        with torch.no_grad():
+            eager_out = model(x, indices)
+            compiled_out = torch.compile(model)(x, indices)
+
+        torch.testing.assert_close(compiled_out, eager_out)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
@@ -1518,11 +1611,36 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_explicit_precision_cast(
+        self, lowp_dtype
+    ):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+        x = torch.randn(4, 32, 32, device=device_type, dtype=torch.float32)
+        w = torch.randn(32, 32, device=device_type, dtype=torch.float32)
+
+        def fn(x, w):
+            x = torch.matmul(x, w)
+            x = x.to(lowp_dtype).float()
+            x = x * torch.sigmoid(x)
+            return x.sum(dim=1)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x, w)
+        actual, (code,) = run_and_get_code(opt_fn, x.clone(), w.clone())
+        self.assertEqual(expected, actual)
+        self.assertIn("args = (%convert_element_type, torch.float32)", code)
+        self.assertIn(f".to(tl.{lowp_name})", code)
+
     @torch._inductor.config.patch(emulate_precision_casts=True)
     @torch._inductor.config.patch(pattern_matcher=False)
     def test_emulate_precision_casts_convert_element_type(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0)
+        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
 
         x = torch.rand(1000, device=device_type, dtype=torch.float32)
 
@@ -1678,15 +1796,15 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_dont_inplace_disjoint_accesses(self):
         # TODO - would not need mms if we could annotate donated buffer..
-        def forward(  # noqa: F821, F722
-            arg0_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
-            arg1_1: f"bf16[8, 4096, 2048][8388608, 2048, 1]{device_type}:0",  # noqa: F821, F722
-            arg2_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
-            arg3_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",  # noqa: F821, F722
-            arg4_1: f"bf16[2048][1]{device_type}:0",  # noqa: F821, F722
-            arg5_1: f"bf16[2048][1]{device_type}:0",  # noqa: F821, F722
-            arg6_1: f"f32[4096, 128][128, 1]{device_type}:0",  # noqa: F821, F722
-            arg7_1: f"f32[4096, 128][128, 1]{device_type}:0",  # noqa: F821, F722
+        def forward(
+            arg0_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
+            arg1_1: f"bf16[8, 4096, 2048][8388608, 2048, 1]{device_type}:0",
+            arg2_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
+            arg3_1: f"bf16[2048, 2048][2048, 1]{device_type}:0",
+            arg4_1: f"bf16[2048][1]{device_type}:0",
+            arg5_1: f"bf16[2048][1]{device_type}:0",
+            arg6_1: f"f32[4096, 128][128, 1]{device_type}:0",
+            arg7_1: f"f32[4096, 128][128, 1]{device_type}:0",
         ):
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
             arg0_1 = None
@@ -2208,7 +2326,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     tmp0 = tl.load(in_ptr0 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
     tmp1 = tl.load(in_ptr1 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
-    tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
+    tl.store(out_ptr0 + (x3), tmp2, xmask)""",
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
@@ -2372,6 +2490,25 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         fc.run(bw_code)
 
         self.assertEqual(f(x_ref, y_ref), out)
+
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
+    )
+    def test_index_add_fallback_direct(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 0, idx, src)
+
+        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
+        idx = torch.randperm(8, device=device_type)
+        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out = torch.compile(f)(x, idx, src)
+        self.assertEqual(out, compiled_out)
 
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):

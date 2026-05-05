@@ -22,6 +22,7 @@ import functools
 import importlib
 import importlib.metadata
 import json
+import logging
 import sys
 import threading
 import types
@@ -45,6 +46,9 @@ from typing import (
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -617,10 +621,24 @@ def _private_register_pytree_node(
     from torch._library.opaque_object import is_opaque_type
 
     if isinstance(cls, type) and is_opaque_type(cls):
-        raise ValueError(
-            f"{cls} cannot be registered as a pytree as it has been "
-            "registered as an opaque object. Opaque objects must be pytree leaves."
-        )
+        # TODO: remove this allowance once downstream callers stop calling
+        # register_constant on Enum subclasses. Enums are now natively
+        # supported as opaque value types and don't need pytree registration.
+        import enum
+
+        if issubclass(cls, enum.Enum):
+            log.warning(
+                "%s is an Enum subclass and is now natively supported by "
+                "torch.compile as an opaque value type. Calling "
+                "register_constant() on Enum subclasses is deprecated and "
+                "will be an error in a future release.",
+                cls,
+            )
+        else:
+            raise ValueError(
+                f"{cls} cannot be registered as a pytree as it has been "
+                "registered as an opaque object. Opaque objects must be pytree leaves."
+            )
 
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
@@ -1031,6 +1049,7 @@ _private_register_pytree_node(
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
 # pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
+    # pyrefly: ignore [bad-argument-type]
     {
         tuple,
         list,

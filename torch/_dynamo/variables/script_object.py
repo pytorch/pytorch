@@ -18,6 +18,7 @@ The module ensures that TorchScript objects are handled safely during tracing
 by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
+import enum
 import functools
 import inspect
 import types
@@ -89,6 +90,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
+        if isinstance(value, type) and issubclass(value, enum.Enum):
+            raise AssertionError(
+                f"Enum class {value} should use UserDefinedClassVariable, "
+                "not OpaqueObjectClassVariable"
+            )
         super().__init__(**kwargs)
         self.value = value
 
@@ -106,6 +112,22 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def get_python_hash(self) -> int:
         return hash(self.value)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        reverse: bool = False,
+    ) -> "VariableTracker":
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
 
     def as_proxy(self) -> Any:
         return self.value
@@ -162,8 +184,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # disallow creating reference-type opaque objects in the middle of the
         # program
         if is_opaque_reference_type(self.value):
-            # Skip __init__ to prevent dynamo from tracing it during resume
-            skip_code(self.value.__init__.__code__)
+            # Skip __init__ to prevent dynamo from tracing it during resume.
+            # C extension types (e.g. torch._C.Generator) have wrapper_descriptor
+            # __init__ without __code__, so guard the skip_code call.
+            if hasattr(self.value.__init__, "__code__"):
+                skip_code(self.value.__init__.__code__)
 
             unimplemented(
                 gb_type="An opaque object was created in the middle of the program.",
@@ -231,6 +256,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
+        if isinstance(value, enum.Enum):
+            raise AssertionError(
+                f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
+            )
         out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
@@ -266,7 +295,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         if not isinstance(self.proxy, torch.fx.Proxy):
             # If we have a hoisted value type, then lazily lift it to be a graph
             # input when as_proxy() is called.
-            assert is_opaque_value_type(type(self.proxy))
+            if not is_opaque_value_type(type(self.proxy)):
+                raise AssertionError(
+                    f"Expected opaque value type, got {type(self.proxy)}"
+                )
             if should_hoist(type(self.proxy)):
                 from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -376,7 +408,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 ],
             )
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "TorchScriptObjectVariable requires a source for var_getattr"
+            )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
@@ -384,9 +419,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             method_name=name,
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        # Call call_method directly on this class to avoid the __getitem__ →
+        # mp_subscript_impl loop in VariableTracker.call_method.
+        return TorchScriptObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through var_getattr then call_function instead of call_method.
-    #
+
     # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -506,7 +550,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return hash(real_obj)
 
     def is_python_equal(self, other: object) -> bool:
-        assert isinstance(other, VariableTracker)
+        if not isinstance(other, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
         real_self = self.as_python_constant()
         real_other = other.as_python_constant()
         return real_self == real_other
