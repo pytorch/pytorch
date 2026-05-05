@@ -1445,7 +1445,6 @@ exclude_patterns = [
     'torch/utils/cpp_backtrace.py',
     'torch/utils/cpp_extension.py',
     'torch/utils/dlpack.py',
-    'torch/utils/file_baton.py',
     'torch/utils/flop_counter.py',
     'torch/utils/hipify/__init__.py',
     'torch/utils/hipify/constants.py',
