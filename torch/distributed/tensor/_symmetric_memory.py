@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from functools import reduce
-from operator import mul
+from math import prod
 from typing import TYPE_CHECKING
 
 import torch
@@ -18,10 +17,6 @@ if TYPE_CHECKING:
 
 def is_symmetric_memory_enabled() -> bool:
     return bool(dist_config.dtensor_use_symmetric_memory)
-
-
-def _numel(shape: Sequence[int]) -> int:
-    return reduce(mul, shape, 1)
 
 
 def _max_shard_dim_size(
@@ -61,11 +56,11 @@ def _compute_max_local_numel(
             device_mesh.size(mesh_dim),
             placement,
         )
-    return _numel(max_shape)
+    return prod(max_shape)
 
 
 def _narrow_and_view(base: torch.Tensor, shape: torch.Size) -> torch.Tensor:
-    return base.narrow(0, 0, _numel(shape)).view(shape).detach()
+    return base.narrow(0, 0, prod(shape)).view(shape).detach()
 
 
 def _is_eligible_device(device: torch.device) -> bool:
