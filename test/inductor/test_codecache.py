@@ -669,6 +669,10 @@ class TestFxGraphCache(TestCase):
                     "fx_graph_remote_cache": True,
                     "bundle_triton_into_fx_graph_cache": bundle_triton,
                     "use_static_triton_launcher": use_static_triton_launcher,
+                    # Disable shape padding to avoid non-deterministic pad_mm
+                    # benchmarking which can produce different FX graphs across
+                    # fresh_cache() iterations, causing flaky cache stats.
+                    "shape_padding": False,
                 }
             ),
             patch.dict(os.environ),
