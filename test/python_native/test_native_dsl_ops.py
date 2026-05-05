@@ -5,13 +5,17 @@ import os
 import subprocess
 import sys
 import textwrap
+import unittest
 import uuid
 from unittest.mock import patch
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
+    TEST_CUDA,
     TestCase,
 )
 
@@ -564,6 +568,116 @@ class TestNativeDSLOps(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeDSLOps)
+
+
+from torch.testing._internal.common_cuda import SM90OrLater
+
+
+def _rmsnorm_override_registered():
+    """Check if the quack RMSNorm override is actually registered in the dispatcher."""
+    try:
+        from torch._native.registry import _graphs
+
+        return ("_fused_rms_norm", "CUDA") in _graphs
+    except ImportError:
+        return False
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@skipIfNoCuteDSL
+@unittest.skipIf(not _rmsnorm_override_registered(), "RMSNorm override not registered")
+@unittest.skipIf(not SM90OrLater, "requires SM90+")
+class TestRMSNormQuackOverride(TestCase):
+    """Compare quack RMSNorm override against the ATen fallback kernel."""
+
+    SHAPES = [
+        (8, 128),
+        (4, 8, 32),
+        (2, 16, 512),
+        (4, 32, 1024),
+    ]
+    EPS = 1e-5
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_fused_rms_norm_fwd(self, dtype):
+        atol = 1e-1 if dtype in (torch.float16, torch.bfloat16) else 1e-5
+
+        for shape in self.SHAPES:
+            normalized_shape = list(shape[-1:])
+            x = torch.randn(*shape, dtype=dtype, device="cuda")
+            w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+
+            # quack
+            y, rstd = torch.ops.aten._fused_rms_norm(x, normalized_shape, w, self.EPS)
+
+            # ATen fallback
+            with torch.backends.python_native.operations_disabled(
+                "_fused_rms_norm",
+            ):
+                y_ref, rstd_ref = torch.ops.aten._fused_rms_norm(
+                    x, normalized_shape, w, self.EPS
+                )
+
+            self.assertEqual(
+                y, y_ref, atol=atol, rtol=0, msg=f"fwd shape={shape} dtype={dtype}"
+            )
+            self.assertEqual(
+                rstd,
+                rstd_ref,
+                atol=1e-5,
+                rtol=0,
+                msg=f"rstd shape={shape} dtype={dtype}",
+            )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_fused_rms_norm_bwd(self, dtype):
+        # might be too high but still within 1ULP
+        atol = (
+            3e-1
+            if dtype == torch.bfloat16
+            else (1e-1 if dtype == torch.float16 else 1e-5)
+        )
+
+        for shape in self.SHAPES:
+            normalized_shape = list(shape[-1:])
+            x = torch.randn(*shape, dtype=dtype, device="cuda")
+            w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+            grad_out = torch.randn(*shape, dtype=dtype, device="cuda")
+
+            # quack
+            x1 = x.detach().requires_grad_(True)
+            w1 = w.detach().requires_grad_(True)
+            y, _ = torch.ops.aten._fused_rms_norm(x1, normalized_shape, w1, self.EPS)
+            y.backward(grad_out)
+
+            # ATen fallback
+            x2 = x.detach().requires_grad_(True)
+            w2 = w.detach().requires_grad_(True)
+            with torch.backends.python_native.operations_disabled(
+                "_fused_rms_norm", "_fused_rms_norm_backward"
+            ):
+                y_ref, _ = torch.ops.aten._fused_rms_norm(
+                    x2, normalized_shape, w2, self.EPS
+                )
+                y_ref.backward(grad_out)
+
+            self.assertEqual(
+                x1.grad,
+                x2.grad,
+                atol=atol,
+                rtol=0,
+                msg=f"x_grad shape={shape} dtype={dtype}",
+            )
+            self.assertEqual(
+                w1.grad,
+                w2.grad,
+                atol=atol,
+                rtol=0,
+                msg=f"w_grad shape={shape} dtype={dtype}",
+            )
+
+
+instantiate_parametrized_tests(TestRMSNormQuackOverride)
 
 if __name__ == "__main__":
     run_tests()
