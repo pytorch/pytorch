@@ -4,8 +4,8 @@
 import itertools
 import math
 import unittest
-from unittest.mock import patch
 from typing import cast
+from unittest.mock import patch
 
 import torch
 import torch.distributed._symmetric_memory as symm_mem
@@ -19,7 +19,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor.experimental import use_symmetric_memory
 from torch.distributed.tensor._ops._matrix_ops import (
     gen_single_dim_einsum_strategies,
     mm_single_dim_strategy,
@@ -29,6 +28,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import use_symmetric_memory
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
