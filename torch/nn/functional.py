@@ -6940,6 +6940,30 @@ def grouped_mm(
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
 
 
+def _expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+    if v is None:
+        return []
+    elif not isinstance(v, list):
+        return [v]
+    else:
+        return v
+
+
+def _list_or_empty(l: list[_Any] | None) -> list[_Any]:
+    """Convert None to a list for native_functions list arguments.
+
+    native_functions cannot pass std::optional<ArrayRef<T>>, but can pass an
+    empty vector, so None arguments for lists must be converted explicitly.
+    """
+    return l if l else []
+
+
+def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+    if not isinstance(l, list):
+        l = [l]
+    return [li.value for li in l]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -6974,47 +6998,22 @@ def scaled_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         bias,
         output_dtype,
         contraction_dim,
@@ -7060,47 +7059,22 @@ def scaled_grouped_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_grouped_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         offs,
         bias,
         output_dtype,
