@@ -17,6 +17,7 @@ RUN yum install -y \
   automake \
   bison \
   bzip2 \
+  ccache \
   curl \
   diffutils \
   file \
@@ -74,6 +75,7 @@ RUN bash ./install_nvpl.sh && rm install_nvpl.sh
 
 # Install Arm Compute Library
 FROM base as arm_compute
+ARG USE_CCACHE=0
 # use python3.9 to install scons
 RUN python3.9 -m pip install scons==4.7.0
 RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin

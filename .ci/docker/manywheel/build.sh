@@ -129,6 +129,7 @@ DOCKER_BUILDKIT=1 docker build  \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
+    --build-arg "USE_CCACHE=${USE_CCACHE:-0}" \
     --target "${TARGET}" \
     -t "${tmp_tag}" \
     $@ \
