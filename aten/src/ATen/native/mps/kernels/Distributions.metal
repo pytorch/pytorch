@@ -5,30 +5,7 @@
 
 using namespace metal;
 
-constant constexpr float eps = 1.19209e-07f;
-
-// Box-Muller transform: turn two pairs of uniforms `(u1a, u2a)` and
-// `(u1b, u2b)` from (0, 1) into 4 independent N(0, 1) samples. `sincos` is a
-// fused intrinsic that returns sin and writes cos in one call, avoiding the
-// duplicate angle computation of separate `sin` / `cos`.
-inline void box_muller(
-    float u1a,
-    float u2a,
-    float u1b,
-    float u2b,
-    thread float (&z)[4]) {
-  float ra = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1a));
-  float rb = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1b));
-  float ta = 2.0f * M_PI_F * u2a;
-  float tb = 2.0f * M_PI_F * u2b;
-  float ca, cb;
-  float sa = ::metal::precise::sincos(ta, ca);
-  float sb = ::metal::precise::sincos(tb, cb);
-  z[0] = ra * ca;
-  z[1] = ra * sa;
-  z[2] = rb * cb;
-  z[3] = rb * sb;
-}
+constant constexpr float eps = ::metal::numeric_limits<float>::epsilon();
 
 // Cauchy, geometric, and log_normal each draw 4 samples per thread from a
 // single Philox-4x32-10 round, matching the existing exponential / bernoulli
@@ -69,16 +46,11 @@ kernel void log_normal(
   uint base = tid * 4;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  // Box-Muller turns each (u1, u2) pair into two independent N(0,1) samples;
-  // one Philox round therefore yields 4 standard normals from two pairs.
-  float u1a = clamp(
-      c10::metal::detail::uint32_to_uniform_float(raw[0]), eps, 1.0f - eps);
-  float u2a = c10::metal::detail::uint32_to_uniform_float(raw[1]);
-  float u1b = clamp(
-      c10::metal::detail::uint32_to_uniform_float(raw[2]), eps, 1.0f - eps);
-  float u2b = c10::metal::detail::uint32_to_uniform_float(raw[3]);
-  float z[4];
-  box_muller(u1a, u2a, u1b, u2b, z);
+  // One Philox round yields two (u1, u2) pairs; each pair produces two
+  // independent N(0, 1) samples via Box-Muller, so we get 4 normals total.
+  float2 za = c10::metal::box_muller_from_philox(raw.xy);
+  float2 zb = c10::metal::box_muller_from_philox(raw.zw);
+  float z[4] = {za.x, za.y, zb.x, zb.y};
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     output[base + i] =
@@ -98,8 +70,9 @@ kernel void geometric(
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
-    float u = clamp(
-        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    // Only `log(0)` is the failure mode; `log(1) = 0` gives a valid 0 sample.
+    float u =
+        ::metal::max(c10::metal::detail::uint32_to_uniform_float(raw[i]), eps);
     output[base + i] =
         static_cast<T>(ceil(::metal::precise::log(u) / params.x));
   }
@@ -118,8 +91,9 @@ kernel void exponential(
   float lambda = params.x;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
-    float u = clamp(
-        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    // Only `u = 1` is the failure mode (`log(0)`); `u = 0` gives `log(1) = 0`.
+    float u = ::metal::min(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), 1.0f - eps);
     output[base + i] =
         static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
   }
