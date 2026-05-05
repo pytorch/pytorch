@@ -79,7 +79,7 @@ tensor([0., 0., 0.])
 :::{warning}
   Please note that directly modifying a tensor's storage as shown in this example is not a recommended practice.
   This low-level manipulation is illustrated solely for educational purposes, to demonstrate the relationship between
-  tensors and their underlying storages. In general, it's more efficient and safer to use standard `torch.Tenso`
+  tensors and their underlying storages. In general, it's more efficient and safer to use standard `torch.Tensor`
   methods, such as {meth}`~torch.Tensor.clone` and {meth}`~torch.Tensor.fill_`, to achieve the same results.
 :::
 
@@ -107,9 +107,9 @@ whereas the storage of the gradient can be obtained through `tensor.grad.untyped
 
 There are also special cases where tensors do not have a typical storage, or no storage at all:
 - Tensors on `"meta"` device: Tensors on the `"meta"` device are used for shape inference
-and do not hold actual data.
+  and do not hold actual data.
 - Fake Tensors: Another internal tool used by PyTorch's compiler is
-[FakeTensor](https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html) which is based on a similar idea.
+  [FakeTensor](https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html) which is based on a similar idea.
 
 Tensor subclasses or tensor-like objects can also display unusual behaviours. In general, we do not
 expect many use cases to require operating at the Storage level!
@@ -133,7 +133,7 @@ expect many use cases to require operating at the Storage level!
 
 {class}`torch.Storage` is an alias for the storage class that corresponds with
 the default data type ({func}`torch.get_default_dtype()`). For example, if the
-default data type is {attr}`torch.float`, :class:`torch.Storage` resolves to
+default data type is {attr}`torch.float`, {class}`torch.Storage` resolves to
 {class}`torch.FloatStorage`.
 
 The {class}`torch.<type>Storage` and {class}`torch.cuda.<type>Storage` classes,
