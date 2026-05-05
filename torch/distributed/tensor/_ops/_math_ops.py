@@ -1717,8 +1717,6 @@ def interp_pool_1out_2in_strategy(
         aten.max_pool3d_with_indices_backward.default,
         aten.adaptive_max_pool2d_backward.default,
         aten.adaptive_max_pool3d_backward.default,
-        aten.fractional_max_pool2d_backward.default,
-        aten.fractional_max_pool3d_backward.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -1727,7 +1725,7 @@ def pool_backward_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # All max-pool backward ops: (grad_output, self, ..., indices) -> grad_input
+    # max_pool/adaptive_max_pool backward ops: (grad_output, self, ..., indices) -> grad_input
     # 1 output + 3 tensor inputs = 4 placements
     input_meta = cast(TensorMeta, args_schema[0])
     strategies: list[list[Placement | _ShardingPlaceholder]] = [

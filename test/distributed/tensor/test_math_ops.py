@@ -1531,11 +1531,6 @@ class DistMathOpsTest(DTensorTestBase):
                 "adaptive_max_pool2d",
                 lambda t: F.adaptive_max_pool2d(t, (4, 4)),
             ),
-            (
-                (8, 4, 16, 16),
-                "fractional_max_pool2d",
-                lambda t: F.fractional_max_pool2d(t, 2, output_size=(8, 8)),
-            ),
             ((8, 4, 8, 8, 8), "avg_pool3d", lambda t: F.avg_pool3d(t, 2)),
             ((8, 4, 8, 8, 8), "max_pool3d", lambda t: F.max_pool3d(t, 2)),
             (
@@ -1548,32 +1543,25 @@ class DistMathOpsTest(DTensorTestBase):
                 "adaptive_max_pool3d",
                 lambda t: F.adaptive_max_pool3d(t, (4, 4, 4)),
             ),
-            (
-                (8, 4, 8, 8, 8),
-                "fractional_max_pool3d",
-                lambda t: F.fractional_max_pool3d(t, 2, output_size=(4, 4, 4)),
-            ),
         ]
 
         for shard_dim in [0, 1]:
             for shape, name, fn in cases:
-                x = torch.randn(*shape, device=self.device_type, requires_grad=True)
-                dt_x = distribute_tensor(
-                    x.detach().clone().requires_grad_(True),
-                    device_mesh,
-                    [Shard(shard_dim)],
-                )
-                out = fn(x)
-                (out[0] if isinstance(out, tuple) else out).sum().backward()
-                dt_out = fn(dt_x)
-                (dt_out[0] if isinstance(dt_out, tuple) else dt_out).sum().backward()
-                self.assertEqual(
-                    dt_x.grad.full_tensor(), x.grad, msg=f"{name} shard={shard_dim}"
-                )
-                self.assertTrue(
-                    dt_x.grad.placements[0].is_shard(shard_dim),
-                    msg=f"{name} shard={shard_dim}: expected Shard({shard_dim}) grad placement",
-                )
+                with self.subTest(name=name, shard_dim=shard_dim):
+                    x = torch.randn(*shape, device=self.device_type, requires_grad=True)
+                    dt_x = distribute_tensor(
+                        x.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        [Shard(shard_dim)],
+                    )
+                    out = fn(x)
+                    (out[0] if isinstance(out, tuple) else out).sum().backward()
+                    dt_out = fn(dt_x)
+                    (
+                        dt_out[0] if isinstance(dt_out, tuple) else dt_out
+                    ).sum().backward()
+                    self.assertEqual(dt_x.grad.full_tensor(), x.grad)
+                    self.assertTrue(dt_x.grad.placements[0].is_shard(shard_dim))
 
     @with_comms
     @skip_unless_torch_gpu
