@@ -2602,7 +2602,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             result = wrap_fx_proxy(tx=tx, proxy=proxy)
 
             if isinstance(inputs_var, ConstDictVariable):
-                assert isinstance(result, BaseListVariable)
+                if not isinstance(result, BaseListVariable):
+                    raise AssertionError(
+                        f"Expected BaseListVariable from autograd.grad with dict inputs, "
+                        f"got {type(result)}"
+                    )
                 items: dict[VariableTracker, VariableTracker] = dict(
                     zip(
                         inputs_var.items.keys(),
