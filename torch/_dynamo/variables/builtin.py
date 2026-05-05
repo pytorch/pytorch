@@ -277,7 +277,10 @@ def populate_builtin_to_tensor_fn_map() -> None:
         for setup_fn, op_list in setups_and_oplists:
             for op in op_list:
                 setup_fn(op)
-                assert most_recent_func is not None
+                if most_recent_func is None:
+                    raise AssertionError(
+                        f"most_recent_func is None after setup for op {op}"
+                    )
                 BUILTIN_TO_TENSOR_FN_MAP[op] = most_recent_func
 
         # gather the reverse functions
@@ -296,7 +299,10 @@ def populate_builtin_to_tensor_fn_map() -> None:
                 if op in rskips:
                     continue
                 setup_fn(op)
-                assert most_recent_func is not None
+                if most_recent_func is None:
+                    raise AssertionError(
+                        f"most_recent_func is None after setup for reverse op {op}"
+                    )
                 if most_recent_func != BUILTIN_TO_TENSOR_FN_MAP[op]:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
@@ -326,7 +332,8 @@ class BaseBuiltinVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.as_python_constant().__name__
-        assert name not in codegen.tx.f_globals, "shadowed global"
+        if name in codegen.tx.f_globals:
+            raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -765,7 +772,8 @@ class BuiltinVariable(BaseBuiltinVariable):
             if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
                 lst, const = const, lst
             try:
-                assert isinstance(lst, BaseListVariable)
+                if not isinstance(lst, BaseListVariable):
+                    raise AssertionError(f"Expected BaseListVariable, got {type(lst)}")
                 return lst.__class__(
                     items=lst.items * const.as_python_constant(),
                     mutation_type=ValueMutationNew(),
@@ -941,8 +949,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             return result
 
         for op in supported_comparison_ops.values():
-            assert callable(op)
-            assert op not in op_handlers
+            if not callable(op):
+                raise AssertionError(f"comparison op {op} is not callable")
+            if op in op_handlers:
+                raise AssertionError(f"duplicate handler for op {op}")
             op_handlers[op] = create_cmp_op_handlers(op)
 
         return op_handlers
@@ -969,10 +979,11 @@ class BuiltinVariable(BaseBuiltinVariable):
     MUST_USE_SPECIALIZED: frozenset[Any] = frozenset({dict, getattr, iter, list})
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
-        assert fn not in self.MUST_USE_SPECIALIZED, (
-            f"Use the specialized VT class for {fn!r}, not BuiltinVariable. "
-            f"E.g. DictBuiltinVariable for dict."
-        )
+        if fn in self.MUST_USE_SPECIALIZED:
+            raise AssertionError(
+                f"Use the specialized VT class for {fn!r}, not BuiltinVariable. "
+                f"E.g. DictBuiltinVariable for dict."
+            )
         super().__init__(**kwargs)
         self.fn = fn
 
@@ -1025,8 +1036,10 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.fn.__name__
-        assert self.fn.__module__ == "builtins"
-        assert name not in codegen.tx.f_globals, "shadowed global"
+        if self.fn.__module__ != "builtins":
+            raise AssertionError(f"Expected builtins module, got {self.fn.__module__}")
+        if name in codegen.tx.f_globals:
+            raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
     def constant_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
@@ -1373,7 +1386,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
-        assert len(args) == 1
+        if len(args) != 1:
+            raise AssertionError(f"vars() expected 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
             return args[0].var_getattr(tx, "__dict__")
@@ -1586,7 +1600,10 @@ class BuiltinVariable(BaseBuiltinVariable):
             self.call_function_handler_cache[key] = handler = self._make_handler(  # type: ignore[assignment]
                 self.fn, [type(x) for x in args], bool(kwargs)
             )
-        assert handler is not None
+        if handler is None:
+            raise AssertionError(
+                f"No handler found for {self.fn} with args {[type(x) for x in args]}"
+            )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
     def call_method(
@@ -1597,8 +1614,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            assert len(args) == 3
-            assert len(kwargs) == 0
+            if len(args) != 3:
+                raise AssertionError(
+                    f"object.__setattr__ expects 3 args, got {len(args)}"
+                )
+            if len(kwargs) != 0:
+                raise AssertionError(
+                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
+                )
             obj, name_var, val = args
             obj = obj.realize()
             if (
@@ -1611,7 +1634,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             # Supported __new__ methods
             if self.fn is object and len(args) == 1:
-                assert len(kwargs) == 0
+                if len(kwargs) != 0:
+                    raise AssertionError(
+                        f"object.__new__ expects no kwargs, got {len(kwargs)}"
+                    )
                 return tx.output.side_effects.track_new_user_defined_object(
                     self, args[0], args[1:]
                 )
@@ -1658,7 +1684,10 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn in (set, frozenset, list, tuple):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
-                assert args[0]._base_vt is not None
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
                 return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1732,7 +1761,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 value = f"{arg.exc_type.__name__}{const_args!r}"
             return VariableTracker.build(tx, value)
         if isinstance(arg, variables.UserDefinedDictVariable):
-            assert arg._base_vt is not None
+            if arg._base_vt is None:
+                raise AssertionError(
+                    "UserDefinedDictVariable._base_vt must not be None"
+                )
             try:
                 return VariableTracker.build(
                     tx, repr(arg._base_vt.as_python_constant())
@@ -1853,7 +1885,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def _call_min_max_seq(
         self, tx: "InstructionTranslator", items: Sequence[VariableTracker]
     ) -> VariableTracker:
-        assert len(items) > 0
+        if len(items) <= 0:
+            raise AssertionError("_call_min_max_seq requires at least one item")
         if len(items) == 1:
             return items[0]
 
@@ -1872,7 +1905,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         if self.tensor_args(a, b):
             if not a.is_tensor():
                 a, b = b, a
-            assert a.is_tensor()
+            if not a.is_tensor():
+                raise AssertionError(
+                    "Expected at least one tensor argument for min/max"
+                )
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
@@ -2056,7 +2092,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        assert not isinstance(obj, variables.IteratorVariable)
+        if isinstance(obj, variables.IteratorVariable):
+            raise AssertionError(
+                "IteratorVariable should not be passed to _call_iter_tuple_list"
+            )
 
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
@@ -2207,7 +2246,10 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        assert not kwargs
+        if kwargs:
+            raise AssertionError(
+                f"set() does not accept keyword arguments, got {kwargs}"
+            )
         if not args:
             return SetVariable([], mutation_type=ValueMutationNew())
         if len(args) != 1:
@@ -2243,7 +2285,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        assert not kwargs
+        if kwargs:
+            raise AssertionError(
+                f"frozenset() does not accept keyword arguments, got {kwargs}"
+            )
         if not args:
             return FrozensetVariable([])
         if len(args) != 1:
@@ -3027,7 +3072,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     _fn = dict
 
     def __init__(self, value: type = dict, **kwargs: Any) -> None:
-        assert value is dict
+        if value is not dict:
+            raise AssertionError(f"DictBuiltinVariable value must be dict, got {value}")
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3069,7 +3115,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             if isinstance(args[0], variables.UserDefinedDictVariable):
-                assert args[0]._base_vt is not None
+                if args[0]._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None for dict method dispatch"
+                    )
                 return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
             elif isinstance(args[0], ConstDictVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
@@ -3155,7 +3204,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     SourcelessBuilder.create(tx, OrderedDict),
                     [],
                 )
-                assert isinstance(result, OrderedDictVariable)
+                if not isinstance(result, OrderedDictVariable):
+                    raise AssertionError(
+                        f"Expected OrderedDictVariable, got {type(result)}"
+                    )
                 result._base_vt = ConstDictVariable(
                     items,
                     user_cls=OrderedDict,
@@ -3171,7 +3223,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     SourcelessBuilder.create(tx, defaultdict),
                     [],
                 )
-                assert isinstance(result, DefaultDictVariable)
+                if not isinstance(result, DefaultDictVariable):
+                    raise AssertionError(
+                        f"Expected DefaultDictVariable, got {type(result)}"
+                    )
                 result._base_vt = ConstDictVariable(
                     items, mutation_type=ValueMutationNew()
                 )
@@ -3206,7 +3261,8 @@ class IterBuiltinVariable(BaseBuiltinVariable):
     _fn = iter
 
     def __init__(self, value: Any = iter, **kwargs: Any) -> None:
-        assert value is iter
+        if value is not iter:
+            raise AssertionError(f"IterBuiltinVariable value must be iter, got {value}")
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3241,7 +3297,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
     _fn = getattr
 
     def __init__(self, value: Any = getattr, **kwargs: Any) -> None:
-        assert value is getattr
+        if value is not getattr:
+            raise AssertionError(
+                f"GetAttrBuiltinVariable value must be getattr, got {value}"
+            )
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3332,7 +3391,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         if default is not None:
             hasattr_var = obj.call_obj_hasattr(tx, name)
             if hasattr_var is not None:
-                assert hasattr_var.is_constant_match(True, False)
+                if not hasattr_var.is_constant_match(True, False):
+                    raise AssertionError(
+                        f"hasattr_var must be a constant True or False, got {hasattr_var}"
+                    )
                 if not hasattr_var.as_python_constant():
                     return default
             else:
@@ -3452,7 +3514,8 @@ class ListBuiltinVariable(BaseBuiltinVariable):
     _fn = list
 
     def __init__(self, value: type = list, **kwargs: Any) -> None:
-        assert value is list
+        if value is not list:
+            raise AssertionError(f"ListBuiltinVariable value must be list, got {value}")
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:

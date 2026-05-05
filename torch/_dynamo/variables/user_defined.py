@@ -919,7 +919,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     ],
                     from_exc=e,
                 )
-            assert bound_args is not None
+            if bound_args is None:
+                raise AssertionError("bound_args is None after signature binding")
             if "iterable" in bound_args.arguments:
                 if not bound_args.arguments["iterable"].has_force_unpack_var_sequence(
                     tx
@@ -1390,7 +1391,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
-        assert type(value) is self.value_type
+        if type(value) is not self.value_type:
+            raise AssertionError(f"Expected type {self.value_type}, got {type(value)}")
         # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
         self.cls_source = cls_source
         if cls_source is None and self.source is not None:
@@ -1626,9 +1628,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.call_method(tx, "__neg__", [], {})
 
     def torch_function_check(self) -> None:
-        assert has_torch_function(self), (
-            f"calling torch function on object without __torch_function__ {self}"
-        )
+        if not has_torch_function(self):
+            raise AssertionError(
+                f"calling torch function on object without __torch_function__ {self}"
+            )
 
     def get_torch_fn(self, tx: "InstructionTranslator") -> VariableTracker:
         self.torch_function_check()
@@ -1818,7 +1821,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return r
 
         if do_other:
-            assert isinstance(other_, UserDefinedObjectVariable)
+            if not isinstance(other_, UserDefinedObjectVariable):
+                raise AssertionError(
+                    f"Expected UserDefinedObjectVariable, got {type(other_)}"
+                )
             r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
             if not is_nb_not_implemented(r):
                 return r
@@ -1997,10 +2003,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
                 hints=["Ensure that the name is a string."],
             )
-        assert tx.output.side_effects.is_attribute_mutation(self), (
-            "Attempted setattr on a user-defined object that does not have "
-            "an AttributeMutation mutation_type"
-        )
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            raise AssertionError(
+                "Attempted setattr on a user-defined object that does not have "
+                "an AttributeMutation mutation_type"
+            )
 
         if (
             torch.distributed.is_available()
@@ -2192,7 +2199,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         f"Ensure the user-defined object {self.value} is constructed outside the compiled region.",
                     ],
                 )
-            assert self.source is not None
+            if self.source is None:
+                raise AssertionError("source must not be None for bound method call")
             func_src = AttrSource(self.source, "__func__")
             func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
@@ -2200,7 +2208,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
         elif callable(self.value):
             if self.source:
-                assert self.cls_source is not None
+                if self.cls_source is None:
+                    raise AssertionError(
+                        "cls_source must not be None for callable with source"
+                    )
                 source_attr = AttrSource(self.cls_source, "__call__")
                 install_guard(source_attr.make_guard(GuardBuilder.CLOSURE_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)  # type: ignore[arg-type]
@@ -2317,7 +2328,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_source_by_walking_mro(
         self, tx: "InstructionTranslator", name: str
     ) -> DictGetItemSource:
-        assert self.cls_source is not None
+        if self.cls_source is None:
+            raise AssertionError("cls_source must not be None for MRO walk")
 
         for idx, klass in enumerate(type(self.value).__mro__):
             if name in klass.__dict__:
@@ -2752,7 +2764,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):
             if name in ("_buffers", "_parameters"):
-                assert self.source is not None
+                if self.source is None:
+                    raise AssertionError(
+                        "source must not be None for _buffers/_parameters access"
+                    )
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
         return source
@@ -3208,7 +3223,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             KeyedJaggedTensor,
         )
 
-        assert type(value) is KeyedJaggedTensor
+        if type(value) is not KeyedJaggedTensor:
+            raise AssertionError(f"Expected KeyedJaggedTensor, got {type(value)}")
         super().__init__(value, **kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -3246,13 +3262,15 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
                 self._base_vt = ConstantVariable.create(base(value))
                 self._base_methods = _constant_base_methods[base]
                 break
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
     def as_python_constant(self) -> Any:
         return self.value
 
     def as_proxy(self) -> object:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in as_proxy")
         return self._base_vt.as_proxy()
 
 
@@ -3288,7 +3306,8 @@ class RemovableHandleVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "remove":
             if self.idx != self.REMOVED:
-                assert self.idx is not None
+                if self.idx is None:
+                    raise AssertionError("idx must not be None for hook removal")
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
@@ -3328,9 +3347,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value, **kwargs)
         if dict_vt is None:
-            assert self.source is None, (
-                "dict_vt must be constructed by builder.py when source is present"
-            )
+            if self.source is not None:
+                raise AssertionError(
+                    "dict_vt must be constructed by builder.py when source is present"
+                )
             self._base_vt = ConstDictVariable(
                 {},
                 mutation_type=ValueMutationNew(),
@@ -3338,13 +3358,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         else:
             self._base_vt = dict_vt
         self._base_methods = dict_methods
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None after initialization")
 
     def len(self) -> int:
         # Used by nn_module.py to short-circuit the nn.Module forward method
         # when no hooks are registered.  Calling .len() directly avoids the
         # overhead of full call_method("__len__") dispatch during tracing.
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in len")
         return self._base_vt.len()  # type: ignore[union-attr]
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -3361,7 +3383,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
         method = self._maybe_get_baseclass_method("__getitem__")
         if method in self._base_methods:
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in mp_subscript_impl")
             try:
                 return self._base_vt.mp_subscript_impl(tx, key)
             except ObservedKeyError:
@@ -3388,7 +3411,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             and self._maybe_get_baseclass_method("__getitem__") in self._base_methods
             and self._maybe_get_baseclass_method("__missing__")
         ):
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in call_method")
             try:
                 return self._base_vt.call_method(tx, name, args, kwargs)
             except ObservedKeyError:
@@ -3432,11 +3456,13 @@ class OrderedDictVariable(UserDefinedDictVariable):
         super().__init__(value, dict_vt=dict_vt, **kwargs)
 
     def is_python_constant(self) -> bool:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in is_python_constant")
         return self._base_vt.is_python_constant()
 
     def as_python_constant(self) -> Any:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in as_python_constant")
         return collections.OrderedDict(self._base_vt.as_python_constant())
 
     def nb_or_impl(
@@ -3476,7 +3502,8 @@ class OrderedDictVariable(UserDefinedDictVariable):
         # OrderedDict-exclusive C methods that ConstDictVariable doesn't handle.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
         if name == "move_to_end":
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in move_to_end")
             self._base_vt.install_dict_keys_match_guard()  # type: ignore[union-attr]
             tx.output.side_effects.mutation(self._base_vt)
             if args[0] not in self._base_vt:  # type: ignore[operator]
@@ -3492,7 +3519,8 @@ class OrderedDictVariable(UserDefinedDictVariable):
             self._base_vt.items.move_to_end(key, last=last)  # type: ignore[union-attr]
             return ConstantVariable.create(None)
         elif name == "popitem":
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in popitem")
             if not self._base_vt.items:  # type: ignore[union-attr]
                 raise_observed_exception(
                     KeyError, tx, args=["popitem(): dictionary is empty"]
@@ -3578,7 +3606,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         )
 
     def is_python_constant(self) -> bool:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in is_python_constant")
         # An empty defaultdict with a non-constant factory can't be
         # constant-folded (we can't serialize the factory).
         if not self.default_factory.is_python_constant() and not self._base_vt.items:  # type: ignore[union-attr]
@@ -3586,15 +3615,18 @@ class DefaultDictVariable(UserDefinedDictVariable):
         return self._base_vt.is_python_constant()
 
     def as_python_constant(self) -> Any:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in as_python_constant")
         factory = None
         if self.default_factory.is_python_constant():
             factory = self.default_factory.as_python_constant()
         return collections.defaultdict(factory, self._base_vt.as_python_constant())
 
     def debug_repr(self) -> str:
-        assert self.default_factory is not None
-        assert self._base_vt is not None
+        if self.default_factory is None:
+            raise AssertionError("default_factory must not be None in debug_repr")
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in debug_repr")
         return (
             f"defaultdict({self.default_factory.debug_repr()}, "
             f"{self._base_vt.debug_repr()})"
@@ -3626,7 +3658,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         ):
             raise_observed_exception(KeyError, tx, args=[key])
         default_var = self.default_factory.call_function(tx, [], {})
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in _missing_impl")
         self._base_vt.call_method(tx, "__setitem__", [key, default_var], {})
         return default_var
 
@@ -3636,7 +3669,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in mp_subscript_impl")
         if key in self._base_vt:  # type: ignore[operator]
             return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
         return self._missing_impl(tx, key)
@@ -3657,7 +3691,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         left, right = (other, self) if reverse else (self, other)
         ret = issubclass(left.python_type(), collections.defaultdict)
         self_, other_ = (left, right) if ret else (right, left)
-        assert isinstance(self_, DefaultDictVariable)
+        if not isinstance(self_, DefaultDictVariable):
+            raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
@@ -3665,7 +3700,10 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if isinstance(left, ConstDictVariable):
             items = left.items
         else:
-            assert isinstance(left, UserDefinedDictVariable), left
+            if not isinstance(left, UserDefinedDictVariable):
+                raise AssertionError(
+                    f"Expected UserDefinedDictVariable, got {type(left)}: {left}"
+                )
             items = left._base_vt.items  # type: ignore[missing-attribute]
 
         new = tx.output.side_effects.track_new_user_defined_object(
@@ -3708,7 +3746,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
                         tx,
                         args=["first argument must be callable or None"],
                     )
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in __init__")
             return self._base_vt.call_method(tx, "__init__", args, kwargs)
         elif name == "__getitem__":
             if len(args) != 1:
@@ -3723,13 +3762,17 @@ class DefaultDictVariable(UserDefinedDictVariable):
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
             from .builder import SourcelessBuilder
 
-            assert self._base_vt is not None
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in copy")
             new_dd = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, dict),
                 SourcelessBuilder.create(tx, collections.defaultdict),
                 [],
             )
-            assert isinstance(new_dd, DefaultDictVariable)
+            if not isinstance(new_dd, DefaultDictVariable):
+                raise AssertionError(
+                    f"Expected DefaultDictVariable, got {type(new_dd)}"
+                )
             new_dd.default_factory = self.default_factory
             new_dd._base_vt = self._base_vt.clone(
                 mutation_type=ValueMutationNew(),
@@ -3781,9 +3824,10 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         self._base_methods = set_methods if python_type is set else frozenset_methods
 
         if set_vt is None:
-            assert self.source is None, (
-                "set_vt must be constructed by builder.py when source is present"
-            )
+            if self.source is not None:
+                raise AssertionError(
+                    "set_vt must be constructed by builder.py when source is present"
+                )
             if python_type is set:
                 # set is initialized later
                 self._base_vt = variables.SetVariable(
@@ -3799,24 +3843,29 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
         else:
             self._base_vt = set_vt
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None after initialization")
 
     def as_python_constant(self) -> object:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in as_python_constant")
         return self._base_vt.as_python_constant()
 
     @property
     def set_items(self) -> set[Any]:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in set_items")
         return self._base_vt.set_items  # pyrefly: ignore[missing-attribute]
 
     @property
     def items(self) -> dict[HashableTracker, VariableTracker]:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in items")
         return self._base_vt.items  # pyrefly: ignore[missing-attribute]
 
     def is_python_equal(self, other: object) -> bool:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in is_python_equal")
         return isinstance(
             other, UserDefinedSetVariable
         ) and self._base_vt.is_python_equal(other._base_vt)
@@ -3838,14 +3887,16 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
         super().__init__(value, **kwargs)
         if list_vt is None:
-            assert self.source is None, (
-                "list_vt must be constructed by builder.py when source is present"
-            )
+            if self.source is not None:
+                raise AssertionError(
+                    "list_vt must be constructed by builder.py when source is present"
+                )
             self._base_vt = ListVariable([], mutation_type=ValueMutationNew())
         else:
             self._base_vt = list_vt
         self._base_methods = list_methods
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None after initialization")
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -3877,10 +3928,12 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
-            assert self.source is None, (
-                "tuple_vt must be constructed by builder.py when source is present"
-            )
-            assert init_args, "init_args must be provided when tuple_vt is None"
+            if self.source is not None:
+                raise AssertionError(
+                    "tuple_vt must be constructed by builder.py when source is present"
+                )
+            if not init_args:
+                raise AssertionError("init_args must be provided when tuple_vt is None")
             # Emulate `tuple.__new__`
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
@@ -3895,11 +3948,13 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._base_vt = tuple_vt
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None after initialization")
 
     @property
     def items(self) -> list[VariableTracker]:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in items")
         return self._base_vt.items  # type: ignore[return-value]
 
     def resolve_data_descriptor(
@@ -3947,7 +4002,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         # UserDefinedDictVariable doesn't need this because it's never created
         # sourceless — it only comes from VariableBuilder which always has a
         # source.
-        assert self.source is None
+        if self.source is not None:
+            raise AssertionError(
+                "reconstruct should only be called on sourceless tuples"
+            )
         create_fn = self.get_construct_fn()
         codegen.add_push_null(
             lambda: codegen.append_output(
@@ -4060,7 +4118,8 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         return self._make_tree_map_result(new_items)
 
     def is_python_equal(self, other: object) -> bool:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in is_python_equal")
         other = other._base_vt if isinstance(other, UserDefinedTupleVariable) else other
         return self._base_vt.is_python_equal(other)
 

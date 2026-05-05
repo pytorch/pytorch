@@ -344,7 +344,8 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4189-L4216
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("CountIteratorVariable must be mutable for next()")
         old_item = self.item
         tx.output.side_effects.mutation(self)
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
@@ -386,7 +387,8 @@ class ZipVariable(IteratorVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(iterables, list)
+        if not isinstance(iterables, list):
+            raise AssertionError(f"Expected list of iterables, got {type(iterables)}")
         # can be list[Variable] or VariableTracker (with next_variable implemented)
         self.iterables = iterables
         self.index = 0
@@ -404,7 +406,10 @@ class ZipVariable(IteratorVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslator"
     ) -> list["VariableTracker"]:
-        assert self.has_unpack_var_sequence(tx)
+        if not self.has_unpack_var_sequence(tx):
+            raise AssertionError(
+                "Cannot unpack var sequence: not all iterables are unpackable"
+            )
         iterables = []
         for it in self.iterables:
             if isinstance(it, list):
@@ -417,7 +422,8 @@ class ZipVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2906-L2994
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("ZipVariable must be mutable for next()")
 
         if len(self.iterables) == 0:
             raise_observed_exception(StopIteration, tx)
@@ -525,9 +531,10 @@ class MapVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.append_output(create_build_tuple(len(self.iterables) + 1))
         if self.strict:
-            assert sys.version_info >= (3, 14), (
-                "Unexpected bug: map(strict=True) requires Python 3.14+"
-            )
+            if sys.version_info < (3, 14):
+                raise AssertionError(
+                    "Unexpected bug: map(strict=True) requires Python 3.14+"
+                )
             codegen.extend_output(
                 [
                     codegen.create_load_const("strict"),
@@ -575,7 +582,10 @@ class FilterVariable(IteratorVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslator"
     ) -> list["VariableTracker"]:
-        assert self.has_unpack_var_sequence(tx)
+        if not self.has_unpack_var_sequence(tx):
+            raise AssertionError(
+                "Cannot unpack var sequence: iterable is not unpackable"
+            )
         it = None
         if isinstance(self.iterable, list):
             it = self.iterable[self.index :]
@@ -645,7 +655,10 @@ class DictViewIterator(IteratorVariable):
         elif self.view_type == "values":
             self._iter = iter(items.values())  # type: ignore[bad-assignment]
         else:
-            assert self.view_type == "items"
+            if self.view_type != "items":
+                raise AssertionError(
+                    f"Expected view_type 'items', got {self.view_type!r}"
+                )
             self._iter = iter(items.items())  # type: ignore[bad-assignment]
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:

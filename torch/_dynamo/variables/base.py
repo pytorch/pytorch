@@ -580,7 +580,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def force_apply_to_var_sequence(
         self, tx: Any, fn: Callable[[VariableTracker], Any]
     ) -> None:
-        assert self.has_force_unpack_var_sequence(tx)
+        if not self.has_force_unpack_var_sequence(tx):
+            raise AssertionError(
+                "force_apply_to_var_sequence requires has_force_unpack_var_sequence(tx) == True"
+            )
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
@@ -1231,15 +1234,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # If this fails, it's either
                 # 1. one mistakenly passed in a source
                 # 2. `mutation_type` is incorrect
-                assert source is None
+                if source is not None:
+                    raise AssertionError(
+                        "source must be None for ValueMutationNew/AttributeMutationNew"
+                    )
             else:
-                assert isinstance(
+                if not isinstance(
                     mutation_type, (ValueMutationExisting, AttributeMutationExisting)
-                )
+                ):
+                    raise AssertionError(
+                        f"Expected ValueMutationExisting or AttributeMutationExisting, "
+                        f"got {type(mutation_type)}"
+                    )
                 # If this fails, it's either
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
-                assert source is not None
+                if source is None:
+                    raise AssertionError(
+                        "source must not be None for ValueMutationExisting/AttributeMutationExisting"
+                    )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """

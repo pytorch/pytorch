@@ -129,7 +129,8 @@ class SuperVariable(VariableTracker):
                     "Use two-argument super(type, object_or_type).",
                 ],
             )
-        assert self.objvar is not None
+        if self.objvar is None:
+            raise AssertionError("super() requires objvar to be set")
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -207,7 +208,8 @@ class SuperVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
-        assert self.objvar is not None
+        if self.objvar is None:
+            raise AssertionError("super() requires objvar to be set for method calls")
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
@@ -251,7 +253,10 @@ class SuperVariable(VariableTracker):
             if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
                 user_cls_vt: VariableTracker = VariableTracker.build(tx, user_cls)
             else:
-                assert source is not None
+                if source is None:
+                    raise AssertionError(
+                        "source must not be None for user-defined class"
+                    )
                 user_cls_source = source.member
                 user_cls_vt = variables.UserDefinedClassVariable(
                     user_cls, source=user_cls_source
@@ -287,7 +292,10 @@ class SuperVariable(VariableTracker):
                     self.objvar.value_type,  # type: ignore[attr-defined]
                     cls_source,
                 )
-            assert source is not None
+            if source is None:
+                raise AssertionError(
+                    "source must not be None for classmethod resolution"
+                )
             fn_vt = VariableTracker.build(
                 tx,
                 inner_fn.__func__,
@@ -335,7 +343,8 @@ class SuperVariable(VariableTracker):
                         *graph_break_hints.DYNAMO_BUG,
                     ],
                 )
-            assert isinstance(attr, str)
+            if not isinstance(attr, str):
+                raise AssertionError(f"attr must be a str, got {type(attr)}")
             tx.output.side_effects.store_attr(
                 self.objvar, attr, variables.DeletedVariable()
             )
@@ -448,7 +457,8 @@ class TracebackVariable(VariableTracker):
         super().__init__(**kwargs)
         self.frame_summary = frame_summary
         # the next traceback in the chain
-        assert tb_next is not None
+        if tb_next is None:
+            raise AssertionError("tb_next must not be None")
         self.tb_next = tb_next
 
     @classmethod
@@ -490,7 +500,10 @@ class TracebackVariable(VariableTracker):
         if name == "tb_next":
             if not self.is_valid_traceback(val):
                 raise_observed_exception(TypeError, tx)
-            assert isinstance(val, (TracebackVariable, ConstantVariable))
+            if not isinstance(val, (TracebackVariable, ConstantVariable)):
+                raise AssertionError(
+                    f"tb_next val must be TracebackVariable or ConstantVariable, got {type(val)}"
+                )
             if self.has_reference_cycle(val) or (
                 istype(val, TracebackVariable) and val.has_reference_cycle(self)
             ):
@@ -580,7 +593,10 @@ class ExceptionVariable(VariableTracker):
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
             if istype(attr, ConstantVariable):
-                assert attr.value in (True, False, None), attr
+                if attr.value not in (True, False, None):
+                    raise AssertionError(
+                        f"attr.value must be True, False, or None, got {attr}"
+                    )
             else:
                 codegen.dup_top()
                 codegen(attr)
@@ -606,14 +622,18 @@ class ExceptionVariable(VariableTracker):
             val = args[1]
             if name == "__context__":
                 # Constant can be either an Exceptior or None
-                assert val.is_constant_none() or isinstance(
-                    val,
-                    (
-                        variables.ExceptionVariable,
-                        variables.UserDefinedExceptionClassVariable,
-                        variables.UserDefinedExceptionObjectVariable,
-                    ),
-                ), f"{val} is not a valid exception context"
+                if not (
+                    val.is_constant_none()
+                    or isinstance(
+                        val,
+                        (
+                            variables.ExceptionVariable,
+                            variables.UserDefinedExceptionClassVariable,
+                            variables.UserDefinedExceptionObjectVariable,
+                        ),
+                    )
+                ):
+                    raise AssertionError(f"{val} is not a valid exception context")
                 self.set_context(val)
             elif name == "__cause__":
                 if val.is_constant_none() or isinstance(
@@ -742,7 +762,8 @@ class ComptimeVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from ..comptime import comptime
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError("ComptimeVariable requires a source")
         # To support the comptime.print_graph convenience accessors
         return VariableTracker.build(
             tx, getattr(comptime, name), source=AttrSource(self.source, name)
@@ -1036,10 +1057,17 @@ class AutogradFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         fn = self.fn_cls.backward
-        # type: ignore[attr-defined]
-        assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
-        assert isinstance(fn, types.FunctionType)
-        assert self.source is not None
+        if (
+            type(args[0].value)  # type: ignore[attr-defined]
+            is not torch._dynamo.external_utils.FakeBackwardCFunction
+        ):
+            raise AssertionError(
+                f"Expected FakeBackwardCFunction, got {type(args[0].value)}"
+            )
+        if not isinstance(fn, types.FunctionType):
+            raise AssertionError(f"Expected FunctionType, got {type(fn)}")
+        if self.source is None:
+            raise AssertionError("AutogradFunctionVariable requires a source")
         fn_source = AttrSource(self.source, "backward")
         fn_vt = VariableTracker.build(tx, fn, source=fn_source, realize=True)
         return fn_vt.call_function(tx, args, kwargs)
@@ -1089,7 +1117,8 @@ class AutogradFunctionVariable(VariableTracker):
             if isinstance(obj, staticmethod):
                 func = obj.__get__(self.fn_cls)
                 traced = trace_rules.lookup(func)
-                assert traced is not None
+                if traced is None:
+                    raise AssertionError(f"trace_rules.lookup returned None for {func}")
                 if source is not None:
                     return (
                         # type: ignore[attr-defined]
@@ -1225,7 +1254,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                     "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`.",
                 ],
             )
-        assert self.saved_tensors is not None
+        if self.saved_tensors is None:
+            raise AssertionError(
+                "saved_tensors must be initialized before save_for_backward"
+            )
         if not self.inference:
             if kwargs or not self.source:
                 raise_type_error(
@@ -1281,9 +1313,10 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph or tx.error_on_graph_break, (
-                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
-                )
+                if not (tx.one_graph or tx.error_on_graph_break):
+                    raise AssertionError(
+                        "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                    )
                 # queue_callback is a method-wrapper, no need to insert a guard.
                 fn_vt = VariableTracker.build(
                     tx,
@@ -1345,8 +1378,10 @@ class GetAttrVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(obj, VariableTracker)
-        assert isinstance(name, str)
+        if not isinstance(obj, VariableTracker):
+            raise AssertionError(f"obj must be a VariableTracker, got {type(obj)}")
+        if not isinstance(name, str):
+            raise AssertionError(f"name must be a str, got {type(name)}")
         self.obj = obj
         self.name = name
         self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
@@ -1779,13 +1814,27 @@ class NumpyVariable(VariableTracker):
     @classmethod
     def can_constant_fold_through(cls, fn: types.FunctionType) -> bool:
         mod = fn.__module__.split(".")
-        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        if len(mod) < 2:
+            raise AssertionError(
+                f"Expected module path with at least 2 parts, got {mod}"
+            )
+        if mod[:2] != ["torch", "_numpy"]:
+            raise AssertionError(
+                f"Expected torch._numpy module, got {'.'.join(mod[:2])}"
+            )
         return fn in cls.constant_fold_functions
 
     @classmethod
     def get_constant_collection_for_func(cls, fn: types.FunctionType) -> Any:
         mod = fn.__module__.split(".")
-        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        if len(mod) < 2:
+            raise AssertionError(
+                f"Expected module path with at least 2 parts, got {mod}"
+            )
+        if mod[:2] != ["torch", "_numpy"]:
+            raise AssertionError(
+                f"Expected torch._numpy module, got {'.'.join(mod[:2])}"
+            )
         return np_constant_collections_map.get(fn)
 
     def call_function(
@@ -1820,7 +1869,10 @@ class NumpyVariable(VariableTracker):
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
-        assert func is not None
+        if func is None:
+            raise AssertionError(
+                f"Could not find torch._numpy equivalent for {self.value}"
+            )
         if (
             collection_variable_typ := self.get_constant_collection_for_func(func)
         ) is not None:
@@ -1989,7 +2041,10 @@ class StringFormatVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(format_string, str)
+        if not isinstance(format_string, str):
+            raise AssertionError(
+                f"format_string must be a str, got {type(format_string)}"
+            )
         self.format_string = format_string
         self.sym_args = sym_args
         self.sym_kwargs = sym_kwargs
@@ -2099,7 +2154,10 @@ class DebuggingVariable(VariableTracker):
         return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "DebugLocalVariable requires a source for reconstruction"
+            )
         return self.source.reconstruct(codegen)
 
     @staticmethod
@@ -2283,7 +2341,8 @@ class TorchVersionVariable(ConstantLikeVariable):
 
     def __init__(self, **kwargs: Any) -> None:
         kwargs.setdefault("value", torch.__version__)
-        assert kwargs["value"] is torch.__version__
+        if kwargs["value"] is not torch.__version__:
+            raise AssertionError("TorchVersionVariable value must be torch.__version__")
         super().__init__(**kwargs)
 
 
@@ -2364,7 +2423,10 @@ class RandomVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         if rand is not None:
-            assert self.is_supported_random_obj(rand)
+            if not self.is_supported_random_obj(rand):
+                raise AssertionError(
+                    "Unsupported random.Random object with overridden methods"
+                )
             self.random = random.Random()
             self.random.setstate(rand.getstate())
         else:
@@ -2398,11 +2460,18 @@ class RandomVariable(VariableTracker):
 
     @staticmethod
     def check_state(state: tuple[int, tuple[int, ...], float | None]) -> None:
-        assert type(state) is tuple
-        assert type(state[0]) is int
-        assert type(state[1]) is tuple
-        assert all(type(x) is int for x in state[1])
-        assert state[2] is None or type(state[2]) is float
+        if type(state) is not tuple:
+            raise AssertionError(f"state must be a tuple, got {type(state)}")
+        if type(state[0]) is not int:
+            raise AssertionError(f"state[0] must be an int, got {type(state[0])}")
+        if type(state[1]) is not tuple:
+            raise AssertionError(f"state[1] must be a tuple, got {type(state[1])}")
+        if not all(type(x) is int for x in state[1]):
+            raise AssertionError("all elements of state[1] must be int")
+        if state[2] is not None and type(state[2]) is not float:
+            raise AssertionError(
+                f"state[2] must be None or float, got {type(state[2])}"
+            )
 
     @staticmethod
     def wrap_state(state: tuple[int, tuple[int, ...], float | None]) -> TupleVariable:
@@ -2495,7 +2564,8 @@ class WeakRefVariable(VariableTracker):
         source: Source | None,
         **options: Any,
     ) -> "WeakRefVariable":
-        assert source is not None
+        if source is None:
+            raise AssertionError("WeakRefVariable.build requires a source")
         callback = weakref_value.__callback__
         callback_source = source and AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)
