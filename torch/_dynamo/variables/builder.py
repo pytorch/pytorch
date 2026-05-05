@@ -1569,10 +1569,24 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            return UserDefinedClassVariable(
+            result = UserDefinedClassVariable(
                 value,
                 source=self.source,
             )
+
+            # Only track user-defined classes for mutation, not torch
+            # internals. Tracking torch classes (e.g. RemovableHandle) causes
+            # side effects like next_id increments to be replayed incorrectly,
+            # and source chains through C-level descriptors break guard
+            # evaluation.
+            mod = getattr(value, "__module__", None) or ""
+            if not mod.startswith(("torch.", "torch_")):
+                if value not in self.tx.output.side_effects:
+                    return self.tx.output.side_effects.track_object_existing(
+                        value, result
+                    )
+            return result
+
         elif type(value) is torch._C.Generator:
             # Generator is registered as an opaque reference type for make_fx
             # tracing, but in dynamo we handle it as a regular object so that
@@ -3944,14 +3958,19 @@ def _automatic_dynamic(
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint, is_nested_int
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
+
+        def _classify_symint(s: Any) -> DimDynamic:
+            if not isinstance(s, SymInt):
+                return DimDynamic.STATIC
+            if not has_guarding_hint(s):
+                return DimDynamic.UNBACKED
+            return DimDynamic.DYNAMIC
+
         return StatefulSymbolicContext(
-            dynamic_sizes=[
-                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-                for s in e.size()
-            ],
+            dynamic_sizes=[_classify_symint(s) for s in e.size()],
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
