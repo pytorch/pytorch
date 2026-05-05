@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -15,24 +16,15 @@
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
-#include <ATen/ops/cauchy_native.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/cumsum.h>
 #include <ATen/ops/div.h>
-#include <ATen/ops/exponential_native.h>
-#include <ATen/ops/full_like.h>
-#include <ATen/ops/geometric_native.h>
-#include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
-#include <ATen/ops/normal_native.h>
 #include <ATen/ops/rand.h>
-#include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
 #include <ATen/ops/randperm_native.h>
 #include <ATen/ops/searchsorted.h>
 #include <ATen/ops/topk.h>
-#include <ATen/ops/uniform_native.h>
-#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -183,255 +175,29 @@ Tensor& random_mps_impl(Tensor& self,
   return self;
 }
 
-static Tensor& normal_mps_impl(Tensor& self,
-                               double mean_s,
-                               double std_s,
-                               const std::optional<Tensor>& mean_opt,
-                               const std::optional<Tensor>& std_opt,
-                               std::optional<Generator> gen,
-                               std::string op_name) {
-  const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
-  const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
-
-  TORCH_CHECK(std_s >= 0.0, op_name, " expects std >= 0.0, but found std ", std_s);
-  if (std_t.defined()) {
-    TORCH_CHECK(!std_t.is_complex(), op_name, " expects standard deviation to be non-complex");
-    if (mean_t.defined())
-      TORCH_CHECK(mean_t.numel() == std_t.numel(), op_name, ": mean and std must have same number of elements")
-  }
-  TORCH_CHECK(!(mean_t.defined() && mean_t.is_complex()), op_name, " expects mean to be non-complex");
-
-  RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* resultTensor = randomTensor;
-
-    if (std_t.defined()) {
-      cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, std_t);
-      resultTensor = [mpsGraph multiplicationWithPrimaryTensor:randomTensor
-                                               secondaryTensor:cachedGraph->stdTensor
-                                                          name:nil];
-    }
-    if (mean_t.defined()) {
-      cachedGraph->meanTensor = mpsGraphRankedPlaceHolder(mpsGraph, mean_t);
-      return [mpsGraph additionWithPrimaryTensor:resultTensor secondaryTensor:cachedGraph->meanTensor name:nil];
-    }
-    return resultTensor;
-  };
-  if (c10::isComplexType(self.scalar_type())) {
-    auto real_view = at::view_as_real(self);
-    random_mps_impl<double>(real_view,
-                            mean_s,
-                            std_s,
-                            mean_opt,
-                            std_opt,
-                            MPSGraphRandomDistributionNormal,
-                            gen,
-                            op_name + getTensorsStringKey({mean_t, std_t}),
-                            random_op_block);
-    return self;
-  }
-  return random_mps_impl<double>(self,
-                                 mean_s,
-                                 std_s,
-                                 mean_opt,
-                                 std_opt,
-                                 MPSGraphRandomDistributionNormal,
-                                 gen,
-                                 op_name + getTensorsStringKey({mean_t, std_t}),
-                                 random_op_block);
-}
-
-static Tensor& bernoulli_mps_impl(Tensor& self,
-                                  const Tensor& prob_t,
-                                  std::optional<Generator> gen,
-                                  std::string op_name) {
-  TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
-              op_name,
-              ": probability and self tensor should be of the same shape")
-
-  RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob_t);
-    return [mpsGraph lessThanWithPrimaryTensor:randomTensor
-                               secondaryTensor:castMPSTensor(mpsGraph, cachedGraph->stdTensor, [randomTensor dataType])
-                                          name:nil];
-  };
-  // Bernoulli generates binary output so we use bool type
-  return mps::random_mps_impl<bool>(self,
-                                    0.0,
-                                    1.0,
-                                    std::nullopt,
-                                    prob_t,
-                                    MPSGraphRandomDistributionUniform,
-                                    gen,
-                                    op_name + getTensorsStringKey({prob_t}),
-                                    random_op_block);
-}
-
 } // namespace mps
-
-Tensor& uniform_mps_(Tensor& self, double from, double to, std::optional<Generator> gen) {
-  auto scalar_type = self.scalar_type();
-  if (scalar_type == ScalarType::ComplexFloat)
-    scalar_type = ScalarType::Float;
-  else if (scalar_type == ScalarType::ComplexHalf)
-    scalar_type = ScalarType::Half;
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, scalar_type, "check_uniform_bounds", [&] {
-    const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
-    const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-    TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
-    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
-                "uniform_ expects to-from <= std::numeric_limits<",
-                toString(scalar_type),
-                ">::max(), but found to=",
-                to,
-                " and from=",
-                from,
-                " which result in to-from to exceed the limit");
-    from = std::min(std::max(from, min), max);
-    to = std::max(std::min(to, max), min);
-  });
-
-  if (c10::isComplexType(self.scalar_type())) {
-    auto real_view = at::view_as_real(self);
-    mps::random_mps_impl<double>(
-        real_view, from, to, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
-    return self;
-  }
-  return mps::random_mps_impl<double>(
-      self, from, to, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
-}
-
-Tensor& normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
-  return mps::normal_mps_impl(self, mean, std, std::nullopt, std::nullopt, gen, "normal");
-}
-
-Tensor normal_mps(const Tensor& mean, double std, std::optional<Generator> gen) {
-  Tensor self = at::empty(mean.sizes(), mean.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-  return mps::normal_mps_impl(self, 0.0, std, mean, std::nullopt, gen, "normal");
-}
-
-Tensor normal_mps(double mean, const Tensor& std, std::optional<Generator> gen) {
-  Tensor self = at::empty(std.sizes(), std.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-  // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
-  // multiply/add ops in random computation. So we create a mean tensor instead.
-  Tensor mean_t = at::full_like(self, Scalar(mean));
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
-}
-
-Tensor normal_mps(const Tensor& mean, const Tensor& std, std::optional<Generator> gen) {
-  auto shape = at::infer_size(mean.sizes(), std.sizes());
-  Tensor self = at::empty(shape, mean.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
-}
-
-Tensor& normal_mps_out(const Tensor& mean, double std, std::optional<Generator> gen, Tensor& self) {
-  return mps::normal_mps_impl(self, 0.0, std, mean, std::nullopt, gen, "normal");
-}
-
-Tensor& normal_mps_out(double mean, const Tensor& std, std::optional<Generator> gen, Tensor& self) {
-  // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
-  // multiply/add ops in random computation. So we create a mean tensor instead.
-  Tensor mean_t = at::full_like(self, Scalar(mean));
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
-}
-
-Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, std::optional<Generator> gen, Tensor& self) {
-  TORCH_CHECK(mean.numel() == std.numel(), "normal_mps_out: mean and std must have same number of elements")
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
-}
-
-Tensor& bernoulli_out_mps(const Tensor& p_, std::optional<Generator> gen, Tensor& result) {
-  result.resize_(p_.sizes());
-  return mps::bernoulli_mps_impl(result, p_, gen, __func__);
-}
-
-Tensor& bernoulli_mps_(Tensor& self, double p, std::optional<Generator> gen) {
-  TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
-  Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
-  return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
-}
-
-Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
-  return mps::bernoulli_mps_impl(self, p_, gen, __func__);
-}
-
-// random_.from
-Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> gen) {
-  auto input_dtype = self.scalar_type();
-  int64_t to = 0;
-
-  if (to_opt.has_value()) {
-    // [from, to)
-    to = *to_opt;
-    TORCH_CHECK(from < to, "random_mps_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
-    if (isFloatingType(input_dtype)) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_dtype, "random_update_from_to", [&] {
-        from = templates::update_from<scalar_t>(from);
-        to = templates::update_to<scalar_t>(to);
-        TORCH_CHECK(from < to,
-                    "random_mps_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=",
-                    from,
-                    " >= to=",
-                    to);
-      });
-      templates::check_from_to_in_range(from, to - 1, self.dtype());
-    }
-  } else if (from != std::numeric_limits<int64_t>::lowest()) {
-    // [from, std::numeric_limits<int64_t>::max()]
-    if (isFloatingType(input_dtype)) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(
-          at::ScalarType::Half, at::ScalarType::BFloat16, input_dtype, "random_from_to_range_calc", [&] {
-            constexpr int64_t scalar_t_max = static_cast<int64_t>(1) << std::numeric_limits<scalar_t>::digits;
-            to = scalar_t_max > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max()
-                                                                    : static_cast<int64_t>(scalar_t_max);
-            from = templates::update_from<scalar_t>(from);
-            TORCH_CHECK(
-                from < to,
-                "random_mps_ expects 'from' casted to dtype to be less than or equal to 'to' casted to dtype, but got from=",
-                from,
-                " > to=",
-                to);
-          });
-    } else if (isIntegralType(input_dtype, /*includeBool=*/true)) {
-      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, input_dtype, "random_from_to_range_calc", [&] {
-        if constexpr (std::is_same_v<scalar_t, int64_t>) {
-          to = std::numeric_limits<int64_t>::max();
-        } else {
-          to = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
-        }
-      });
-    } else {
-      TORCH_CHECK(false, "random_mps_ handles only integral, floating-point and boolean types");
-    }
-    templates::check_from_to_in_range(from, to - 1, self.dtype());
-  } else {
-    // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
-    // range = 2^64
-
-    // TODO - should we error out in case max is beyond MPS limit (INT32_MAX)?
-    TORCH_CHECK(false, "random_mps_ currently does not handle the lowest() -> max() range");
-  }
-
-  return mps::random_mps_impl<int64_t>(
-      self, from, to - 1, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
-}
-
-Tensor& random_mps_(Tensor& self, int64_t to, std::optional<Generator> gen) {
-  return random_mps_(self, 0, to, gen);
-}
-
-Tensor& random_mps_(Tensor& self, std::optional<Generator> gen) {
-  return random_mps_(self, 0, std::nullopt, gen);
-}
 
 static Tensor& distribution_kernel_mps_impl(Tensor& self,
                                             double param1,
                                             double param2,
                                             const std::string& kernel_name,
-                                            int64_t randoms_per_element,
+                                            int64_t randoms_per_thread,
                                             std::optional<Generator> gen,
-                                            int64_t elements_per_thread = 1) {
+                                            int64_t elements_per_thread = 4);
+
+// `randoms_per_thread` is the number of Philox-4x32-10 calls each thread
+// makes; `elements_per_thread` is how many output elements that thread
+// writes. The host advances the generator offset by exactly the number of
+// philox indices the kernel consumes (`randoms_per_thread * threads`),
+// rather than by `randoms_per_element * numel` as before, which could
+// over-advance by 4x for kernels that pack 4 elements per thread.
+static Tensor& distribution_kernel_mps_impl(Tensor& self,
+                                            double param1,
+                                            double param2,
+                                            const std::string& kernel_name,
+                                            int64_t randoms_per_thread,
+                                            std::optional<Generator> gen,
+                                            int64_t elements_per_thread) {
   if (self.numel() == 0) {
     return self;
   }
@@ -442,6 +208,7 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
   auto stream = getCurrentMPSStream();
   const auto needs_copy = !self.is_contiguous();
   auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+  const int64_t threads = (output.numel() + elements_per_thread - 1) / elements_per_thread;
 
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc(kernel_name + "_" + scalarToMetalTypeString(output));
@@ -453,24 +220,20 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
       std::lock_guard<std::mutex> lock(mps_gen->mutex_);
       seed = static_cast<int64_t>(mps_gen->current_seed());
       base_offset = static_cast<int64_t>(mps_gen->get_offset());
-      mps_gen->set_offset(base_offset + randoms_per_element * output.numel());
+      mps_gen->set_offset(base_offset + randoms_per_thread * threads);
     }
 
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
+        auto numel = static_cast<uint32_t>(output.numel());
         mtl_setArgs(computeEncoder,
                     output,
                     std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
                     std::array<long, 2>{seed, base_offset});
-        if (elements_per_thread > 1) {
-          auto numel = static_cast<uint32_t>(output.numel());
-          mtl_setBytes(computeEncoder, numel, 3);
-          mtl_dispatch1DJob(computeEncoder, pso, (numel + elements_per_thread - 1) / elements_per_thread);
-        } else {
-          mtl_dispatch1DJob(computeEncoder, pso, output.numel());
-        }
+        mtl_setBytes(computeEncoder, numel, 3);
+        mtl_dispatch1DJob(computeEncoder, pso, threads);
       }
     });
   }
@@ -482,26 +245,182 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
   return self;
 }
 
-Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
-  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
-  return distribution_kernel_mps_impl(self, lambda, 0.0, "exponential", 1, gen, /*elements_per_thread=*/4);
+// Helpers extract the (writable) tensor backing a TensorIteratorBase /
+// TensorBase reference. The shared CPU/CUDA `*_impl_` templates take care of
+// argument validation (bounds, complex via `view_as_real`, broadcasting tensor
+// mean/std into the output) before dispatching here.
+static Tensor& output_tensor_from_iter(TensorIteratorBase& iter) {
+  return const_cast<Tensor&>(static_cast<const Tensor&>(iter.tensor(0)));
 }
 
-Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
-  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
-  return distribution_kernel_mps_impl(self, median, sigma, "cauchy", 1, gen);
+static Tensor& output_tensor_from_base(const TensorBase& self) {
+  return const_cast<Tensor&>(static_cast<const Tensor&>(self));
 }
 
-Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
-  return distribution_kernel_mps_impl(self, mean, std, "log_normal", 2, gen);
+// Tensor-p Bernoulli: dispatches the Metal `bernoulli_tensor` kernel with a
+// flat float32 probability buffer matching `self.numel()`.
+static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
+  if (self.numel() == 0) {
+    return self;
+  }
+  TORCH_CHECK(p_.is_same_size(self) || p_.dim() == 0,
+              "bernoulli_mps_: probability and self tensor should be of the same shape");
+
+  using namespace mps;
+
+  // 0-dim p is a scalar — go through the scalar path.
+  if (p_.dim() == 0) {
+    double p_val = p_.item<double>();
+    TORCH_CHECK(0.0 <= p_val && p_val <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p_val);
+    return distribution_kernel_mps_impl(self, p_val, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+  }
+
+  // Both `to` and `contiguous` short-circuit when no work is needed.
+  auto p_float = p_.to(kFloat).contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto needs_copy = !self.is_contiguous();
+  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("bernoulli_tensor_" + scalarToMetalTypeString(output));
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + output.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        auto numel = static_cast<uint32_t>(output.numel());
+        mtl_setArgs(computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset});
+        mtl_setBytes(computeEncoder, numel, 3);
+        mtl_dispatch1DJob(computeEncoder, pso, (numel + 3) / 4);
+      }
+    });
+  }
+
+  if (needs_copy) {
+    self.copy_(output);
+  }
+  return self;
 }
 
-Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
-  TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
-  double log_one_minus_p = std::log1p(-p);
-  return distribution_kernel_mps_impl(self, log_one_minus_p, 0.0, "geometric", 1, gen);
+// Stub-style entry points so MPS shares the dispatch template with CPU/CUDA.
+// `const TensorBase&` mirrors the stub signature; the underlying storage is
+// still the inplace target (TensorIterator uses the same idiom).
+static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
+  // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  distribution_kernel_mps_impl(self_t, p, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
 }
+
+static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
+  const Tensor& p_t = static_cast<const Tensor&>(p_);
+  bernoulli_tensor_mps_impl(self_t, p_t, gen);
+}
+
+REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
+REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
+
+static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
+  Tensor& self = output_tensor_from_iter(iter);
+  distribution_kernel_mps_impl(self, from, to, "uniform_dist", 1, gen);
+}
+
+static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {
+  Tensor& self_t = output_tensor_from_base(self);
+  distribution_kernel_mps_impl(self_t, mean, std, "normal", 1, gen);
+}
+
+static void cauchy_kernel_mps(TensorIteratorBase& iter, double median, double sigma, std::optional<Generator> gen) {
+  Tensor& self = output_tensor_from_iter(iter);
+  distribution_kernel_mps_impl(self, median, sigma, "cauchy", 1, gen);
+}
+
+static void exponential_kernel_mps(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
+  Tensor& self = output_tensor_from_iter(iter);
+  distribution_kernel_mps_impl(self, lambda, 0.0, "exponential", 1, gen, /*elements_per_thread=*/4);
+}
+
+static void log_normal_kernel_mps(TensorIteratorBase& iter, double mean, double std, std::optional<Generator> gen) {
+  Tensor& self = output_tensor_from_iter(iter);
+  distribution_kernel_mps_impl(self, mean, std, "log_normal", 1, gen);
+}
+
+static void geometric_kernel_mps(TensorIteratorBase& iter, double p, std::optional<Generator> gen) {
+  // `geometric_impl_` already enforces 0 < p < 1; we pass `log1p(-p)` so the
+  // kernel can apply the inverse-CDF (`floor(log(u) / log1p(-p))`) directly.
+  Tensor& self = output_tensor_from_iter(iter);
+  distribution_kernel_mps_impl(self, std::log1p(-p), 0.0, "geometric", 1, gen);
+}
+
+// Implements both `random_stub` (full dtype range) and the `from`-only branches
+// of `random_from_to_stub`. Floating dtypes use the [0, 2^digits) range; integer
+// dtypes the full numeric range. Values are produced by `random_int`, which
+// samples a uniform float and truncates - precision is therefore limited to the
+// 24-bit float mantissa for ranges that exceed it (this matches the previous
+// MPS behavior).
+static void random_kernel_mps_impl(TensorIteratorBase& iter, int64_t from, int64_t to, std::optional<Generator> gen) {
+  Tensor& self = output_tensor_from_iter(iter);
+  const double low = static_cast<double>(from);
+  const double range = static_cast<double>(to - from);
+  distribution_kernel_mps_impl(self, low, range, "random_int", 1, gen);
+}
+
+static void random_from_to_kernel_mps(TensorIteratorBase& iter,
+                                      uint64_t range,
+                                      int64_t base,
+                                      std::optional<Generator> gen) {
+  // `range` is `to - from` (exclusive `to`); the int64 cast is safe here because
+  // `random_from_to_impl` clamps `to` to `int64_t::max()` before invoking us.
+  random_kernel_mps_impl(iter, base, base + static_cast<int64_t>(range), gen);
+}
+
+static void random_kernel_mps(TensorIteratorBase& iter, std::optional<Generator> gen) {
+  int64_t to = 0;
+  const auto dtype = iter.dtype();
+  if (isFloatingType(dtype)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "random_kernel_mps_range_calc", [&] {
+      constexpr int64_t scalar_t_max = static_cast<int64_t>(1) << std::numeric_limits<scalar_t>::digits;
+      to = scalar_t_max > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : scalar_t_max;
+    });
+  } else if (isIntegralType(dtype, /*includeBool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, dtype, "random_kernel_mps_range_calc", [&] {
+      if constexpr (std::is_same_v<scalar_t, int64_t>) {
+        to = std::numeric_limits<int64_t>::max();
+      } else {
+        to = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
+      }
+    });
+  } else {
+    TORCH_CHECK(false, "random_mps handles only integral, floating-point and boolean types");
+  }
+  random_kernel_mps_impl(iter, 0, to, gen);
+}
+
+static void random_full_64_bits_range_kernel_mps(TensorIteratorBase&, std::optional<Generator>) {
+  // TODO: support [int64_t::min(), int64_t::max()] in the random_int kernel.
+  TORCH_CHECK(false, "random_mps does not handle the lowest() -> max() range");
+}
+
+REGISTER_MPS_DISPATCH(uniform_stub, &uniform_kernel_mps)
+REGISTER_MPS_DISPATCH(normal_stub, &normal_kernel_mps)
+REGISTER_MPS_DISPATCH(cauchy_stub, &cauchy_kernel_mps)
+REGISTER_MPS_DISPATCH(exponential_stub, &exponential_kernel_mps)
+REGISTER_MPS_DISPATCH(log_normal_stub, &log_normal_kernel_mps)
+REGISTER_MPS_DISPATCH(geometric_stub, &geometric_kernel_mps)
+REGISTER_MPS_DISPATCH(random_stub, &random_kernel_mps)
+REGISTER_MPS_DISPATCH(random_from_to_stub, &random_from_to_kernel_mps)
+REGISTER_MPS_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel_mps)
 
 Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
   if (alpha.numel() == 0) {
