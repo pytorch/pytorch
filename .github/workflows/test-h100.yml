@@ -36,14 +36,14 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-cuda12_8-py3_10-gcc11-sm90-build:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+  linux-jammy-cuda13_0-py3_10-gcc11-sm90-build:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm90
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -51,25 +51,25 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-sm90-test:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+  linux-jammy-cuda13_0-py3_10-gcc11-sm90-test:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+      - linux-jammy-cuda13_0-py3_10-gcc11-sm90-build
     with:
-      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test:
-    name: linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test
+  linux-jammy-cuda13_0-py3_10-gcc11-sm90-FA3-ABI-stable-test:
+    name: linux-jammy-cuda13_0-py3_10-gcc11-sm90-FA3-ABI-stable-test
     uses: ./.github/workflows/_linux-test-stable-fa3.yml
     needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+      - linux-jammy-cuda13_0-py3_10-gcc11-sm90-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
       timeout-minutes: 30
       s3-bucket: gha-artifacts
     secrets: inherit
