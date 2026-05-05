@@ -18,7 +18,7 @@ import queue
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar, overload
 from typing_extensions import Self
 
 import torch
@@ -54,12 +54,14 @@ __all__ = [
 
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
-_worker_init_fn_t = Callable[[int], None]
 
-# Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
-# type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
-# See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[list[_T]], Any]
+
+# An additional covariant TypeVariable that is only used as the datatype returned by the collator
+# Since dataloaders need two covariant types to be properly defined (dataset sample & training batch),
+#  a second typevar had to be defined.
+_T_Collated_co = TypeVar("_T_Collated_co", covariant=True)
+_worker_init_fn_t = Callable[[int], None]
+_collate_fn_t = Callable[[list[_T]], _T_Collated_co]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -139,7 +141,7 @@ def _share_dist_seed(generator, pg):
     return _shared_seed.item()
 
 
-class DataLoader(Generic[_T_co]):
+class DataLoader(Generic[_T_co, _T_Collated_co]):
     r"""
     Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
@@ -242,9 +244,18 @@ class DataLoader(Generic[_T_co]):
     sampler: Sampler | Iterable
     pin_memory_device: str
     prefetch_factor: int | None
-    _iterator: _BaseDataLoaderIter | None
+    _iterator: _BaseDataLoaderIter[_T_Collated_co] | None
     __initialized = False
 
+    # __init__ is defined with two extras:
+    # - The first one is the specific case where the user provides `collate_fn`, in which case we can determine its _T_Collated_co
+    # - The second one is the "default" case where nothing is provided.
+    #
+    # As proposed initially in https://github.com/pytorch/pytorch/issues/179707, one could define more overloads for the __init__ with the default cases,
+    #  depending on known common dataset types, but that would make this file unreadable. If the need arises, a dataloader.pyi would be more suitable,
+    #  as it would not worsen the logic's maintenance.
+
+    @overload  # collate_fn provided
     def __init__(
         self,
         dataset: Dataset[_T_co],
@@ -253,7 +264,55 @@ class DataLoader(Generic[_T_co]):
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: _collate_fn_t | None = None,
+        collate_fn: _collate_fn_t[_T_co, _T_Collated_co] = ...,
+        pin_memory: bool = False,
+        drop_last: bool = False,
+        timeout: float = 0,
+        worker_init_fn: _worker_init_fn_t | None = None,
+        multiprocessing_context=None,
+        generator=None,
+        *,
+        prefetch_factor: int | None = None,
+        persistent_workers: bool = False,
+        pin_memory_device: str = "",
+        in_order: bool = True,
+    ):
+        ...
+
+    @overload  # collate_fn not provided
+    def __init__(
+        self: "DataLoader[_T_co, Any]",
+        dataset: Dataset[_T_co],
+        batch_size: int | None = 1,
+        shuffle: bool | None = None,
+        sampler: Sampler | Iterable | None = None,
+        batch_sampler: Sampler[list] | Iterable[list] | None = None,
+        num_workers: int = 0,
+        collate_fn: None = None,
+        pin_memory: bool = False,
+        drop_last: bool = False,
+        timeout: float = 0,
+        worker_init_fn: _worker_init_fn_t | None = None,
+        multiprocessing_context=None,
+        generator=None,
+        *,
+        prefetch_factor: int | None = None,
+        persistent_workers: bool = False,
+        pin_memory_device: str = "",
+        in_order: bool = True,
+    ):
+        ...
+
+    # implementation
+    def __init__(
+        self,
+        dataset: Dataset[_T_co],
+        batch_size: int | None = 1,
+        shuffle: bool | None = None,
+        sampler: Sampler | Iterable | None = None,
+        batch_sampler: Sampler[list] | Iterable[list] | None = None,
+        num_workers: int = 0,
+        collate_fn: _collate_fn_t[_T_co, _T_Collated_co] | None = None,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
@@ -423,7 +482,7 @@ class DataLoader(Generic[_T_co]):
 
         self.check_worker_number_rationality()
 
-    def _get_iterator(self) -> _BaseDataLoaderIter:
+    def _get_iterator(self) -> _BaseDataLoaderIter[_T_Collated_co]:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -482,7 +541,7 @@ class DataLoader(Generic[_T_co]):
 
         super().__setattr__(attr, val)
 
-    def __iter__(self) -> _BaseDataLoaderIter:
+    def __iter__(self) -> _BaseDataLoaderIter[_T_Collated_co]:
         # When using a single worker the returned iterator should be
         # created every time to avoid resetting its state
         # However, in the case of a multiple workers iterator
@@ -616,8 +675,8 @@ class DataLoader(Generic[_T_co]):
             )
 
 
-class _BaseDataLoaderIter:
-    def __init__(self, loader: DataLoader) -> None:
+class _BaseDataLoaderIter(Generic[_T_Collated_co]):
+    def __init__(self, loader: DataLoader[Any, _T_Collated_co]) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
         self._pg = None
@@ -710,7 +769,7 @@ class _BaseDataLoaderIter:
     def _next_data(self) -> NoReturn:
         raise NotImplementedError
 
-    def __next__(self) -> Any:
+    def __next__(self) -> _T_Collated_co:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
                 # TODO(https://github.com/pytorch/pytorch/issues/76750)
@@ -747,7 +806,7 @@ class _BaseDataLoaderIter:
         raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
 
 
-class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
+class _SingleProcessDataLoaderIter(_BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]):
     def __init__(self, loader) -> None:
         super().__init__(loader)
         if self._timeout != 0:
@@ -781,7 +840,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         return data
 
 
-class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
+class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
