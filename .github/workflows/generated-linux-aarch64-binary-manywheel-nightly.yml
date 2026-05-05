@@ -63,6 +63,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_10-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.10"
             desired_cuda: "cu126"
@@ -71,6 +72,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_10-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu130"
@@ -79,6 +81,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_10-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu132"
@@ -87,6 +90,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_10-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cpu"
@@ -95,6 +99,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_11-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "cu126"
@@ -103,6 +108,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_11-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu130"
@@ -111,6 +117,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_11-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu132"
@@ -119,6 +126,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_11-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cpu"
@@ -127,6 +135,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_12-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
             desired_cuda: "cu126"
@@ -135,6 +144,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_12-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu130"
@@ -143,6 +153,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_12-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu132"
@@ -151,6 +162,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_12-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cpu"
@@ -159,6 +171,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_13-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
             desired_cuda: "cu126"
@@ -167,6 +180,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_13-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu130"
@@ -175,6 +189,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_13-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu132"
@@ -183,6 +198,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "cpu"
@@ -191,6 +207,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_13t-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13t"
             desired_cuda: "cu126"
@@ -199,6 +216,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_13t-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "cu130"
@@ -207,6 +225,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_13t-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13t"
             desired_cuda: "cu132"
@@ -215,6 +234,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_13t-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cpu"
@@ -223,6 +243,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_14-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
             desired_cuda: "cu126"
@@ -231,6 +252,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu130"
@@ -239,6 +261,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu132"
@@ -247,6 +270,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
@@ -255,6 +279,7 @@ jobs:
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
             build_name: "manywheel-py3_14t-cpu-aarch64"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
             desired_cuda: "cu126"
@@ -263,6 +288,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda12.6"
             build_name: "manywheel-py3_14t-cuda-aarch64-12_6"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu130"
@@ -271,6 +297,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.0"
             build_name: "manywheel-py3_14t-cuda-aarch64-13_0"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu132"
@@ -279,6 +306,7 @@ jobs:
             docker_image: "manylinuxaarch64-builder"
             docker_image_tag_prefix: "cuda13.2"
             build_name: "manywheel-py3_14t-cuda-aarch64-13_2"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     with:
       PYTORCH_ROOT: /pytorch
@@ -294,7 +322,7 @@ jobs:
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
-      timeout-minutes: 420
+      timeout-minutes: ${{ matrix.timeout_minutes }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
     secrets:
