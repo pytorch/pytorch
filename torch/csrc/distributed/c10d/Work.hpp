@@ -59,8 +59,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
       int rank = -1,
       OpType opType = OpType::UNKNOWN,
       const char* profilingTitle = nullptr,
-      const std::optional<std::vector<at::Tensor>>& inputTensors =
-          std::nullopt);
+      const std::optional<std::vector<at::Tensor>>& inputTensors = std::nullopt,
+      bool allowProfilingNameOverride = true);
 
   ~Work() override;
 
