@@ -1043,40 +1043,39 @@ class TestSymbolicTracing(TestCase):
 
 
     def test_debug_interpreter(self):
-        import torch.library
-        from torch.library import Library
+        from torch.library import _scoped_library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("foo(Tensor self) -> Tensor")
+        with _scoped_library("foo", "DEF") as foo:
+            foo.define("foo(Tensor self) -> Tensor")
 
-        # Operator where meta and cpu disagree on strides
-        @torch.library.impl(foo, "foo", "CPU")
-        def foo_cpu(x):
-            return x.clone().T
+            # Operator where meta and cpu disagree on strides
+            @torch.library.impl(foo, "foo", "CPU")
+            def foo_cpu(x):
+                return x.clone().T
 
-        @torch.library.impl(foo, "foo", "Meta")
-        def foo_meta(x):
-            return x.clone()
+            @torch.library.impl(foo, "foo", "Meta")
+            def foo_meta(x):
+                return x.clone()
 
-        def f(x):
-            return torch.ops.foo.foo.default(x)
+            def f(x):
+                return torch.ops.foo.foo.default(x)
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
-        from torch._functorch.compilers import DebugInterpreter
+            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+            from torch._functorch.compilers import DebugInterpreter
 
-        interp = DebugInterpreter(gm)
+            interp = DebugInterpreter(gm)
 
-        # input mismatch is caught (indicates guard problem)
-        self.assertRaisesRegex(
-            AssertionError, r"3 != 1",
-            lambda: interp.run(torch.randn(3, 3).T),
-        )
+            # input mismatch is caught (indicates guard problem)
+            self.assertRaisesRegex(
+                AssertionError, r"3 != 1",
+                lambda: interp.run(torch.randn(3, 3).T),
+            )
 
-        # Catch the incorrect meta
-        self.assertRaisesRegex(
-            AssertionError, r"\(3, 1\) != \(1, 3\)",
-            lambda: interp.run(torch.randn(3, 3))
-        )
+            # Catch the incorrect meta
+            self.assertRaisesRegex(
+                AssertionError, r"\(3, 1\) != \(1, 3\)",
+                lambda: interp.run(torch.randn(3, 3))
+            )
 
     def test_int_input(self):
         def f(x, y):

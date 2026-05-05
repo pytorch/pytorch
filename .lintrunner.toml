@@ -1588,6 +1588,26 @@ command = [
 ]
 is_formatter = true
 
+[[linter]]
+code = 'SCOPED_LIBRARY'
+include_patterns = [
+    'test/**/*.py',
+]
+exclude_patterns = [
+    'test/dynamo/cpython/**',
+    'test/test_torchfuzz_repros.py',
+    'test/torch_np/numpy_test/**',
+    'third_party/**',
+    'fb/**',
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/scoped_library_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
 # This linter prevents merge conflicts in csv files in pytorch by enforcing
 # three lines of whitespace between entries such that unless people are modifying
 # the same line, merge conflicts should not arise in git or hg
@@ -1822,14 +1842,31 @@ command = [
 code = 'STABLE_SHIM_USAGE'
 include_patterns = [
     'torch/csrc/stable/**/*.h',
-    # We're including the shim file because this linter writes a shim_function_versions.txt that it reads
-    # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want to
-    # update that file.
+    # We're including shim files because this linter writes a shim_function_versions.txt that it reads
+    # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want
+    # to update that file.
     'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.h',
 ]
 command = [
     'python3',
     'tools/linter/adapters/stable_shim_usage_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'GENERATED_SHIMS_VERSION'
+include_patterns = [
+    'torchgen/aoti/fallback_ops.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
