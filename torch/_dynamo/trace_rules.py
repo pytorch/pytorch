@@ -1705,6 +1705,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
+        "torch._scaled_mm_v2",
         "torch._scaled_grouped_mm",
         "torch._shape_as_tensor",
         "torch._sobol_engine_draw",
@@ -3357,6 +3358,7 @@ BUILTIN_SKIPLIST = (
     copy,
     importlib,
     random,
+    re,
     linecache,
 )
 
@@ -3453,8 +3455,6 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
-    if not config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
@@ -3522,8 +3522,6 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    if not config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # By default, all functions under these modules are skipped.
