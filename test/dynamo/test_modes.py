@@ -879,7 +879,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             torch.set_default_device(device_type)
 
             @torch.compile(fullgraph=True)
-            def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            def with_explicit_device(
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
                 rnd = torch.randint(
                     0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
                 )
