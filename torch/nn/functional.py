@@ -3712,9 +3712,11 @@ class LinearCrossEntropyOptions:
 
     The op loops over ``ceil(num_batches / batch_chunk_size)`` chunks.
     Smaller values reduce peak memory but launch more kernels; the
-    default ``None`` means a single chunk (no actual chunking). If
-    :attr:`chunking_method` is also set and disagrees, its computed
-    value wins and a warning is emitted.
+    default ``None`` means a single chunk (no actual chunking).
+
+    Cannot be combined with :attr:`chunking_method`: if both are set
+    and the heuristic-computed chunk size disagrees with this value, a
+    ``ValueError`` is raised. Pass only one.
     """
 
     chunking_method: str | None = None
@@ -3722,14 +3724,17 @@ class LinearCrossEntropyOptions:
 
     Supported methods:
 
-    - ``"aspect_ratio"`` — picks the chunk size so that each chunk's
-      logits volume ``batch_chunk_size * num_classes`` is roughly the
-      same order as the input volume ``num_batches *
-      in_features``. Suitable when ``num_classes`` is much larger than
-      ``in_features`` (LLM heads).
+    - "aspect_ratio" — sizes each chunk so its ``(batch_chunk_size,
+      num_classes)`` logits buffer uses about the same memory as the
+      full ``(num_batches, in_features)`` input.  Computed as
+      ``batch_chunk_size = next_pow2(ceil(num_batches /
+      ceil(num_classes / in_features)))``.  Suitable when
+      ``num_classes`` is much larger than ``in_features`` (LLM
+      vocabulary heads); reduces to ``next_pow2(num_batches)`` when
+      ``num_classes <= in_features``.
     - ``"aspect_ratio:N"`` for ``N >= 1`` — same heuristic, then
-      divides the chunk size by ``N``. Reduces peak memory roughly by
-      a factor of ``N`` at the cost of more chunks.
+      divides the batch chunk size by ``N``. Reduces peak memory
+      roughly by a factor of ``N`` at the cost of more chunks.
     - ``None`` (default) — use :attr:`batch_chunk_size` directly.
     """
 
@@ -3790,21 +3795,20 @@ class LinearCrossEntropyOptions:
             else:
                 factor = 1
 
-            # next power-of-2 >= ceil(num_batches * in_features / num_classes)
             batch_chunk_size = (
                 1 << (-(num_batches // (num_classes // -in_features)) - 1).bit_length()
             )
-            batch_chunk_size = min(max(batch_chunk_size // factor, 1), num_batches)
+            batch_chunk_size = min(batch_chunk_size // factor, num_batches)
 
             if (
                 self.batch_chunk_size is not None
                 and self.batch_chunk_size != batch_chunk_size
             ):
-                warnings.warn(
-                    f"Specified batch_chunk_size (={self.batch_chunk_size}) is different"
-                    f" from one (={batch_chunk_size}) computed using chunking method"
-                    f" ('{self.chunking_method}'). Using the latter.",
-                    stacklevel=3,
+                raise ValueError(
+                    f"batch_chunk_size (={self.batch_chunk_size}) and "
+                    f"chunking_method ('{self.chunking_method}') give different "
+                    f"chunk sizes ({self.batch_chunk_size} vs {batch_chunk_size}); "
+                    f"pass only one."
                 )
 
         if self.acc_dtype is None:
@@ -3812,7 +3816,7 @@ class LinearCrossEntropyOptions:
         else:
             acc_dtype = self.acc_dtype
         return dataclasses.replace(
-            self, batch_chunk_size=batch_chunk_size, acc_dtype=acc_dtype
+            self, batch_chunk_size=max(1, batch_chunk_size), acc_dtype=acc_dtype
         )
 
 
@@ -3978,7 +3982,7 @@ def linear_cross_entropy(
 
         options = options._adjust(num_batches, in_features, num_classes, input.dtype)
 
-        # global import results a likely circular import
+        # global import would result in a likely circular import
         import torch.nn._linear_cross_entropy as m
 
         result = m._linear_cross_entropy_batch_chunked(
@@ -3992,7 +3996,7 @@ def linear_cross_entropy(
             options.batch_chunk_size,
             options.acc_policy,
             options.acc_dtype,
-            not options.allow_retain_graph,
+            options.allow_retain_graph,
             input.requires_grad,
             linear_weight.requires_grad,
         )[0]

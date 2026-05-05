@@ -1,21 +1,22 @@
 import torch
 
 
-def chunk_iter(total_size, chunk_size):
+def _chunk_iter(total_size, chunk_size):
     for start in range(0, total_size, chunk_size):
-        if start + chunk_size > total_size:
-            yield start, total_size - start
-        else:
-            yield start, chunk_size
+        yield start, min(chunk_size, total_size - start)
 
 
+# keep in sync with _linear_cross_entropy_batch_chunked's signature:
 _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS = 13
 
 
 def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
-    assert len(inputs) == _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS  # noqa: S101
-    *_, grad_inplace, compute_input_grad, compute_linear_weight_grad = inputs
-    ctx.grad_inplace = grad_inplace
+    if len(inputs) != _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS:
+        raise RuntimeError(
+            f"expected {_NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS} inputs, got {len(inputs)}"
+        )
+    *_, allow_retain_graph, compute_input_grad, compute_linear_weight_grad = inputs
+    ctx.allow_retain_graph = allow_retain_graph
     ctx.compute_input_grad = compute_input_grad
     ctx.compute_linear_weight_grad = compute_linear_weight_grad
     _, grad_input, grad_linear_weight = output
@@ -37,14 +38,22 @@ def _linear_cross_entropy_batch_chunked(
     batch_chunk_size: int,
     acc_policy: str,
     acc_dtype: torch.dtype,
-    grad_inplace: bool,
+    allow_retain_graph: bool,
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Returns ``(loss, grad_input, grad_linear_weight)``: gradients
+    are precomputed during the chunked forward loop and stashed on ctx
+    by ``setup_context``; backward is a single multiply by the
+    upstream gradient.
+    """
     device = input.device
     dtype = input.dtype
     num_batches, in_features = input.shape
     num_classes, _ = linear_weight.shape
+    # CUDA gates the out_dtype= mm fast path; other accelerators take
+    # the more conservative CPU path until validated.
+    is_cuda = input.device.type == "cuda"
 
     if dtype != acc_dtype and not (
         dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
@@ -107,6 +116,12 @@ def _linear_cross_entropy_batch_chunked(
             GL=dtype,
         )
 
+    # TODO: per-call allocations cannot be cached across training-loop
+    # iterations from inside the op. The largest in practice are the
+    # logits chunk X and the linear_weight_ cast; a user-supplied
+    # workspace via LinearCrossEntropyOptions should target those
+    # first, with GL/X_acc/gx_acc/tmp as follow-ups.
+
     # A chunk buffer used to hold logits, softmax of logits:
     X = torch.empty(
         (batch_chunk_size, num_classes),
@@ -116,7 +131,7 @@ def _linear_cross_entropy_batch_chunked(
     )
     X_acc = torch.empty(
         (batch_chunk_size, num_classes)
-        if (compute_linear_weight_grad and not input.is_cuda and X.dtype != acc_dtype)
+        if (compute_linear_weight_grad and not is_cuda and X.dtype != acc_dtype)
         else (0, 0),
         device=device,
         dtype=acc_dtype,
@@ -125,7 +140,7 @@ def _linear_cross_entropy_batch_chunked(
 
     linear_weight_ = (
         linear_weight.to(X.dtype)
-        if use_acc_dtype and (compute_input_grad or not input.is_cuda)
+        if use_acc_dtype and (compute_input_grad or not is_cuda)
         else linear_weight
     )
 
@@ -147,6 +162,18 @@ def _linear_cross_entropy_batch_chunked(
         dtype=dtypes["GL"],
         requires_grad=False,
     )
+    gx_acc = torch.empty(
+        (batch_chunk_size, in_features)
+        if (
+            compute_input_grad
+            and grad_input.dtype != linear_weight_.dtype
+            and not is_cuda
+        )
+        else (0, 0),
+        device=device,
+        dtype=linear_weight_.dtype,
+        requires_grad=False,
+    )
     # Chunk-sized scratch reused per iteration: first as Xmax, then as
     # tmp_chunk after Xmax is consumed by X_.sub_(Xmax):
     tmp = torch.empty(
@@ -157,10 +184,12 @@ def _linear_cross_entropy_batch_chunked(
         output = torch.zeros(
             (), device=device, dtype=dtypes["output"], requires_grad=False
         )
+        if reduction == "mean" and num_batches == 0:
+            output.fill_(torch.nan)
     else:
         raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
     # chunking along batches dimension:
-    for bchunk_start, bchunk_size in chunk_iter(num_batches, batch_chunk_size):
+    for bchunk_start, bchunk_size in _chunk_iter(num_batches, batch_chunk_size):
         x = input.narrow(0, bchunk_start, bchunk_size)
         t = target.narrow(0, bchunk_start, bchunk_size)
         neg_weight_t = neg_weight_target.narrow(0, bchunk_start, bchunk_size)
@@ -171,7 +200,7 @@ def _linear_cross_entropy_batch_chunked(
         # Compute output.
 
         if use_acc_dtype:
-            if input.is_cuda:
+            if is_cuda:
                 torch.mm(x, linear_weight.T, out_dtype=X.dtype, out=X_)
             else:
                 torch.mm(x.to(X.dtype), linear_weight_.T, out=X_)
@@ -201,17 +230,32 @@ def _linear_cross_entropy_batch_chunked(
 
         if compute_input_grad:
             grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
-            torch.mul(
-                torch.index_select(linear_weight_, 0, t),
-                neg_weight_t_.unsqueeze(1),
-                out=grad_x,
-            )
-            torch.addmm(grad_x, X_, linear_weight_, alpha=-1, out=grad_x)
+            if grad_x.dtype == linear_weight_.dtype or is_cuda:
+                torch.mul(
+                    torch.index_select(linear_weight_, 0, t),
+                    neg_weight_t_.unsqueeze(1),
+                    out=grad_x,
+                )
+                torch.addmm(grad_x, X_, linear_weight_, alpha=-1, out=grad_x)
+            else:
+                # CPU: addmm is strict on dtype, and a bf16 subtract
+                # loses precision; compute in acc_dtype and cast at
+                # the end.
+                gx_acc_chunk = gx_acc.narrow(0, 0, bchunk_size)
+                torch.mul(
+                    torch.index_select(linear_weight_, 0, t),
+                    neg_weight_t_.unsqueeze(1),
+                    out=gx_acc_chunk,
+                )
+                torch.addmm(
+                    gx_acc_chunk, X_, linear_weight_, alpha=-1, out=gx_acc_chunk
+                )
+                grad_x.copy_(gx_acc_chunk)
 
         if compute_linear_weight_grad:
             if X.dtype == GL.dtype:
                 torch.mm(X_.T, x_, out=GL)
-            elif input.is_cuda:
+            elif is_cuda:
                 torch.mm(X_.T, x, out_dtype=GL.dtype, out=GL)
             else:
                 X_acc_chunk = X_acc.narrow(0, 0, bchunk_size)
@@ -241,7 +285,7 @@ def _(
     batch_chunk_size,
     acc_policy: str,
     acc_dtype,
-    grad_inplace,
+    allow_retain_graph,
     compute_input_grad,
     compute_linear_weight_grad,
 ):
@@ -285,18 +329,22 @@ def _vmap(info, in_dims, *args):
     """
     batch_size = info.batch_size
 
-    def slice_arg(arg, in_dim, i):
-        if in_dim is None or not isinstance(arg, torch.Tensor):
-            return arg
-        return arg.movedim(in_dim, 0)[i]
+    moved_args = [
+        arg.movedim(in_dim, 0)
+        if in_dim is not None and isinstance(arg, torch.Tensor)
+        else arg
+        for arg, in_dim in zip(args, in_dims)
+    ]
 
     outputs = [
         _linear_cross_entropy_batch_chunked(
-            *[slice_arg(arg, in_dim, i) for arg, in_dim in zip(args, in_dims)]
+            *[
+                arg[i] if in_dim is not None and isinstance(arg, torch.Tensor) else arg
+                for arg, in_dim in zip(moved_args, in_dims)
+            ]
         )
         for i in range(batch_size)
     ]
-
     losses = torch.stack([o[0] for o in outputs])
     grad_inputs = torch.stack([o[1] for o in outputs])
     grad_linear_weights = torch.stack([o[2] for o in outputs])
@@ -306,7 +354,7 @@ def _vmap(info, in_dims, *args):
 def _linear_cross_entropy_batch_chunked_backward(ctx, grad_output, _gi_grad, _gw_grad):
     result = [None] * _NUM_LINEAR_CROSS_ENTROPY_BATCH_CHUNKED_INPUTS
     if ctx.compute_input_grad:
-        if not ctx.grad_inplace:
+        if ctx.allow_retain_graph:
             result[0] = ctx._gi * grad_output
         else:
             gi, ctx._gi = ctx._gi, None
@@ -318,7 +366,7 @@ def _linear_cross_entropy_batch_chunked_backward(ctx, grad_output, _gi_grad, _gw
             result[0] = gi.mul_(grad_output)
 
     if ctx.compute_linear_weight_grad:
-        if not ctx.grad_inplace:
+        if ctx.allow_retain_graph:
             result[1] = ctx._gw * grad_output
         else:
             gw, ctx._gw = ctx._gw, None

@@ -1497,6 +1497,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         "reduction",
         "ignore_index",
         "label_smoothing",
+        # `options` is a Python dataclass, not TorchScript-compatible
     ]
     num_classes: int
     out_features: tuple[int, ...]
@@ -1571,7 +1572,8 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             f" out_features={self.out_features},"
             f" reduction={self.reduction},"
             f" ignore_index={self.ignore_index},"
-            f" label_smoothing={self.label_smoothing}"
+            f" label_smoothing={self.label_smoothing},"
+            f" options={self.options}"
         )
 
 

@@ -15762,21 +15762,24 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
                          'TestInductorOpInfo', 'test_comprehensive',
                          device_type="cuda"),
-
-            # Forward-mode AD and functorch coverage are limited by
-            # the current torch.library.custom_op + register_autograd
-            # setup: register_autograd accepts no jvp callable, and
-            # TestOperators requires torch.autograd.Function with a
-            # staticmethod setup_context. Wrapping this op in an
-            # autograd.Function — with jvp returning the dot product
-            # of the precomputed grad_input / grad_linear_weight
-            # (saved on ctx) with the input tangents — would retire
-            # TestOperators and
-            # TestFwdGradients/test_forward_mode_AD. Higher-order AD
+            # Forward-mode AD coverage is limited because
+            # register_autograd accepts no jvp callable. Tests
+            # requiring jvp still fail; vmap over grad works via
+            # register_vmap. An autograd.Function wrapper would
+            # unblock the remaining variants. Higher-order AD
             # (test_fn_gradgrad, test_fn_fwgrad_bwgrad) needs
             # precomputed second derivatives, which the chunked op
             # does not produce.
-            DecorateInfo(unittest.expectedFailure, 'TestOperators'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvmap'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjpvjp'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
             # Exception: Jacobian mismatch for output 0 with respect to input 0
             # numerical:0.21544406078673195 analytical:0.0
             # Jacobian mismatch — analytical=0 because the chunked op precomputes

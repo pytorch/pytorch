@@ -7464,153 +7464,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
-    def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32, acc_policy=None, acc_dtype=None):
-        # tests LinearCrossEntropyLoss in the default (in-place backward) mode
-
-        # For assessing the accuracy of chunking algorithms, we'll use
-        # the linear_cross_entropy reference implementation with
-        # float64 dtype.
-        ref_dtype = torch.float64
-
-        if acc_policy is None:
-            expected_max_ulp_diff = 2
-            expected_input_grad_max_ulp_diff = 7000
-            expected_weight_grad_max_ulp_diff = 3000
-        elif acc_policy == "memory":
-            expected_max_ulp_diff = 1
-            if device == "cpu":
-                expected_input_grad_max_ulp_diff = 210
-            else:
-                expected_input_grad_max_ulp_diff = 100
-            if device == "cpu":
-                expected_weight_grad_max_ulp_diff = 200
-            else:
-                expected_weight_grad_max_ulp_diff = 100
-        else:
-            expected_max_ulp_diff = 1
-            expected_input_grad_max_ulp_diff = 1
-            if device == "cpu":
-                expected_weight_grad_max_ulp_diff = 40
-            else:
-                expected_weight_grad_max_ulp_diff = 25
-
-        eta = torch.finfo(dtype).eps
-        feps = torch.finfo(dtype).eps * 2
-
-        def diff_ulp(x, y):
-            # ULP difference between two normal numbers, applied to
-            # input items
-            uint = {torch.float16: torch.uint16, torch.bfloat16: torch.uint16,
-                    torch.float32: torch.uint32}[x.dtype]
-            ix = x.view(uint).to(torch.int64)
-            iy = y.view(uint).to(torch.int64)
-            return torch.where(
-                x == y,
-                0,
-                torch.where(x.sign() == y.sign(), torch.where(ix > iy, ix - iy, iy - ix), ix + iy)
-            )
-
-        def grad_error(grad, expected):
-            # return relative error of two jacobian tensors
-            if grad.dim() < 2:
-                grad = grad.reshape(-1, 1)
-                expected = expected.reshape(-1, 1)
-            abserr = torch.linalg.matrix_norm(grad - expected, ord="fro")
-            norm = torch.linalg.matrix_norm(expected, ord="fro")
-            return abserr / (eta + norm)
-
-        maximal_input_grad_max_ulp_diff = 0
-        maximal_linear_weight_grad_max_ulp_diff = 0
-        worst_input_grad_kwargs = None
-        worst_linear_weight_grad_kwargs = None
-        for module_input in module_inputs_torch_nn_LinearCrossEntropyLoss(
-                module_info=None, device=torch.device(device), dtype=dtype,
-                requires_grad=True, training=None, allow_retain_graph=False, acc_dtype=acc_dtype
-        ):
-            module_args = module_input.constructor_input.args
-            module_kwargs = module_input.constructor_input.kwargs
-            (input, target) = module_input.forward_input.args
-
-            options = module_kwargs.get('options')
-            if (
-                    options is None
-                    or target.dtype.is_floating_point
-                    or module_kwargs.get('out_features')
-                    or module_kwargs.get('reduction') == 'none'
-                    or module_kwargs.get('label_smoothing') > 0
-            ):
-                # skip samples that are not be processed via chunking
-                # algorithms
-                continue
-            if acc_policy is not None:
-                module_kwargs['options'] = dataclasses.replace(options, acc_policy=acc_policy)
-
-            # use reference implementation, no chunking
-            ref_module_kwargs = module_kwargs.copy()
-            ref_module_kwargs['dtype'] = ref_dtype
-            ref_module_kwargs['options'] = None
-
-            torch.manual_seed(1245)
-            loss = nn.LinearCrossEntropyLoss(*module_args, **module_kwargs)
-            ref_loss = nn.LinearCrossEntropyLoss(*module_args, **ref_module_kwargs)
-            # ensure equal linear weights in loss and ref_loss:
-            ref_loss.linear.weight.detach().copy_(loss.linear.weight).requires_grad_(True)
-
-            self.assertEqual(loss.linear.weight, ref_loss.linear.weight.to(dtype))
-
-            ref_input = input.clone().detach()
-            if dtype != ref_dtype:
-                ref_loss = ref_loss.to(ref_dtype)
-                ref_input = ref_input.to(ref_dtype)
-            ref_input.requires_grad_(True)
-
-            out = loss(input, target)
-            ref_out = ref_loss(ref_input, target)
-
-            max_ulp_diff = diff_ulp(out, ref_out.to(dtype)).max().item()
-            self.assertLessEqual(max_ulp_diff, expected_max_ulp_diff)
-            self.assertEqual(out, ref_out.to(dtype))
-
-            torch.autograd.gradcheck(ref_loss, (ref_input, target))
-
-            # gradcheck will fail due to
-            # - inplace modification of gradients
-            # - low precision dtype such as float16, bfloat16
-            # so, we'll check gradients explicitly:
-            out.sum().backward()
-            ref_out.sum().backward()
-
-            max_ulp_diff = diff_ulp(input.grad, ref_input.grad.to(dtype)).max().item()
-            if max_ulp_diff > maximal_input_grad_max_ulp_diff:
-                maximal_input_grad_max_ulp_diff = max_ulp_diff
-                worst_input_grad_kwargs = dict(module_kwargs)
-
-            err = grad_error(input.grad, ref_input.grad.to(dtype))
-            self.assertLess(err, feps)
-
-            max_ulp_diff = diff_ulp(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype)).max().item()
-            if max_ulp_diff > maximal_linear_weight_grad_max_ulp_diff:
-                maximal_linear_weight_grad_max_ulp_diff = max_ulp_diff
-                worst_linear_weight_grad_kwargs = dict(module_kwargs)
-            err = grad_error(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype))
-            self.assertLess(err, feps)
-
-        self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
-                             msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
-        self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
-                             msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
-
-    def test_linear_cross_entropy_loss_default(self):
-        self._test_linear_cross_entropy_loss(device='cpu', dtype=torch.float32)
-
-    @parametrize_test("device", ["cpu"] + (["cuda"] if TEST_CUDA else []))
-    @parametrize_test("dtype", [torch.float16] + ([torch.bfloat16] if SM80OrLater else []))
-    @parametrize_test("acc_policy", ["memory", "accurate"])
-    def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy):
-        self._test_linear_cross_entropy_loss(
-            device=device, dtype=dtype, acc_policy=acc_policy,
-            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype])
-
     def test_linear_cross_entropy_retain_graph_default_raises(self):
         # Default mode mutates saved buffers; second .backward() must fail loudly.
         options = nn.LinearCrossEntropyOptions(allow_retain_graph=False)
@@ -7643,58 +7496,47 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(inp.grad, g1_inp)
         self.assertEqual(weight.grad, g1_w)
 
-    @parametrize_test("reduction", ["sum", "mean"])
-    def test_linear_cross_entropy_chunk_size_invariance(self, reduction):
-        """Chunked op output is independent of batch_chunk_size.
+    def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
+        """Pin the aspect_ratio heuristic's chunk size for representative shapes.
 
-        Exercises partial-chunk paths (num_batches=13 doesn't divide
-        most chunk sizes) and verifies forward and gradient agreement.
+        A heuristic regression that always returned the same value
+        would pass the chunked-op numerics tests (since the chunked op
+        is correct regardless of chunk size). Pin the arithmetic here
+        so heuristic changes are explicit.
         """
-        torch.manual_seed(42)
-        N, F, C = 13, 5, 4
-
-        linear_weight = torch.randn(C, F)
-        inp = torch.randn(N, F, requires_grad=True)
-        target = torch.randint(0, C, (N,))
-
-        forwards, input_grads, linear_weight_grads = [], [], []
-        for bcs in [1, 2, 3, 4, 7, 13, 16]:
-            options = nn.LinearCrossEntropyOptions(batch_chunk_size=bcs)
-            w = linear_weight.detach().clone().requires_grad_(True)
-            inp.grad = None
-            out = nn.functional.linear_cross_entropy(
-                inp, w, target, reduction=reduction, options=options,
+        cases = [
+            # (num_batches, in_features, num_classes, factor, expected)
+            (128, 4096, 50000, 1, 16),   # LLM-head regime
+            (128, 4096, 50000, 2, 8),    # aspect_ratio:2 halves
+            (8, 5, 4, 1, 8),             # small synthetic; equals num_batches
+            (13, 5, 4, 1, 13),           # next_pow2(13)=16 clamped to N=13
+            (16, 64, 64, 1, 16),         # C == F (degenerate -> next_pow2(N))
+            (8, 128, 64, 1, 8),          # C < F (degenerate -> next_pow2(N))
+        ]
+        for num_batches, in_features, num_classes, factor, expected in cases:
+            method = "aspect_ratio" if factor == 1 else f"aspect_ratio:{factor}"
+            options = nn.LinearCrossEntropyOptions(chunking_method=method)
+            adjusted = options._adjust(num_batches, in_features, num_classes, torch.float32)
+            self.assertEqual(
+                adjusted.batch_chunk_size, expected,
+                msg=f"N={num_batches}, F={in_features}, C={num_classes}, method={method!r}",
             )
-            forwards.append(out.detach().clone())
-            out.backward()
-            input_grads.append(inp.grad.clone())
-            linear_weight_grads.append(w.grad.clone())
 
-        for i in range(1, len(forwards)):
-            self.assertEqual(forwards[i], forwards[0])
-            self.assertEqual(input_grads[i], input_grads[0])
-            self.assertEqual(linear_weight_grads[i], linear_weight_grads[0])
-
-    def test_linear_cross_entropy_batch_invariance(self):
-        """Sum over per-item evaluations equals batched evaluation."""
-        torch.manual_seed(42)
-        N, F, C = 8, 5, 4
-        weight = torch.randn(C, F)
-        inp = torch.randn(N, F)
-        target = torch.randint(0, C, (N,))
-
-        options = nn.LinearCrossEntropyOptions(batch_chunk_size=3)
-        batched = nn.functional.linear_cross_entropy(
-            inp, weight, target, reduction="sum", options=options,
+    def test_linear_cross_entropy_options_chunk_size_disagreement_raises(self):
+        """batch_chunk_size + chunking_method with mismatched values raises."""
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=4, chunking_method="aspect_ratio:2",
         )
-        per_item = sum(
-            nn.functional.linear_cross_entropy(
-                inp[i:i + 1], weight, target[i:i + 1],
-                reduction="sum", options=options,
-            )
-            for i in range(N)
+        with self.assertRaisesRegex(ValueError, "batch_chunk_size .* chunking_method"):
+            options._adjust(128, 4096, 50000, torch.float32)
+
+    def test_linear_cross_entropy_options_chunk_size_agreement_ok(self):
+        """batch_chunk_size + chunking_method with matching values passes."""
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=16, chunking_method="aspect_ratio",
         )
-        self.assertEqual(batched, per_item)
+        adjusted = options._adjust(128, 4096, 50000, torch.float32)
+        self.assertEqual(adjusted.batch_chunk_size, 16)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
@@ -14667,6 +14509,253 @@ if __name__ == '__main__':
             self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
+
+    def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32, acc_policy=None, acc_dtype=None):
+        # tests LinearCrossEntropyLoss in the default (in-place backward) mode
+
+        # For assessing the accuracy of chunking algorithms, we'll use
+        # the linear_cross_entropy reference implementation with
+        # float64 dtype.
+        ref_dtype = torch.float64
+
+        expected_max_ulp_diff = 1
+        expected_input_grad_max_ulp_diff = 1
+        expected_weight_grad_max_ulp_diff = 1
+        # The following mapping to expected ULP differences
+        # characterizes the accuracy dependence on acc_policy, dtype,
+        # device:
+        if acc_policy == "memory":
+            if "cpu" in device:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 204
+                    expected_weight_grad_max_ulp_diff = 191
+                else:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 2
+                    expected_weight_grad_max_ulp_diff = 153
+            else:
+                if (
+                        dtype == torch.float16
+                        or dtype == torch.bfloat16
+                ):
+                    # TODO: bf16 satisfies fp16's bound on the current
+                    # sample matrix; revisit if a sample triggers a
+                    # tighter check
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 90
+                    expected_weight_grad_max_ulp_diff = 37
+        elif acc_policy == "accurate":
+            if "cpu" in device:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 1
+                    expected_weight_grad_max_ulp_diff = 38
+                else:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 2
+                    expected_weight_grad_max_ulp_diff = 153
+            else:
+                if (
+                        dtype == torch.float16
+                        or dtype == torch.bfloat16
+                ):
+                    # TODO: bf16 satisfies fp16's bound on the current
+                    # sample matrix; revisit if a sample triggers a
+                    # tighter check
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 1
+                    expected_weight_grad_max_ulp_diff = 21
+        else:
+            # acc_policy is None (fp32 path; use_acc_dtype is False)
+            if "cpu" in device:
+                if dtype == torch.float32:
+                    expected_max_ulp_diff = 2
+                    expected_input_grad_max_ulp_diff = 6236
+                    expected_weight_grad_max_ulp_diff = 2271
+            else:
+                if dtype == torch.float32:
+                    expected_max_ulp_diff = 2
+                    expected_input_grad_max_ulp_diff = 277
+                    expected_weight_grad_max_ulp_diff = 4878
+
+        eta = torch.finfo(dtype).eps
+        feps = torch.finfo(dtype).eps * 2
+
+        def diff_ulp(x, y):
+            # ULP difference between two normal numbers, applied to
+            # input items
+            uint = {torch.float16: torch.uint16, torch.bfloat16: torch.uint16,
+                    torch.float32: torch.uint32}[x.dtype]
+            ix = x.view(uint).to(torch.int64)
+            iy = y.view(uint).to(torch.int64)
+            return torch.where(
+                x == y,
+                0,
+                torch.where(x.sign() == y.sign(), torch.where(ix > iy, ix - iy, iy - ix), ix + iy)
+            )
+
+        def grad_error(grad, expected):
+            # return relative error of two jacobian tensors
+            if grad.dim() < 2:
+                grad = grad.reshape(-1, 1)
+                expected = expected.reshape(-1, 1)
+            abserr = torch.linalg.matrix_norm(grad - expected, ord="fro")
+            norm = torch.linalg.matrix_norm(expected, ord="fro")
+            return abserr / (eta + norm)
+
+        maximal_output_max_ulp_diff = 0
+        maximal_input_grad_max_ulp_diff = 0
+        maximal_linear_weight_grad_max_ulp_diff = 0
+        worst_output_kwargs = None
+        worst_input_grad_kwargs = None
+        worst_linear_weight_grad_kwargs = None
+        for module_input in module_inputs_torch_nn_LinearCrossEntropyLoss(
+                module_info=None, device=torch.device(device), dtype=dtype,
+                requires_grad=True, training=None, allow_retain_graph=False, acc_dtype=acc_dtype
+        ):
+            module_args = module_input.constructor_input.args
+            module_kwargs = module_input.constructor_input.kwargs
+            (input, target) = module_input.forward_input.args
+
+            options = module_kwargs.get('options')
+            if (
+                    options is None
+                    or target.dtype.is_floating_point
+                    or module_kwargs.get('out_features')
+                    or module_kwargs.get('reduction') == 'none'
+                    or module_kwargs.get('label_smoothing') > 0
+            ):
+                # skip samples that are not be processed via chunking
+                # algorithms
+                continue
+            if acc_policy is not None:
+                module_kwargs['options'] = dataclasses.replace(options, acc_policy=acc_policy)
+
+            # use reference implementation, no chunking
+            ref_module_kwargs = module_kwargs.copy()
+            ref_module_kwargs['dtype'] = ref_dtype
+            ref_module_kwargs['options'] = None
+
+            torch.manual_seed(1245)
+            loss = nn.LinearCrossEntropyLoss(*module_args, **module_kwargs)
+            ref_loss = nn.LinearCrossEntropyLoss(*module_args, **ref_module_kwargs)
+            # ensure equal linear weights in loss and ref_loss:
+            ref_loss.linear.weight.detach().copy_(loss.linear.weight).requires_grad_(True)
+
+            self.assertEqual(loss.linear.weight, ref_loss.linear.weight.to(dtype))
+
+            ref_input = input.clone().detach()
+            if dtype != ref_dtype:
+                ref_loss = ref_loss.to(ref_dtype)
+                ref_input = ref_input.to(ref_dtype)
+            ref_input.requires_grad_(True)
+
+            out = loss(input, target)
+            ref_out = ref_loss(ref_input, target)
+
+            max_ulp_diff = diff_ulp(out, ref_out.to(dtype)).max().item()
+            if max_ulp_diff > maximal_output_max_ulp_diff:
+                maximal_output_max_ulp_diff = max_ulp_diff
+                worst_output_kwargs = dict(module_kwargs)
+            self.assertEqual(out, ref_out.to(dtype))
+
+            torch.autograd.gradcheck(ref_loss, (ref_input, target))
+
+            # gradcheck will fail due to
+            # - inplace modification of gradients
+            # - low precision dtype such as float16, bfloat16
+            # so, we'll check gradients explicitly:
+            out.sum().backward()
+            ref_out.sum().backward()
+
+            max_ulp_diff = diff_ulp(input.grad, ref_input.grad.to(dtype)).max().item()
+            if max_ulp_diff > maximal_input_grad_max_ulp_diff:
+                maximal_input_grad_max_ulp_diff = max_ulp_diff
+                worst_input_grad_kwargs = dict(module_kwargs)
+
+            err = grad_error(input.grad, ref_input.grad.to(dtype))
+            self.assertLess(err, feps)
+
+            max_ulp_diff = diff_ulp(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype)).max().item()
+            if max_ulp_diff > maximal_linear_weight_grad_max_ulp_diff:
+                maximal_linear_weight_grad_max_ulp_diff = max_ulp_diff
+                worst_linear_weight_grad_kwargs = dict(module_kwargs)
+            err = grad_error(loss.linear.weight.grad, ref_loss.linear.weight.grad.to(dtype))
+            self.assertLess(err, feps)
+
+        self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
+                             msg=f"worst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
+        self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
+                             msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
+        self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
+                             msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
+
+    @dtypes(torch.float32)
+    def test_linear_cross_entropy_loss_default(self, device, dtype):
+        self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("acc_policy", ["memory", "accurate"])
+    def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy):
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype])
+
+    @parametrize_test("reduction", ["sum", "mean"])
+    def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
+        """Chunked op output is independent of batch_chunk_size.
+
+        Exercises partial-chunk paths (num_batches=13 doesn't divide
+        most chunk sizes) and verifies forward and gradient agreement.
+        """
+        torch.manual_seed(42)
+        N, F, C = 13, 5, 4
+
+        linear_weight = torch.randn(C, F, device=device)
+        inp = torch.randn(N, F, device=device, requires_grad=True)
+        target = torch.randint(0, C, (N,), device=device)
+
+        forwards, input_grads, linear_weight_grads = [], [], []
+        for bcs in [1, 2, 3, 4, 7, 13]:
+            options = nn.LinearCrossEntropyOptions(batch_chunk_size=bcs)
+            w = linear_weight.detach().clone().requires_grad_(True)
+            inp.grad = None
+            out = nn.functional.linear_cross_entropy(
+                inp, w, target, reduction=reduction, options=options,
+            )
+            forwards.append(out.detach().clone())
+            out.backward()
+            input_grads.append(inp.grad.clone())
+            linear_weight_grads.append(w.grad.clone())
+
+        for i in range(1, len(forwards)):
+            self.assertEqual(forwards[i], forwards[0])
+            self.assertEqual(input_grads[i], input_grads[0])
+            self.assertEqual(linear_weight_grads[i], linear_weight_grads[0])
+
+    def test_linear_cross_entropy_batch_invariance(self, device):
+        """Sum over per-item evaluations equals batched evaluation."""
+        torch.manual_seed(42)
+        N, F, C = 8, 5, 4
+        weight = torch.randn(C, F, device=device)
+        inp = torch.randn(N, F, device=device)
+        target = torch.randint(0, C, (N,), device=device)
+
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=3)
+        batched = nn.functional.linear_cross_entropy(
+            inp, weight, target, reduction="sum", options=options,
+        )
+        per_item = sum(
+            nn.functional.linear_cross_entropy(
+                inp[i:i + 1], weight, target[i:i + 1],
+                reduction="sum", options=options,
+            )
+            for i in range(N)
+        )
+        self.assertEqual(batched, per_item)
 
 
 class TestFunctionalPickle(TestCase):

@@ -1895,7 +1895,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         if ii < 0 or ii >= num_classes:
                             # tests the correctness of out-of-range ii
                             # mapping to 0 (see the batch chunking
-                            # logic in the next PR)
+                            # logic)
                             target[0] = 0
                         yield module_args, module_kwargs, (input, target)
 
