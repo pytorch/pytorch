@@ -107,6 +107,9 @@ class PyCodegen:
     def add_pycode(self, pycode: str, *args):
         if not config.generate_pycode:
             return
+        for a in args:
+            if isinstance(a, VariableTracker):
+                a.realize()
         self.pycodes.append(pycode.format(*[a.reconstruct_pycode(self) for a in args]))
 
     def restore_stack(

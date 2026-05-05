@@ -1449,6 +1449,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return side_effects.is_modified(self._base_vt)
         return False
 
+    def reconstruct_pycode(self, codegen):
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented yet for sourceless UserDefinedObjectVariable"
+        )
+
     def python_type(self) -> type:
         return self.value_type  # type: ignore[return-value]
 
@@ -1530,11 +1537,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 f"__bool__ should return bool, returned {result.python_type().__name__}",
             )
         return result
-
-    def reconstruct_pycode(self, codegen) -> str:
-        if self.source:
-            return self.source.reconstruct_pycode(codegen)
-        raise NotImplementedError
 
     def nb_index_impl(
         self,
