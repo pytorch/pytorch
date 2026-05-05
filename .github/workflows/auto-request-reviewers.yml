@@ -158,9 +158,8 @@ jobs:
     permissions:
       contents: none
       pull-requests: write
-      issues: write  # required to add the "triaged" label
     steps:
-      - name: Request reviews and mark triaged
+      - name: Request reviews
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           PR_NUMBER: ${{ needs.compute.outputs.number }}
@@ -171,7 +170,7 @@ jobs:
             const prNumber = parseInt(process.env.PR_NUMBER);
 
             if (reviewers.length === 0 && teams.length === 0) {
-              core.info('No reviewers to request; skipping triaged label.');
+              core.info('No reviewers to request.');
               return;
             }
 
@@ -202,17 +201,4 @@ jobs:
               } catch (error) {
                 core.warning(`Failed to request review from team pytorch/${team}: ${error.message}`);
               }
-            }
-
-            // Mark the PR as triaged so future runs of this workflow skip it.
-            try {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                labels: ['triaged'],
-              });
-              core.info('Added "triaged" label');
-            } catch (error) {
-              core.warning(`Failed to add "triaged" label: ${error.message}`);
             }
