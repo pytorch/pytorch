@@ -3836,13 +3836,10 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj (stored in "pyobj_")
-          Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they also have an "obj" field
-          if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-            Py_VISIT(py_node_fn->obj);
-          }
+        // Check that this python object is the sole owner of the grad_fn.
+        // The grad_fn's PyObject holds the other reference.
+        if (grad_fn && grad_fn.use_count() == 2) {
+          Py_VISIT(grad_fn->pyobj_slot()->load_pyobj());
         }
       }
     }
