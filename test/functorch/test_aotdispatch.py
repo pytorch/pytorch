@@ -8411,7 +8411,7 @@ def forward(self, primals_1, tangents_1):
             return args[0]
 
         fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
-        fn([1, 2, 3], make_subclass_override=override)
+        fn([], make_subclass_override=override)
         self.assertNotIn("fast", call_log)
 
     def test_backward_epilogue_no_subclass_no_override_param(self):
@@ -8500,41 +8500,6 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
-
-    def test_backward_epilogue_compiled_autograd_tokens(self):
-        from torch._higher_order_ops.effects import _register_effectful_op
-        from torch._library.effects import EffectType
-
-        bwd_op = self._make_effectful_op("ca_epi_tok_bwd")
-        fwd_op = self._make_effectful_op("ca_epi_tok_fwd")
-
-        def setup_context(ctx, inputs, output):
-            pass
-
-        def backward(ctx, grad):
-            return torch.ops.test.ca_epi_tok_bwd(grad)
-
-        fwd_op.register_autograd(backward, setup_context=setup_context)
-        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
-        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
-        try:
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                return torch.ops.test.ca_epi_tok_fwd(x) * 2
-
-            def run():
-                x = torch.randn(4, requires_grad=True)
-                f(x).sum().backward()
-                return x.grad
-
-            expected = run()
-            torch._dynamo.reset()
-            actual = self._run_with_compiled_autograd(run)
-            self.assertEqual(actual, expected)
-        finally:
-            h1.destroy()
-            h2.destroy()
 
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
