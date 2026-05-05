@@ -188,9 +188,9 @@ void weight_norm_backward_first_dim_kernel(
     const TensorBase& saved_norm,
     int64_t M, int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
-  const auto saved_v_data = saved_v.data_ptr<scalar_t>();
-  const auto saved_g_data = saved_g.data_ptr<scalar_t>();
-  const auto saved_norm_data = saved_norm.data_ptr<accscalar_t>();
+  const auto saved_v_data = saved_v.const_data_ptr<scalar_t>();
+  const auto saved_g_data = saved_g.const_data_ptr<scalar_t>();
+  const auto saved_norm_data = saved_norm.const_data_ptr<accscalar_t>();
   auto grad_v_data = grad_v.data_ptr<scalar_t>();
   auto grad_g_data = grad_g.data_ptr<scalar_t>();
 
@@ -331,9 +331,9 @@ void weight_norm_backward_last_dim_kernel(
     const TensorBase& saved_norm,
     int64_t M, int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
-  const auto saved_v_data = saved_v.data_ptr<scalar_t>();
-  const auto saved_g_data = saved_g.data_ptr<scalar_t>();
-  const auto saved_norm_data = saved_norm.data_ptr<accscalar_t>();
+  const auto saved_v_data = saved_v.const_data_ptr<scalar_t>();
+  const auto saved_g_data = saved_g.const_data_ptr<scalar_t>();
+  const auto saved_norm_data = saved_norm.const_data_ptr<accscalar_t>();
   auto grad_v_data = grad_v.data_ptr<scalar_t>();
   auto grad_g_data = grad_g.data_ptr<scalar_t>();
 
