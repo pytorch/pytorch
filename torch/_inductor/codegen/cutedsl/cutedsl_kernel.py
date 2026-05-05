@@ -502,15 +502,28 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            dim_indices = (
+                list(index.args) if isinstance(index, HierarchicalIndex) else [index]
+            )
+            # The HierarchicalIndex may carry more coords than the captured
+            # buffer's physical rank when an outer-graph view (e.g.
+            # `.unsqueeze(0)`) inserted broadcast dims. Those broadcast dims
+            # have stride 0 in the underlying buffer and contribute nothing
+            # to the actual address. Trim the leading coords so the emitted
+            # `var[c0, c1, ...]` access has the same rank as the buffer's
+            # cute layout — otherwise cute's MLIR layout checker rejects the
+            # load with `expects coordinate to be weakly congruent to the
+            # layout`.
+            buffer_rank = len(buffer.get_size())
+            if len(dim_indices) > buffer_rank:
+                dim_indices = dim_indices[len(dim_indices) - buffer_rank :]
             idx_vars = [
                 self._emit_scalar_fragment(
                     self.kernel.kexpr(self.kernel.rename_indexing(dim_index)),
                     "cutlass.Int32",
                     torch.int32,
                 )
-                for dim_index in (
-                    index.args if isinstance(index, HierarchicalIndex) else (index,)
-                )
+                for dim_index in dim_indices
             ]
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
