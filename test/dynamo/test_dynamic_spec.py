@@ -8,7 +8,7 @@ import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
 from torch._dynamo.dynamic_spec import IntSpec, IntSpecType, TensorSpec
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -17,8 +17,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
-    skipIfTorchDynamo,
 )
 
 
@@ -488,7 +486,6 @@ class TestTensorSpecConstruction(TestCase):
         self.assertIsNotNone(ts[3])
 
 
-@skipIfTorchDynamo()
 class TestTensorSpecCompile(TestCase):
     """TensorSpec + compile integration via the test-local
     `_compile_with_dynamic_shapes` helper. Same scaffolding path as
@@ -563,7 +560,6 @@ class TestTensorSpecCompile(TestCase):
         self.assertEqual(len(backend.graphs), 2)
 
 
-@skipIfTorchDynamo()
 class TestIntSpecCompile(TestCase):
     """Covers IntSpec + torch.compile integration using the local
     `_compile_with_dynamic_shapes` helper.
