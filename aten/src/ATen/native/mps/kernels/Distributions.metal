@@ -202,6 +202,58 @@ REGISTER_OP(random_int, float);
 REGISTER_OP(random_int, half);
 REGISTER_OP(random_int, bfloat);
 
+// Fisher-Yates shuffle for small `randperm` (n <= N_RANDPERM_SMALL). One
+// threadgroup performs the shuffle in threadgroup memory: thread 0 walks
+// `i = n - 1 .. 1` swapping `buf[i]` with `buf[rand % (i + 1)]`, and the
+// rest of the threadgroup cooperates on the identity init and the writeout.
+// Avoids the keys + argsort + cast pipeline that the large-n path uses;
+// works for any output dtype that can hold values < n (caller restricts).
+constant constexpr uint N_RANDPERM_SMALL = 4096;
+
+template <typename T>
+kernel void randperm_small(
+    device T* output [[buffer(0)]],
+    constant long2& seed_base_offset [[buffer(1)]],
+    constant uint& n [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]]) {
+  threadgroup uint buf[N_RANDPERM_SMALL];
+  for (uint i = tid; i < n; i += tg_size) {
+    buf[i] = i;
+  }
+  threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  if (tid == 0) {
+    long seed = seed_base_offset.x;
+    long offset = seed_base_offset.y;
+    uint4 raw = uint4(0);
+    uint raw_idx = 4;
+    for (uint i = n; i-- > 1;) {
+      if (raw_idx == 4) {
+        raw = c10::metal::philox4::rand(seed, offset++);
+        raw_idx = 0;
+      }
+      // Modulo bias for `i + 1 < 2^32` is below the Philox stream's own
+      // statistical noise floor; matches what NumPy / std::shuffle do.
+      uint j = raw[raw_idx++] % (i + 1);
+      uint tmp = buf[i];
+      buf[i] = buf[j];
+      buf[j] = tmp;
+    }
+  }
+  threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  for (uint i = tid; i < n; i += tg_size) {
+    output[i] = static_cast<T>(buf[i]);
+  }
+}
+
+#define REGISTER_RANDPERM(DTYPE)                               \
+  template [[host_name("randperm_small_" #DTYPE)]] kernel void \
+  randperm_small<DTYPE>(                                       \
+      device DTYPE*, constant long2&, constant uint&, uint, uint)
+
+REGISTER_RANDPERM(int);
+REGISTER_RANDPERM(long);
+
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
   exponential<DTYPE>(                                       \
