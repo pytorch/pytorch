@@ -31,6 +31,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm:
     name: linux-jammy-cuda13.0-py3.10-gcc11-sm90-symm
@@ -45,6 +46,10 @@ jobs:
         { include: [
           { config: "h100-symm-mem", shard: 1, num_shards: 1, runner: "linux.aws.h100.4" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-test:
@@ -52,8 +57,13 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm
+      - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
