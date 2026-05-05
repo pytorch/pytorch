@@ -364,7 +364,12 @@ class TestPythonRegistration(TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
-                    my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
+                    my_lib2.impl(
+                        torch.ops.aten.mul.Tensor,
+                        my_mul,
+                        "ZeroTensor",
+                        allow_override=False,
+                    )
 
             # Validate that lib2 is not affected by removing lib1
             self.assertFalse(torch.mul(x, y)._is_zerotensor())
