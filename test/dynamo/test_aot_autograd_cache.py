@@ -346,8 +346,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
@@ -388,8 +388,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -421,8 +421,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
@@ -2220,8 +2220,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 torch.compile(dynamic=dynamic)
             ):
                 actual_grads = torch.autograd.grad(compiled_result.sum(), inputs=(a, b))
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(expected_grads[0], actual_grads[0])
             self.assertEqual(expected_grads[1], actual_grads[1])
@@ -2282,8 +2282,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                     actual_grads = torch.autograd.grad(
                         compiled_result.sum(), inputs=(a, b)
                     )
-                if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                    del a._dynamo_weak_dynamic_indices
+                if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                    del a._dynamo_propagated_dynamic_indices
                 self.assertEqual(eager_result, compiled_result)
                 self.assertEqual(expected_grads[0], actual_grads[0])
                 self.assertEqual(expected_grads[1], actual_grads[1])
@@ -3556,6 +3556,74 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             r"AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>",
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
+
+    @requires_cuda_and_triton
+    def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
+        """prepare_for_pickle clears benchmark_failure_reasons which can hold
+        exec'd launcher keys that aren't picklable.
+        """
+        from torch._inductor.runtime.hints import (
+            AttrsDescriptorWrapper,
+            DeviceProperties,
+            HeuristicType,
+        )
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
+        meta = {
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i32",
+            },
+            "device": DeviceProperties.create(torch.device(GPU_TYPE)),
+            "configs": [AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())],
+            "constants": {},
+        }
+        if triton_version_uses_attrs_dict():
+            meta["signature"]["XBLOCK"] = "constexpr"
+
+        @triton.jit
+        def _add_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * XBLOCK + tl.arange(0, XBLOCK)
+            mask = offsets < xnumel
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.store(out_ptr0 + offsets, x + 1.0, mask=mask)
+
+        autotuner = CachingAutotuner(
+            fn=_add_kernel,
+            triton_meta=meta,
+            configs=[triton.Config({"XBLOCK": 128})],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            optimize_mem=True,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"grid_type": "Grid1D"},
+        )
+
+        xnumel = 256
+        inp = torch.randn(xnumel, device=GPU_TYPE)
+        out = torch.empty_like(inp)
+        autotuner.run(inp, out, xnumel, stream=torch.cuda.current_stream().cuda_stream)
+        self.assertEqual(out, inp + 1.0)
+
+        # Inject a launcher key into benchmark_failure_reasons — this is how
+        # the leak happens in production (launcher used as dict key).
+        self.assertTrue(len(autotuner.launchers) > 0)
+        launcher_fn = autotuner.launchers[0]
+        autotuner.benchmark_failure_reasons[launcher_fn] = "test"
+
+        # The autotuner is unpicklable: __getstate__ asserts launchers are
+        # empty, and benchmark_failure_reasons holds an exec'd launcher key.
+        with self.assertRaises((pickle.PicklingError, AttributeError, AssertionError)):
+            pickle.dumps(autotuner)
+
+        # prepare_for_pickle clears benchmark_failure_reasons (and other
+        # unpicklable fields), making pickle succeed.
+        autotuner.prepare_for_pickle()
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        pickle.dumps(autotuner)
 
     def test_nested_tensor_subclass_cache_key(self):
         ctx = multiprocessing.get_context("spawn")

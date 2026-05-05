@@ -2686,5 +2686,96 @@ class TestLeafFunctionRegisterHook(TestCase):
         self.assertEqual(hook_count[0], 1)
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionGradDtype(TestCase):
+    def _make_pair(self, size, dtype, grad_dtype):
+        torch.manual_seed(42)
+        x_ref = torch.randn(size, dtype=dtype, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
+        if grad_dtype is not None:
+            x_ref.grad_dtype = grad_dtype
+            x_test.grad_dtype = grad_dtype
+        return x_ref, x_test
+
+    @staticmethod
+    def _precision_sensitive_fn(x, w):
+        return (x.float() * w.float()).sum() + (x.float() ** 3 / 7.0).sum()
+
+    def test_grad_bitwise_equal_with_grad_dtype(self):
+        @leaf_function
+        def fn(x, w):
+            return (self._precision_sensitive_fn(x, w),)
+
+        @fn.register_fake
+        def fn_fake(x, w):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        x_ref, x_test = self._make_pair(64, torch.bfloat16, torch.float32)
+        torch.manual_seed(7)
+        w = torch.randn(64, dtype=torch.bfloat16)
+
+        self._precision_sensitive_fn(x_ref, w).backward()
+        fn(x_test, w)[0].backward()
+
+        self.assertTrue(torch.equal(x_test.grad, x_ref.grad))
+
+    @parametrize(
+        "dtype,grad_dtype",
+        [
+            (torch.bfloat16, torch.float32),
+            (torch.float16, torch.float32),
+            (torch.float32, torch.bfloat16),
+            (torch.float32, torch.float16),
+        ],
+    )
+    def test_backward_engine_with_dtype_grad_dtype_mismatch(self, dtype, grad_dtype):
+        observed_inner = {}
+
+        @leaf_function
+        def fn(x, w):
+            observed_inner["dtype"] = x.dtype
+            observed_inner["grad_dtype"] = x.grad_dtype
+            return ((x.float() * w.float()).sum(),)
+
+        @fn.register_fake
+        def fn_fake(x, w):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        torch.manual_seed(0)
+        x = torch.randn(8, dtype=dtype, requires_grad=True)
+        x.grad_dtype = grad_dtype
+        w = torch.randn(8, dtype=dtype)
+        self.assertNotEqual(x.dtype, x.grad_dtype)
+
+        fn(x, w)[0].backward()
+
+        self.assertEqual(observed_inner["dtype"], dtype)
+        self.assertEqual(observed_inner["grad_dtype"], grad_dtype)
+        self.assertEqual(x.grad.dtype, grad_dtype)
+
+    def test_nonleaf_input_does_not_raise(self):
+        @leaf_function
+        def fn(x, b):
+            return (self._precision_sensitive_fn(x, b),)
+
+        @fn.register_fake
+        def fn_fake(x, b):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        x_ref, x_test = self._make_pair(64, torch.bfloat16, torch.float32)
+        torch.manual_seed(7)
+        b_leaf = torch.randn(64, dtype=torch.bfloat16)
+        b_ref = b_leaf * 2
+        b_test = b_leaf * 2
+
+        self._precision_sensitive_fn(x_ref, b_ref).backward()
+        fn(x_test, b_test)[0].backward()
+
+        self.assertTrue(torch.equal(x_test.grad, x_ref.grad))
+
+
+instantiate_parametrized_tests(TestLeafFunctionGradDtype)
+
+
 if __name__ == "__main__":
     run_tests()
