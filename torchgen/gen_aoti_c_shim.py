@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -296,11 +297,43 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
 
 
+_TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
+
+
+def _get_earliest_torch_version_for_op_variant(
+    op_metadata: dict[str, str | dict[str, list[str] | str]],
+    op_version: int,
+) -> str | None:
+    """
+    Return the TORCH_VERSION_X_Y_Z macro string at which the given op variant became
+    available, or None if the variant is ungated.
+
+    op_metadata contains the entry for an op in a dictionary like aten_shimified_ops
+    in torchgen/aoti/fallback_ops.py
+
+    op_version is the integer extracted from a "vN" key in `op_metadata`. The base op
+    has op_version == 1 and reads from a top-level "since" key; later variants read
+    "since" from their own dict-form entry {"new_args": [...], "since": "..."}.
+    """
+    if op_version == 1:
+        since = op_metadata.get("since")
+    else:
+        variant = op_metadata.get(f"v{op_version}")
+        since = variant.get("since") if isinstance(variant, dict) else None
+    if since is None:
+        return None
+    if not isinstance(since, str) or not _TORCH_VERSION_PATTERN.match(since):
+        raise AssertionError(
+            f"`since` value {since!r} is not of the form TORCH_VERSION_X_Y_Z"
+        )
+    return since
+
+
 def gen_declaration_and_definition(
     schema: FunctionSchema,
     device: str,
     backend_call: str,
-    version_info: dict[str, list[str]],
+    op_metadata: dict[str, str | dict[str, list[str] | str]],
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
@@ -308,10 +341,14 @@ def gen_declaration_and_definition(
     if (base_name, device, backend_call) in declaration_definition_cache:
         return declaration_definition_cache[(base_name, device, backend_call)]
 
-    # Check the validity of version_info. The format should look like
-    # {"v2" : ["new_arg1"], "v3": ["new_arg2, new_arg3"]}.
-    indexed_version_info: dict[int, list[str]] = {1: []}
-    for ver_str, new_args in sorted(version_info.items()):
+    # Check the validity of op_metadata. Each "vN" entry is a dict
+    # {"new_args": [...], "since": "TORCH_VERSION_X_Y_Z"} where "since" is optional;
+    # op_metadata may also carry a top-level "since" key that would version-gate v1.
+    indexed_op_metadata: dict[int, list[str]] = {1: []}
+    for ver_str, payload in sorted(op_metadata.items()):
+        # since will get processed later per op
+        if ver_str == "since":
+            continue
         if not ver_str.startswith("v"):
             raise AssertionError(
                 f"Version number for {base_name} is {ver_str}, not starting with 'v'"
@@ -322,15 +359,26 @@ def gen_declaration_and_definition(
             raise AssertionError(
                 f"Version number for {base_name} is {ver_str}, not a valid integer after 'v'"
             ) from e
-        if ver_id in indexed_version_info:
+        if ver_id in indexed_op_metadata:
             raise AssertionError(f"{ver_str} for {base_name} has already been defined")
-        indexed_version_info[ver_id] = new_args
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Variant {ver_str} for {base_name} must be a dict of the form "
+                "{'new_args': [...], 'since': 'TORCH_VERSION_X_Y_Z'}"
+            )
+        new_args = payload.get("new_args", [])
+        if not isinstance(new_args, list):
+            raise AssertionError(
+                f"Variant {ver_str} for {base_name} has non-list 'new_args' field when a "
+                "list of arg names differing from prev versions is expected."
+            )
+        indexed_op_metadata[ver_id] = new_args
 
     declarations: list[str] = []
     definitions: list[str] = []
     skipped_args: set[str] = set()
 
-    for ver_id, new_args in sorted(indexed_version_info.items(), reverse=True):
+    for ver_id, new_args in sorted(indexed_op_metadata.items(), reverse=True):
         # Iterate in the reverse order, so the latest version of an op will get generated first
         # with all the arguments included, while a set of to-be-trimmed args is carried down
         # to generate earlier version of the op.
@@ -376,7 +424,15 @@ def gen_declaration_and_definition(
         """)
         )
         skipped_args.update(new_args)
-        declarations.append(f"AOTI_TORCH_EXPORT {declaration};")
+        decl = f"AOTI_TORCH_EXPORT {declaration};"
+        since = _get_earliest_torch_version_for_op_variant(op_metadata, ver_id)
+        if since is not None:
+            decl = (
+                f"#if TORCH_FEATURE_VERSION >= {since}\n"
+                f"{decl}\n"
+                f"#endif // TORCH_FEATURE_VERSION >= {since}"
+            )
+        declarations.append(decl)
         definitions.append(definition)
 
     declaration_definition_cache[(base_name, device, backend_call)] = (
@@ -500,7 +556,7 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    version_info: dict[str, list[str]],
+    version_info: dict[str, str | dict[str, list[str] | str]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
@@ -538,7 +594,7 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    inductor_fallback_ops: dict[str, dict[str, list[str]]]
+    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey | None
     backend_indices: dict[DispatchKey, BackendIndex]
@@ -565,7 +621,7 @@ class ShimGenerator:
 
 def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
-    inductor_fallback_ops: dict[str, dict[str, list[str]]],
+    inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
