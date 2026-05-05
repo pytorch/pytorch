@@ -27,15 +27,20 @@ from pathlib import Path
 
 
 # CUDA build flags that don't depend on CUDA version or host arch.
+# Values mirror the original build_cuda.sh; static linking is OFF (the
+# nvidia/* pypi packages provide the shared libs, and static linking causes
+# unresolved __cudaRegisterLinkedBinary_* RDC stubs when test executables
+# link against libtorch_cuda.so).
 CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     "NCCL_ROOT_DIR": "/usr/local/cuda",
     "CUDNN_ROOT_DIR": "/usr/local/cuda",
     "TH_BINARY_BUILD": "1",
-    "USE_STATIC_CUDNN": "1",
-    "USE_STATIC_NCCL": "1",
-    "ATEN_STATIC_CUDA": "1",
-    "USE_CUDA_STATIC_LINK": "1",
-    "USE_CUPTI_SO": "0",
+    "INSTALL_TEST": "0",
+    "USE_STATIC_CUDNN": "0",
+    "USE_STATIC_NCCL": "0",
+    "ATEN_STATIC_CUDA": "0",
+    "USE_CUDA_STATIC_LINK": "0",
+    "USE_CUPTI_SO": "1",
     "USE_CUSPARSELT": "1",
     "USE_CUFILE": "1",
     "USE_SYSTEM_NCCL": "1",
