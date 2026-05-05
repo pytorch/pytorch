@@ -79,7 +79,12 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta
+from .schemas import (
+    AOTAutogradCacheInfo,
+    AOTConfig,
+    CacheableAOTConfig,
+    ViewAndMutationMeta,
+)
 
 
 if TYPE_CHECKING:
@@ -660,17 +665,22 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Reduce the config to a stable key for caching.
         """
+        cacheable = aot_config.to_cacheable()
         return (
+            # Cache entries persist the full CacheableAOTConfig, but cache keys
+            # intentionally ignore the debug-only aot_id so equivalent graphs can hit.
             _ident,
             (
-                aot_config.num_params_buffers,
-                aot_config.keep_inference_input_mutations,
-                aot_config.is_export,
-                aot_config.no_tangents,
-                aot_config.dynamic_shapes,
-                aot_config.aot_autograd_arg_pos_to_source,
-                aot_config.enable_log,
-                aot_config.pre_dispatch,
+                cacheable.num_params_buffers,
+                cacheable.keep_inference_input_mutations,
+                cacheable.is_export,
+                cacheable.no_tangents,
+                cacheable.dynamic_shapes,
+                cacheable.aot_autograd_arg_pos_to_source,
+                cacheable.static_input_indices,
+                cacheable.enable_log,
+                cacheable.pre_dispatch,
+                cacheable.precompile_backend_id,
             ),
         )
 
@@ -1337,7 +1347,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         indices_of_inps_to_detach: list[int],
         forward_time_taken_ns: int,
         backward_time_taken_ns: int,
-        sanitized_aot_config: AOTConfig,
+        sanitized_aot_config: CacheableAOTConfig,
         guards_expr: str | None,
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,

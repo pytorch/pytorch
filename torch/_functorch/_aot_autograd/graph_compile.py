@@ -309,28 +309,6 @@ def aot_stage2_export(
     return compiled_fn, aot_state.fw_metadata
 
 
-def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
-    return AOTConfig(
-        fw_compiler=None,
-        bw_compiler=None,
-        partition_fn=None,
-        decompositions={},
-        inference_compiler=None,
-        num_params_buffers=input.num_params_buffers,
-        aot_id=input.aot_id,
-        keep_inference_input_mutations=input.keep_inference_input_mutations,
-        is_export=input.is_export,
-        no_tangents=input.no_tangents,
-        aot_autograd_arg_pos_to_source=input.aot_autograd_arg_pos_to_source,
-        dynamic_shapes=input.dynamic_shapes,
-        enable_log=input.enable_log,
-        static_input_indices=input.static_input_indices,
-        pre_dispatch=input.pre_dispatch,
-        cache_info=None,
-        precompile_backend_id=input.precompile_backend_id,
-    )
-
-
 def _get_inner_meta(
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
@@ -527,7 +505,7 @@ def _cache_inference_info(
             indices_of_inps_to_detach=[],
             forward_time_taken_ns=time_taken_ns,
             backward_time_taken_ns=0,
-            sanitized_aot_config=sanitize_aot_config(aot_config),
+            sanitized_aot_config=aot_config.to_cacheable(),
             guards_expr=guards_expr,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
@@ -2605,7 +2583,7 @@ def _cache_autograd_info(
                     _indices_of_inps_to_detach,
                     forward_time_taken_ns,
                     backward_time_taken_ns,
-                    sanitized_aot_config=sanitize_aot_config(aot_config),
+                    sanitized_aot_config=aot_config.to_cacheable(),
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,

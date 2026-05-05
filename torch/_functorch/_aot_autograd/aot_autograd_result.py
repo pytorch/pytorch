@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
@@ -49,14 +49,14 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo  # noqa: F401
+from .schemas import AOTAutogradCacheInfo, AOTConfig  # noqa: F401
 from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
 
-    from .schemas import AOTConfig, ViewAndMutationMeta
+    from .schemas import CacheableAOTConfig, ViewAndMutationMeta
 
 log = logging.getLogger(__name__)
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -382,7 +382,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     backward_time_taken_ns: int
 
     # Used by standalone_compile
-    sanitized_aot_config: AOTConfig
+    sanitized_aot_config: CacheableAOTConfig
 
     guards_expr: str | None
 
@@ -397,7 +397,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
 
-    def _log_cached_graphs(self, aot_config: AOTConfig) -> None:
+    def _log_cached_graphs(self, aot_config: AOTConfig | CacheableAOTConfig) -> None:
         if not aot_config.enable_log:
             return
 
@@ -601,7 +601,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     def wrap_post_compile(
         self,
         args: list[torch.Tensor],
-        aot_config: AOTConfig,
+        aot_config: AOTConfig | CacheableAOTConfig,
         fx_config: _CompileFxKwargs,
     ) -> Callable[..., Any]:
         """
@@ -623,13 +623,20 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         from torch._dynamo.utils import dynamo_timed
 
         self._log_cached_graphs(aot_config)
+        # Cache hits only retain the cacheable subset of AOTConfig. Narrow once
+        # here so the existing post-compile wrapper stack can keep its compile-time
+        # AOTConfig annotations.
+        runtime_aot_config = cast(AOTConfig, aot_config)
         with dynamo_timed("AOTAutogradCache.inductor_load"):
             compiled_fw_func, compiled_bw_func, needs_autograd = (
                 self._load_and_post_compile(args, fx_config)
             )
 
         compiled_function = self._apply_runtime_wrappers(
-            compiled_fw_func, compiled_bw_func, needs_autograd, aot_config
+            compiled_fw_func,
+            compiled_bw_func,
+            needs_autograd,
+            runtime_aot_config,
         )
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache.
