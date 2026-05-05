@@ -187,6 +187,21 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         self.assertNotIn("streams.fork", bw_code)
         self.assertNotIn("streams.join", bw_code)
 
+        # Verify keepalive: ao.wait_tensor for reload should reference the CPU
+        # placeholder as its 2nd arg so its storage is freed after the H2D copy
+        for node in bw_graph.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.ao.wait_tensor.default
+                and isinstance(node.args[0], torch.fx.Node)
+                and node.args[0].target == torch.ops.ao.reload.default
+            ):
+                self.assertEqual(len(node.args), 2)
+                reload_node = node.args[0]
+                keepalive_node = node.args[1]
+                # keepalive should be the CPU placeholder that was reloaded
+                self.assertIs(keepalive_node, reload_node.args[0])
+
     def test_partitioner_offload_sep_stream_accuracy(self):
         # Run without compilation to get reference gradients
         x_ref = [x.detach().clone().requires_grad_(True) for x in self.x]
