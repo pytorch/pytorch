@@ -1,11 +1,13 @@
 # Owner(s): ["module: tests"]
 
 import operator
+import os
 import random
 import unittest
 import warnings
 from functools import reduce
 from itertools import product
+from unittest import mock
 
 import numpy as np
 
@@ -2026,17 +2028,23 @@ class TestIndexing(TestCase):
     @onlyNativeDeviceTypes
     @skipMPS  # https://github.com/pytorch/pytorch/issues/161029
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_index_add_large_index_vectorized_path(self, device, dtype):
-        # Tests that exercise both the VecSize=4 (vectorized) and VecSize=1
-        # (scalar) paths in the indexFuncLargeIndex CUDA kernel.
-        # VecSize=4 activates when: IndexIsMajor=true, sliceSize % 4 == 0,
-        # and both dst/src have stride-1 on their innermost dimension.
-        # numIndex must be > 16 to hit the LargeIndex kernel at all.
+    @parametrize("disable_vec", ["0", "1"])
+    def test_index_add_large_index_vectorized_path(
+        self, device, dtype, disable_vec
+    ):
+        # Exercises both the VecSize=4 (vectorized) and VecSize=1 (scalar)
+        # paths in the indexFuncLargeIndex CUDA kernel. The path is selected
+        # at runtime by TORCH_DISABLE_INDEX_ADD_VECTORIZED ("0"=vec on,
+        # default; "1"=vec off). VecSize=4 activates when IndexIsMajor=true,
+        # sliceSize % 4 == 0, both dst/src have stride-1 on innermost dim,
+        # and the gate is not set. numIndex must be > 16 to hit LargeIndex
+        # at all.
         #
-        # Strategy: for each shape that hits the vectorized path, also run
-        # the same operation with sliceSize+1 (which forces the scalar path)
-        # and compare both against a CPU float reference.  We use UNIQUE
-        # indices to avoid non-deterministic atomic accumulation ordering.
+        # Each shape is run with sliceSize divisible by 4 (vec-eligible),
+        # not divisible by 4 (forces scalar even with vec on), non-contig
+        # (forces scalar), IndexIsMajor=false (forces scalar), and 3-D.
+        # All against a CPU float reference. UNIQUE indices avoid
+        # nondeterministic atomic accumulation order.
         num_idx = 64
         num_dest = 100
 
@@ -2047,11 +2055,9 @@ class TestIndexing(TestCase):
             src = torch.randn(src_shape, dtype=dtype, device=device)
             index = torch.randperm(num_dest_dim, device=device)[:num_idx]
 
-            # Reference: run the same op on CPU in float
             dst_ref = dst.detach().cpu().float()
             src_ref = src.detach().cpu().float()
-            idx_cpu = index.cpu()
-            dst_ref.index_add_(dim, idx_cpu, src_ref)
+            dst_ref.index_add_(dim, index.cpu(), src_ref)
 
             dst.index_add_(dim, index, src)
 
@@ -2066,65 +2072,70 @@ class TestIndexing(TestCase):
                 msg=f"Failed for {tag}, shape={dst_shape}, dim={dim}",
             )
 
-        # --- VecSize=4 path: contiguous, dim=0, sliceSize divisible by 4 ---
-        for slice_size in [32, 128, 256]:
-            _run_and_check(
-                (num_dest, slice_size),
-                0,
-                num_idx,
-                num_dest,
-                f"vec4 sliceSize={slice_size}",
+        with mock.patch.dict(
+            os.environ, {"TORCH_DISABLE_INDEX_ADD_VECTORIZED": disable_vec}
+        ):
+            # VecSize=4-eligible: contiguous, dim=0, sliceSize divisible by 4
+            for slice_size in [32, 128, 256]:
+                _run_and_check(
+                    (num_dest, slice_size),
+                    0,
+                    num_idx,
+                    num_dest,
+                    f"vec-eligible sliceSize={slice_size}",
+                )
+
+            # Forces scalar even with vec on: sliceSize NOT divisible by 4
+            for slice_size in [3, 17, 33]:
+                _run_and_check(
+                    (num_dest, slice_size),
+                    0,
+                    num_idx,
+                    num_dest,
+                    f"scalar sliceSize={slice_size}",
+                )
+
+            # Forces scalar even with vec on: non-contiguous (stride != 1
+            # on innermost dim).
+            dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
+            src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
+            dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
+            src = src_base[:, ::2]
+            index = torch.randperm(num_dest, device=device)[:num_idx]
+
+            dst_ref = dst.detach().cpu().float().contiguous()
+            src_ref = src.detach().cpu().float().contiguous()
+            dst_ref.index_add_(0, index.cpu(), src_ref)
+            dst.index_add_(0, index, src)
+            atol, rtol = (
+                (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+            )
+            self.assertEqual(
+                dst.cpu().float(),
+                dst_ref,
+                atol=atol,
+                rtol=rtol,
+                msg="Failed for non-contiguous (stride-2)",
             )
 
-        # --- VecSize=1 path: sliceSize NOT divisible by 4 ---
-        for slice_size in [3, 17, 33]:
+            # Forces scalar even with vec on: IndexIsMajor=false (dim=1 on
+            # row-major tensor).
             _run_and_check(
-                (num_dest, slice_size),
-                0,
+                (32, num_dest),
+                1,
                 num_idx,
                 num_dest,
-                f"scalar sliceSize={slice_size}",
+                "IndexIsMajor=false dim=1",
             )
 
-        # --- VecSize=1 path: non-contiguous (stride != 1 on inner dim) ---
-        dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
-        src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
-        dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
-        src = src_base[:, ::2]
-        index = torch.randperm(num_dest, device=device)[:num_idx]
-
-        dst_ref = dst.detach().cpu().float().contiguous()
-        src_ref = src.detach().cpu().float().contiguous()
-        dst_ref.index_add_(0, index.cpu(), src_ref)
-        dst.index_add_(0, index, src)
-        atol, rtol = (
-            (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
-        )
-        self.assertEqual(
-            dst.cpu().float(),
-            dst_ref,
-            atol=atol,
-            rtol=rtol,
-            msg="Failed for non-contiguous (stride-2)",
-        )
-
-        # --- VecSize=1 path: IndexIsMajor=false (dim=1 on row-major tensor) ---
-        _run_and_check(
-            (32, num_dest),
-            1,
-            num_idx,
-            num_dest,
-            "IndexIsMajor=false dim=1",
-        )
-
-        # --- VecSize=4 path: 3-D contiguous, dim=0, sliceSize divisible by 4 ---
-        _run_and_check(
-            (100, 8, 16),
-            0,
-            num_idx,
-            100,
-            "3D vec4 sliceSize=128",
-        )
+            # 3-D contiguous, dim=0, sliceSize divisible by 4
+            _run_and_check(
+                (100, 8, 16),
+                0,
+                num_idx,
+                100,
+                "3D vec-eligible sliceSize=128",
+            )
 
     @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029

@@ -17,6 +17,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <c10/util/env.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -998,6 +999,16 @@ static size_t getSliceSize(const Tensor & dst,
   return dstSliceSize;
 }
 
+// Kill switch for the VecSize=4 fast path in indexFuncLargeIndex. The
+// vectorized path issues 4 atomicAdds back-to-back per warp on the same dst
+// row; under heavy-tailed index distributions this can serialize at the L2
+// atomic ALU and regress vs. the scalar path. Set to "1" to disable.
+// Read on every call (not cached) so tests can flip the env between calls;
+// the per-launch getenv cost is negligible against kernel launch overhead.
+inline bool indexFuncVectorizedDisabled() {
+  return c10::utils::check_env("TORCH_DISABLE_INDEX_ADD_VECTORIZED") == true;
+}
+
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
@@ -1250,14 +1261,25 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     const TYPE innerSizeVal =                                                \
         static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);            \
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
-        selfInfo, sourceInfo, indexInfo,                                     \
-        selfAddDim, sourceAddDim, sourceTotalSize,                          \
-        innerSizeVal, selfAddDimSize, selfNumel,                            \
-        reduce_add, alpha_value, innerSizeDivider);                         \
+    if ((IDX_IS_MAJOR) && !indexFuncVectorizedDisabled()) {                  \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                   \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                     \
+                          IDX_IS_MAJOR, 4>                                   \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                    \
+          selfInfo, sourceInfo, indexInfo,                                   \
+          selfAddDim, sourceAddDim, sourceTotalSize,                         \
+          innerSizeVal, selfAddDimSize, selfNumel,                           \
+          reduce_add, alpha_value, innerSizeDivider);                        \
+    } else {                                                                 \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                   \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                     \
+                          IDX_IS_MAJOR, 1>                                   \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                    \
+          selfInfo, sourceInfo, indexInfo,                                   \
+          selfAddDim, sourceAddDim, sourceTotalSize,                         \
+          innerSizeVal, selfAddDimSize, selfNumel,                           \
+          reduce_add, alpha_value, innerSizeDivider);                        \
+    }                                                                        \
   }                                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -1431,14 +1453,25 @@ void index_reduce_func_cuda_impl(
     const TYPE innerSizeVal =                                                             \
         static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);                         \
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
-        selfInfo, sourceInfo, indexInfo,                                                   \
-        selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
-        innerSizeVal, selfReduceDimSize, selfNumel,                                       \
-        reduce_func, alpha_value, innerSizeDivider);                                      \
+    if ((IDX_IS_MAJOR) && !indexFuncVectorizedDisabled()) {                               \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                                  \
+                          IDX_IS_MAJOR, 4>                                                \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                 \
+          selfInfo, sourceInfo, indexInfo,                                                \
+          selfReduceDim, sourceReduceDim, sourceTotalSize,                                \
+          innerSizeVal, selfReduceDimSize, selfNumel,                                     \
+          reduce_func, alpha_value, innerSizeDivider);                                    \
+    } else {                                                                              \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                                  \
+                          IDX_IS_MAJOR, 1>                                                \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                 \
+          selfInfo, sourceInfo, indexInfo,                                                \
+          selfReduceDim, sourceReduceDim, sourceTotalSize,                                \
+          innerSizeVal, selfReduceDimSize, selfNumel,                                     \
+          reduce_func, alpha_value, innerSizeDivider);                                    \
+    }                                                                                     \
   }                                                                                       \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
