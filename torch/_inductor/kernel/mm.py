@@ -928,9 +928,11 @@ def tuned_scaled_mm_v2(
     def check_supported_recipe(recipe):
         disallowed = [ScalingType.BlockWise1x16, ScalingType.BlockWise1x32]
 
-        return not (recipe in disallowed)
+        return recipe not in disallowed
 
-    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(recipe_b)
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
 
     # Only handle single-level scales (no MX/NV)
     scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
@@ -976,7 +978,10 @@ def tuned_scaled_mm_v2(
 
         # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
         #       first scale types passed.
-        scale_option_a, scale_option_b = ScalingType(recipe_a[0]), ScalingType(recipe_b[0])
+        scale_option_a, scale_option_b = (
+            ScalingType(recipe_a[0]),
+            ScalingType(recipe_b[0]),
+        )
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
@@ -1038,7 +1043,11 @@ def tuned_scaled_mm_v2(
     )
 
     # Early return for MX variants
-    if scale_a[0].dtype != torch.float32 or (not supported_recipe) or (not is_single_level_scale):
+    if (
+        scale_a[0].dtype != torch.float32
+        or (not supported_recipe)
+        or (not is_single_level_scale)
+    ):
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
         return node
 

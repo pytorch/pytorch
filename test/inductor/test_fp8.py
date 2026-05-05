@@ -921,8 +921,16 @@ class TestFP8Lowering(TestCase):
                 x_inverse_scale.t().contiguous().t()
             )  # 1x128 blocks need scales to be outer-dim-major
 
-        recipe_x = ScalingType.BlockWise1x128 if (am, ak) == (1, 128) else ScalingType.BlockWise128x128
-        recipe_w = ScalingType.BlockWise1x128 if (bn, bk) == (1, 128) else ScalingType.BlockWise128x128
+        recipe_x = (
+            ScalingType.BlockWise1x128
+            if (am, ak) == (1, 128)
+            else ScalingType.BlockWise128x128
+        )
+        recipe_w = (
+            ScalingType.BlockWise1x128
+            if (bn, bk) == (1, 128)
+            else ScalingType.BlockWise128x128
+        )
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch.nn.functional.scaled_mm(
