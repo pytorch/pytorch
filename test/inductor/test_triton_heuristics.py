@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
-    skipIfRocm_BUGGY,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -315,7 +315,7 @@ _PLUGIN_FACTORY_PATH = (
 # Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
 # attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
 # used by these tests. CUDA paths are unaffected.
-@skipIfRocm_BUGGY
+@skipIfRocm
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
