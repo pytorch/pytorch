@@ -2199,6 +2199,7 @@ def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm 
     """Old skipIfRocm that silently drops classes from discovery. Migrate to skipIfRocm."""
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
+
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if TEST_WITH_ROCM:
@@ -2264,6 +2265,7 @@ def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU st
     """Old skipIfXpu that silently drops classes from discovery. Migrate to skipIfXpu."""
     def dec_fn(fn):
         reason = f"skipIfXpu: {msg}"
+
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if TEST_XPU:
