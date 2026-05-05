@@ -65,24 +65,29 @@ else:
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+BACKEND = dist.get_default_backend_for_device(device_type)
 
 
-def gpus_for_rank(world_size):
-    """Multigpu tests are designed to simulate the multi nodes with multi
-    GPUs on each node. Nccl backend requires equal #GPUs in each process.
-    On a single node, all visible GPUs are evenly
+def devices_for_rank(world_size):
+    """Tests are designed to simulate multi nodes with multi
+    devices on each node. The backend requires equal #devices in each process.
+    On a single node, all visible devices are evenly
     divided to subsets, each process only uses a subset.
     """
     device_count = torch.accelerator.device_count()
     visible_devices = list(range(device_count))
-    gpus_per_process = device_count // world_size
-    gpus_for_rank = []
+    devices_per_process = device_count // world_size
+    devices = []
     for rank in range(world_size):
-        gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
+        devices.append(
+            visible_devices[rank * devices_per_process : (rank + 1) * devices_per_process]
         )
-    return gpus_for_rank
+    return devices
 
 
 class AbstractTimeoutTest:
@@ -365,7 +370,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -854,7 +859,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -871,7 +876,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_builtin_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -1422,7 +1427,7 @@ class AbstractCommTest:
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # test alltoall_base
         tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
         zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
@@ -2109,6 +2114,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend == dist.Backend.XCCL:
                 if not dist.is_xccl_available():
                     continue
+            elif backend == dist.Backend.PRIVATEUSE1:
+                if not dist.is_backend_available(str(backend)):
+                    continue
             # Multi-threaded PG is defined as a pure python class.
             # Its pg.name() does not going through Pybind, so its backend name
             # is still "threaded" instead of "custom".
@@ -2139,7 +2147,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import torch
 from torch import distributed as dist
 
-# This should initialize on CPU even though this is a CUDA-enabled build
+# This should initialize on CPU even though this is an accelerator-enabled build
 dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
 """
         try:
@@ -2164,7 +2172,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         # correctly dispatched
 
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
@@ -2216,7 +2224,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = device_type
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
@@ -2230,7 +2238,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # test alltoall_base
         input_tensor = torch.ones(2, 2, device=torch.device(device))
         output_tensor = torch.zeros(2, 2, device=torch.device(device))
