@@ -1,17 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from __future__ import annotations
 
-from collections.abc import Sequence
 from math import prod
 from typing import TYPE_CHECKING
 
 import torch
-import torch.distributed.config as dist_config
 import torch.distributed._symmetric_memory as symm_mem
-
+import torch.distributed.config as dist_config
 from torch.distributed.tensor.placement_types import _StridedShard, Placement, Shard
 
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.distributed.device_mesh import DeviceMesh
 
 
@@ -37,7 +38,7 @@ def _max_shard_dim_size(
 
 def _compute_max_local_numel(
     global_shape: torch.Size,
-    device_mesh: "DeviceMesh",
+    device_mesh: DeviceMesh,
     placements: Sequence[Placement],
 ) -> int:
     max_shape = list(global_shape)
@@ -69,7 +70,7 @@ def _is_eligible_device(device: torch.device) -> bool:
 
 def _should_allocate_symmetric(
     device: torch.device,
-    device_mesh: "DeviceMesh",
+    device_mesh: DeviceMesh,
 ) -> bool:
     return (
         is_symmetric_memory_enabled()
@@ -81,7 +82,7 @@ def _should_allocate_symmetric(
 def empty_symmetric_memory_local_tensor(
     global_shape: torch.Size,
     local_shape: torch.Size,
-    device_mesh: "DeviceMesh",
+    device_mesh: DeviceMesh,
     placements: Sequence[Placement],
     *,
     dtype: torch.dtype | None,
@@ -99,7 +100,7 @@ def empty_symmetric_memory_local_tensor(
 def copy_to_symmetric_memory(
     local_tensor: torch.Tensor,
     global_shape: torch.Size,
-    device_mesh: "DeviceMesh",
+    device_mesh: DeviceMesh,
     placements: Sequence[Placement],
 ) -> torch.Tensor:
     if not _should_allocate_symmetric(local_tensor.device, device_mesh):
