@@ -8,10 +8,6 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
@@ -82,6 +78,10 @@ RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
+
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 USER jenkins
 CMD ["bash"]

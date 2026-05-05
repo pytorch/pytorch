@@ -20,7 +20,7 @@ install_ubuntu() {
     exit 1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  if [[ "$(uname -m)" == "riscv64" ]]; then
     valgrind="" # it's not available on riscv64 yet
   else
     valgrind="valgrind"
@@ -91,6 +91,3 @@ case "$ID" in
     exit 1
     ;;
 esac
-
-# Just add everything as a safe.directory for git since these will be used in multiple places with git
-git config --system --add safe.directory '*'

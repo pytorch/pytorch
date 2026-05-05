@@ -273,8 +273,9 @@ case "$tag" in
     GCC_VERSION=14
     PYTHON_VERSION=3.12
     OPENBLAS=yes
-    OPENBLAS_VERSION="v0.3.33"
-    platform_flag="--platform linux/riscv64" # we may be building on an x86 host with QEMU
+    if [[ "$(uname -m)" != "riscv64" ]]; then
+      platform_flag="--platform linux/riscv64" # we are building using QEMU
+    fi
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
@@ -361,7 +362,6 @@ docker buildx build \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
-       --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \

@@ -3,36 +3,39 @@
 set -ex
 
 install_ubuntu() {
-  if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
-    # Download from official mozilla/sccache releases
-    curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.15.0/sccache-v0.15.0-riscv64gc-unknown-linux-musl.tar.gz \
-      | tar -xvzf - -C /opt/cache/bin --strip-components 1 --wildcards 'sccache-*-riscv64gc-unknown-linux-musl/sccache'
+  echo "Installing pkg-config and libssl-dev"
+  apt-get update && apt-get install -y pkg-config libssl-dev curl
+  echo "Installing rust"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y
+  echo "Checking out sccache repo"
+  git clone https://github.com/mozilla/sccache -b v0.13.0
+  cd sccache
+  echo "Patch dist build on $(uname -m)"
+  sed -i "/all(target_os = \"linux\", target_arch = \"x86_64\"),/{ p; s/x86_64/$(uname -m)/; }" src/bin/sccache-dist/main.rs
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    # dist-server has a transient dependency on nix v0.14.1 which doesn't compile
+    # on riscv64. Support was added in nix v0.17.0 with [1], released on Feb 2020.
+    # [1] https://github.com/nix-rust/nix/commit/10e69dbc99812775ad68b30c8d20cdae2346bca2
+    features="dist-client"
   else
-    [[ "$BUILD_ENVIRONMENT" == *aarch64* ]] || (echo "we are not building for aarch64"; exit 1)
-    echo "Installing pkg-config and libssl-dev"
-    apt-get update && apt-get install -y pkg-config libssl-dev curl
-    echo "Installing rust"
-    curl https://sh.rustup.rs -sSf | sh -s -- -y
-    echo "Checking out sccache repo"
-    git clone https://github.com/mozilla/sccache -b v0.13.0
-    cd sccache
-    echo "Patch dist build on aarch64"
-    sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
-    echo "Building sccache"
-    . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
-    cp target/release/sccache /opt/cache/bin
-    cp target/release/sccache-dist /opt/cache/bin
-    echo "Cleaning up"
-    cd ..
-    rm -rf sccache
-    rustup self uninstall -y
-    apt-get remove -y pkg-config libssl-dev
-    apt-get autoclean && apt-get clean
-
-    echo "Downloading old sccache binary from S3 repo for PCH builds"
-    curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
-    chmod 755 /opt/cache/bin/sccache-0.2.14a
+    features="dist-client dist-server"
   fi
+  echo "Building sccache"
+  . "$HOME/.cargo/env" && cargo build --release --features="$features"
+  cp target/release/sccache /opt/cache/bin
+  if [[ "${features}" =~ *dist-server* ]]; then
+    cp target/release/sccache-dist /opt/cache/bin
+  fi
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache
+  rustup self uninstall -y
+  apt-get remove -y pkg-config libssl-dev
+  apt-get autoclean && apt-get clean
+
+  echo "Downloading old sccache binary from S3 repo for PCH builds"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
+  chmod 755 /opt/cache/bin/sccache-0.2.14a
 }
 
 install_binary() {

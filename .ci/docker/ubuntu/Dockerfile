@@ -8,10 +8,6 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 # Allow APT to run as root
 RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
 
@@ -187,6 +183,10 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 COPY ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
+
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # AWS specific CUDA build guidance
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"

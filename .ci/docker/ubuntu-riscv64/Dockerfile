@@ -11,10 +11,6 @@ ENV PIP_PREFER_BINARY=true
 ARG GCC_VERSION
 ARG CLANG_VERSION
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 # Allow APT to run as root
 RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
 
@@ -133,7 +129,9 @@ COPY ./common/install_jni.sh install_jni.sh
 COPY ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-RUN chown -R jenkins:jenkins /var/lib/jenkins/ci_env
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 USER jenkins
 CMD ["bash"]
