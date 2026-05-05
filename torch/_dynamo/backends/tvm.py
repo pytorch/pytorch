@@ -51,7 +51,8 @@ def tvm(
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    assert options is not None
+    if options is None:
+        raise AssertionError("options must not be None")
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -103,7 +104,8 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
-            assert trials > 0
+            if trials <= 0:
+                raise AssertionError(f"trials must be positive, got {trials}")
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
