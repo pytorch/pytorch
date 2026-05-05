@@ -1056,6 +1056,16 @@
       ]
     }
   ],
+  "GB0755": [
+    {
+      "Gb_type": "nb_negative_impl not implemented",
+      "Context": "{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_negative C slot but the corresponding VariableTracker doesn't implement nb_negative_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7596": [
     {
       "Gb_type": "Indexing torch.Size with non-scalar tensor",
@@ -3873,6 +3883,16 @@
       ]
     }
   ],
+  "GB4372": [
+    {
+      "Gb_type": "autograd_function_kwonly_args",
+      "Context": "forward() has keyword-only args: {set(kwargs) - set(self.fn_cls.forward.__code__.co_varnames)}",
+      "Explanation": "autograd.Function.apply does not support keyword-only arguments in forward().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0290": [
     {
       "Gb_type": "attempted to trace numpy.* function as a method",
@@ -4760,6 +4780,14 @@
       ]
     }
   ],
+  "GB7444": [
+    {
+      "Gb_type": "register_hook with stride-dependent code",
+      "Context": "Hook accesses grad metadata (e.g. is_contiguous)",
+      "Explanation": "register_hook callbacks that branch on gradient metadata are not supported because grad properties are unknown at trace time.",
+      "Hints": []
+    }
+  ],
   "GB0355": [
     {
       "Gb_type": "non-single Tensor return unsupported",
@@ -4860,6 +4888,16 @@
       "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
       "Hints": [
         "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB9137": [
+    {
+      "Gb_type": "non-constant typing subscript",
+      "Context": "TypingVariable[{key}]",
+      "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
