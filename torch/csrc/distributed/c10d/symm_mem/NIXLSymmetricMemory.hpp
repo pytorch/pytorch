@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <cstdint>
 #include <nixl.h>
 
 class nixlAgent;
@@ -10,7 +11,8 @@ namespace c10d {
 namespace symmetric_memory {
 
 inline constexpr size_t kNixlValueSignalOffset = 0;
-inline constexpr size_t kNixlChannelSignalOffset = 8;
+inline constexpr size_t kNixlValueSignalBytes = sizeof(uint64_t);
+inline constexpr size_t kNixlChannelSignalOffset = kNixlValueSignalBytes;
 inline constexpr size_t kNixlSignalStagingBytes = 64;
 inline constexpr size_t kNixlTransferTimeoutSeconds = 30;
 
@@ -58,9 +60,9 @@ class NIXLSymmetricMemory : public SymmetricMemory {
   int get_peer_device_idx(int rank) const;
   int get_local_device_idx() const;
 
-  // Registered VRAM staging buffer for signal writes.
-  // Layout: [0..7] uint64_t slot for value-based put_with_signal,
-  //         [8..11] uint32_t(1) for channel-based put_signal.
+  // Registered VRAM staging buffer used as the source for small signal writes.
+  // The value slot is 64-bit aligned; channel signals start after it so the two
+  // protocols never alias the same signal-pad bytes.
   void* get_signal_staging_ptr() const;
 
  private:

@@ -3,6 +3,7 @@
 import os
 import pathlib
 import unittest
+import importlib.util
 
 import torch
 import torch.distributed as dist
@@ -18,24 +19,34 @@ from torch.testing._internal.common_utils import (
 )
 
 
-if "NIXL_PLUGIN_DIR" not in os.environ:
-    try:
-        import importlib.util
+_NIXL_WHEEL_PLUGIN_DIRS = (
+    ("nixl_cu13", ".nixl-cu13.mesonpy.libs"),
+    ("nixl_cu12", ".nixl-cu12.mesonpy.libs"),
+    ("nixl", ".nixl.mesonpy.libs"),
+)
+_COMMON_UCX_PLUGIN_DIRS = (
+    pathlib.Path("/opt/hpcx/ucx/lib"),
+    pathlib.Path("/opt/hpcx/ucx/lib/ucx"),
+    pathlib.Path("/usr/lib/ucx"),
+    pathlib.Path("/usr/local/lib/ucx"),
+)
+_COMMON_NIXL_PLUGIN_DIRS = (
+    pathlib.Path("/usr/local/nixl/lib/x86_64-linux-gnu/plugins"),
+    pathlib.Path("/usr/local/nixl/lib/aarch64-linux-gnu/plugins"),
+)
 
-        for package, lib_dir in [
-            ("nixl_cu13", ".nixl-cu13.mesonpy.libs"),
-            ("nixl_cu12", ".nixl-cu12.mesonpy.libs"),
-            ("nixl", ".nixl.mesonpy.libs"),
-        ]:
-            spec = importlib.util.find_spec(package)
-            if not spec or not spec.origin:
-                continue
-            candidate = pathlib.Path(spec.origin).parent.parent / lib_dir / "plugins"
-            if candidate.is_dir():
-                os.environ["NIXL_PLUGIN_DIR"] = str(candidate)
-                break
-    except (ImportError, AttributeError, TypeError):
-        pass
+
+def _maybe_set_nixl_plugin_dir_from_wheel() -> None:
+    if "NIXL_PLUGIN_DIR" in os.environ:
+        return
+    for package, lib_dir in _NIXL_WHEEL_PLUGIN_DIRS:
+        spec = importlib.util.find_spec(package)
+        if not spec or not spec.origin:
+            continue
+        candidate = pathlib.Path(spec.origin).parent.parent / lib_dir / "plugins"
+        if candidate.is_dir():
+            os.environ["NIXL_PLUGIN_DIR"] = str(candidate)
+            return
 
 
 def _path_entries(env_var: str) -> list[pathlib.Path]:
@@ -57,21 +68,17 @@ def _nixl_vram_functional() -> bool:
     if not symm_mem.is_nixl_available() or not torch.cuda.is_available():
         return False
 
-    ucx_dirs = _path_entries("LD_LIBRARY_PATH") + [
-        pathlib.Path("/opt/hpcx/ucx/lib"),
-        pathlib.Path("/opt/hpcx/ucx/lib/ucx"),
-        pathlib.Path("/usr/lib/ucx"),
-        pathlib.Path("/usr/local/lib/ucx"),
-    ]
+    ucx_dirs = _path_entries("LD_LIBRARY_PATH") + list(_COMMON_UCX_PLUGIN_DIRS)
     if not _has_file_in_dirs("libuct_cuda.so", ucx_dirs):
         return False
 
     plugin_dirs = _path_entries("NIXL_PLUGIN_DIR") + [
         d / "plugins" for d in _path_entries("LD_LIBRARY_PATH")
-    ]
+    ] + list(_COMMON_NIXL_PLUGIN_DIRS)
     return _has_file_in_dirs("libplugin_UCX.so", plugin_dirs)
 
 
+_maybe_set_nixl_plugin_dir_from_wheel()
 NIXL_COMPILED = symm_mem.is_nixl_available()
 NIXL_FUNCTIONAL = _nixl_vram_functional()
 
@@ -84,10 +91,9 @@ requires_nixl_functional = unittest.skipUnless(
 class NixlSymmetricMemoryTest(MultiProcContinuousTest):
     """Multi-process tests for the NIXL symmetric memory backend.
 
-    NIXL 1.0 does not support incremental metadata updates: once a remote
-    agent's buffer descriptors are loaded via loadRemoteMD, reloading after
-    buffer address reuse (cudaMalloc) fails with NOT_ALLOWED. To work around
-    this, all tests share a SINGLE rendezvous-ed tensor created in _init().
+    TODO: Revisit once NIXL's repeated metadata-load semantics are documented
+    across releases. Continuous workers reuse one rendezvoused tensor so these
+    tests do not depend on repeated remote metadata reloads after address reuse.
     """
 
     @property
@@ -97,6 +103,8 @@ class NixlSymmetricMemoryTest(MultiProcContinuousTest):
     def _init(self):
         symm_mem.set_backend("NIXL")
         torch.cuda.set_device(self.rank)
+        # MultiProcContinuousTest keeps worker processes alive across methods.
+        # Reuse one allocation/rendezvous per worker to keep tests deterministic.
         if not hasattr(self, "_shared_t"):
             self._shared_t = symm_mem.empty(
                 1024, dtype=torch.float32, device=self.device

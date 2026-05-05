@@ -16,6 +16,15 @@
 #include <tuple>
 #include <unordered_map>
 
+// NIXL SymmMem backend design:
+// - Allocations are ordinary CUDA allocations with a signal pad appended.
+// - Rendezvous registers the allocation with a process-local NIXL agent and
+//   exchanges NIXL metadata through the process-group store.
+// - Remote buffers are not mapped as direct peer pointers; host-side NIXL
+//   READ/WRITE requests implement one-sided access.
+// - The NIXL progress thread is enabled because peers may be inside PyTorch
+//   collectives while another rank is polling a host-side NIXL transfer.
+
 namespace c10d {
 namespace symmetric_memory {
 
@@ -42,23 +51,37 @@ nixlAgent& ensure_nixl_agent() {
   auto status = g_agent->createBackend("UCX", params, g_ucx_backend);
   TORCH_CHECK(status == NIXL_SUCCESS, "NIXL: failed to create UCX backend");
   {
-    int cur_dev = 0;
-    AT_CUDA_CHECK(cudaGetDevice(&cur_dev));
+    // Fail early if the selected UCX backend cannot register CUDA memory.
+    // This catches common installs where NIXL is present but UCX lacks CUDA
+    // transport support.
+    int current_device = 0;
+    AT_CUDA_CHECK(cudaGetDevice(&current_device));
     void* probe = nullptr;
     AT_CUDA_CHECK(cudaMalloc(&probe, 1));
-    nixl_reg_dlist_t preg(VRAM_SEG);
-    preg.addDesc(nixlBlobDesc(reinterpret_cast<uintptr_t>(probe), 1, uint64_t(cur_dev), ""));
-    bool ok = (g_agent->registerMem(preg) == NIXL_SUCCESS);
-    if (ok) {
-      nixl_xfer_dlist_t px(VRAM_SEG);
-      px.addDesc(nixlBasicDesc(reinterpret_cast<uintptr_t>(probe), 1, uint64_t(cur_dev)));
-      nixlDlistH* dh = nullptr;
-      ok = (g_agent->prepXferDlist(NIXL_INIT_AGENT, px, dh) == NIXL_SUCCESS);
-      if (dh) g_agent->releasedDlistH(dh);
-      g_agent->deregisterMem(preg);
+    nixl_reg_dlist_t probe_reg(VRAM_SEG);
+    probe_reg.addDesc(nixlBlobDesc(
+        reinterpret_cast<uintptr_t>(probe),
+        1,
+        uint64_t(current_device),
+        ""));
+    bool vram_supported = (g_agent->registerMem(probe_reg) == NIXL_SUCCESS);
+    if (vram_supported) {
+      nixl_xfer_dlist_t probe_xfer(VRAM_SEG);
+      probe_xfer.addDesc(nixlBasicDesc(
+          reinterpret_cast<uintptr_t>(probe),
+          1,
+          uint64_t(current_device)));
+      nixlDlistH* probe_handle = nullptr;
+      vram_supported =
+          (g_agent->prepXferDlist(NIXL_INIT_AGENT, probe_xfer, probe_handle) ==
+           NIXL_SUCCESS);
+      if (probe_handle) {
+        g_agent->releasedDlistH(probe_handle);
+      }
+      g_agent->deregisterMem(probe_reg);
     }
     AT_CUDA_CHECK(cudaFree(probe));
-    TORCH_CHECK(ok, "NIXL: UCX lacks VRAM support. Install ucx-cuda.");
+    TORCH_CHECK(vram_supported, "NIXL: UCX lacks VRAM support. Install ucx-cuda.");
   }
   return *g_agent;
 }
@@ -74,28 +97,37 @@ static std::mutex g_md_exchange_mutex;
 static std::unordered_map<std::string, size_t> g_md_exchange_seq;
 
 static std::vector<nixl_blob_t> all_gather_nixl_metadata(
-    const c10::intrusive_ptr<c10d::Store>& store, int rank, int ws,
-    const std::string& gn, const nixl_blob_t& md) {
+    const c10::intrusive_ptr<c10d::Store>& store, int rank, int world_size,
+    const std::string& group_name, const nixl_blob_t& local_metadata) {
   size_t seq;
-  { std::lock_guard<std::mutex> lk(g_md_exchange_mutex); seq = g_md_exchange_seq[gn]++; }
+  {
+    std::lock_guard<std::mutex> lk(g_md_exchange_mutex);
+    seq = g_md_exchange_seq[group_name]++;
+  }
   std::vector<std::string> keys;
-  for (int r = 0; r < ws; ++r)
-    keys.push_back("nixl_md/" + gn + "/" + std::to_string(seq) + "/" + std::to_string(r));
+  for (int r = 0; r < world_size; ++r) {
+    keys.push_back(
+        "nixl_md/" + group_name + "/" + std::to_string(seq) + "/" +
+        std::to_string(r));
+  }
   std::vector<uint8_t> payload(
-      reinterpret_cast<const uint8_t*>(md.data()),
-      reinterpret_cast<const uint8_t*>(md.data()) + md.size());
+      reinterpret_cast<const uint8_t*>(local_metadata.data()),
+      reinterpret_cast<const uint8_t*>(local_metadata.data()) +
+          local_metadata.size());
   store->set(keys[rank], payload);
-  std::vector<nixl_blob_t> res(ws);
-  res[rank] = md;
-  for (int r = 0; r < ws; ++r) {
+  std::vector<nixl_blob_t> gathered_metadata(world_size);
+  gathered_metadata[rank] = local_metadata;
+  for (int r = 0; r < world_size; ++r) {
     if (r == rank) continue;
     store->wait({keys[r]});
-    auto d = store->get(keys[r]);
-    res[r] = nixl_blob_t(reinterpret_cast<const char*>(d.data()), d.size());
+    auto remote_payload = store->get(keys[r]);
+    gathered_metadata[r] = nixl_blob_t(
+        reinterpret_cast<const char*>(remote_payload.data()),
+        remote_payload.size());
   }
-  storeExchange.barrier(store, rank, ws);
+  storeExchange.barrier(store, rank, world_size);
   store->deleteKey(keys[rank]);
-  return res;
+  return gathered_metadata;
 }
 
 struct NIXLRendezvousInfo {
@@ -225,6 +257,9 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
       peer_agent_names_.push_back(rn);
       buffers_.push_back(nullptr); signal_pads_.push_back(nullptr);
     }
+    // Backend-private support allocations: device pointer tables are consumed
+    // by kernels, and the staging buffer is registered so NIXL can write small
+    // signal values to remote signal pads.
     size_t as = sizeof(void*) * world_size_;
     buffers_dev_ = (void**)c10::cuda::CUDACachingAllocator::raw_alloc(as);
     signal_pads_dev_ = (void**)c10::cuda::CUDACachingAllocator::raw_alloc(as);
@@ -410,6 +445,8 @@ class NIXLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   c10::intrusive_ptr<SymmetricMemory> rendezvous(void* p, const std::optional<std::string>& gn) override {
     TORCH_CHECK(gn.has_value());
     std::lock_guard<std::mutex> lk(mu_);
+    // Rendezvous state is cached by allocation base and group. Interior
+    // pointers share the base handle and differ only by byte offset.
     { auto i = sms_.find({p, *gn}); if (i != sms_.end()) return i->second; }
     auto ai = std::find_if(allocs_.begin(), allocs_.end(), [&](auto& kv) {
       auto pi = uintptr_t(p), bi = uintptr_t(kv.second->ptr);
