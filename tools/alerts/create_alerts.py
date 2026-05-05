@@ -11,7 +11,6 @@ from difflib import SequenceMatcher
 from typing import Any
 
 import requests
-from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 ALL_SKIPPED_THRESHOLD = 100
@@ -64,6 +63,22 @@ DISABLED_ALERTS = [
     "rerun_disabled_tests",
     "unstable",
 ]
+
+
+def strtobool(val: str) -> bool:
+    """Convert a string representation of truth to true (1) or false (0).
+
+    True values are "y", "yes", "t", "true", "on", and "1"; false values
+    are "n", "no", "f", "false", "off", and "0".  Raises ValueError if
+    "val" is anything else.
+    """
+    val = val.lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    elif val in ("n", "no", "f", "false", "off", "0"):
+        return False
+    else:
+        raise ValueError(f"invalid truth value {val!r}")
 
 
 class JobStatus:
@@ -299,13 +314,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-flaky-test-alert",
         help="Run this script with the flaky test alerting",
-        type=distutils.util.strtobool,
+        type=strtobool,
         default=os.getenv("WITH_FLAKY_TEST_ALERT", "YES"),
     )
     parser.add_argument(
         "--dry-run",
         help="Whether or not to actually post issues",
-        type=distutils.util.strtobool,
+        type=strtobool,
         default=os.getenv("DRY_RUN", "YES"),
     )
     return parser.parse_args()
