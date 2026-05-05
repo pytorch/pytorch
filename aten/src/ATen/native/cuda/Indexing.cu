@@ -1237,9 +1237,9 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   #ifdef USE_ROCM
-    const bool is_rocm = true;
+    constexpr bool is_rocm = true;
   #else
-    const bool is_rocm = false;
+    constexpr bool is_rocm = false;
   #endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
@@ -1424,9 +1424,9 @@ void index_reduce_func_cuda_impl(
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   #ifdef USE_ROCM
-    const bool is_rocm = true;
+    constexpr bool is_rocm = true;
   #else
-    const bool is_rocm = false;
+    constexpr bool is_rocm = false;
   #endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
