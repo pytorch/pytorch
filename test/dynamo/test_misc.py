@@ -14871,6 +14871,29 @@ fn
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(t)
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamically_created_class_object_escape_unimplemented(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class DynamicClass:
+                def __init__(self, tensor):
+                    self.tensor = tensor
+
+                def compute(self):
+                    return self.tensor.sin()
+
+            obj = DynamicClass(t)
+            # The object escapes the compiled region (implicitly by being returned)
+            return obj
+
+        t = torch.randn(2)
+        # Should raise Unsupported with the unimplemented error about
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Reconstruct user defined class without a source",
+        ):
+            fn(t)
+
     def test_dunder_weakref(self):
         class Foo:
             pass
