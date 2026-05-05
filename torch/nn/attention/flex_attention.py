@@ -1737,6 +1737,11 @@ def _apply_kernel_options(
         or key.device.type == "cpu"
         or value.device.type == "cpu"
     )
+    any_inputs_on_mps_device = (
+        query.device.type == "mps"
+        or key.device.type == "mps"
+        or value.device.type == "mps"
+    )
 
     # Determine what auxiliary outputs are needed
     output_lse = return_lse
@@ -1758,6 +1763,9 @@ def _apply_kernel_options(
         if any_inputs_on_cpu_device:
             # CPU with torch.compile now supports inference, and will not return lse
             # TODO: support CPU for training and return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
+        if any_inputs_on_mps_device:
+            # MPS supports inference only; backward / LSE not yet implemented
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.

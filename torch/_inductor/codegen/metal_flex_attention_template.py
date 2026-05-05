@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 METAL_DTYPE_MAP = {
     torch.float32: "float",
     torch.float16: "half",
-    torch.bfloat16, "bfloat", #TODO check if this works
+    torch.bfloat16: "bfloat",
 }
 
 
@@ -274,12 +274,18 @@ def _generate_mma_shader(
 
     def _block_loop_body(score_code, mask_code, is_partial):
         """Generate the inner tiled loop body for one block type."""
-        mask_section = ""
+        # mask_result starts true; the partial block path overwrites it via
+        # mask_code. Gating the softmax update on mask_result avoids the
+        # exp(-inf - -inf) = NaN trap when the very first element of a row is
+        # masked.
         if is_partial:
             mask_section = f"""
                     bool mask_result = true;
 {mask_code}
-                    if (!mask_result) s = -HUGE_VALF;
+"""
+        else:
+            mask_section = """
+                    bool mask_result = true;
 """
         return f"""\
         for (int tile_start = kv_start; tile_start < kv_end; tile_start += BLOCK_N) {{
@@ -344,14 +350,16 @@ def _generate_mma_shader(
 {score_code}
                     s = score_val;
 {mask_section}\
-                    float new_max = metal::max(row_max, s);
-                    float old_scale_v = metal::precise::exp(row_max - new_max);
-                    float p = metal::precise::exp(s - new_max);
-                    row_sum = row_sum * old_scale_v + p;
-                    for (int d = 0; d < D_V; d++) o_acc[d] *= old_scale_v;
-                    for (int d = 0; d < D_V; d++)
-                        o_acc[d] += p * float(KV_tg[n_local * D_V + d]);
-                    row_max = new_max;
+                    if (mask_result) {{
+                        float new_max = metal::max(row_max, s);
+                        float old_scale_v = metal::precise::exp(row_max - new_max);
+                        float p = metal::precise::exp(s - new_max);
+                        row_sum = row_sum * old_scale_v + p;
+                        for (int d = 0; d < D_V; d++) o_acc[d] *= old_scale_v;
+                        for (int d = 0; d < D_V; d++)
+                            o_acc[d] += p * float(KV_tg[n_local * D_V + d]);
+                        row_max = new_max;
+                    }}
                 }}
             }}
             threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -698,20 +706,22 @@ kernel void flex_attn_fwd(
                     // Apply mask_mod
                     bool mask_result = true;
 {mask_mod_indented}
-                    if (!mask_result) s = -HUGE_VALF;
 
-                    // Online softmax update
-                    float new_max = metal::max(row_max, s);
-                    float old_scale = metal::precise::exp(row_max - new_max);
-                    float p = metal::precise::exp(s - new_max);
-                    row_sum = row_sum * old_scale + p;
-                    for (int d = 0; d < D_V; d++) o_acc[d] *= old_scale;
-
-                    // Accumulate V (from threadgroup memory)
-                    for (int d = 0; d < D_V; d++) {{
-                        o_acc[d] += p * float(V_tile[n_local * D_V + d]);
+                    // Skip masked positions entirely. If we instead set
+                    // s = -HUGE_VALF and entered the update, the very first
+                    // masked element of a row would compute exp(-inf - -inf)
+                    // = NaN and poison row_sum / o_acc.
+                    if (mask_result) {{
+                        float new_max = metal::max(row_max, s);
+                        float old_scale = metal::precise::exp(row_max - new_max);
+                        float p = metal::precise::exp(s - new_max);
+                        row_sum = row_sum * old_scale + p;
+                        for (int d = 0; d < D_V; d++) o_acc[d] *= old_scale;
+                        for (int d = 0; d < D_V; d++) {{
+                            o_acc[d] += p * float(V_tile[n_local * D_V + d]);
+                        }}
+                        row_max = new_max;
                     }}
-                    row_max = new_max;
                 }}
             }}
 
