@@ -477,6 +477,16 @@ its type to `common_constant_types`.
             return ConstantVariable.create(NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
+        # bool inherits nb_negative from int via slot inheritance.
+        return ConstantVariable.create(-self.value)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)

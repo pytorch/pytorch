@@ -10,9 +10,18 @@ When asked to review a PR, always use the /pr-review skill.
 
 If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
 
+# CI Docker Images
+
+The `.ci/docker/` directory is content-hashed to determine whether Docker images
+need rebuilding. Any file change inside `.ci/docker/` (including the README)
+changes the hash and triggers a full Docker image rebuild. Do not make changes
+in this directory unless you intend to rebuild Docker images. When Docker builds
+are broken (e.g., due to an upstream Ubuntu outage), avoid touching this
+directory so you don't force a rebuild against the broken state.
+
 # Build
 
-Always ask for build configuration environment variables before running build.
+Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
 You should NEVER run any other command to build PyTorch.
 
@@ -49,7 +58,11 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with Claude.
+Disclose that the PR was authored with an AI assistant. Do this informally in
+the commit body (e.g., "Authored by Claude." or a similar attribution for
+whichever assistant was used). NEVER add a `Co-authored-by:` trailer
+attributing the AI assistant, as it interferes with the Linux Foundation CLA
+bot.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
