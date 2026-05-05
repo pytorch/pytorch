@@ -160,10 +160,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def setUp(self):
+        super().setUp()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
@@ -927,7 +929,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, arg1_1);  mul = arg1_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -981,7 +983,7 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
     @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
@@ -1101,7 +1103,7 @@ class GraphModule(torch.nn.Module):
             # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(cos, 2);  cos = None
             return (div, arg0_1)
-        """,  # noqa: B950
+        """,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1124,7 +1126,7 @@ class GraphModule(torch.nn.Module):
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
-            return (mul,)""",  # noqa: B950
+            return (mul,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1184,7 +1186,7 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1231,7 +1233,7 @@ class outer_fn(torch.nn.Module):
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1);  arg2_1 = arg3_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1281,7 +1283,7 @@ class outer_fn(torch.nn.Module):
             sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (add, sub, mul)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1332,7 +1334,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
             return (add_1, mul_1)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -2005,6 +2007,142 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
         dist.destroy_process_group()
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
+        """2-tier AOT export with BlockMask whose mask_mod captures tensors.
+
+        Reproduces the sixlib/mango pattern where:
+        - BlockMask is pytree-registered (as in sixlib/attention_mask.py)
+        - BlockMask with tensor closure is created inside forward
+        - aot_export flattens intermediates via pytree, exposing the
+          mask_mod callable (with captured tensors) in the context
+
+        visibility is a model input -> FunctionalTensor during outer trace.
+        mask_mod closure captures derived slices (lower, upper).
+        """
+        import contextlib
+
+        import torch.fx.traceback as fx_traceback
+        from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+        from torch._subclasses import FakeTensorMode
+        from torch.nn.attention.flex_attention import (
+            BlockMask,
+            create_block_mask,
+            flex_attention,
+        )
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+        # Register BlockMask as pytree node (same as sixlib/attention_mask.py)
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+
+        d_model, n_heads = 64, 4
+        batch_size, seq_len = 2, 32
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(d_model, d_model)
+                self.k_proj = torch.nn.Linear(d_model, d_model)
+                self.v_proj = torch.nn.Linear(d_model, d_model)
+
+            def forward(self, x, visibility):
+                bs, sl, _ = x.shape
+                lower = visibility[:, 0, :]
+                upper = visibility[:, 1, :]
+
+                def mask_mod(b_idx, h_idx, q_idx, k_idx):
+                    return (lower[b_idx, q_idx] <= k_idx) & (
+                        k_idx <= upper[b_idx, q_idx]
+                    )
+
+                bm = create_block_mask(
+                    mask_mod,
+                    B=bs,
+                    H=None,
+                    Q_LEN=sl,
+                    KV_LEN=sl,
+                    device=x.device,
+                )
+
+                q = (
+                    self.q_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+
+                with fx_traceback.annotate({"compile_with_inductor": 1}):
+                    attn_out = flex_attention(q, k, v, block_mask=bm)
+
+                out = attn_out.transpose(1, 2).contiguous().view(bs, sl, -1)
+                # Return BlockMask alongside output so it appears in the
+                # output pytree spec — this matches how sixlib's decoder
+                # returns context alongside outputs.
+                return out, bm
+
+        with (
+            torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=True),
+        ):
+            torch._dynamo.reset()
+
+            model = SimpleModel().to(GPU_TYPE)
+            x = torch.randn(
+                batch_size,
+                seq_len,
+                d_model,
+                device=GPU_TYPE,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+            visibility = torch.zeros(
+                batch_size,
+                2,
+                seq_len,
+                device=GPU_TYPE,
+                dtype=torch.int64,
+            )
+            visibility[:, 1, :] = seq_len - 1
+
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(fake_mode)
+                result = aot_export_joint_with_descriptors(
+                    stack,
+                    model,
+                    args=(x, visibility),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    _disable_torch_fn_metadata_mode=True,
+                )
+
+            print("=== Outer (aot_export) graph ===")
+            print(result.graph_module.graph)
+            for name, submod in result.graph_module.named_modules():
+                if name and hasattr(submod, "graph"):
+                    print(f"\n=== Submodule: {name} ===")
+                    print(submod.graph)
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):

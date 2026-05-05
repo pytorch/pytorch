@@ -3,8 +3,9 @@ import logging
 import sys
 from typing import cast
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
+from ..backends import cuda as _cuda
 from .common_utils import (
     _available_version,
     _unavailable_reason,
@@ -13,7 +14,8 @@ from .common_utils import (
 )
 from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
-    _OpFn,
+    _OpCondFn,
+    _OpImplFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -38,6 +40,10 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
     NOTE: Doesn't import at this point
     """
+    # Skip all checks if running on CPU-only binary
+    if not _cuda.is_built():
+        return (False, None)
+
     deps = [
         ("nvidia_cutlass_dsl", "cutlass"),
         ("apache_tvm_ffi", "tvm_ffi"),
@@ -94,7 +100,8 @@ def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    impl: _OpFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -116,6 +123,7 @@ def register_op_override(
         lib_symbol,
         op_symbol,
         dispatch_key,
+        cond,
         impl,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,

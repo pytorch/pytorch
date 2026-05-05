@@ -43,6 +43,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -177,6 +178,7 @@ def evaluate_platform_supports_fp8():
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
+            return False
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
@@ -212,8 +214,21 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def evaluate_platform_supports_fp8_sparse():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return (
+                (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
+                and torch.backends.cusparselt.is_available()
+                and torch.backends.cusparselt.version() >= 602
+            )
+    return False
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
@@ -463,8 +478,42 @@ def xfailIfSM100OrLater(func):
 def xfailIfSM120OrLater(func):
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
+def xfailIfSM12X(func):
+    return func if not IS_SM12X else unittest.expectedFailure(func)
+
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
+
+def _xfail_cuda_on_windows_wrapper(test_fn):
+    """Wraps a test to xfail when running on a CUDA device.
+
+    Works for both device-parameterized tests (device_type == "cuda") and plain
+    TestCase CUDA tests (device_type is None). Only passes through for tests
+    explicitly running on a non-CUDA device type (e.g. "cpu", "xpu").
+    """
+    @functools.wraps(test_fn)
+    def wrapper(slf, *args, **kwargs):
+        import pytest
+        device_type = getattr(slf, "device_type", None)
+        if device_type is not None and device_type != "cuda":
+            return test_fn(slf, *args, **kwargs)
+        try:
+            test_fn(slf, *args, **kwargs)
+        except Exception as e:
+            pytest.xfail(f"Expected failure for {test_fn.__name__}: {e}")
+
+        raise AssertionError(f"Test {test_fn.__name__} was expected to fail but succeeded.")
+    return wrapper
+
+
+def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
+    """Mark a CUDA test as expected failure on Windows with SM >= 8.9.
+
+    Works for both device-parameterized tests and plain TestCase CUDA tests.
+    CPU/XPU variants of device-parameterized tests are unaffected.
+    """
+    return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
+
 
 # When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)

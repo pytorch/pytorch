@@ -27,7 +27,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -1650,6 +1650,125 @@ class DistMathOpsTest(DTensorTestBase):
         expected = torch.linalg.solve(A, B)
         result = torch.linalg.solve(dt_A, dt_B)
         self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_interpolation_upsample_ops(self):
+        """Test forward and backward for F.interpolate with DTensor.
+
+        Verifies output and gradient correctness for all interpolation modes
+        across batch-shard, channel-shard, and replicate placements. Also
+        checks that sharded placements incur no communication in backward.
+        """
+        device_mesh = self.build_device_mesh()
+        F = torch.nn.functional
+        comm_mode = CommDebugMode()
+
+        # Test configs: (input_shape, output_size, mode, align_corners)
+        # Covers upsample forward and backward ops. "area" mode is excluded
+        # here because it dispatches to adaptive_avg_pool2d (tested separately).
+        test_configs = [
+            # 1D: (N, C, L)
+            ((8, 4, 16), (8,), "linear", True),
+            ((8, 4, 16), (32,), "nearest", None),
+            # 2D: (N, C, H, W)
+            ((8, 4, 8, 8), (16, 16), "bilinear", True),
+            ((8, 4, 8, 8), (16, 16), "bicubic", True),
+            ((8, 4, 8, 8), (4, 4), "nearest", None),
+            # 3D: (N, C, D, H, W)
+            ((8, 4, 4, 4, 4), (8, 8, 8), "trilinear", True),
+        ]
+
+        placements_to_test = [[Shard(0)], [Shard(1)], [Replicate()]]
+
+        for shape, out_size, mode, align_corners in test_configs:
+            for placements in placements_to_test:
+                with self.subTest(shape=shape, mode=mode, placements=placements):
+                    kwargs = {"size": out_size, "mode": mode}
+                    if align_corners is not None:
+                        kwargs["align_corners"] = align_corners
+
+                    # Reference: plain tensor forward + backward
+                    inp_ref = torch.randn(
+                        shape, device=self.device_type, requires_grad=True
+                    )
+                    out_ref = F.interpolate(inp_ref, **kwargs)
+                    out_ref.sum().backward()
+
+                    # DTensor: forward + backward
+                    inp = inp_ref.detach().clone().requires_grad_(True)
+                    dt_inp = distribute_tensor(inp, device_mesh, placements)
+                    dt_out = F.interpolate(dt_inp, **kwargs)
+
+                    self.assertEqual(dt_out.full_tensor(), out_ref)
+
+                    dt_out.sum().backward()
+                    self.assertEqual(dt_inp.grad.full_tensor(), inp_ref.grad)
+
+                    # No communication needed: upsample backward runs
+                    # independently on each local shard or replica.
+                    inp2 = inp_ref.detach().clone().requires_grad_(True)
+                    dt_inp2 = distribute_tensor(inp2, device_mesh, placements)
+                    dt_out2 = F.interpolate(dt_inp2, **kwargs)
+                    with comm_mode:
+                        dt_out2.sum().backward()
+                    self.assertEqual(
+                        comm_mode.get_total_counts(),
+                        0,
+                        f"Unexpected communication in backward for "
+                        f"{mode} with {placements}",
+                    )
+
+        # Forward-only tests for pooling ops (backward uses different ops)
+        inp = torch.randn(8, 3, 16, 16, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+
+        # F.interpolate with area mode
+        expected = F.interpolate(inp, size=(8, 8), mode="area")
+        result = F.interpolate(dt_inp, size=(8, 8), mode="area")
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # F.adaptive_avg_pool2d
+        expected = F.adaptive_avg_pool2d(inp, (4, 4))
+        result = F.adaptive_avg_pool2d(dt_inp, (4, 4))
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+    @skipIfRocm
+    @with_comms
+    def test_normalization_ops(self):
+        device_mesh = self.build_device_mesh()
+        F = torch.nn.functional
+
+        N, C, H, W = 8, 6, 4, 4
+        inp = torch.randn(N, C, H, W, device=self.device_type)
+        weight = torch.randn(C, device=self.device_type)
+        bias = torch.randn(C, device=self.device_type)
+        running_mean = torch.zeros(C, device=self.device_type)
+        running_var = torch.ones(C, device=self.device_type)
+
+        replicate = [Replicate()]
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_weight = distribute_tensor(weight, device_mesh, replicate)
+        dt_bias = distribute_tensor(bias, device_mesh, replicate)
+        dt_running_mean = distribute_tensor(running_mean, device_mesh, replicate)
+        dt_running_var = distribute_tensor(running_var, device_mesh, replicate)
+
+        # batch_norm (eval mode with running stats) — replicate-only strategy
+        expected = F.batch_norm(inp, running_mean, running_var, weight, bias)
+        result = F.batch_norm(
+            dt_inp, dt_running_mean, dt_running_var, dt_weight, dt_bias
+        )
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_replicate())
+
+        # group_norm with batch-dim sharding — scalar N/C/HxW args are adjusted
+        num_groups = 3
+        expected = F.group_norm(inp, num_groups, weight, bias)
+        result = F.group_norm(dt_inp, num_groups, dt_weight, dt_bias)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

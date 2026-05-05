@@ -9,12 +9,13 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast
+from typing import cast, TypedDict
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     _StridedShardNotDecodableError,
@@ -26,6 +27,7 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -166,11 +168,11 @@ class _TransformInfo:
         src, dst = self.src_dst_placements
         if src.is_partial() and dst.is_replicate():
             return "all_reduce"
-        elif src.is_partial() and dst.is_shard():
+        elif src.is_partial() and _is_shard_like(dst):
             return "reduce_scatter"
-        elif src.is_shard() and dst.is_replicate():
+        elif _is_shard_like(src) and dst.is_replicate():
             return "all_gather"
-        elif src.is_shard() and dst.is_shard():
+        elif _is_shard_like(src) and _is_shard_like(dst):
             return "all_to_all"
         else:
             # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
@@ -274,9 +276,7 @@ def _get_flattened_mesh_by_layout_impl(
     # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
     # _get_slice_mesh_layout does pure layout math, no tensor operations
     sliced_layout = mesh._get_slice_mesh_layout(dim_names)
-    expected_layout = sliced_layout.coalesce()
-    if len(expected_layout) > 1:
-        expected_layout = expected_layout.nest()
+    expected_layout = _MeshLayout([sliced_layout.collapse()])
 
     # Search existing flattened meshes by comparing layouts
     for flattened_mesh in root_mesh._flatten_mapping.values():
@@ -1311,7 +1311,7 @@ class DTensorRedistributePlanner:
         This would detect if there're mis-aligned/nested shardings between src/dst placements.
         E.g. Suppose the redistribution to perform is (Shard(0), Shard(0)) -> (Replicate(), Shard(0)),
         in this case Shard(0) -> Shard(0) for mesh dimension 1 actually needs resharding, because in
-        the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
+        the former is a nested-sharding of a tensor already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
         # logical shape records the logic tensor shape on the mesh dimension
@@ -1372,6 +1372,11 @@ class DTensorRedistributePlanner:
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
                 # are traversing from inner to outer placements here
+                # TODO: extend nested sharding detection to _StridedShard
+                # (isinstance check and is_shard() below miss it).
+                # Safe today: strategies convert _StridedShard to Replicate
+                # on ALL mesh dims for a given reduction dim, so misaligned
+                # nested _StridedShard targets can't arise.
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
@@ -1442,7 +1447,7 @@ def _gen_transform_infos_non_cached(
     )
 
     # Determine which transform strategy to use:
-    # 1. Non-standard device order or _StridedShard → graph-based
+    # 1. Non-standard device order or contains _StridedShard → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
     # 3. Otherwise → use greedy
     if has_non_default_order or has_strided_shard:
@@ -1458,12 +1463,16 @@ def _gen_transform_infos_non_cached(
         src_spec.tensor_meta,
     )
     if use_graph_based_transform:
-        # The graph-based planner requires decoding _StridedShard split_factor into a
-        # shard order via _maybe_convert_StridedShard_to_shard_order. This fails when
-        # split_factor doesn't correspond to any valid product of mesh dimension sizes
-        # (e.g. sf=2 on a 1D mesh, or sf=3 on a (4,2) mesh). In those cases, fall back
-        # to greedy which treats _StridedShard as an opaque placement and delegates
-        # directly to _StridedShard._to_replicate_tensor().
+        # TODO(zpcore): Temporary workaround for the case where _StridedShard
+        # cannot be decoded into shard order. This happens when
+        # use_strided_shard_as_shard_order defaults to True (e.g. in
+        # Redistribute.forward where the target DTensorSpec is constructed from
+        # raw placements without the flag), but the split_factor doesn't
+        # correspond to any valid product of mesh dimension sizes (e.g. sf=2
+        # on a 1D mesh). A proper fix is to either pass
+        # use_strided_shard_as_shard_order through the Redistribute API, or
+        # migrate to explicit shard_order so _StridedShard is no longer
+        # overloaded for two purposes.
         try:
             transform_infos = drp.generate_graph_based_transform_infos(
                 src_spec, dst_spec, src_spec.shape
@@ -1571,6 +1580,15 @@ def redistribute_local_tensor(
                 mesh_to_use = device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
+
+            # _StridedShard methods use device_mesh directly, not mesh_to_use.
+            # This is safe because _StridedShard.is_shard() returns False, so
+            # _comm_type_key() returns None and flattening is never attempted.
+            if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
+                assert mesh_to_use is device_mesh, (  # noqa: S101
+                    "_StridedShard redistribute assumes no flattened transforms"
+                )
+
             num_chunks = mesh_to_use.size(mesh_dim=i)
 
             if current == target:
@@ -1641,8 +1659,15 @@ def redistribute_local_tensor(
                             target_placement.dim,
                         )
                 elif isinstance(current, _StridedShard):
-                    raise NotImplementedError(
-                        "Redistribute from _StridedShard to Shard is not implemented yet"
+                    # _StridedShard -> Shard: go via Replicate as intermediate
+                    replicated = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target_placement._replicate_to_shard(
+                        replicated,
+                        mesh_to_use,
+                        i,
+                        mesh_to_use._sym_get_coordinate(i),
                     )
                 else:
                     raise ValueError(
@@ -1654,7 +1679,7 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._partition_value(
                         local_tensor, mesh_to_use, i
                     )
-                elif current.is_shard() or isinstance(current, _StridedShard):
+                elif _is_shard_like(current):
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
@@ -1668,8 +1693,13 @@ def redistribute_local_tensor(
             elif isinstance(target, _StridedShard):
                 # Case 4: target is _StridedShard
                 if current.is_partial():
-                    raise NotImplementedError(
-                        "Redistribute from Partial to _StridedShard is not implemented yet"
+                    # Partial -> _StridedShard: reduce to Replicate, then strided shard
+                    partial_spec = cast(Partial, current)
+                    replicated = partial_spec._reduce_value(
+                        local_tensor, mesh_to_use, i
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding local strided shard
@@ -1677,9 +1707,13 @@ def redistribute_local_tensor(
                         local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_shard():
-                    # Shard -> _StridedShard on potentially different dimensions
-                    raise NotImplementedError(
-                        "Redistribute from Shard to _StridedShard is not implemented yet"
+                    # Shard -> _StridedShard: all-gather to Replicate, then strided shard
+                    current_placement = cast(Shard, current)
+                    replicated = current_placement._to_replicate_tensor(
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif isinstance(current, _StridedShard):
                     # _StridedShard -> _StridedShard: go through Replicate
@@ -1706,8 +1740,9 @@ def redistribute_local_tensor(
 def _redistribute_backward(
     grad_output: "dtensor.DTensor",
     previous_spec: DTensorSpec,
-    original_dtype: torch.dtype | None = None,
-    backward_dtype: torch.dtype | None = None,
+    *,
+    out_dtype: torch.dtype,
+    op_dtype: torch.dtype,
     async_op: bool = False,
 ):
     """
@@ -1717,8 +1752,9 @@ def _redistribute_backward(
     Args:
         grad_output: The output gradient tensor.
         previous_spec: DTensorSpec prior to redistribution.
-        original_dtype: Original output tensor dtype from forward pass (for type checking)
-        backward_dtype: Desired data type for backwards output.
+        out_dtype: dtype to cast the returned gradient to. Pinned by autograd
+                to match the dtype of the input of the node above this one.
+        op_dtype: dtype to run the backward collective at.
         async_op: whether to perform the DTensor redistribute operation
                 asynchronously or not. Default: False
 
@@ -1726,22 +1762,23 @@ def _redistribute_backward(
         A :class:`torch.Tensor` object.
         A :class:`DTensorSpec` object.
     """
-    if backward_dtype is not None and backward_dtype != grad_output._local_tensor.dtype:
-        local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+    if op_dtype != grad_output._local_tensor.dtype:
+        local_tensor = grad_output._local_tensor.to(dtype=op_dtype)
         current_spec = DTensorSpec(
             mesh=grad_output._spec.device_mesh,
             placements=grad_output._spec.placements,
             tensor_meta=TensorMeta(
                 shape=grad_output.shape,
                 stride=grad_output.stride(),
-                # pyrefly: ignore [bad-argument-type]
-                dtype=backward_dtype,
+                dtype=op_dtype,
             ),
+            use_strided_shard_as_shard_order=grad_output._spec.use_strided_shard_as_shard_order,
         )
         previous_spec = DTensorSpec(
             mesh=previous_spec.device_mesh,
             placements=previous_spec.placements,
             tensor_meta=current_spec.tensor_meta,
+            use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
         )
     else:
         local_tensor = grad_output._local_tensor
@@ -1755,9 +1792,11 @@ def _redistribute_backward(
 
     # for backward shard -> partial, we just do shard -> replicate
     # for backward replicate -> partial, we skip the transformation
+    # NOTE: _is_shard_like covers _StridedShard defensively; currently
+    # unreachable because Partial -> _StridedShard is not implemented.
     normalized_placements: list[Placement] = []
     for current, target in zip(current_spec.placements, previous_spec.placements):
-        if (current.is_shard() or current.is_replicate()) and target.is_partial():
+        if (_is_shard_like(current) or current.is_replicate()) and target.is_partial():
             normalized_placements.append(Replicate())
         else:
             normalized_placements.append(target)
@@ -1766,6 +1805,7 @@ def _redistribute_backward(
         previous_spec.device_mesh,
         placements=tuple(normalized_placements),
         tensor_meta=previous_spec.tensor_meta,
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
 
     output = redistribute_local_tensor(
@@ -1775,8 +1815,8 @@ def _redistribute_backward(
         async_op=async_op,
     )
 
-    if output.dtype != original_dtype:
-        output = output.to(original_dtype)
+    if output.dtype != out_dtype:
+        output = output.to(out_dtype)
 
     spec = DTensorSpec(
         previous_spec.device_mesh,
@@ -1786,8 +1826,20 @@ def _redistribute_backward(
             stride=grad_output.stride(),
             dtype=output.dtype,
         ),
+        use_strided_shard_as_shard_order=previous_spec.use_strided_shard_as_shard_order,
     )
     return output, spec
+
+
+class _BackwardDtypeConfig(TypedDict):
+    op_dtype: torch.dtype  # dtype the backward collective runs at
+    out_dtype: torch.dtype  # dtype the returned gradient is cast to
+
+
+class _DtypeConfig(TypedDict):
+    op_dtype: torch.dtype  # forward: dtype the collective runs at
+    out_dtype: torch.dtype  # forward: dtype of the output tensor
+    backward_options: _BackwardDtypeConfig
 
 
 class Redistribute(torch.autograd.Function):
@@ -1798,24 +1850,28 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
-        async_op: bool = False,
-        forward_dtype: torch.dtype | None = None,
-        backward_dtype: torch.dtype | None = None,
+        async_op: bool,
+        dtype_config: _DtypeConfig,
     ):
         ctx.async_op = async_op
-        ctx.backward_dtype = backward_dtype
-        ctx.original_dtype = input._local_tensor.dtype
+        bwd = dtype_config["backward_options"]
+        ctx.bwd_op_dtype = bwd["op_dtype"]
+        ctx.bwd_out_dtype = bwd["out_dtype"]
 
-        if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
-            local_tensor = input._local_tensor.to(dtype=forward_dtype)
+        op_dtype = dtype_config["op_dtype"]
+        out_dtype = dtype_config["out_dtype"]
+
+        if op_dtype != input._local_tensor.dtype:
+            local_tensor = input._local_tensor.to(dtype=op_dtype)
             current_spec = DTensorSpec(
                 mesh=device_mesh,
                 placements=input._spec.placements,
                 tensor_meta=TensorMeta(
                     shape=input.shape,
                     stride=input.stride(),
-                    dtype=forward_dtype,
+                    dtype=op_dtype,
                 ),
+                use_strided_shard_as_shard_order=input._spec.use_strided_shard_as_shard_order,
             )
         else:
             local_tensor = input._local_tensor
@@ -1840,6 +1896,19 @@ class Redistribute(torch.autograd.Function):
             output = local_tensor
             target_spec = current_spec
 
+        if output.dtype != out_dtype:
+            output = output.to(out_dtype)
+            target_spec = DTensorSpec(
+                device_mesh,
+                target_spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=input.shape,
+                    stride=input.stride(),
+                    dtype=out_dtype,
+                ),
+                use_strided_shard_as_shard_order=target_spec.use_strided_shard_as_shard_order,
+            )
+
         # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
             # pyrefly: ignore [bad-argument-count]
@@ -1851,17 +1920,15 @@ class Redistribute(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
-        previous_spec = ctx.current_spec
         output_dtensor = NestedRedistribute.apply(
             grad_output,
-            previous_spec,
+            ctx.current_spec,
             ctx.async_op,
-            ctx.backward_dtype,
-            ctx.original_dtype,
+            ctx.bwd_op_dtype,
+            ctx.bwd_out_dtype,
         )
         return (
             output_dtensor,
-            None,
             None,
             None,
             None,
@@ -1886,16 +1953,22 @@ class NestedRedistribute(torch.autograd.Function):
         ctx,
         grad_output: "dtensor.DTensor",
         previous_spec: DTensorSpec,
-        async_op: bool = False,
-        forward_dtype: torch.dtype | None = None,
-        backward_dtype: torch.dtype | None = None,
+        async_op: bool,
+        op_dtype: torch.dtype,
+        out_dtype: torch.dtype,
     ):
+        # Persist op_dtype so the double-backward reuses the same collective
+        # dtype one level down.
         ctx.async_op = async_op
-        ctx.backward_dtype = backward_dtype or ctx.original_dtype
         ctx.original_dtype = grad_output._local_tensor.dtype
+        ctx.op_dtype = op_dtype
 
         output, spec = _redistribute_backward(
-            grad_output, previous_spec, ctx.original_dtype, backward_dtype, async_op
+            grad_output,
+            previous_spec,
+            out_dtype=out_dtype,
+            op_dtype=op_dtype,
+            async_op=async_op,
         )
 
         ctx.current_spec = spec
@@ -1912,14 +1985,14 @@ class NestedRedistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad2_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype or ctx.original_dtype
-
+        # Reuse the same op_dtype one level down; pin out_dtype to the dtype
+        # of the grad we received at this level, since that's what the node
+        # above us expects back.
         output_dtensor = NestedRedistribute.apply(
             grad2_output,
             previous_spec,
-            async_op,
-            backward_dtype,
+            ctx.async_op,
+            ctx.op_dtype,
             ctx.original_dtype,
         )
 

@@ -34,18 +34,7 @@ def should_unwrap_unspec_arg(name: str):
 
 def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
-        # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
-        # Related PR: https://github.com/triton-lang/triton/pull/2279/
-        if arg.dtype == torch.float8_e4m3fn:
-            typ = "*fp8e4nv"
-        elif arg.dtype == torch.float8_e5m2:
-            typ = "*fp8e5"
-        elif arg.dtype == torch.float8_e4m3fnuz:
-            typ = "*fp8e4b8"
-        elif arg.dtype == torch.float8_e5m2fnuz:
-            typ = "*fp8e5b16"
-        else:
-            typ = _type_of(arg.dtype)
+        typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_typ = typ.lstrip("*")

@@ -4443,6 +4443,10 @@ class TestFlat(TestCase):
         if it.index != it.base.size:
             raise AssertionError(f"index mismatch: {it.index} != {it.base.size}")
 
+    def test_flat_cumsum(self):
+        x = np.array([[1.0, 2.0], [3.0, 4.0]])
+        assert_array_equal(np.cumsum(x.flat), np.array([1.0, 3.0, 6.0, 10.0]))
+
 
 class TestResize(TestCase):
     @_no_tracing
@@ -6385,7 +6389,7 @@ class TestArrayInterface(TestCase):
 
 
 class TestDelMisc(TestCase):
-    @xpassIfTorchDynamo_np  # (reason="TODO")
+    @xfail  # torch._numpy .flat returns ravel() instead of flatiter, so del is not supported
     def test_flat_element_deletion(self):
         it = np.ones(3).flat
         try:
@@ -6834,7 +6838,7 @@ class TestWritebackIfCopy(TestCase):
         np.choose(a, choices, out=out, mode="raise")
         assert_equal(out, np.array([[10, -10, 10], [-10, 10, -10], [10, -10, 10]]))
 
-    @xpassIfTorchDynamo_np  # (reason="XXX: ndarray.flat")
+    @xfail  # torch._numpy ndarray doesn't implement __array__
     def test_flatiter__array__(self):
         a = np.arange(9).reshape(3, 3)
         b = a.T.flat
