@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfHpu,
-    skipIfHpu_BUGGY,
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
