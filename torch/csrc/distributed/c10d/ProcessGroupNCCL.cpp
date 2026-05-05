@@ -71,6 +71,32 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   );
 }
 
+template <typename Fn>
+ncclResult_t runNcclWithCommProfilingName(
+    at::cuda::CUDAStream& ncclStream,
+    c10::ArrayRef<at::Tensor> inputs,
+    Fn&& fn) {
+  const auto& commProfilingName = get_comm_profiling_name();
+  if (commProfilingName.empty()) {
+    return fn();
+  }
+
+  at::cuda::CUDAStreamGuard guard(ncclStream);
+  at::RecordFunction recordingFunction(at::RecordScope::USER_SCOPE);
+  if (recordingFunction.isActive()) {
+    std::vector<c10::IValue> recordInputs;
+    recordInputs.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      recordInputs.emplace_back(input);
+    }
+    recordingFunction.before(
+        std::string(commProfilingName),
+        c10::ArrayRef<const c10::IValue>(
+            recordInputs.data(), recordInputs.size()));
+  }
+  return fn();
+}
+
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
@@ -579,7 +605,12 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     bool enableTiming,
     bool cudaEventCacheEnabled,
     DebugLevel distDebugLevel)
-    : Work(rank, opType, profilingTitle, inputs),
+    : Work(
+          rank,
+          opType,
+          profilingTitle,
+          inputs,
+          /*allowProfilingNameOverride=*/false),
       pgUID_(std::move(pgUID)),
       pgDesc_(std::move(pgDesc)),
       device_(device),
@@ -610,7 +641,12 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
-    : Work(w.rank_, w.opType_),
+    : Work(
+          w.rank_,
+          w.opType_,
+          nullptr,
+          std::nullopt,
+          /*allowProfilingNameOverride=*/false),
       std::enable_shared_from_this<WorkNCCL>(w),
       pgUID_(w.pgUID_),
       pgDesc_(w.pgDesc_),
@@ -3895,11 +3931,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 // or removing input and output from lambda's signature).
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
-      fn(inputs[0], outputs[0], comm, ncclStream),
+      runNcclWithCommProfilingName(
+          ncclStream,
+          inputs,
+          [&]() { return fn(inputs[0], outputs[0], comm, ncclStream); }),
       ncclComm->getNcclCommFailureReason());
 #else
   C10D_NCCL_CHECK_TIMEOUT(
-      fn(inputs[0], outputs[0], comm, ncclStream),
+      runNcclWithCommProfilingName(
+          ncclStream,
+          inputs,
+          [&]() { return fn(inputs[0], outputs[0], comm, ncclStream); }),
       ncclComm,
       ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
@@ -4065,13 +4107,20 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   {
     torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comm, useNonblocking());
     for (const auto i : c10::irange(inputs.size())) {
+      c10::ArrayRef<at::Tensor> profiledInputs(inputs.data() + i, 1);
 #ifndef NCCL_HAS_COMM_NONBLOCKING
       C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], comm, ncclStream),
+          runNcclWithCommProfilingName(
+              ncclStream,
+              profiledInputs,
+              [&]() { return fn(inputs[i], outputs[i], comm, ncclStream); }),
           ncclComm->getNcclCommFailureReason());
 #else
       C10D_NCCL_CHECK_TIMEOUT(
-          fn(inputs[i], outputs[i], comm, ncclStream),
+          runNcclWithCommProfilingName(
+              ncclStream,
+              profiledInputs,
+              [&]() { return fn(inputs[i], outputs[i], comm, ncclStream); }),
           ncclComm,
           ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING

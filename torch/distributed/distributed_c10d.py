@@ -6588,10 +6588,10 @@ def _update_process_group_global_state(
 def record_comm(name: str):
     """Context manager to set a custom profiling name for communication collectives.
 
-    When active, all c10d collectives issued within this context will use ``name``
-    as their profiling title in the Work base class, overriding the default
-    backend-specific name (e.g. ``nccl:all_reduce``). This works across all
-    backends without per-backend or per-collective changes.
+    When active, c10d collectives issued within this context will use ``name``
+    as their profiling title. Backends may apply the name to the Work base class
+    range or to backend-specific launch annotations, such as NCCL collectives
+    enqueued on CUDA streams.
 
     Args:
         name (str): The profiling name to associate with collectives.
