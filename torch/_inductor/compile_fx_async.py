@@ -13,7 +13,6 @@ from torch._inductor.output_code import (
 )
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .output_code import complex_memory_overlap  # noqa: F401
 
 
 # When async compile works with cache, remove the disabling below

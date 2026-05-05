@@ -19,11 +19,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
@@ -2239,23 +2235,6 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_timed_cpu_only(self):
         timed(lambda: torch.randn(10), ())
-
-    def test_complex_memory_overlap(self):
-        dense = torch.zeros(64, 32)
-        self.assertFalse(complex_memory_overlap(dense))
-        self.assertFalse(complex_memory_overlap(dense.t()))
-
-        strided = dense.split(4, dim=1)
-        self.assertFalse(complex_memory_overlap(strided[0]))
-        self.assertFalse(complex_memory_overlap(strided[0].t()))
-
-        unsqueezed = dense.unsqueeze(1)
-        self.assertFalse(complex_memory_overlap(unsqueezed))
-        self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
-        self.assertFalse(complex_memory_overlap(gathered))
-        self.assertFalse(complex_memory_overlap(gathered.t()))
 
     @requires_vectorization
     def test_vec_dynamic_shapes(self):
