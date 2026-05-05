@@ -437,13 +437,15 @@ def _local_map_wrapped(
         _annotate_spmd_types(
             flat_local_args, in_placements, in_grad_placements, device_mesh
         )
+        from spmd_types._checker import typecheck  # pyrefly: ignore[missing-import]
+
         mesh_axes = frozenset(
             spmd.MeshAxis.of(device_mesh.get_group(name))
             for name in device_mesh.mesh_dim_names  # pyrefly: ignore
         )
         with (
             spmd.set_current_mesh(mesh_axes),
-            spmd.typecheck(strict_mode="strict"),
+            typecheck(strict_mode="strict"),
         ):
             out = func(*local_args, **kwargs)
     else:
