@@ -120,7 +120,8 @@ class PyCodegen:
         self, value: Union[VariableTracker, Source, "GraphArg"]
     ) -> None:
         res = value.reconstruct(self)
-        assert res is None, f"reconstruct!=None {value}"
+        if res is not None:
+            raise AssertionError(f"reconstruct!=None {value}")
 
     def add_push_null(
         self, gen_fn: Callable[[], None], call_function_ex: bool = False
@@ -198,11 +199,13 @@ class PyCodegen:
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
             types like `NNModuleVariable`, etc.
         """
-        assert value is not None
+        if value is None:
+            raise AssertionError("value must not be None")
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
-            assert allow_cache is True, "allow_cache must be True for Source"
+            if allow_cache is not True:
+                raise AssertionError("allow_cache must be True for Source")
             if self.top_of_stack is value:
                 self._output.append(create_dup_top())
                 return
@@ -229,7 +232,8 @@ class PyCodegen:
 
             return
 
-        assert isinstance(value, VariableTracker)
+        if not isinstance(value, VariableTracker):
+            raise AssertionError(f"expected VariableTracker, got {type(value)}")
         output = self._output
         graph_outputs = self.graph_outputs
 
@@ -357,7 +361,8 @@ class PyCodegen:
                 output.append(self.create_load(parts[0]))
                 parts = parts[1:]
             else:
-                assert self.root is not None
+                if self.root is None:
+                    raise AssertionError("self.root must not be None")
                 output.append(self.create_load_const_unchecked(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
@@ -395,7 +400,8 @@ class PyCodegen:
 
     def load_graph_output(self, index: int) -> None:
         output = self._output
-        assert self.graph_output_var is not None
+        if self.graph_output_var is None:
+            raise AssertionError("graph_output_var must not be None")
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
@@ -417,7 +423,10 @@ class PyCodegen:
         name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         f_globals = self.tx.f_globals
         if name in f_globals:
-            assert id(f_globals[name]) == id(value)
+            if id(f_globals[name]) != id(value):
+                raise AssertionError(
+                    f"f_globals[{name!r}] already exists with a different identity"
+                )
         else:
             f_globals[name] = value
         return [self.create_load_global(name, add=True)]
@@ -426,12 +435,14 @@ class PyCodegen:
         self.top_of_stack = None
 
     def append_output(self, inst: Instruction) -> None:
-        assert isinstance(inst, Instruction)
+        if not isinstance(inst, Instruction):
+            raise AssertionError(f"expected Instruction, got {type(inst)}")
         self._output.append(inst)
         self.clear_tos()
 
     def extend_output(self, insts: list[Instruction]) -> None:
-        assert all(isinstance(x, Instruction) for x in insts)
+        if not all(isinstance(x, Instruction) for x in insts):
+            raise AssertionError("all elements of insts must be Instruction instances")
         self._output.extend(insts)
         self.clear_tos()
 
@@ -439,30 +450,36 @@ class PyCodegen:
         return self._output
 
     def create_load(self, name: str) -> Instruction:
-        assert name in self.code_options["co_varnames"], f"{name} missing"
+        if name not in self.code_options["co_varnames"]:
+            raise AssertionError(f"{name} missing")
         return create_instruction("LOAD_FAST", argval=name)
 
     def create_load_closure(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
         return create_instruction(inst_name, argval=name)
 
     def create_load_deref(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         return create_instruction("LOAD_DEREF", argval=name)
 
     def create_store(self, name: str) -> Instruction:
-        assert name in self.code_options["co_varnames"], f"{name} missing"
+        if name not in self.code_options["co_varnames"]:
+            raise AssertionError(f"{name} missing")
         return create_instruction("STORE_FAST", argval=name)
 
     def create_store_deref(self, name: str) -> Instruction:
-        assert name in self.cell_and_freevars()
+        if name not in self.cell_and_freevars():
+            raise AssertionError(f"{name!r} not in cell_and_freevars")
         return create_instruction("STORE_DEREF", argval=name)
 
     def create_load_global(self, name: str, add: bool = False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
-        assert name in self.code_options["co_names"], f"{name} not in co_names"
+        if name not in self.code_options["co_names"]:
+            raise AssertionError(f"{name} not in co_names")
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value: Any) -> Instruction:
@@ -536,7 +553,8 @@ class PyCodegen:
     def pop_null(self) -> list[Instruction]:
         # POP_TOP doesn't work for null, so we pop nulls by pushing in a
         # nop function, calling it (which consumes the null), and popping the result.
-        assert sys.version_info >= (3, 11)
+        if sys.version_info < (3, 11):
+            raise AssertionError("pop_null requires Python 3.11+")
         return [
             self.create_load_const_unchecked(lambda: None),
             # 3.13 swapped NULL and callable
@@ -685,7 +703,8 @@ class PyCodegen:
                     utils.__name__, "record_pregraph_bytecode_exit"
                 )
             )
-            assert cm_var is not None
+            if cm_var is None:
+                raise AssertionError("cm_var must not be None")
             self.extend_output([self.create_load(cm_var)])
             self.extend_output(create_call_function(1, False))
             self.pop_top()
@@ -709,7 +728,10 @@ class PyCodegen:
     ) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
-            assert output[-1].opname == "CALL"
+            if output[-1].opname != "CALL":
+                raise AssertionError(
+                    f"expected last instruction to be CALL, got {output[-1].opname}"
+                )
             output.insert(-1, self.create_load_const(kw_names))
             output[-1] = create_instruction("CALL_KW", arg=nargs)
             return output
@@ -721,7 +743,11 @@ class PyCodegen:
             else:
                 idx = -2
                 expected_inst = "PRECALL"
-            assert output[idx].opname == expected_inst
+            if output[idx].opname != expected_inst:
+                raise AssertionError(
+                    f"expected instruction at index {idx} to be {expected_inst}, "
+                    f"got {output[idx].opname}"
+                )
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
             output.insert(idx, kw_names_inst)
             return output
