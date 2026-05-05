@@ -56,7 +56,7 @@ class IntVar:
         if self.max is not None:
             parts.append(f"max={self.max}")
         if self.optimization_hint is not None:
-            parts.append(f"hint={self.optimization_hint}")
+            parts.append(f"optimization_hint={self.optimization_hint}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
 

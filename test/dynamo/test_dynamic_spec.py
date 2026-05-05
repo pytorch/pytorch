@@ -98,7 +98,9 @@ class TestShapeVarConstruction(TestCase):
 
     def test_repr(self):
         s = ShapeVar("batch", max=64, optimization_hint=32)
-        self.assertEqual(repr(s), "ShapeVar(batch, min=0, max=64, hint=32)")
+        self.assertEqual(
+            repr(s), "ShapeVar(batch, min=0, max=64, optimization_hint=32)"
+        )
 
     def test_repr_minimal(self):
         s = ShapeVar("x")
@@ -148,7 +150,9 @@ class TestIntVarConstruction(TestCase):
 
     def test_repr(self):
         s = IntVar("offset", min=-100, max=100, optimization_hint=0)
-        self.assertEqual(repr(s), "IntVar(offset, min=-100, max=100, hint=0)")
+        self.assertEqual(
+            repr(s), "IntVar(offset, min=-100, max=100, optimization_hint=0)"
+        )
 
     def test_repr_minimal(self):
         s = IntVar("x")
@@ -383,6 +387,29 @@ class TestShapeVarCompile(TestCase):
         # y not in spec → all static; changing y's shape recompiles
         compiled(torch.randn(8, 3), torch.randn(8, 3))  # x dim0 absorbed, y recompiles
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_unspecified_parameter_stays_static(self):
+        """nn.Parameter arg not mentioned in shapes_spec stays fully static."""
+        backend = EagerAndRecordGraphs()
+
+        def fn(x, w):
+            return x + w
+
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+            ),
+        )
+        compiled(torch.randn(4, 3), torch.randn(4, 3))
+        # w is not in the spec → all dims static. Changing w's shape recompiles.
+        compiled(torch.randn(8, 3), torch.randn(8, 3))
+        # x dim 0 is unbacked (absorbed), but w changed shape → recompile
+        self.assertEqual(len(backend.graphs), 2)
+
+    # TODO: once ObjectSpec is added, test the opposite — that specifying a
+    # TensorSpec on an nn.Parameter makes it a placeholder (not inlined).
 
 
 if __name__ == "__main__":

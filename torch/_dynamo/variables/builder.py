@@ -2412,9 +2412,13 @@ class VariableBuilder:
         # Those paths bypass _automatic_dynamic where the spec is applied.
         # Without this check, specifying TensorSpec on an nn.Parameter would
         # be silently ignored.
-        _has_spec = (
-            lookup_spec_from_dynamo_source(source, config._shapes_spec) is not None
-        )
+        _tensor_spec = lookup_spec_from_dynamo_source(source, config._shapes_spec)
+        if isinstance(_tensor_spec, TensorSpec) and len(_tensor_spec) != value.dim():
+            raise ValueError(
+                f"TensorSpec has {len(_tensor_spec)} dims but tensor {source.name} "
+                f"has {value.dim()} dims"
+            )
+        _has_spec = _tensor_spec is not None
 
         if (
             not _has_spec
@@ -2552,7 +2556,11 @@ class VariableBuilder:
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
         example_value = wrap_to_fake_tensor_and_record(
-            value, tx=self.tx, is_tensor=True, source=source
+            value,
+            tx=self.tx,
+            is_tensor=True,
+            source=source,
+            tensor_spec=_tensor_spec if isinstance(_tensor_spec, TensorSpec) else None,
         )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -3873,6 +3881,7 @@ def _automatic_dynamic(
     source: Source,
     static_shapes: bool,
     outer_only: bool = False,
+    tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
     # strided NT not supported
     if e.is_nested and not isinstance(
@@ -3939,8 +3948,11 @@ def _automatic_dynamic(
     # bypass condition checks for *any* spec so a mis-typed user spec
     # still opts out of the fast path instead of being silently
     # specialized.
-    _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
-    tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
+    # tensor_spec is passed from wrap_tensor (already looked up).
+    # If not passed (recursive calls), look it up.
+    if tensor_spec is None:
+        _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
+        tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
 
     if tensor_spec is None and static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
@@ -4229,11 +4241,17 @@ def wrap_to_fake_tensor_and_record(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     _t0 = time.time_ns()
     try:
         return _wrap_to_fake_tensor_and_record_impl(
-            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+            e,
+            tx,
+            source=source,
+            is_tensor=is_tensor,
+            parent_context=parent_context,
+            tensor_spec=tensor_spec,
         )
     finally:
         tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
@@ -4248,6 +4266,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -4262,7 +4281,9 @@ def _wrap_to_fake_tensor_and_record_impl(
         )
 
         if not parent_context:
-            symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
+            symbolic_context = _automatic_dynamic(
+                e, tx, source, static_shapes, tensor_spec=tensor_spec
+            )
         else:
             assert isinstance(source, AttrSource)
             inner_context_name = source.member
