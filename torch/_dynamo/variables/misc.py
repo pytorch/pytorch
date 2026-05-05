@@ -1329,7 +1329,7 @@ class GetAttrVariable(VariableTracker):
         # etc.) with different C tp_hash.  Resolve to the actual value and hash.
         try:
             val = self.as_python_constant()
-        except AsPythonConstantNotImplementedError:
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
             from ..exc import unimplemented
 
             unimplemented(
