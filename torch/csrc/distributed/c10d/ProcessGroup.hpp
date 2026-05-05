@@ -842,6 +842,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return !deviceTypeToBackendType_.empty();
   }
 
+  bool hasBackendForDeviceType(c10::DeviceType deviceType) {
+    return deviceTypeToBackendType_.find(deviceType) !=
+        deviceTypeToBackendType_.end();
+  }
+
   void setBackend(
       c10::DeviceType deviceType,
       BackendType backendType,
@@ -975,6 +980,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
     bound_device_id_ = device;
+  }
+
+  bool getUsePgForSymmMemRendezvous() const {
+    return getDefaultBackend()->getUsePgForSymmMemRendezvous();
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
   }
 
   // This creates a new subgroup using the specified ranks.
