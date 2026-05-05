@@ -126,9 +126,14 @@ class TestCheckCapability(TestCase):
 
     @patch("torch.cuda.get_arch_list", return_value=["sm_60"])
     @patch("torch.cuda.get_device_capability", return_value=(7, 0))
+    @patch("torch.cuda._host_arch_key", return_value="x86_64")
     @patch(
         "torch.cuda.PYTORCH_RELEASES_CODE_CC",
-        {"12.6": {50, 60, 70}, "12.8": {70}, "13.0": {75}},
+        {
+            "12.6": {"x86_64": {50, 60, 70}, "aarch64": {50, 60, 70}},
+            "12.8": {"x86_64": {70}, "aarch64": {70}},
+            "13.0": {"x86_64": {75}, "aarch64": {75}},
+        },
     )
     def test_warning_suggests_compatible_pytorch_release(self, *args):
         with warnings.catch_warnings(record=True) as w:
