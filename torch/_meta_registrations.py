@@ -189,6 +189,12 @@ def meta_take(self, index):
     return self.new_empty(index.shape)
 
 
+@register_meta([aten._standard_gamma.default, aten._standard_gamma.out])
+@out_wrapper()
+def meta__standard_gamma(self, generator=None):
+    return torch.empty_like(self)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
@@ -826,10 +832,6 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
 
-    if is_8bit_input_type:
-        if dense_B.is_contiguous():
-            raise AssertionError("dense input must be transposed for 8bit dtypes")
-
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
@@ -845,6 +847,7 @@ def meta__cslt_sparse_mm(
             in {
                 torch.float16,
                 torch.bfloat16,
+                torch.float32,
                 torch.int32,
                 torch.float8_e4m3fn,
             }
@@ -2665,11 +2668,11 @@ def meta_miopen_batch_norm(
     out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
 
     if training:
-        save_mean = input_tensor.new_empty(save_mean_shape)
-        save_var = input_tensor.new_empty(save_var_shape)
+        save_mean = weight.new_empty(save_mean_shape)
+        save_var = weight.new_empty(save_var_shape)
     else:
-        save_mean = input_tensor.new_empty((0,))
-        save_var = input_tensor.new_empty((0,))
+        save_mean = weight.new_empty((0,))
+        save_var = weight.new_empty((0,))
 
     return out, save_mean, save_var
 
@@ -4205,6 +4208,14 @@ def meta__weight_int8pack_mm(x, w, q_scales):
         w.dtype is torch.int8,
         lambda: f"expected w to be int8, got {w.dtype}",
     )
+    torch._check(
+        w.size(1) == x.size(1),
+        lambda: f"expected w.size(1) ({w.size(1)}) == x.size(1) ({x.size(1)})",
+    )
+    torch._check(
+        q_scales.dim() == 1 and q_scales.size(0) == w.size(0),
+        lambda: f"expected q_scales to be 1D with size {w.size(0)}, got shape {q_scales.shape}",
+    )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
@@ -4521,7 +4532,7 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     # Do not allow bool+other->bool in-place
     if is_booleanic(self) and not is_booleanic(other):
         raise RuntimeError(
-            "Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change."
+            "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change."
         )
 
     if isinstance(other, torch.Tensor):
@@ -4588,11 +4599,21 @@ def meta_zero(self):
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return self
 
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return torch.empty_like(self)
 
 

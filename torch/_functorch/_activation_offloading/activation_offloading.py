@@ -291,7 +291,7 @@ def reload_activation_bw_async(graph: fx.Graph) -> None:
             wait_node.meta["tensor_meta"] = reload_node.meta["tensor_meta"]
 
         for user in list(node.users.keys()):
-            if user != reload_node:
+            if user != reload_node and user != wait_node:
                 user.replace_input_with(node, wait_node)
 
 

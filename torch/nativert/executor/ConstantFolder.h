@@ -22,7 +22,7 @@ class ConstantFolder {
     1. identify nodes without dynamic inputs, mark as foldable
 
     2. traverse the nodes deemed foldable as if they were being evaluated,
-       pushing nodes that become foldable after it's inputs were traversed.
+       pushing nodes that become foldable after its inputs were traversed.
 
        unlink foldable nodes from the graph in the topological order in which
        they were traversed, storing the node and its associated kernel (moved
