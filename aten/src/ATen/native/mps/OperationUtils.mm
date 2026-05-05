@@ -1117,7 +1117,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
@@ -1153,6 +1152,23 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
+  // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
+  // elements. Eligibility matches unary_dense — contiguous, floating-point,
+  // no cast / broadcast / scalar / alpha — and the same 256K crossover (see
+  // exec_unary_kernel for the rationale).
+  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18;
+  const bool ilp_eligible = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
+      !alpha.has_value() && c10::isFloatingType(out.scalar_type());
+  bool dense_ilp = ilp_eligible && static_cast<uint32_t>(iter.numel()) >= ILP_DISPATCH_THRESHOLD;
+  if (ilp_eligible) {
+    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
+
   std::string kernel_name;
   if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
@@ -1186,6 +1202,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
+    const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" : "dense") : "strided";
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
@@ -1233,7 +1250,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         }
       } else {
         if (iter.is_contiguous()) {
-          if (alpha) {
+          if (dense_ilp) {
+            mtl_setBytes(computeEncoder, static_cast<uint32_t>(iter.numel()), 3);
+          } else if (alpha) {
             mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);
           }
           if (cast_needed) {
@@ -1265,7 +1284,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      const auto dispatch_n =
+          dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, dispatch_n);
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
