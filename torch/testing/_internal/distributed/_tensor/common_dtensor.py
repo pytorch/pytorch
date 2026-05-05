@@ -806,7 +806,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
-        if backend not in [
+        _known = [
             "nccl",
             "gloo",
             "mpi",
@@ -817,7 +817,12 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "xccl",
             "fake",
             "cpu:gloo,xpu:xccl",
-        ]:
+        ]
+        # Dynamically accept the current device's registered backend.
+        if curr_backend:
+            _known.append(curr_backend)
+        
+        if backend not in _known:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None

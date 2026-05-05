@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TEST_XPU,
@@ -209,6 +210,8 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
+    if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+        return True
     return False
 
 
@@ -237,7 +240,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+            if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+                return func(*args, **kwargs)
+            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -455,23 +460,33 @@ def requires_accelerator_dist_backend(backends=None):
     Decorator to skip tests if no accelerator communication backend (NCCL, XCCL, HCCL) is available.
 
     Args:
-        backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ["nccl", "xccl", "hccl"]).
-                                       If None, checks all supported accelerator backends (NCCL, XCCL, HCCL).
+        backends (Optional[List[str]]): Specific accelerator backends to check
+            (e.g., ["nccl", "xccl", "hccl"]). Any registered PrivateUse1 backend
+            is always checked in addition to the listed backends.
+            If None, checks all known accelerator backends (NCCL, XCCL, HCCL)
+            plus any registered PrivateUse1 backend.
 
     Returns:
         callable: A decorator that skips the test if no specified accelerator backend is available.
     """
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
+    
+    _backend_availability_checks = {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+    }
+
+    def _is_privateuse1_backend_available() -> bool:
+        """Check if a PrivateUse1 backend is registered."""
+        pu1_device = torch._C._get_privateuse1_backend_name()
+        return c10d.Backend.default_device_backend_map.get(pu1_device) is not None
 
     backend_available = any(
-        {
-            "nccl": c10d.is_nccl_available,
-            "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
-        }.get(backend, lambda: False)()
+        _backend_availability_checks.get(backend, lambda: False)()
         for backend in backends
-    )
+    ) or _is_privateuse1_backend_available()
 
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
@@ -1192,14 +1207,8 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        device_type = torch.device(device).type if isinstance(device, str) else device.type
+        return c10d.Backend.default_device_backend_map.get(device_type, "gloo")
 
     def create_pg(self, device, world_size=None):
         if world_size is None:
