@@ -33,7 +33,7 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: list[int]
 
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define(
     """
