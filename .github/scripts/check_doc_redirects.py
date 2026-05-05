@@ -5,6 +5,10 @@ Check for moved/deleted doc files and optionally auto-update redirects.py.
 This script detects when documentation files in docs/source/ are moved or deleted
 and verifies that corresponding redirects exist in docs/source/redirects.py.
 
+RST <-> MD source conversions (e.g. ``foo.rst`` deleted and ``foo.md`` added with
+the same stem) are treated as no-ops because Sphinx produces the same HTML output
+filename regardless of source extension; no redirect is required.
+
 Usage:
     # Check only (CI mode) - reports missing redirects
     python check_doc_redirects.py --base-ref origin/main
@@ -33,6 +37,14 @@ def get_doc_changes(base_ref: str) -> list[tuple[str, str, str | None]]:
     """
     Get moved/deleted doc files between base_ref and HEAD.
 
+    A delete of ``foo.rst`` paired with an add of ``foo.md`` (or vice versa)
+    is treated as a no-op RST <-> MD source conversion: Sphinx produces the
+    same HTML output filename regardless of source extension, so no redirect
+    is required. Such pairs are filtered out before being returned. This is
+    necessary because git's rename detection (``-M``) defaults to ~50%
+    similarity, and MyST conversions often rewrite enough of the file that
+    git classifies the change as a delete + add rather than a rename.
+
     Returns:
         List of (status, old_path, new_path) tuples.
         For deletions, new_path is None.
@@ -49,7 +61,11 @@ def get_doc_changes(base_ref: str) -> list[tuple[str, str, str | None]]:
         ]
     )
 
-    changes = []
+    renames: list[tuple[str, str, str]] = []
+    deletes: list[tuple[str, str]] = []
+    # Map redirect-key -> added file path, used to detect RST<->MD pairs.
+    adds_by_key: dict[str, str] = {}
+
     for line in diff.split("\n"):
         if not line:
             continue
@@ -58,10 +74,32 @@ def get_doc_changes(base_ref: str) -> list[tuple[str, str, str | None]]:
 
         # Renames: R100 (100% similar), R095 (95% similar), etc.
         if status.startswith("R") and len(parts) >= 3:
-            changes.append((status, parts[1], parts[2]))
+            renames.append((status, parts[1], parts[2]))
         # Deletions
         elif status == "D" and len(parts) >= 2:
-            changes.append((status, parts[1], None))
+            deletes.append((status, parts[1]))
+        # Additions (only used to detect RST<->MD conversion pairs)
+        elif status == "A" and len(parts) >= 2:
+            adds_by_key[path_to_key(parts[1])] = parts[1]
+
+    changes: list[tuple[str, str, str | None]] = list(renames)
+    skipped_pairs = 0
+    for status, old_path in deletes:
+        old_key = path_to_key(old_path)
+        paired_add = adds_by_key.get(old_key)
+        if paired_add is not None and Path(paired_add).suffix != Path(old_path).suffix:
+            # Same stem, opposite extension: this is an RST<->MD conversion.
+            # The published HTML URL is unchanged, so no redirect is needed.
+            skipped_pairs += 1
+            continue
+        changes.append((status, old_path, None))
+
+    if skipped_pairs:
+        plural = "s" if skipped_pairs != 1 else ""
+        print(
+            f"\u2139\ufe0f  Skipped {skipped_pairs} RST<->MD source conversion{plural} "
+            f"(no redirect needed; HTML URL unchanged)"
+        )
 
     return changes
 
