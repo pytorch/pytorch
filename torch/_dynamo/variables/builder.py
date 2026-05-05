@@ -411,7 +411,10 @@ class GraphArg:
         codegen(self.source)
 
     def reconstruct_pycode(self, codegen) -> str:
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "Expecting GraphArg to have source during python codegen."
+            )
         return self.source.reconstruct_pycode(codegen)
 
     def erase(self) -> None:

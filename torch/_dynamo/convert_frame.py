@@ -1585,6 +1585,10 @@ def compile_frame(  # type: ignore[return]
                     raise AssertionError(
                         "tracer_output must not be None after transform_code_object"
                     )
+                if tracer_output.output_graph is None:
+                    raise AssertionError(
+                        "tracer_output.output_graph must not be None after transform_code_object"
+                    )
                 return DynamoOutput(
                     tracer_output=tracer_output,
                     bytecode=bytecode,

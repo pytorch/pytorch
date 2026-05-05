@@ -3315,9 +3315,8 @@ class OutputGraph(OutputGraphCommon):
         from the `prefix` argument.
         """
         self.output_instructions.extend(prefix)
-        assert isinstance(pycode, (list, type(None))), (
-            "pycode must be a list of python code or None"
-        )
+        if not isinstance(pycode, (list, type(None))):
+            raise AssertionError("pycode must be a list of python code or None")
         self.output_pycode.append(pycode)
         self.should_exit = True
 
