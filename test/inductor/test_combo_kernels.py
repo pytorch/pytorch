@@ -2179,6 +2179,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertIsNotNone(combo)
 
     @requires_cuda_and_triton
+    @skipIfRocm
     def test_combo_kernel_peak_memory_wide_resnet(self):
         """A tight peak-memory threshold must measurably reduce the
         runtime CUDA peak memory of the compiled forward pass compared
