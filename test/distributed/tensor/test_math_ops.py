@@ -1833,6 +1833,45 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
         self.assertTrue(result_no_affine.placements[0].is_shard(0))
 
+        # group_norm with batch-dim sharding -- forward + backward
+        N_bwd = self.world_size * 2
+        inp_bwd = torch.randn(N_bwd, C, H, W, device=self.device_type)
+
+        ref_inp = inp_bwd.clone().detach().requires_grad_(True)
+        ref_w = weight.clone().detach().requires_grad_(True)
+        ref_b = bias.clone().detach().requires_grad_(True)
+        dt_inp_bwd = distribute_tensor(
+            inp_bwd.clone().detach().requires_grad_(True), device_mesh, [Shard(0)]
+        )
+        dt_w = distribute_tensor(
+            weight.clone().detach().requires_grad_(True), device_mesh, replicate
+        )
+        dt_b = distribute_tensor(
+            bias.clone().detach().requires_grad_(True), device_mesh, replicate
+        )
+
+        ref_out = F.group_norm(ref_inp, num_groups, ref_w, ref_b)
+        ref_out.sum().backward()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            dt_out = F.group_norm(dt_inp_bwd, num_groups, dt_w, dt_b)
+            dt_out.sum().backward()
+        self.assertEqual(
+            comm_mode.get_total_counts(),
+            0,
+            "Unexpected communication in group_norm forward/backward",
+        )
+
+        self.assertEqual(dt_out.full_tensor(), ref_out)
+        self.assertTrue(dt_out.placements[0].is_shard(0))
+        self.assertEqual(dt_inp_bwd.grad.full_tensor(), ref_inp.grad)
+        self.assertTrue(dt_inp_bwd.grad.placements[0].is_shard(0))
+        self.assertEqual(dt_w.grad.full_tensor(), ref_w.grad)
+        self.assertEqual(dt_w.grad.placements, (Partial("sum"),))
+        self.assertEqual(dt_b.grad.full_tensor(), ref_b.grad)
+        self.assertEqual(dt_b.grad.placements, (Partial("sum"),))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
