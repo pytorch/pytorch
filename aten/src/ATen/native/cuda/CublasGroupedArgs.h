@@ -14,22 +14,26 @@ struct cublasGroupedArgs {
       const Tensor& mat1,
       const Tensor& mat2,
       const std::optional<Tensor>& offs,
-      Tensor& c);
+      Tensor& c,
+      int batchCount,
+      bool needs_int64);
 
   char transa, transb;
   int64_t avgM, avgN, avgK;
   ScalarType A_dtype, B_dtype, result_dtype;
   int batchCount;
+  bool use_int64;
 
   // All arrays live in a single device allocation
   Tensor buf;
 
-  int32_t* mArray;
-  int32_t* nArray;
-  int32_t* kArray;
-  int32_t* ldaArray;
-  int32_t* ldbArray;
-  int32_t* lddArray;
+  // Type-erased pointers into buf (int32_t* or int64_t* depending on use_int64)
+  void* mArray;
+  void* nArray;
+  void* kArray;
+  void* ldaArray;
+  void* ldbArray;
+  void* lddArray;
   int64_t* APtrArray;
   int64_t* BPtrArray;
   int64_t* DPtrArray;

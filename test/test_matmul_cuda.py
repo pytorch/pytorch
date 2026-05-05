@@ -894,6 +894,91 @@ class TestMatmulCuda(InductorTestCase):
         C = f(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
+    def test_grouped_gemm_doubly_non_contiguous(self):
+        # Verify that doubly-non-contiguous inputs (neither stride is 1)
+        # are rejected by _grouped_mm_validate_inputs.
+        device = "cuda"
+        dtype = torch.bfloat16
+        k = 32
+        ngroups = 5
+        # Create a doubly-non-contiguous 2D matrix: stride on both dims > 1
+        A_full = torch.randn(3, 2 * k, device=device, dtype=dtype)
+        A = A_full[:, 0:2 * k:2]  # shape (3, k), strides (2*k, 2)
+        self.assertNotEqual(A.stride(-1), 1)
+        self.assertNotEqual(A.stride(-2), 1)
+
+        B = torch.randn(ngroups, k, 7, device=device, dtype=dtype)
+        offs = torch.tensor([0, 1, 1, 2, 3], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "Invalid strides/sizes"):
+            torch._grouped_mm(A, B, offs=offs)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
+                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    def test_grouped_gemm_cublaslt_int64_indexing(self, op):
+        # Verify that the int64 indexing path works correctly when a
+        # leading dimension (stride) exceeds INT32_MAX. Uses as_strided
+        # with M=1 or N=1 so only a small amount of storage is needed
+        # despite the large stride.
+        device = "cuda"
+        dtype = torch.bfloat16
+        os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
+        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+
+        big_ld = (1 << 31)  # > INT32_MAX, divisible by 8
+        K = 8
+
+        if op == "3d/3d":
+            # 3D x 3D with ngroups=1. mat_a has a large leading dimension
+            # but M=1 so only K elements of storage are actually accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (1, M, K), (M * K, big_ld, 1))
+            B = torch.randn(1, K, N, device=device, dtype=dtype)
+            offs = None
+
+            C_ref = torch.mm(A[0].contiguous(), B[0]).unsqueeze(0)
+        elif op == "2d/3d":
+            # 2D x 3D (jagged M) with ngroups=1. mat_a (2D) has a large
+            # leading dimension but M=1 so only K elements are accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (M, K), (big_ld, 1))
+            B = torch.randn(1, K, N, device=device, dtype=dtype)
+            offs = torch.tensor([1], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A.contiguous(), B[0])
+        elif op == "3d/2d":
+            # 3D x 2D (jagged N) with ngroups=1. mat_b (2D) is column-major
+            # with a large column stride but N=1, so only K elements of
+            # storage are actually accessed.
+            M, N = 8, 1
+            A = torch.randn(1, M, K, device=device, dtype=dtype)
+            storage_b = torch.randn(K, device=device, dtype=dtype)
+            B = torch.as_strided(storage_b, (K, N), (1, big_ld))
+            offs = torch.tensor([1], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A[0], B.contiguous())
+        elif op == "2d/2d":
+            # 2D x 2D (jagged K) with ngroups=1. mat_a (2D) has a large
+            # leading dimension but M=1 so only K elements of storage are
+            # actually accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (M, K), (big_ld, 1))
+            B = torch.randn(K, N, device=device, dtype=dtype)
+            offs = torch.tensor([K], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A.contiguous(), B).unsqueeze(0)
+        else:
+            raise AssertionError(f"Invalid op: {op}")
+
+        C = torch._grouped_mm(A, B, offs=offs)
+        self.assertEqual(C, C_ref)
+
     @skipCUDAIfNotRocm
     # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
