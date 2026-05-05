@@ -30,7 +30,7 @@ def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/", only_
         "autograd/generated/TraceType_4.cpp",
         "autograd/generated/ADInplaceOrViewType_0.cpp",
         "autograd/generated/ADInplaceOrViewType_1.cpp",
-    ] + ([] if only_type_varse slse [
+    ] + ([] if only_type_vars else [
         "autograd/generated/Functions.cpp",
         "autograd/generated/ViewFuncs.cpp",
     ])
