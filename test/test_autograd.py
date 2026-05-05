@@ -1873,7 +1873,7 @@ class TestAutograd(TestCase):
 
     def test_grad_empty_inputs(self):
         x = torch.tensor([1.0], requires_grad=True)
-        with self.assertRaisesRegex(ValueError, "grad requires non-empty inputs."):
+        with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
             torch.autograd.grad(2 * x, [], grad_outputs=torch.tensor([1.0]))
 
     def test_grad_fn_badcalls(self):
@@ -2710,6 +2710,138 @@ class TestAutograd(TestCase):
             "cannot be empty",
             lambda: torch.autograd.backward(fn(), gradient, inputs=[]),
         )
+
+    def test_grad_dict_inputs(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {"x", "y"})
+        self.assertEqual(result["x"], 2 * x + y)
+        self.assertEqual(result["y"], x + 2 * y)
+
+    def test_grad_dict_inputs_ordered_dict(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        inputs = OrderedDict([("x", x), ("y", y)])
+        with self.assertRaisesRegex(TypeError, "must be a dict"):
+            torch.autograd.grad(z.sum(), inputs)
+
+    def test_grad_dict_inputs_materialize_grads(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs, materialize_grads=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 2 * x)
+        self.assertEqual(result["y"], torch.zeros_like(y))
+
+    def test_grad_dict_inputs_allow_unused(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(z.sum(), inputs, allow_unused=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 2 * x)
+        self.assertIsNone(result["y"])
+
+    def test_grad_dict_inputs_create_graph(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**3
+
+        inputs = {"x": x}
+        result = torch.autograd.grad(z.sum(), inputs, create_graph=True)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["x"], 3 * x**2)
+        self.assertTrue(result["x"].requires_grad)
+
+        # Second-order derivative
+        result2 = torch.autograd.grad(result["x"].sum(), inputs)
+        self.assertIsInstance(result2, dict)
+        self.assertEqual(result2["x"], 6 * x)
+
+    def test_grad_dict_inputs_empty(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+        inputs: dict[str, torch.Tensor] = {}
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot be empty",
+            lambda: torch.autograd.grad(z.sum(), inputs),
+        )
+
+    def test_backward_dict_inputs(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = {"x": x, "y": y}
+        torch.autograd.backward(z, gradient, inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_tensor_backward(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = (x**2 + y * x + y**2).sum()
+
+        inputs = {"x": x, "y": y}
+        z.backward(inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_empty(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot be empty",
+            lambda: torch.autograd.backward(z, gradient, inputs={}),
+        )
+
+    @skipIfTorchDynamo("compiled autograd does not support is_grads_batched with vmap")
+    def test_grad_dict_inputs_batched_grads(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = (x**2 + y * x + y**2).sum()
+
+        # Batched grad_outputs: shape (batch_size,) for scalar output
+        batch_size = 3
+        grad_outputs = torch.ones(batch_size, dtype=torch.double)
+        inputs = {"x": x, "y": y}
+        result = torch.autograd.grad(
+            z, inputs, grad_outputs=grad_outputs, is_grads_batched=True
+        )
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {"x", "y"})
+        # Each result tensor should have batch_size as first dim
+        self.assertEqual(result["x"].shape, (batch_size, 2, 2))
+        self.assertEqual(result["y"].shape, (batch_size, 2, 2))
+
+    def test_grad_dict_inputs_non_string_keys(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        # Non-string keys work at runtime (type annotations only enforce str)
+        inputs = {0: x, 1: y}
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result.keys()), {0, 1})
+        self.assertEqual(result[0], 2 * x + y)
+        self.assertEqual(result[1], x + 2 * y)
 
     def test_backward_with_scalar_input(self):
         x = torch.randn([], dtype=torch.double, requires_grad=True)
