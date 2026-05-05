@@ -3899,14 +3899,19 @@ def _automatic_dynamic(
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint, is_nested_int
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
+
+        def _classify_symint(s: Any) -> DimDynamic:
+            if not isinstance(s, SymInt):
+                return DimDynamic.STATIC
+            if not has_guarding_hint(s):
+                return DimDynamic.UNBACKED
+            return DimDynamic.DYNAMIC
+
         return StatefulSymbolicContext(
-            dynamic_sizes=[
-                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-                for s in e.size()
-            ],
+            dynamic_sizes=[_classify_symint(s) for s in e.size()],
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
