@@ -2866,41 +2866,45 @@ def _codegen_backward_epilogue(
     is_rng = fw_metadata.is_rng_op_functionalized
     has_subclass = maybe_subclass_meta is not None
 
-    L: list[str] = ["def _backward_epilogue(out):"]
-    G: dict[str, object] = {}
+    lines: list[str] = ["def _backward_epilogue(out):"]
+    code_globals: dict[str, object] = {}
 
     if num_bw_tokens > 0:
-        L.append(f"    out = out[:-{num_bw_tokens}]")
+        lines.append(f"    out = out[:-{num_bw_tokens}]")
 
     if is_rng:
-        G["_set_offset_"] = CUDARngStateHelper.set_new_offset
-        L.append("    _oi = len(out) - 1")
-        L.append("    _set_offset_(out[_oi])")
-        L.append("    out = out[:_oi] + out[_oi + 1:]")
+        if fw_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
+            )
+        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        lines.append("    _oi = len(out) - 1")
+        lines.append("    _set_offset_(out[_oi])")
+        lines.append("    out = out[:_oi] + out[_oi + 1:]")
 
-    L.append("    out = tuple(out)")
+    lines.append("    out = tuple(out)")
 
     if has_subclass and codegen_wrap_fn is not None:
-        G["_wrap_"] = codegen_wrap_fn
-        L.append("    return _wrap_(out)")
+        code_globals["_wrap_"] = codegen_wrap_fn
+        lines.append("    return _wrap_(out)")
     elif has_subclass:
-        G["_wrap_subclasses_"] = wrap_tensor_subclasses
+        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
         if (
             maybe_subclass_meta.grad_input_metas is None
         ):  # pyrefly: ignore [missing-attribute]
             raise AssertionError("grad_input_metas must not be None")
-        G["_grad_input_metas_"] = (
+        code_globals["_grad_input_metas_"] = (
             maybe_subclass_meta.grad_input_metas
         )  # pyrefly: ignore [missing-attribute]
-        L.append("    return _wrap_subclasses_(out,")
-        L.append("        subclass_metas=_grad_input_metas_,")
-        L.append("        included_subclass_symints=True, is_runtime=True)")
+        lines.append("    return _wrap_subclasses_(out,")
+        lines.append("        subclass_metas=_grad_input_metas_,")
+        lines.append("        included_subclass_symints=True, is_runtime=True)")
     else:
-        L.append("    return out")
+        lines.append("    return out")
 
-    source = "\n".join(L)
+    source = "\n".join(lines)
     return _compile_and_exec_source(
-        source, G, "_backward_epilogue", "backward_epilogue"
+        source, code_globals, "_backward_epilogue", "backward_epilogue"
     )
 
 
