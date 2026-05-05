@@ -2219,7 +2219,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        return False
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2282,11 +2285,15 @@ class CUDAGraphTreeManager:
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
-                if (
-                    status == CheckInvariantStatus.StaticInputIdxMismatch
-                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
-                ):
-                    unexpected_rerecord = True
+                if status != CheckInvariantStatus.SUCCESS:
+                    # StaticInputIdxMismatch fires on non-cudagraph-managed
+                    # static inputs (nn parameters and mark_static_address
+                    # tensors) whose identity can churn under
+                    # inline_inbuilt_nn_modules. We re-record but don't count
+                    # those toward cudagraph_unexpected_rerecord_limit. All
+                    # other mismatch reasons do count.
+                    if status != CheckInvariantStatus.StaticInputIdxMismatch:
+                        unexpected_rerecord = True
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
