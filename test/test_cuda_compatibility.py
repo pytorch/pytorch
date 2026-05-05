@@ -132,7 +132,7 @@ class TestCheckCapability(TestCase):
         {
             "12.6": {"x86_64": {50, 60, 70}, "aarch64": {50, 60, 70}},
             "12.8": {"x86_64": {70}, "aarch64": {70}},
-            "13.0": {"x86_64": {75}, "aarch64": {75}},
+            "13.2": {"x86_64": {75}, "aarch64": {75}},
         },
     )
     def test_warning_suggests_compatible_pytorch_release(self, *args):
@@ -143,7 +143,7 @@ class TestCheckCapability(TestCase):
             msg = str(w[0].message)
             self.assertIn("12.6", msg)
             self.assertIn("12.8", msg)
-            self.assertNotIn("13.0", msg)
+            self.assertNotIn("13.2", msg)
 
     @patch("torch.cuda.get_arch_list", return_value=["sm_80"])
     @patch("torch.cuda.get_device_capability", return_value=(5, 3))
