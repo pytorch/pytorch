@@ -858,11 +858,12 @@ class AutogradFunctionVariable(VariableTracker):
         self,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
+    ) -> list[VariableTracker] | None:
         """Resolve kwargs to positional args using forward().__code__.
 
         Uses co_varnames/co_argcount directly to match the C++
         resolve_kwargs_to_positional in python_function.cpp.
+        Keyword-only args are not resolved; callers should graph break.
         """
         from torch.autograd.function import _is_setup_context_defined
 
@@ -874,9 +875,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         for name in kwargs:
             if name not in param_names:
-                raise TypeError(
-                    f"forward() got an unexpected keyword argument '{name}'"
-                )
+                return None
             if param_names.index(name) < len(args):
                 raise TypeError(f"forward() got multiple values for argument '{name}'")
 
@@ -894,7 +893,7 @@ class AutogradFunctionVariable(VariableTracker):
                 raise TypeError(
                     f"forward() missing required argument: '{name}' (position {i})"
                 )
-        return result, {}
+        return result
 
     def call_apply(
         self,
@@ -903,7 +902,16 @@ class AutogradFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if kwargs:
-            args, kwargs = self._resolve_kwargs(args, kwargs)
+            resolved = self._resolve_kwargs(args, kwargs)
+            if resolved is None:
+                unimplemented(
+                    gb_type="autograd_function_kwonly_args",
+                    context=f"forward() has keyword-only args: {set(kwargs) - set(self.fn_cls.forward.__code__.co_varnames)}",
+                    explanation="autograd.Function.apply does not support keyword-only arguments in forward().",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            args = resolved
+            kwargs = {}
 
         requires_grad = False
 
