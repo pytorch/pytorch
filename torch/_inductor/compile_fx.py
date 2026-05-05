@@ -577,6 +577,7 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
 
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
+            subgraph.meta["is_subgraph"] = True
             _recursive_post_grad_passes(subgraph, is_inference)
         post_grad_passes(gm, is_inference)
 
