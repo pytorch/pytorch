@@ -1443,6 +1443,10 @@ class InstructionTranslatorBase(
         if inst.starts_line:
             self.starts_line(inst.starts_line)
 
+        tc = TracingContext.try_get()
+        if tc is not None:
+            tc.loc_in_frame_positions = inst.positions
+
         if (
             not self.stack
             and self.should_compile_partial_graph()
@@ -4543,11 +4547,19 @@ class InstructionTranslatorBase(
         )
 
     def frame_summary(self) -> traceback.FrameSummary:
+        positions = self.current_instruction.positions
+        colno = None
+        end_colno = None
+        if positions is not None:
+            colno = positions.col_offset
+            end_colno = positions.end_col_offset
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
             self.lineno,
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
+            colno=colno,
+            end_colno=end_colno,
         )
 
     def is_co_filename_from_nn_modules(self) -> bool:

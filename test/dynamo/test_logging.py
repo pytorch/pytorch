@@ -1153,7 +1153,7 @@ print("arf")
         fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
-        msg0 = munge_exc(records[0].getMessage())
+        msg0 = munge_exc(records[0].getMessage(), strip_carets=False)
         self.assertExpectedInline(
             msg0,
             """\

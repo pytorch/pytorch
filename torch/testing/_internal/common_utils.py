@@ -6005,7 +6005,7 @@ class NestedTensorTestCase(TestCase):
             nested_tensor_module._tensor_symint_registry = original_tensor_symint_registry
 
 
-def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0, strip_carets=True, strip_stack_attribution=True):
     from torch._dynamo.trace_rules import _as_posix_path
 
     if file is None:
@@ -6049,6 +6049,19 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
+    if strip_carets:
+        # Remove caret/tilde indicator lines (e.g. "    ~~~^^^^") since their
+        # presence and alignment vary across Python versions.
+        s = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", s)
+    if strip_stack_attribution:
+        # Strip the contents of "Stack variable source attribution" blocks but
+        # keep the header, since the entries depend on whether specific bytecodes
+        # have position info which varies across Python point releases.
+        s = re.sub(
+            r"(\nStack variable source attribution:)\n(?:.*\n)*?\n",
+            r"\1\n\n",
+            s,
+        )
     return s
 
 
