@@ -379,14 +379,27 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
 #ifdef NCCL_HAS_COMM_REGISTER
   // Deregister all registered segments before aborting.
   for (auto& it : registeredSegmentHandles_) {
-    void* handle = it.second;
-    C10D_NCCL_CHECK(
-        ::ncclCommDeregister(ncclComm_, handle),
-        c10::str(
-            "Failed to deregister segment handle ",
-            handle,
-            " on ncclComm_ ",
-            ncclComm_));
+    void* handle = it.second.first;
+    bool is_window = it.second.second;
+    if (is_window) {
+#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
+      C10D_NCCL_CHECK(
+          ::ncclCommWindowDeregister(ncclComm_, (ncclWindow_t)handle),
+          c10::str(
+              "Failed to window deregister segment handle ",
+              handle,
+              " on ncclComm_ ",
+              ncclComm_));
+#endif
+    } else {
+      C10D_NCCL_CHECK(
+          ::ncclCommDeregister(ncclComm_, handle),
+          c10::str(
+              "Failed to deregister segment handle ",
+              handle,
+              " on ncclComm_ ",
+              ncclComm_));
+    }
   }
   registeredSegmentHandles_.clear();
 #endif
@@ -531,7 +544,7 @@ ncclResult_t NCCLComm::registerSegment(
           " on ncclComm_ ",
           comm));
 #endif
-  registeredSegmentHandles_[ptr] = handle;
+  registeredSegmentHandles_[ptr] = {handle, window};
   return ncclSuccess;
 #else
   return ncclInvalidUsage;
@@ -548,7 +561,7 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
       " is not registered on ncclComm_ ",
       ncclComm_);
 
-  void* handle = registeredSegmentHandles_[ptr];
+  void* handle = registeredSegmentHandles_[ptr].first;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
 #ifdef NCCL_HAS_COMM_WINDOW_REGISTER

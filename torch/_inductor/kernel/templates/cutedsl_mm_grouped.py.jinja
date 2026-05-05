@@ -9,6 +9,29 @@ from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_g
     GroupedGemmKernel,
 )
 
+# Caching is split into two levels:
+#
+#   1. _prep_fn_cache — caches the compiled executor for
+#      build_group_ptrs_from_bases(). Depends only on tensor shapes, strides,
+#      and dtypes of A/B/C, so it can be reused across different group
+#      partitionings (`offs`).
+#
+#   2. _gemm_fn_cache — caches the compiled Grouped GEMM executor. Its key
+#      extends the prep key with (max_active_clusters, total_num_clusters)
+#      because different `offs` tensors change per-group problem sizes and
+#      thus total_num_clusters, which alters the grid shape and persistent
+#      scheduler configuration. Kernels compiled for one grid cannot be
+#      safely reused for another.
+#
+# Compile-time constexprs (TILE_M, TILE_N, CLUSTER_M/N, USE_2_CTA, etc.)
+# are baked into each generated file, so they appear only in
+# _KERNEL_CONFIG_KEY (used by the disk cache) and not in the per-call
+# runtime keys.
+#
+# The @lru_cache on get_hardware_info() avoids redundant MLIR
+# recompilation overhead from hw.get_max_active_clusters(), which depends
+# only on GPU type.
+
 _prep_fn_cache = {}
 _gemm_fn_cache = {}
 
