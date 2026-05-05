@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder, unique
+from torch._inductor.utils import Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
@@ -90,21 +90,6 @@ class CuteDSLTemplate(KernelTemplate):
             code = kernel.render(self.template, **kwargs)
 
             log.debug("Generated CuteDSL Code:\n%s", code)
-
-            # Append captured closure buffers discovered during rendering
-            input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-            assert input_call_args[: len(expected_input_args)] == expected_input_args, (
-                input_call_args,
-                expected_input_args,
-            )
-            if len(input_call_args) > len(expected_input_args):
-                kernel_input_nodes = tuple(
-                    V.graph.get_buffer(k) for k in input_call_args
-                )
-                input_nodes = list(input_nodes) + list(
-                    kernel_input_nodes[len(expected_input_args) :]
-                )
 
             bmreq = CuteDSLBenchmarkRequest(
                 kernel_name=kernel_name,

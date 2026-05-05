@@ -278,10 +278,6 @@ def flex_attention(
         num_score_mod_placeholders=len(placeholder_inps),
         backend=backend,
     ):
-        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
-        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
-        freeze_irnodes(score_mod_other_buffers)
-        freeze_irnodes(mask_mod_other_buffers)
         return create_flex_flash_attention_kernel(
             query,
             key,
