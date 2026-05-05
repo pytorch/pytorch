@@ -2208,7 +2208,7 @@ def _has_uninterpretable_sympy_function(expr: sympy.Basic) -> bool:
 class SymbolicContext:
     """
     Data structure specifying how we should create symbols in
-    ``create_symbolic_sizes_strides_storage_offset``; e.g., should
+    ``_create_symbolic_sizes_strides_storage_offset``; e.g., should
     they be static or dynamic.
 
     This is an abstract base class because we are probably going to add
@@ -2233,7 +2233,7 @@ _T1 = TypeVar("_T1")
 @dataclass(frozen=True, slots=True)
 class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     """
-    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    Create symbols in ``_create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
     This will cause fresh symbols to be allocated
     """
@@ -2308,7 +2308,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class StatefulSymbolicContext(StatelessSymbolicContext[..., Any]):
     """
-    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    Create symbols in ``_create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by a cache of Source:Symbol. A cache hit
     will reuse a stored symbol, and a cache miss will write to this cache.
 
@@ -4662,6 +4662,7 @@ class ShapeEnv:
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
+
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
@@ -4704,77 +4705,210 @@ class ShapeEnv:
         tuple[IntLikeType, ...],
         IntLikeType,
     ]:
-        """
-        Returns a list of symbolic sizes and strides for the given tensor.
-        We try our best to express stride in terms of the sizes, so as to not
-        introduce new symbolic variables.
-        """
+        """Create symbolic sizes/strides/offset for a tensor.
 
-        ex_size = tuple(
-            self._maybe_specialize_sym_int_with_hint(sz) for sz in ex.size()
-        )
-        ex_stride = tuple(
-            self._maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride()
-        )
-        ex_storage_offset = self._maybe_specialize_sym_int_with_hint(
-            ex.storage_offset()
-        )
-
+        If the tensor has symbolic sizes from a different ShapeEnv,
+        delegates to transfer_symbols_from_foreign_shape_env.
+        """
+        fake_mode = getattr(ex, "fake_mode", None)
+        if fake_mode is not None and fake_mode.shape_env is not self:
+            return self.transfer_symbols_from_foreign_shape_env(
+                ex.size(),
+                ex.stride(),
+                ex.storage_offset(),
+                source,
+                symbolic_context=symbolic_context,
+            )
         return self._create_symbolic_sizes_strides_storage_offset(
-            ex_size,
-            ex_stride,
-            ex_storage_offset,
-            [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
+            ex.size(),
+            ex.stride(),
+            ex.storage_offset(),
+            [False] * ex.dim(),
             source,
             symbolic_context=symbolic_context,
         )
 
-    # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
-    # We create symbols in shape_env using the backed hints behind SymInt.
+    def transfer_symbols_from_foreign_shape_env(
+        self,
+        sizes: Sequence[IntLikeType],
+        strides: Sequence[IntLikeType],
+        storage_offset: IntLikeType,
+        source: Source,
+        *,
+        symbolic_context: SymbolicContext | None = None,
+        hint_overrides: dict[int, int] | None = None,
+    ) -> tuple[
+        tuple[IntLikeType, ...],
+        tuple[IntLikeType, ...],
+        IntLikeType,
+    ]:
+        """Transfer symbolic sizes/strides/offset from a foreign ShapeEnv
+        into this one.
 
-    # Case 1: when SymInt is backed, dynamo can proceed with FakeTensors that have concrete shape.
-    # produce_guards will trigger specializations on the outer stuff
+        If symbolic_context is None, each dimension is auto-classified as
+        STATIC, DUCK, or UNBACKED based on whether the foreign symbol has
+        a guarding hint.  If symbolic_context is provided (e.g. from
+        _automatic_dynamic), its classification is used instead.
 
-    # Case 2: when the SymInt is unbacked, we will throw a data dependent error in guarding_hint_or_throw().
-    #
-    # It's probably good for now but it's important to note that this approach has implications for
-    # the original shape_env when checking guards in different order.
+        For unbacked dims, strides are derived by substituting old foreign
+        symbols with the newly created symbols, preserving stride-size
+        relationships.  Hint overrides are read from the foreign ShapeEnv
+        and transferred to the new one."""
 
-    # Example:
-    # ---------
-    # Consider a function "opt_f" as shown below:
+        def _classify(s: IntLikeType) -> DimDynamic:
+            if not is_symbolic(s):
+                return DimDynamic.STATIC
+            if not has_guarding_hint(s):
+                return DimDynamic.UNBACKED
+            return DimDynamic.DUCK
 
-    # @torch.compile()
-    # def opt_f(x: bool, y: Tensor):
-    #   if x == True:
-    #     return y + torch.randn([4])
-    #   else:
-    #     return y
-    # Depending on the sequence of calls, we might install two different sets of guards:
+        def _hint(s: IntLikeType) -> int | None:
+            """Extract concrete hint.  For unbacked symbols returns None."""
+            if is_symbolic(s):
+                if not has_guarding_hint(s):
+                    return None
+                return guarding_hint_or_throw(s.node)  # type: ignore[union-attr]
+            return s  # type: ignore[return-value]
 
-    # 1. opt_f(False, y):
-    #    - "x == False" (always works for any size y)
+        if symbolic_context is None:
+            dynamic_sizes = [_classify(sz) for sz in sizes]
+            dynamic_strides = [DimDynamic.INFER_STRIDE] * len(sizes)
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                dynamic_strides=dynamic_strides,
+            )
+        else:
+            dynamic_sizes = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
 
-    # 2. opt_f(True, y):
-    #    - Triggers recompilation and results in guards like:
-    #      - "x == True and y.size(0) == 4"
-    #      - (or "y.size(0) == 4 and x == True")
+        # For unbacked dims, read the optimization hint from the foreign
+        # ShapeEnv and set it as a hint override so the new unbacked symbol
+        # gets a useful hint value.
+        if hint_overrides is None:
+            hint_overrides = {}
+        for i, sz in enumerate(sizes):
+            if dynamic_sizes[i] is DimDynamic.UNBACKED and is_symbolic(sz):
+                foreign_env = sz.node.shape_env  # type: ignore[union-attr]
+                if foreign_env is not None:
+                    opt_hint = foreign_env.var_to_hint_override.get(sz.node.expr)  # type: ignore[union-attr]
+                    if opt_hint is not None:
+                        hint_overrides[i] = opt_hint
 
-    # The order of checking the guards matters. In this specific example:
-    # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnecessary shape specialization for y.
-    def _maybe_specialize_sym_int_with_hint(
-        self, maybe_sym: IntLikeType
-    ) -> IntLikeType:
-        if not isinstance(maybe_sym, (int, torch.SymInt)):
-            raise AssertionError(f"Expected int or SymInt, got {type(maybe_sym)}")
-        if is_symbolic(maybe_sym):
-            if maybe_sym.node.shape_env is self:
-                raise AssertionError(
-                    "expect the symbol is created from an shape env other than current one."
+        import sympy
+
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        ex_size = tuple(_hint(sz) for sz in sizes)
+        ex_stride = tuple(_hint(sd) for sd in strides)
+        ex_storage_offset = _hint(storage_offset)
+
+        has_unbacked = any(ds is DimDynamic.UNBACKED for ds in dynamic_sizes)
+
+        if not has_unbacked:
+            # No unbacked dims — ex_size/ex_stride/ex_storage_offset are all ints.
+            return self._create_symbolic_sizes_strides_storage_offset(
+                ex_size,  # type: ignore[arg-type]
+                ex_stride,  # type: ignore[arg-type]
+                ex_storage_offset,  # type: ignore[arg-type]
+                [False] * len(sizes),
+                source,
+                symbolic_context=symbolic_context,
+                hint_overrides=hint_overrides,
+            )
+
+        # Unbacked path
+
+        # Unbacked path: create new size symbols with dedup for shared
+        # unbacked symbols, then derive strides by substitution.
+
+        # 1. Create new size symbols, deduplicating shared unbacked symbols.
+        # Try xreplace to substitute known mappings; if foreign symbols remain,
+        # create a fresh unbacked symbol.
+        # NOTE: if all dims are derived expressions from a base symbol that
+        # doesn't appear as a dim itself (e.g., size=[u0//2, u0//4]), the
+        # relationship between dims is lost — each gets an independent symbol.
+        # This is acceptable as this case is rare in practice.
+        old_to_new: dict[sympy.Expr, sympy.Expr] = {}
+        new_size_exprs: list[sympy.Expr] = []
+        for i, old_sz in enumerate(sizes):
+            if is_symbolic(old_sz):
+                old_expr = old_sz.node.expr  # type: ignore[union-attr]
+                new_expr = old_expr.xreplace(old_to_new)
+                if new_expr.free_symbols - set(old_to_new.values()):
+                    # Still has unmapped foreign symbols — create fresh symbol
+                    sym = self.create_symbol(
+                        ex_size[i],  # type: ignore[arg-type]  # None for UNBACKED, ignored
+                        TensorPropertySource(source, TensorProperty.SIZE, i),
+                        dynamic_sizes[i],
+                        symbolic_context.constraint_sizes[i]
+                        if hasattr(symbolic_context, "constraint_sizes")
+                        else None,  # type: ignore[attr-defined]
+                        symbolic_context=symbolic_context,
+                    )
+                    old_to_new[old_expr] = sym
+                    new_size_exprs.append(sym)
+                else:
+                    new_size_exprs.append(new_expr)
+            else:
+                new_size_exprs.append(sympy.Integer(old_sz))
+
+        # 3. Derive new strides by substituting old symbols.
+        # If after substitution a stride still has foreign symbols (e.g. from
+        # as_strided), create a fresh unbacked symbol for it.
+        new_stride_exprs: list[sympy.Expr] = []
+        for sd in strides:
+            if is_symbolic(sd):
+                new_expr = sd.node.expr.xreplace(old_to_new)  # type: ignore[union-attr]
+                if new_expr.free_symbols - set(old_to_new.values()):
+                    # Stride references a foreign symbol not in any size dim.
+                    new_expr = self.create_unbacked_symint().node.expr
+                new_stride_exprs.append(new_expr)
+            else:
+                new_stride_exprs.append(sympy.Integer(sd))
+
+        # 4. Storage offset.
+        if is_symbolic(storage_offset):
+            new_offset_expr = storage_offset.node.expr.xreplace(old_to_new)  # type: ignore[union-attr]
+            if new_offset_expr.free_symbols - set(old_to_new.values()):
+                new_offset_expr = self.create_unbacked_symint().node.expr
+        else:
+            new_offset_expr = sympy.Integer(storage_offset)
+
+        # 5. Wrap into SymInt nodes.  Unbacked dims have hint=None.
+        sym_sizes = []
+        for i, sym in enumerate(new_size_exprs):
+            hint = ex_size[i]
+            sym_sizes.append(
+                self.create_symintnode(
+                    sym,
+                    hint=hint,
+                    source=TensorPropertySource(source, TensorProperty.SIZE, i),
                 )
-            return guarding_hint_or_throw(maybe_sym.node)
-        return maybe_sym
+            )
+            if (
+                isinstance(sym_sizes[-1], torch.SymInt)
+                and hint_overrides
+                and i in hint_overrides
+            ):
+                self.var_to_hint_override[sym_sizes[-1].node.expr] = hint_overrides[i]
+
+        sym_strides = []
+        for i, stride_expr in enumerate(new_stride_exprs):
+            hint_stride = ex_stride[i]
+            sym_strides.append(
+                self.create_symintnode(
+                    stride_expr,
+                    hint=hint_stride,
+                    source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                )
+            )
+
+        sym_offset = self.create_symintnode(
+            new_offset_expr,
+            hint=ex_storage_offset,
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+        )
+
+        return tuple(sym_sizes), tuple(sym_strides), sym_offset
 
     @record_shapeenv_event()
     def _create_symbolic_sizes_strides_storage_offset(
@@ -5390,7 +5524,7 @@ class ShapeEnv:
 
         if not isinstance(source, Source):
             raise AssertionError(f"{type(source)} {source}")
-        if positive and val < 0:
+        if positive and dynamic_dim is not DimDynamic.UNBACKED and val < 0:
             raise AssertionError(f"positive set for negative value: {val}")
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the symbolic_context to DYNAMIC, because our
