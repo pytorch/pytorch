@@ -113,7 +113,7 @@ class TestFusionRegionDetection(InductorTestCase):
         def model(a, b):
             # region 1: 3-node chain, middle node has only internal I/O
             x = a + 1  # reads a (ext), writes to neg (int)
-            x = -x  # reads add (int), writes to mul (int) → cost=0
+            x = -x  # reads add (int), writes to mul (int) -> cost=0
             x = x * 2  # reads neg (int), writes to mm (ext)
             x = torch.mm(x, a)  # mm boundary
             x = (x - 1) / 2  # region 2
@@ -214,12 +214,7 @@ class TestFusionRegionDetection(InductorTestCase):
         )
 
     def test_fused_costs_handles_forced_bad_region(self):
-        """estimate_fused_node_costs works for any region_of mapping.
-
-        Unlike collapse_fusion_regions which crashes on cyclic partitions,
-        estimate_fused_node_costs just computes per-node costs without
-        graph mutation -- no cycles possible.
-        """
+        """estimate_fused_node_costs works for any region_of mapping."""
         from torch._inductor.fx_passes.fusion_regions import estimate_fused_node_costs
 
         with FakeTensorMode():
@@ -248,17 +243,16 @@ class TestFusionRegionDetection(InductorTestCase):
             )
         ]
 
-        if len(fusible_nodes) >= 4:
-            from torch.utils._ordered_set import OrderedSet
+        self.assertGreaterEqual(len(fusible_nodes), 4)
+        from torch.utils._ordered_set import OrderedSet
 
-            bad_group = OrderedSet(fusible_nodes)
-            region_of = dict.fromkeys(fusible_nodes, bad_group)
+        bad_group = OrderedSet(fusible_nodes)
+        region_of = dict.fromkeys(fusible_nodes, bad_group)
 
-            # No crash -- no graph mutation, works for any region_of
-            costs = estimate_fused_node_costs(region_of)
-            self.assertEqual(len(costs), len(fusible_nodes))
-            # All costs should be non-negative
-            self.assertTrue(all(c >= 0.0 for c in costs.values()))
+        costs = estimate_fused_node_costs(region_of)
+        self.assertEqual(len(costs), len(fusible_nodes))
+        self.assertTrue(all(c >= 0.0 for c in costs.values()))
+
 
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests

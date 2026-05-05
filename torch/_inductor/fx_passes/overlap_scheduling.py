@@ -467,10 +467,10 @@ class OverlapScheduler:
                 num_device_put_converted,
             )
 
-        # Build fusion regions (mutates gm.graph) and compute initial node runtime
-        # estimates. Compute nodes use roofline model here; the alignment step in
-        # run() replaces them with benchmarked + cross-rank-aligned values.
-        self.node_estimations, self.region_of = gather_node_runtime_estimations(
+        # Compute initial node runtime estimates. Compute nodes use roofline model
+        # here; the alignment step in run() replaces them with benchmarked +
+        # cross-rank-aligned values.
+        self.node_estimations = gather_node_runtime_estimations(
             gm,
             custom_runtime_estimation,
             enable_fusion_regions=enable_fusion_regions,
@@ -1021,7 +1021,7 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        # Finalize: bucket collectives (if enabled), inline fusions, apply deps
+        # Finalize: bucket collectives (if enabled), apply deps
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             finalize_overlap_scheduling,
         )
@@ -1034,7 +1034,6 @@ class OverlapScheduler:
             insert_overlap_deps=self.insert_overlap_deps,
             max_bucket_memory_gb=2.0,
             max_coll_distance=self.max_node_distance,
-            region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
             bucket_mode=self.bucket_mode,
@@ -1093,9 +1092,11 @@ class OverlapScheduler:
 
         # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
         # using these nodes for overlap prevents bucketing. potentially if chain time < latency
-        if runtime_estimate is None or (
-            runtime_estimate == 0 and not is_compute_node(node)
-        ):
+        if runtime_estimate is None:
+            assert not is_compute_node(node), "should have estimate for compute nodes"
+            self._schedule(node)
+            return
+        if runtime_estimate == 0 and not is_compute_node(node):
             self._schedule(node)
             return
 
@@ -1627,16 +1628,16 @@ def gather_node_runtime_estimations(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     enable_fusion_regions: bool = False,
     log_estimations: bool = False,
-) -> tuple[dict[fx.Node, float], dict[fx.Node, Any]]:
+) -> dict[fx.Node, float]:
     """Gather initial runtime estimations for all nodes without scheduling.
 
-    Uses analytical models (roofline) for compute nodes — the alignment step
+    Uses analytical models (roofline) for compute nodes -- the alignment step
     in OverlapScheduler.run() replaces these with benchmarked + cross-rank-aligned
     values. Collectives use bandwidth formulas or CUDA events depending on
     collective_estimator.
 
-    When enable_fusion_regions is True, builds and collapses fusion regions
-    (mutating gm's graph), then includes their costs in the estimations.
+    When enable_fusion_regions is True, builds fusion regions and corrects
+    per-node I/O costs to account for fusion (no graph mutation).
 
     Args:
         collective_estimator: "analytical" uses bandwidth formulas,
@@ -1644,12 +1645,8 @@ def gather_node_runtime_estimations(
         log_estimations: When True, log compute and collective estimations
             via trace_structured for tlparse.
 
-    Returns (estimations, fusion_region_of) where estimations maps fx.Node to
-    runtime in ms. fusion_region_of is always empty (the no-collapse approach
-    corrects costs without graph mutation).
+    Returns estimations mapping fx.Node to runtime in ms.
     """
-    # Build fusion regions for cost correction (does NOT collapse/mutate gm)
-    fusion_region_of: dict[fx.Node, Any] = {}
     fused_costs: dict[fx.Node, float] = {}
     if enable_fusion_regions:
         from torch._inductor.fx_passes.fusion_regions import (
@@ -1705,8 +1702,7 @@ def gather_node_runtime_estimations(
                     estimations[node] = est
 
     # Apply fused costs: replace individual I/O estimates with fusion-aware ones
-    for node, fused_cost in fused_costs.items():
-        estimations[node] = fused_cost
+    estimations.update(fused_costs)
 
     # Logging
     if log_estimations and compute_nodes:
@@ -1734,7 +1730,7 @@ def gather_node_runtime_estimations(
             artifact_name="fx_collectives_analytical_estimation",
         )
 
-    return estimations, fusion_region_of
+    return estimations
 
 
 def align_estimations_across_ranks(
