@@ -830,6 +830,80 @@ if HAS_CUDA_AND_TRITON:
             # should be in execution mode
             self.assertEqual(all_live_block_count(), 0)
 
+        def test_forward_with_skipped_cudagraphed_backward(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            for _ in range(3):
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # we should not have cudagraph'd the backwards
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cache_hit_forward_miss_backward(self):
+            # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            # Run forwards, fx graph should cache miss
+            for _ in range(3):
+                torch._dynamo.reset()
+                counters.clear()
+                FxGraphCache.clear()
+                AOTAutogradCache.clear()
+
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+                    # Reset dynamo and related caches except for FXGraphCache
+                    torch._dynamo.reset()
+                    # Forwards should be a cache hit now, we still skip cudagraphs
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+                # Run the backward without the force-disable knob; cache should
+                # miss for the backward, but cudagraphs should not run because
+                # the forward already skipped.
+                back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                out.backward(back_inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # Run it one more time, this time AOTAutogradCache will hit
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            torch._dynamo.reset()
+            inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+            out = foo(inp)
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+            out.backward(back_inp)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            # we should not have cudagraph'd anything
+            if self.get_manager() is not None:
+                raise AssertionError
+
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
@@ -3870,6 +3944,26 @@ if HAS_CUDA_AND_TRITON:
 
             # 0 cudagraph since all ops are on cpu
             self.assertEqual(self.get_manager() is None, True)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_with_skipped_cudagraphed_backward(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            for _ in range(3):
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # we should not have cudagraph'd the backwards
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward_not_called(self):

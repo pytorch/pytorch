@@ -624,6 +624,10 @@ class CompiledFxGraph(OutputCode):
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
                     (
+                        not config.force_disable_cudagraph_TESTING_ONLY,
+                        "force_disable_cudagraph_TESTING_ONLY",
+                    ),
+                    (
                         all(
                             isinstance(
                                 t,
