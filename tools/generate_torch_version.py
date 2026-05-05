@@ -9,25 +9,11 @@ from pathlib import Path
 
 from packaging.version import Version
 
+from tools.strtobool import strtobool
+
 
 UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
-
-
-def strtobool(val: str) -> bool:
-    """Convert a string representation of truth to true (1) or false (0).
-
-    True values are "y", "yes", "t", "true", "on", and "1"; false values
-    are "n", "no", "f", "false", "off", and "0".  Raises ValueError if
-    "val" is anything else.
-    """
-    val = val.lower()
-    if val in ("y", "yes", "t", "true", "on", "1"):
-        return True
-    elif val in ("n", "no", "f", "false", "off", "0"):
-        return False
-    else:
-        raise ValueError(f"invalid truth value {val!r}")
 
 
 def get_sha(pytorch_root: str | Path) -> str:

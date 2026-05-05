@@ -4,29 +4,22 @@ import argparse
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+from tools.strtobool import strtobool
+
+
+sys.path.pop(0)
 
 
 LEADING_V_PATTERN = re.compile("^v")
 TRAILING_RC_PATTERN = re.compile("-rc[0-9]*$")
 LEGACY_BASE_VERSION_SUFFIX_PATTERN = re.compile("a0$")
-
-
-def strtobool(val: str) -> bool:
-    """Convert a string representation of truth to true (1) or false (0).
-
-    True values are "y", "yes", "t", "true", "on", and "1"; false values
-    are "n", "no", "f", "false", "off", and "0".  Raises ValueError if
-    "val" is anything else.
-    """
-    val = val.lower()
-    if val in ("y", "yes", "t", "true", "on", "1"):
-        return True
-    elif val in ("n", "no", "f", "false", "off", "0"):
-        return False
-    else:
-        raise ValueError(f"invalid truth value {val!r}")
 
 
 class NoGitTagException(Exception):
