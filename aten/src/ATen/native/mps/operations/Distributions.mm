@@ -15,7 +15,6 @@
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
-#include <ATen/ops/argsort.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/cumsum.h>
@@ -35,6 +34,147 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Distributions_metallib.h>
 #endif
+
+struct RandomCachedGraph : public MPSCachedGraph {
+  RandomCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+  // Only relevant for multinomial
+  MPSGraphTensor* probTensor = nil;
+  MPSGraphTensor* resultTensor = nil;
+  MPSGraphTensor* stateTensor = nil;
+  // used for Normal distributions only
+  MPSGraphTensor *meanTensor = nil, *stdTensor = nil;
+};
+
+typedef MPSGraphTensor* (^RandomOpBlock)(RandomCachedGraph*, MPSGraphTensor*);
+#define RandomOpFn(graph, randomTensor) MPSGraphTensor*(mps::RandomCachedGraph * graph, MPSGraphTensor * randomTensor)
+
+// for Uniform distributions with scalar from (val1) and to (val2) intervals
+// for Normal distributions with scalar mean (val1) and std (val2) values
+template <typename scalar_t>
+Tensor& random_mps_impl(Tensor& self,
+                        scalar_t val1,
+                        scalar_t val2,
+                        const std::optional<Tensor>& mean_opt,
+                        const std::optional<Tensor>& std_opt,
+                        MPSGraphRandomDistribution distribution,
+                        std::optional<Generator> gen,
+                        std::string op_name,
+                        RandomOpBlock randomBlock) {
+  if (self.numel() == 0) {
+    return self;
+  }
+  at::assert_no_internal_overlap(self);
+  // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
+  const auto need_reshape = self.ndimension() > 4;
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    auto key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
+        std::to_string(val1) + ":" + std::to_string(val2);
+    auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->stateTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
+
+      // BF16, FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
+      const MPSDataType inputDataType = [&] {
+        // only for random_mps, we pass interval range of type int64_t
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
+          return MPSDataTypeInt32;
+        }
+        // for bernoully always use float32
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          return MPSDataTypeFloat32;
+        }
+        switch (self.scalar_type()) {
+          case kHalf:
+            return MPSDataTypeFloat16;
+          case kFloat:
+            return MPSDataTypeFloat32;
+          case kBFloat16: {
+            return MPSDataTypeBFloat16;
+          }
+          default:
+            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
+        }
+      }();
+      const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
+
+      MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:distribution
+                                                                                       dataType:inputDataType];
+      if (distribution == MPSGraphRandomDistributionUniform) {
+        if (inputDataType == MPSDataTypeInt32) {
+          desc.minInteger = static_cast<NSInteger>(val1);
+          desc.maxInteger = static_cast<NSInteger>(val2);
+        } else {
+          desc.min = static_cast<float>(val1);
+          desc.max = static_cast<float>(val2);
+        }
+      } else if (distribution == MPSGraphRandomDistributionNormal) {
+        desc.mean = static_cast<float>(val1);
+        desc.standardDeviation = static_cast<float>(val2);
+      }
+      // we don't use the output state tensor from the MPSGraph API as it requires reading back from GPU to CPU.
+      // Instead, we keep the Philox state in the MPSGenerator and use the PyTorch's philox_engine to maintain
+      // the counters, and feed them to the graph manually
+      auto self_shape = getMPSShape(self);
+      NSArray<MPSGraphTensor*>* resultTensors =
+          [mpsGraph randomTensorWithShape:need_reshape ? @[ @(self.numel()) ] : self_shape
+                               descriptor:desc
+                              stateTensor:newCachedGraph->stateTensor
+                                     name:nil];
+      newCachedGraph->resultTensor =
+          need_reshape ? [mpsGraph reshapeTensor:resultTensors[0] withShape:self_shape name:nil] : resultTensors[0];
+      if (randomBlock) {
+        newCachedGraph->resultTensor = randomBlock(newCachedGraph, newCachedGraph->resultTensor);
+      }
+      // results will be cast if self's scalar type isn't directly supported by MPS backend.
+      if (getMPSDataType(self) != outputDataType)
+        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
+    });
+    // feed the updated state values to the graph
+    MPSNDArrayDescriptor* stateDesc =
+        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
+    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      // update the Philox state values on each run
+      mps_gen->update_philox_counters();
+      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
+    }
+    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
+
+    Placeholder meanPlaceholder, stdPlaceholder;
+    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
+    feeds[cachedGraph->stateTensor] = stateTensorData;
+
+    if (cachedGraph->stdTensor) {
+      const Tensor& stdTensor = *(at::borrow_from_optional_tensor(std_opt));
+      stdPlaceholder = Placeholder(cachedGraph->stdTensor, stdTensor);
+      feeds[stdPlaceholder.getMPSGraphTensor()] = stdPlaceholder.getMPSGraphTensorData();
+    }
+    if (cachedGraph->meanTensor) {
+      const Tensor& meanTensor = *(at::borrow_from_optional_tensor(mean_opt));
+      meanPlaceholder = Placeholder(cachedGraph->meanTensor, meanTensor);
+      feeds[meanPlaceholder.getMPSGraphTensor()] = meanPlaceholder.getMPSGraphTensorData();
+    }
+
+    // Handle non-contiguous output tensors by creating a contiguous temporary
+    const auto needs_gather = needsGather(self);
+    Tensor self_ = needs_gather ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self_);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+
+    // Copy results back to original non-contiguous output
+    if (needs_gather) {
+      self.copy_(self_);
+    }
+  }
+
+  return self;
+}
+
 } // namespace mps
 
 static Tensor& distribution_kernel_mps_impl(Tensor& self,
@@ -365,16 +505,24 @@ Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& 
     return result;
   }
 
-  // Generate `n` uniform-float keys via the Metal kernel and argsort them; the
-  // sort permutation is a uniformly-random permutation of [0, n).
-  Tensor keys = at::empty({n}, result.options().dtype(kFloat));
-  distribution_kernel_mps_impl(keys, 0.0, 1.0, "uniform_dist", 1, generator);
-  Tensor perm = at::argsort(keys);
-  if (perm.scalar_type() != result.scalar_type()) {
-    perm = perm.to(result.scalar_type());
-  }
-  result.copy_(perm);
-  return result;
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* argsortTensor = [mpsGraph argSortWithTensor:randomTensor axis:0 name:nil];
+    if (result.scalar_type() != kInt) {
+      argsortTensor = [mpsGraph castTensor:argsortTensor toType:mps::getMPSDataType(result) name:@"castOutput"];
+    }
+    return argsortTensor;
+  };
+
+  return mps::random_mps_impl<int64_t>(result,
+                                       std::numeric_limits<int64_t>::min(),
+                                       std::numeric_limits<int64_t>::max(),
+                                       std::nullopt,
+                                       std::nullopt,
+                                       MPSGraphRandomDistributionUniform,
+                                       generator,
+                                       "ranperm_out_mps:" + mps::getTensorsStringKey({result}),
+                                       random_op_block);
 }
 
 static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
