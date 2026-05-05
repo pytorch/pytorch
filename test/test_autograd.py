@@ -546,6 +546,152 @@ class TestAutograd(TestCase):
         self.assertEqual("bar", res[5])
         self.assertEqual(t1, res[6])
 
+    def test_custom_function_apply_kwargs(self):
+        class MySin(Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                ctx.save_for_backward(input)
+                ctx.factor = factor
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        x = torch.tensor([0.812], requires_grad=True)
+
+        # Baseline: positional
+        out_pos = MySin.apply(x, 6)
+        out_pos.backward()
+        grad_pos = x.grad.clone()
+
+        # kwarg
+        x.grad = None
+        out_kw = MySin.apply(x, factor=6)
+        self.assertEqual(out_kw, out_pos)
+        out_kw.backward()
+        self.assertEqual(x.grad, grad_pos)
+
+        # default value (no kwarg)
+        x.grad = None
+        out_default = MySin.apply(x)
+        out_default_expected = MySin.apply(x, 1)
+        self.assertEqual(out_default, out_default_expected)
+
+    def test_custom_function_apply_kwargs_required(self):
+        class Add(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x + y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        x = torch.tensor([2.0], requires_grad=True)
+        y = torch.tensor([3.0], requires_grad=True)
+
+        # All required args as kwargs
+        out = Add.apply(x=x, y=y)
+        self.assertEqual(out, torch.tensor([5.0]))
+        out.backward()
+        self.assertEqual(x.grad, torch.tensor([1.0]))
+        self.assertEqual(y.grad, torch.tensor([1.0]))
+
+        # Swap order of kwargs
+        x.grad = None
+        y.grad = None
+        out = Add.apply(y=y, x=x)
+        self.assertEqual(out, torch.tensor([5.0]))
+        out.backward()
+        self.assertEqual(x.grad, torch.tensor([1.0]))
+        self.assertEqual(y.grad, torch.tensor([1.0]))
+
+    def test_custom_function_apply_kwargs_tensor(self):
+        class ScaledMul(Function):
+            @staticmethod
+            def forward(ctx, x, y, scale=1.0):
+                ctx.save_for_backward(x, y)
+                ctx.scale = scale
+                return scale * x * y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return (
+                    grad_output * ctx.scale * y,
+                    grad_output * ctx.scale * x,
+                    None,
+                )
+
+        x = torch.tensor([2.0], requires_grad=True)
+        y = torch.tensor([3.0], requires_grad=True)
+
+        # Tensor args as kwargs
+        out = ScaledMul.apply(x, y=y, scale=5.0)
+        self.assertEqual(out, torch.tensor([30.0]))
+        out.backward()
+        self.assertEqual(x.grad, torch.tensor([15.0]))
+        self.assertEqual(y.grad, torch.tensor([10.0]))
+
+    def test_custom_function_apply_kwargs_setup_context(self):
+        class MyScale(Function):
+            @staticmethod
+            def forward(x, factor=1):
+                return factor * x
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, factor = inputs
+                ctx.save_for_backward(x)
+                ctx.factor = factor
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * ctx.factor, None
+
+        x = torch.randn([], requires_grad=True)
+        y = MyScale.apply(x, factor=3)
+        (gx,) = torch.autograd.grad(y, x)
+        self.assertEqual(gx, torch.tensor(3.0))
+
+    def test_custom_function_apply_kwargs_errors(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        x = torch.tensor([1.0])
+        y = torch.tensor([2.0])
+
+        with self.assertRaisesRegex(TypeError, "got an unexpected keyword argument"):
+            MyFn.apply(x, bad_kwarg=y)
+
+        # Duplicate: positional + kwarg for same param
+        with self.assertRaisesRegex(TypeError, "got multiple values for argument"):
+            MyFn.apply(x, y, y=y)
+
+        # kwarg collides with an earlier positional arg: f(x, y, z) called
+        # as f(2, 3, y=4) -- y is already filled by position 1
+        class MyFn3(Function):
+            @staticmethod
+            def forward(ctx, x, y, z):
+                return x + y + z
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output, grad_output
+
+        z = torch.tensor([3.0])
+        with self.assertRaisesRegex(TypeError, "got multiple values for argument"):
+            MyFn3.apply(x, y, y=z)
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
@@ -3892,43 +4038,21 @@ class TestAutograd(TestCase):
         t = Id.apply(x)
         self.assertEqual(t.grad_fn.name(), "IdBackward")
 
-        # THPFunction is the base class of both grad_fn and autograd functions,
-        # which means that a lot of accessors on them may segfault. Test that we
-        # properly error in this case.
+        # THPFunction always has a backing PyNode (cdata), so attribute
+        # accesses on a directly-instantiated Function succeed. Previously,
+        # cdata was a null weak ref (PyNode was only created during apply),
+        # so these would raise "Attribute X is invalid".
         t = torch.ones(1, requires_grad=True)
         t._backward_hooks = {}
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_register_hook_dict' is invalid"
-        ):
-            f._register_hook_dict(t)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute 'register_hook' is invalid"
-        ):
-            f.register_hook(lambda x, y: None)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute 'next_functions' is invalid"
-        ):
-            f.next_functions
-        with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
-            f.name()
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_sequence_nr' is invalid"
-        ):
-            f._sequence_nr()
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_set_sequence_nr' is invalid"
-        ):
-            f._set_sequence_nr(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attribute '_input_metadata' is invalid"
-        ):
-            f._input_metadata
-        with self.assertRaisesRegex(
-            RuntimeError, "underlying PyNode has already been deallocated"
-        ):
-            f.metadata
+        f._register_hook_dict(t)
+        f.register_hook(lambda x, y: None)
+        f.next_functions  # empty tuple
+        f.name()
+        f._sequence_nr()
+        f._set_sequence_nr(2)
+        f._input_metadata  # empty tuple
+        f.metadata
 
-    @unittest.expectedFailure
     def test_naughty_anomaly_access(self):
         class MyFunction(Function):
             @staticmethod
@@ -3945,7 +4069,7 @@ class TestAutograd(TestCase):
         y.grad_fn.metadata
         g = y.grad_fn
         del y
-        g.metadata  # this currently fails, but shouldn't
+        self.assertIsNotNone(g.metadata)  # this used to fail
 
     def test_naughty_autograd_function_stashing_ctx(self):
         saved_ctx = []
@@ -3965,10 +4089,11 @@ class TestAutograd(TestCase):
         loss = Id.apply(p)
         loss.backward(retain_graph=True)
         del loss
-        # At this point in time, it complains that the graph has been freed
-        # (which indeed true, although a somewhat indirect way of stating the
-        # problem).
-        self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
+        # THPFunction now always has a strong reference to its backing PyNode
+        # (cdata), so the stashed ctx stays alive and saved_tensors is
+        # accessible. Previously, cdata was a weak ref that expired after the
+        # graph was freed, causing a RuntimeError here.
+        self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting

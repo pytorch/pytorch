@@ -10,17 +10,24 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class DeviceInfo:
     """
-    Theoretical Numbers from data sheet. If two numbers are given, Tensor/Matrix Core vs not,
-    then the higher number is reported. Sparsity is not considered.
+    Theoretical numbers from data sheet.  When a data sheet reports both
+    Tensor/Matrix-Core and non-Tensor-Core numbers, the higher (Tensor Core)
+    number is used.
 
+    NVIDIA data sheets since Hopper (H100) only publish Tensor-Core TFLOPS
+    with 2:4 structured sparsity (marked ``*With sparsity``).  For devices
+    whose ``tops`` include sparsity, set ``tops_sparsity_factor`` to 2 so
+    that callers can recover the dense (non-sparse) throughput used by
+    cuBLAS / cuDNN in normal (non-sparse) workloads.
 
-    Bandwidth numbers are tricky, because there are platform differences that may not show up in the profiler trace.
-    For example,
+    Bandwidth numbers are tricky, because there are platform differences
+    that may not show up in the profiler trace.
     """
 
     tops: dict[torch.dtype | str, float]
     dram_bw_gbs: float
     dram_gb: float
+    tops_sparsity_factor: int = 1
 
 
 # Indexing is based on `torch.cuda.get_device_name()`
@@ -28,11 +35,12 @@ class DeviceInfo:
 _device_mapping: dict[str, DeviceInfo] = {
     # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
+    # Tensor Core values are *with sparsity* per the datasheet.
     "NVIDIA H100": DeviceInfo(
         tops={
             torch.float64: 67.0,
-            torch.float32: 67.5,
-            "torch.tf32": 156.0,
+            torch.float32: 67.0,
+            "torch.tf32": 989.0,
             torch.bfloat16: 1979.0,
             torch.float16: 1979.0,
             torch.float8_e8m0fnu: 3958.0,
@@ -45,6 +53,7 @@ _device_mapping: dict[str, DeviceInfo] = {
         },
         dram_bw_gbs=3350,
         dram_gb=80,
+        tops_sparsity_factor=2,
     ),
     # Source:
     # @lint-ignore https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/
@@ -190,8 +199,12 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
 
 def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     """
-    Get the theoretical TFLOPS of the device for a given dtype. This can throw an exception if the device
-    is not in the datasheet list above.
+    Get the theoretical *dense* TFLOPS of the device for a given dtype.
+
+    If the datasheet values include 2:4 structured sparsity
+    (``tops_sparsity_factor > 1``), they are divided by that factor so
+    callers always receive the throughput achievable by cuBLAS/cuDNN on
+    non-sparse data.
     """
     name: str | None = torch.cuda.get_device_name()
     if name is None:
@@ -210,6 +223,7 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
         )
         return None
 
-    return device_info.tops[
+    tops = device_info.tops[
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
+    return tops / device_info.tops_sparsity_factor
