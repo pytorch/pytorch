@@ -12,23 +12,37 @@ from collections import Counter
 import torch
 from torch._inductor import config
 from torch._logging import trace_structured
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
 
 
-def _compute_hash(gm: torch.fx.GraphModule) -> int | None:
-    """Compute a structural hash of the graph including tensor metadata.
+def _get_subgraph_modules(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[str, torch.fx.GraphModule]]:
+    """Return (name, module) pairs for subgraph children referenced by get_attr nodes."""
+    attr_names = OrderedSet([n.target for n in gm.graph.find_nodes(op="get_attr")])
+    result = []
+    for name, child in gm.named_children():
+        if name in attr_names and isinstance(child, torch.fx.GraphModule):
+            result.append((name, child))
+    return result
 
-    Uses FxGraphCachePickler(device_id_agnostic=True) to serialize
-    (target, val) per call_function node, capturing op targets and
-    FakeTensor metadata (dtype, shape, stride, etc.) with device indices
-    normalized to 0.
 
-    Returns None if the graph contains unpicklable objects.
+def _compute_hash_bundle(
+    gm: torch.fx.GraphModule, prefix: str = ""
+) -> dict[str, int] | None:
+    """Compute structural hashes for the graph and all subgraphs recursively.
+
+    Returns a dict mapping graph path to hash, e.g.:
+      {"": 123, "subgraph_0": 456, "subgraph_0.inner": 789}
+
+    Returns None if any graph contains unpicklable objects.
     """
     from torch._inductor.codecache import BypassFxGraphCache, FxGraphCachePickler
 
+    bundle: dict[str, int] = {}
     try:
         pickler = FxGraphCachePickler(gm, device_id_agnostic=True)
         data = pickler.dumps(
@@ -39,23 +53,31 @@ def _compute_hash(gm: torch.fx.GraphModule) -> int | None:
             )
         )
         digest = hashlib.blake2b(data, digest_size=8).digest()
-        return int.from_bytes(digest, "big", signed=True)
+        bundle[prefix] = int.from_bytes(digest, "big", signed=True)
     except BypassFxGraphCache:
-        # FxGraphCachePickler can't serialize certain objects:
-        # mkldnn tensors, BackwardState, torchbind objects, or general
-        # pickle failures. Skip the SPMD check gracefully.
         log.warning("SPMD check: skipping, unpicklable graph objects", exc_info=True)
         return None
 
+    for name, child in _get_subgraph_modules(gm):
+        child_prefix = f"{prefix}.{name}" if prefix else name
+        child_bundle = _compute_hash_bundle(child, child_prefix)
+        if child_bundle is None:
+            return None
+        bundle.update(child_bundle)
 
-def _build_diag_fingerprint(
-    gm: torch.fx.GraphModule,
-) -> tuple[tuple[str, str | None], ...]:
-    """Build human-readable fingerprint for mismatch diagnostics.
+    return bundle
+
+
+def _build_diag_fingerprint_bundle(
+    gm: torch.fx.GraphModule, prefix: str = ""
+) -> dict[str, tuple[tuple[str, str | None], ...]]:
+    """Build human-readable fingerprints for the graph and all subgraphs.
 
     Only called on the rare mismatch path.
     """
     from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+
+    bundle: dict[str, tuple[tuple[str, str | None], ...]] = {}
 
     entries: list[tuple[str, str | None]] = []
     for n in gm.graph.nodes:
@@ -69,7 +91,13 @@ def _build_diag_fingerprint(
                 _format_val_metadata(val, extract_tensor_metadata_for_cache_key),
             )
         )
-    return tuple(entries)
+    bundle[prefix] = tuple(entries)
+
+    for name, child in _get_subgraph_modules(gm):
+        child_prefix = f"{prefix}.{name}" if prefix else name
+        bundle.update(_build_diag_fingerprint_bundle(child, child_prefix))
+
+    return bundle
 
 
 def _format_val_metadata(val: object, extract_fn: object) -> str | None:
@@ -92,10 +120,9 @@ def _format_val_metadata(val: object, extract_fn: object) -> str | None:
 def spmd_check(gm: torch.fx.GraphModule) -> bool:
     """Verify all ranks have identical FX graph structure (SPMD).
 
-    Computes a structural hash (op targets + tensor metadata including
-    shapes, dtypes, strides) and compares across ranks.
-    On mismatch, emits a diagnostic report to stdout, logging, and
-    trace_structured.
+    Computes structural hashes for the graph and all subgraphs, then
+    compares across ranks via a single all_gather_object. On mismatch,
+    emits a diagnostic report identifying which subgraph diverged.
 
     Returns True if graphs match (SPMD), False on mismatch.
     """
@@ -104,8 +131,8 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
     if not dist.is_initialized() or dist.get_world_size() <= 1:
         return True
 
-    structure_hash = _compute_hash(gm)
-    if structure_hash is None:
+    hash_bundle = _compute_hash_bundle(gm)
+    if hash_bundle is None:
         return True
 
     from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -116,19 +143,23 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
     rank = dist.get_rank()
 
     with unset_fake_temporarily():
-        all_hashes: list[int] = [0] * world_size
-        dist.all_gather_object(all_hashes, structure_hash, pg)
+        all_bundles: list[dict[str, int]] = [{} for _ in range(world_size)]
+        dist.all_gather_object(all_bundles, hash_bundle, pg)
 
-    if all(h == all_hashes[0] for h in all_hashes):
+    if all(b == all_bundles[0] for b in all_bundles):
         return True
 
-    # Mismatch detected — build and gather diagnostic fingerprints
-    fingerprint = _build_diag_fingerprint(gm)
-    with unset_fake_temporarily():
-        all_fingerprints: list[tuple[object, ...]] = [() for _ in range(world_size)]
-        dist.all_gather_object(all_fingerprints, fingerprint, pg)
+    # Mismatch detected — identify which subgraphs diverged
+    mismatched_paths = _find_mismatched_paths(all_bundles)
 
-    report = _build_mismatch_report(all_fingerprints, rank, world_size)
+    fingerprint_bundle = _build_diag_fingerprint_bundle(gm)
+    with unset_fake_temporarily():
+        all_fp_bundles: list[dict[str, tuple[object, ...]]] = [
+            {} for _ in range(world_size)
+        ]
+        dist.all_gather_object(all_fp_bundles, fingerprint_bundle, pg)
+
+    report = _build_mismatch_report(all_fp_bundles, mismatched_paths, rank, world_size)
 
     print(report, flush=True)
     log.warning("\n%s", report)
@@ -152,6 +183,22 @@ def spmd_check(gm: torch.fx.GraphModule) -> bool:
     return False
 
 
+def _find_mismatched_paths(
+    all_bundles: list[dict[str, int]],
+) -> list[str]:
+    """Find graph paths where hashes differ across ranks."""
+    all_paths: OrderedSet[str] = OrderedSet()
+    for b in all_bundles:
+        all_paths.update(b.keys())
+
+    mismatched = []
+    for path in sorted(all_paths):
+        hashes = [b.get(path) for b in all_bundles]
+        if any(h != hashes[0] for h in hashes):
+            mismatched.append(path)
+    return mismatched
+
+
 def _entry_target(entry: object) -> str:
     """Extract the target string from a fingerprint entry."""
     if isinstance(entry, tuple):
@@ -169,7 +216,8 @@ def _entry_metadata(entry: object) -> str:
 
 
 def _build_mismatch_report(
-    all_fingerprints: list[tuple[object, ...]],
+    all_fp_bundles: list[dict[str, tuple[object, ...]]],
+    mismatched_paths: list[str],
     rank: int,
     world_size: int,
 ) -> str:
@@ -180,49 +228,75 @@ def _build_mismatch_report(
         "=" * 80,
     ]
 
-    # Node count per rank
-    counts = [len(t) for t in all_fingerprints]
-    lines.append("NODE COUNTS PER RANK:")
-    for r in range(world_size):
-        marker = " <--" if counts[r] != counts[0] else ""
-        lines.append(f"  rank {r}: {counts[r]} call_function nodes{marker}")
-    lines.append("")
+    if not mismatched_paths:
+        lines.append("Hash mismatch detected but no specific path identified.")
+        lines.append("=" * 80)
+        return "\n".join(lines)
 
-    # Find entries that differ
-    ref = all_fingerprints[0]
-    for r in range(1, world_size):
-        other = all_fingerprints[r]
-        if other == ref:
-            continue
-        lines.append(f"DIFFS rank 0 vs rank {r}:")
+    for path in mismatched_paths:
+        graph_label = f"subgraph '{path}'" if path else "top-level graph"
+        lines.append(f"MISMATCH IN {graph_label}:")
 
-        # Show first few positional differences
-        max_diffs = 10
-        shown = 0
-        for i, (a, b) in enumerate(zip(ref, other)):
-            if a != b and shown < max_diffs:
-                lines.append(f"  node {i}:")
-                lines.append(f"    rank 0: {_entry_target(a)}{_entry_metadata(a)}")
-                lines.append(f"    rank {r}: {_entry_target(b)}{_entry_metadata(b)}")
-                shown += 1
+        fingerprints = [b.get(path, ()) for b in all_fp_bundles]
 
-        # Also show count-based diffs for op targets
-        ref_targets = [_entry_target(e) for e in ref]
-        other_targets = [_entry_target(e) for e in other]
-
-        ref_counts = Counter(ref_targets)
-        other_counts = Counter(other_targets)
-        only_ref = ref_counts - other_counts
-        only_other = other_counts - ref_counts
-        if only_ref:
-            lines.append("  Only on rank 0:")
-            for op, cnt in only_ref.most_common(10):
-                lines.append(f"    {op} (x{cnt})")
-        if only_other:
-            lines.append(f"  Only on rank {r}:")
-            for op, cnt in only_other.most_common(10):
-                lines.append(f"    {op} (x{cnt})")
+        counts = [len(fp) for fp in fingerprints]
+        lines.append("  NODE COUNTS PER RANK:")
+        for r in range(world_size):
+            marker = " <--" if counts[r] != counts[0] else ""
+            lines.append(f"    rank {r}: {counts[r]} call_function nodes{marker}")
         lines.append("")
+
+        ref = fingerprints[0]
+        for r in range(1, world_size):
+            other = fingerprints[r]
+            if other == ref:
+                continue
+            lines.append(f"  DIFFS rank 0 vs rank {r}:")
+
+            max_diffs = 10
+            shown = 0
+            for i, (a, b) in enumerate(zip(ref, other)):
+                if a != b and shown < max_diffs:
+                    lines.append(f"    node {i}:")
+                    lines.append(
+                        f"      rank 0: {_entry_target(a)}{_entry_metadata(a)}"
+                    )
+                    lines.append(
+                        f"      rank {r}: {_entry_target(b)}{_entry_metadata(b)}"
+                    )
+                    shown += 1
+
+            ref_targets = [_entry_target(e) for e in ref]
+            other_targets = [_entry_target(e) for e in other]
+
+            ref_counts = Counter(ref_targets)
+            other_counts = Counter(other_targets)
+            only_ref = ref_counts - other_counts
+            only_other = other_counts - ref_counts
+            if only_ref:
+                lines.append("    Only on rank 0:")
+                for op, cnt in only_ref.most_common(10):
+                    lines.append(f"      {op} (x{cnt})")
+            if only_other:
+                lines.append(f"    Only on rank {r}:")
+                for op, cnt in only_other.most_common(10):
+                    lines.append(f"      {op} (x{cnt})")
+            lines.append("")
+
+    # Also report subgraph count differences
+    all_paths_per_rank = [OrderedSet(b.keys()) for b in all_fp_bundles]
+    ref_paths = all_paths_per_rank[0]
+    for r in range(1, world_size):
+        only_on_0 = ref_paths - all_paths_per_rank[r]
+        only_on_r = all_paths_per_rank[r] - ref_paths
+        if only_on_0:
+            lines.append(f"SUBGRAPHS only on rank 0 (not on rank {r}):")
+            for p in sorted(only_on_0):
+                lines.append(f"  {p}")
+        if only_on_r:
+            lines.append(f"SUBGRAPHS only on rank {r} (not on rank 0):")
+            for p in sorted(only_on_r):
+                lines.append(f"  {p}")
 
     lines.append("=" * 80)
     return "\n".join(lines)
