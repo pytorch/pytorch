@@ -1104,7 +1104,7 @@ def _context_parallel_buffers(
             # NOTE: assuming batch dim is 0
 
             if load_balance_indices is not None:
-                # TODO: we should expclitly ask users to unsqueeze the batch dim.
+                # TODO: we should explicitly ask users to unsqueeze the batch dim.
                 # But this is a BC breaking ask.
                 # However, what we have done today is also not very safe.
                 idx_batch_size = load_balance_indices.size(0)
