@@ -18,6 +18,9 @@ scons -j8  Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
 popd
 
 # Install ACL
+if [[ -d "${ACL_INSTALL_DIR}" ]]; then
+  sudo rm -rf "${ACL_INSTALL_DIR}"
+fi
 sudo mkdir -p ${ACL_INSTALL_DIR}
 for d in arm_compute include utils support src build
 do
