@@ -231,7 +231,7 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
-      docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18
+      docker-image: ${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/' || '' }}ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18
       test-matrix: ${{ needs.inductor-cpu-core-build.outputs.test-matrix }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "${{ matrix.python-version }}"
