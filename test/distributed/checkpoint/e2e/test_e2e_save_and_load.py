@@ -514,7 +514,7 @@ class TestNoCPU(DTensorTestBase):
     def backend(self):
         return (
             torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
-                torch.accelerator.current_accelerator().type
+                device_type
             )
         )
 
