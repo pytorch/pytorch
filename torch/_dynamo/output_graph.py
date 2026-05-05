@@ -3603,6 +3603,8 @@ class SubgraphTracer(fx.Tracer):
         # This is useful for debugging and transforming the exported graph.
         if self.parent is None:
             self.source_fn_stack: list[Any] = []
+        elif source_target is None:
+            self.source_fn_stack = self.parent.source_fn_stack[:]
         else:
             self.source_fn_stack = self.parent.source_fn_stack + [
                 (self.graph._target_to_str(source_target), source_target)
@@ -4077,6 +4079,16 @@ class SubgraphTracer(fx.Tracer):
         # would already be lifted as inputs to parent graph.
         if proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
+
+        # Wrapper subclasses (e.g. DTensor) from dynamo-disabled regions may not
+        # have had track_produced_symints called, causing _lift_basic_symbols to
+        # hit "Source of 'sN' is None" when lifting inner tensor symbols.
+        if (
+            isinstance(example_value, torch.Tensor)
+            and is_traceable_wrapper_subclass(example_value)
+            and proxy.tracer is self.parent
+        ):
+            self.parent.track_produced_symints(example_value, proxy)
 
         example_value = proxy.node.meta["example_value"]
         type_expr = (
