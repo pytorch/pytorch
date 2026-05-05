@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <torch/csrc/inductor/aoti_include/kernel_compile_result.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/cpp_wrapper/common.h>
 #if defined(USE_XPU)
@@ -10,22 +11,6 @@
 #else
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
 #endif
-
-struct LazyKernelCompileResult {
-  std::string cubin_path;
-  std::string mangled_name;
-  int num_warps;
-  int shared_mem;
-  std::vector<int> xblocks;
-  std::vector<int> yblocks;
-  std::vector<int> zblocks;
-  std::vector<int> r0blocks;
-  int rsplit;
-  int rsplit_size;
-  int config_index;
-  int global_scratch;
-  int profile_scratch;
-};
 
 static PyObject* (*_THPVariable_Wrap)(const at::TensorBase&) = nullptr;
 static int32_t (*_THPUtils_unpackInt)(PyObject*) = nullptr;
