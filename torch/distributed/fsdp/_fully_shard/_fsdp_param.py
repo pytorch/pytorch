@@ -78,7 +78,7 @@ case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 

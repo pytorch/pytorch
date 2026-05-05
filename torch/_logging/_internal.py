@@ -403,7 +403,7 @@ def set_logs(
             Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
 
         kernel_code (:class:`bool`):
-            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-kernel basis. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -433,7 +433,7 @@ def set_logs(
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
         sym_node (:class:`bool`):
-            Whether to emit debug info for various SymNode opterations. Default: ``False``
+            Whether to emit debug info for various SymNode operations. Default: ``False``
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
