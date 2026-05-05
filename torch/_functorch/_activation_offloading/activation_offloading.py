@@ -284,14 +284,14 @@ def reload_activation_bw_async(graph: fx.Graph) -> None:
             )
             wait_node: fx.Node = graph.call_function(
                 torch.ops.ao.wait_tensor.default,
-                args=(reload_node,),
+                args=(reload_node, node),
                 name=str(node.name).replace(CPU_OFFLOAD_PREFIX, GPU_RELOAD_PREFIX),
             )
             wait_node.meta["val"] = reload_node.meta["val"]
             wait_node.meta["tensor_meta"] = reload_node.meta["tensor_meta"]
 
         for user in list(node.users.keys()):
-            if user != reload_node:
+            if user != reload_node and user != wait_node:
                 user.replace_input_with(node, wait_node)
 
 
