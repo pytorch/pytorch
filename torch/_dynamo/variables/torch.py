@@ -171,7 +171,6 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 )
 
 constant_fold_functions_need_guards = [
-    torch._C._functorch.get_dynamic_layer_stack_depth,
     torch.accelerator.current_device_index,
     torch.accelerator.current_accelerator,
     torch.cuda.current_device,
@@ -1171,68 +1170,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             prev = torch.is_autocast_cache_enabled()
             torch.set_autocast_cache_enabled(enabled.as_python_constant())
             tx.output.add_cleanup_hook(lambda: torch.set_autocast_cache_enabled(prev))
-            return ConstantVariable.create(None)
-
-        @register(torch._functorch.predispatch._jvp_increment_nesting)
-        def handle_jvp_increment_nesting(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._jvp_increment_nesting
-            )
-            level = torch._functorch.predispatch._jvp_increment_nesting()
-            tx.output.add_cleanup_hook(
-                torch._functorch.predispatch._jvp_decrement_nesting
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._jvp_decrement_nesting)
-        def handle_jvp_decrement_nesting(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._jvp_decrement_nesting
-            )
-            level = torch._functorch.predispatch._jvp_decrement_nesting()
-            tx.output.add_cleanup_hook(
-                torch._functorch.predispatch._jvp_increment_nesting
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._enter_dual_level)
-        def handle_enter_dual_level(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._enter_dual_level
-            )
-            level = torch._functorch.predispatch._enter_dual_level()
-            tx.output.add_cleanup_hook(
-                lambda: torch._functorch.predispatch._exit_dual_level(level=level)
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._exit_dual_level)
-        def handle_exit_dual_level(
-            self, tx: "InstructionTranslator", level: VariableTracker
-        ) -> VariableTracker:
-            level_const = level.as_python_constant()
-            tx.output.create_node(
-                "call_function",
-                torch._functorch.predispatch._exit_dual_level,
-                (),
-                {
-                    "level": level_const,
-                },
-            )
-            torch._functorch.predispatch._exit_dual_level(level=level_const)
-
-            def cleanup():
-                new_level = torch._C._enter_dual_level()
-                if new_level != level_const:
-                    raise AssertionError("Invalid _exit_dual_level")
-
-            tx.output.add_cleanup_hook(cleanup)
             return ConstantVariable.create(None)
 
         @register(torch._C._functorch._grad_increment_nesting)
