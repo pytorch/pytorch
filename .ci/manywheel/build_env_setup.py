@@ -26,9 +26,8 @@ import tempfile
 from pathlib import Path
 
 
-# CUDA-specific build flags written to GITHUB_ENV/--env-out for the wheel build.
-CUDA_BUILD_ENV: dict[str, str] = {
-    "TORCH_NVCC_FLAGS": "-Xfatbin -compress-all",
+# CUDA build flags that don't depend on CUDA version or host arch.
+CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     "NCCL_ROOT_DIR": "/usr/local/cuda",
     "CUDNN_ROOT_DIR": "/usr/local/cuda",
     "TH_BINARY_BUILD": "1",
@@ -43,6 +42,45 @@ CUDA_BUILD_ENV: dict[str, str] = {
     "NCCL_INCLUDE_DIR": "/usr/local/cuda/include/",
     "NCCL_LIB_DIR": "/usr/local/cuda/lib64/",
 }
+
+
+def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
+    """Compute TORCH_CUDA_ARCH_LIST for the wheel build.
+
+    Mirrors the matrix from the original build_cuda.sh. CUDA 13.x dropped
+    sm_50/60/70, so we must NOT leave this empty -- CMake's defaults still
+    include compute_50 which nvcc 13 rejects with "Unsupported gpu
+    architecture 'compute_50'".
+    """
+    base = ["7.5", "8.0", "8.6", "9.0", "10.0"]
+    if cuda_version.startswith("12.6"):
+        # 12.6 keeps legacy Maxwell/Pascal/Volta and drops the 10.0 entry.
+        archs = ["5.0", "6.0", "7.0", *(a for a in base if a != "10.0")]
+    elif cuda_version.startswith("13."):
+        # 13.x adds 12.0+PTX, plus 11.0 on aarch64 (Grace Hopper / GB200).
+        archs = [*base, *(["11.0"] if arch == "aarch64" else []), "12.0+PTX"]
+    else:
+        raise SystemExit(f"unknown cuda version {cuda_version}")
+    if arch == "aarch64":
+        # aarch64 GPUs are 8.0+ only; 8.6 is x86-only (RTX 3090 / A6000).
+        skip = {"5.0", "6.0", "7.0", "7.5", "8.6"}
+        archs = [a for a in archs if a not in skip]
+    return ";".join(archs)
+
+
+def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
+    nvcc_flags = "-Xfatbin -compress-all --threads 2"
+    if cuda_version.startswith("13."):
+        nvcc_flags += " -compress-mode=size"
+    env = {
+        **CUDA_BUILD_ENV_STATIC,
+        "TORCH_NVCC_FLAGS": nvcc_flags,
+        "TORCH_CUDA_ARCH_LIST": torch_cuda_arch_list(cuda_version, arch),
+    }
+    if arch == "aarch64":
+        # Pre-built MAGMA tarballs are x86-only.
+        env["USE_MAGMA"] = "0"
+    return env
 
 CPU_BUILD_ENV: dict[str, str] = {
     "TH_BINARY_BUILD": "1",
@@ -277,7 +315,7 @@ def main() -> None:
         if not cuda_version:
             sys.exit("Could not determine CUDA version from GPU_ARCH_VERSION/DESIRED_CUDA")
         setup_cuda(cuda_version)
-        env_out.update(CUDA_BUILD_ENV)
+        env_out.update(cuda_build_env(cuda_version, arch))
         print(f"CUDA {cuda_version} environment configured")
     elif gpu_arch_type in ("cpu", "cpu-aarch64", "cpu-s390x", "cpu-cxx11-abi"):
         cleanup_cuda_for_cpu_build()
