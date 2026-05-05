@@ -169,6 +169,19 @@ _COPY_META_FIELDS = [
 ]
 
 
+# Set of (filename, co_name) pairs registered as user-code anchors. Frames
+# matching any entry are preserved by ``_filter_traceback_frames`` when
+# ``_record_forward_stack_traces_only`` is True. Populated via
+# ``_register_stack_trace_anchor`` (e.g. by ``annotate_fn``).
+_STACK_TRACE_ANCHORS: set[tuple[str, str]] = set()
+
+
+def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
+    code = getattr(fn, "__code__", None)
+    if code is not None:
+        _STACK_TRACE_ANCHORS.add((code.co_filename, code.co_name))
+
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -293,6 +306,7 @@ class TracerBase:
                 if (
                     frame.name == "forward"
                     or frame.filename.endswith("torch/__init__.py")
+                    or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
                 )
             ]
         else:
