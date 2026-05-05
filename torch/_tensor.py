@@ -99,30 +99,32 @@ def _dtype_to_typestr(dtype):
         torch.bool: "|b1",
     }[dtype]
 
+
 def _check_and_warn_oversized_storage_copy(tensor, stacklevel=2):
     if not torch._C._has_storage(tensor):
         return
     storage_size = tensor._typed_storage().size()
     tensor_size = tensor.numel()
     if storage_size > tensor_size:
-        _warn_oversized_storage_copy(tensor_size, storage_size, stacklevel=stacklevel+1)
+        _warn_oversized_storage_copy(
+            tensor_size, storage_size, stacklevel=stacklevel + 1
+        )
 
 
 def _warn_oversized_storage_copy(view_size, storage_size, stacklevel=2):
-
     def is_first_time():
         if not hasattr(_warn_oversized_storage_copy, "has_warned"):
             return True
         else:
             return not _warn_oversized_storage_copy.__dict__["has_warned"]
-        
+
     if is_first_time():
         message = (
             f"Deepcopying or serializing this tensor view will include its full underlying storage ({storage_size} elements) "
             f"while the tensor view contains {view_size} elements. Consider using tensor.clone() before "
             "serialization or deepcopy if this is not intended."
         )
-        warnings.warn(message, UserWarning, stacklevel=stacklevel+1)
+        warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
         _warn_oversized_storage_copy.__dict__["has_warned"] = True
 
 

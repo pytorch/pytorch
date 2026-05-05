@@ -4592,7 +4592,7 @@ class TestSerialization(TestCase, SerializationMixin):
         t_view = t[1:3]
         with self.assertWarnsRegex(UserWarning, "Deepcopying or serializing this tensor view will include its full underlying storage"):
             copy.deepcopy(t_view)
-        
+
         if hasattr(_warn_oversized_storage_copy, "has_warned"):
             _warn_oversized_storage_copy.__dict__["has_warned"] = False
         with warnings.catch_warnings():
