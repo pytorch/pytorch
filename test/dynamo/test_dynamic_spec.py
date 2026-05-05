@@ -8,7 +8,7 @@ import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
 from torch._dynamo.dynamic_spec import IntSpec, IntSpecType, TensorSpec
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -17,8 +17,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
-    skipIfTorchDynamo,
 )
 
 
@@ -90,6 +88,15 @@ class TestIntSpecConstruction(TestCase):
         s = IntSpec.static()
         self.assertEqual(s._type, IntSpecType.STATIC)
         self.assertIsNone(s._value)
+        # ``name=None`` auto-fills with a stable per-instance handle.
+        self.assertTrue(s._name.startswith("_intspec_static_"))
+
+    def test_anonymous_specs_have_distinct_names(self):
+        # Two anonymous specs of the same mode get different auto-names so
+        # they can be distinguished in error messages / logs.
+        a = IntSpec.static()
+        b = IntSpec.static()
+        self.assertNotEqual(a._name, b._name)
 
     def test_backed(self):
         s = IntSpec.backed("batch", min=1, max=64, guarding_hint=32)
@@ -173,8 +180,11 @@ class TestIntSpecConstruction(TestCase):
         )
 
     def test_repr(self):
-        # Anonymous, no fields set.
-        self.assertEqual(repr(IntSpec.static()), "IntSpec(type=STATIC)")
+        # Anonymous: name is auto-generated; check shape via prefix since
+        # the trailing id-hex is process-dependent.
+        anon = repr(IntSpec.static())
+        self.assertTrue(anon.startswith("IntSpec(name='_intspec_static_"))
+        self.assertIn("type=STATIC", anon)
         # Named + value.
         self.assertEqual(
             repr(IntSpec.static("x", value=10)),
@@ -476,7 +486,6 @@ class TestTensorSpecConstruction(TestCase):
         self.assertIsNotNone(ts[3])
 
 
-@skipIfTorchDynamo()
 class TestTensorSpecCompile(TestCase):
     """TensorSpec + compile integration via the test-local
     `_compile_with_dynamic_shapes` helper. Same scaffolding path as
@@ -551,7 +560,6 @@ class TestTensorSpecCompile(TestCase):
         self.assertEqual(len(backend.graphs), 2)
 
 
-@skipIfTorchDynamo()
 class TestIntSpecCompile(TestCase):
     """Covers IntSpec + torch.compile integration using the local
     `_compile_with_dynamic_shapes` helper.
