@@ -134,12 +134,18 @@ class WorldMetaClassVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for WORLD attribute"
+                )
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.WORLD, source)
         elif name == "NON_GROUP_MEMBER":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
+                )
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)

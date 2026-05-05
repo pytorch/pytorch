@@ -107,11 +107,15 @@ class ConstDictVariable(VariableTracker):
         Hashable = HashableTracker
 
         # Keys will just be HashableTrackers when cloning, in any other case they'll be VariableTrackers
-        assert all(
+        if not all(
             isinstance(x, (VariableTracker, Hashable))
             and isinstance(v, VariableTracker)
             for x, v in items.items()
-        )
+        ):
+            raise AssertionError(
+                "All keys must be VariableTracker or HashableTracker "
+                "and all values must be VariableTracker"
+            )
 
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
@@ -139,7 +143,8 @@ class ConstDictVariable(VariableTracker):
             dict_cls = next(
                 base for base in user_cls.__mro__ if base in accepted_dict_types
             )
-        assert dict_cls in accepted_dict_types, dict_cls
+        if dict_cls not in accepted_dict_types:
+            raise AssertionError(f"Unexpected dict_cls: {dict_cls}")
 
         # Use a dict instead as the call "defaultdict({make_hashable(x): v ..})"
         # would fail as defaultdict expects a callable as first argument
@@ -172,7 +177,8 @@ class ConstDictVariable(VariableTracker):
         return self.user_cls
 
     def __contains__(self, vt: VariableTracker) -> bool:
-        assert isinstance(vt, VariableTracker)
+        if not isinstance(vt, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
         Hashable = HashableTracker
         if not is_hashable(vt):
             return False
@@ -396,7 +402,8 @@ class ConstDictVariable(VariableTracker):
 
     def realize_key_vt(self, arg: VariableTracker) -> None:
         # Realize the LazyVT on a particular index
-        assert arg in self
+        if arg not in self:
+            raise AssertionError(f"Key {arg} not found in dict")
         key = HashableTracker(arg)
         index = tuple(self.items.keys()).index(key)
         original_key_vt = tuple(self.original_items.keys())[index]
@@ -805,7 +812,8 @@ class MappingProxyVariable(VariableTracker):
     # proxies to the original dict_vt
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert isinstance(dv_dict, ConstDictVariable)
+        if not isinstance(dv_dict, ConstDictVariable):
+            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
     def python_type(self) -> type:
@@ -919,13 +927,18 @@ class DictViewVariable(VariableTracker):
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert self.kv in ("keys", "values", "items")
-        assert isinstance(dv_dict, ConstDictVariable)
+        if self.kv not in ("keys", "values", "items"):
+            raise AssertionError(
+                f"Expected kv to be 'keys', 'values', or 'items', got {self.kv!r}"
+            )
+        if not isinstance(dv_dict, ConstDictVariable):
+            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
     @property
     def view_items(self) -> Any:
-        assert self.kv is not None
+        if self.kv is None:
+            raise AssertionError("kv must not be None")
         return getattr(self.dv_dict.items, self.kv)()
 
     @property
@@ -938,7 +951,8 @@ class DictViewVariable(VariableTracker):
         return self.view_items_vt
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert self.kv is not None
+        if self.kv is None:
+            raise AssertionError("kv must not be None for reconstruct")
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
@@ -946,7 +960,8 @@ class DictViewVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        assert self.kv is not None
+        if self.kv is None:
+            raise AssertionError("kv must not be None for call_obj_hasattr")
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
@@ -1267,7 +1282,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def __setitem__(self, key: kV, value: VariableTracker) -> None:
         # Find a way to not hash the key using HashableTracker
         name = self._maybe_unwrap_key(key)
-        assert istype(name, str)
+        if not istype(name, str):
+            raise AssertionError(f"Expected str key, got {type(name)}")
         self.side_effects.store_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:

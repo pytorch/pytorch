@@ -395,7 +395,8 @@ class GraphArg:
     def example(self) -> torch.Tensor | torch.SymInt | BackwardState | None:
         if isinstance(self._example, TensorWeakRef):
             r = self._example()
-            assert r is not None
+            if r is None:
+                raise AssertionError("TensorWeakRef expired unexpectedly")
             return r
         else:
             return self._example
@@ -403,7 +404,8 @@ class GraphArg:
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
             self._example = TensorWeakRef(self._example)
-            assert is_fake(self.fake_tensor)
+            if not is_fake(self.fake_tensor):
+                raise AssertionError("fake_tensor must be a FakeTensor")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.source)
@@ -434,7 +436,8 @@ class BackwardStateGraphArg(GraphArg):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert codegen.tx.output.backward_state_var
+        if not codegen.tx.output.backward_state_var:
+            raise AssertionError("backward_state_var must be set on output")
         codegen.add_push_null(
             lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
         )
@@ -469,10 +472,12 @@ class VariableBuilder:
         source: Source,
         allow_lazy_constant: bool = True,
     ) -> None:
-        assert source is not None, (
-            "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
-        )
-        assert TracingContext.try_get() is not None, "Expected active TracingContext"
+        if source is None:
+            raise AssertionError(
+                "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
+            )
+        if TracingContext.try_get() is None:
+            raise AssertionError("Expected active TracingContext")
         super().__init__()
         self.tx = tx
         self.source = source
@@ -618,7 +623,8 @@ class VariableBuilder:
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
-                assert t not in result
+                if t in result:
+                    raise AssertionError(f"Duplicate type dispatch entry for {t}")
                 result[t] = fn
 
         return result
@@ -723,7 +729,8 @@ class VariableBuilder:
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
-                assert t not in result
+                if t in result:
+                    raise AssertionError(f"Duplicate id dispatch entry for {t}")
                 result[id(t)] = fn
 
         return result
@@ -1056,7 +1063,8 @@ class VariableBuilder:
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif trace_rules.is_numpy(value):
-            assert np
+            if not np:
+                raise AssertionError("numpy must be available for numpy tracing")
             if istype(value, types.MethodType):
                 # Dont guard on cython functions as they dont change ids
                 if inspect.isfunction(value.__func__):
@@ -1307,9 +1315,8 @@ class VariableBuilder:
                 example_strong_ref=node,
             )
             sym_expr = node.node.expr
-            assert isinstance(sym_expr, sympy.Symbol), (
-                f"{sym_expr} is not a basic Symbol."
-            )
+            if not isinstance(sym_expr, sympy.Symbol):
+                raise AssertionError(f"{sym_expr} is not a basic Symbol.")
             self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
             return SymNodeVariable.create(self.tx, sym_node_proxy, node)
         elif is_torch_sym(value):
@@ -1351,7 +1358,8 @@ class VariableBuilder:
                         explanation="Unbacked SymInt input is not supported yet.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            assert new_symint is not None
+            if new_symint is None:
+                raise AssertionError("new_symint must not be None after wrapping")
             if not isinstance(new_symint, SymInt):
                 raise AssertionError(f"Expected SymInt, got {type(new_symint)}")
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1371,9 +1379,8 @@ class VariableBuilder:
             )
             # We bind the new_symint to graph input.
             sym_expr = new_symint.node.expr
-            assert isinstance(sym_expr, sympy.Symbol), (
-                f"{sym_expr} is not a basic Symbol."
-            )
+            if not isinstance(sym_expr, sympy.Symbol):
+                raise AssertionError(f"{sym_expr} is not a basic Symbol.")
             self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
 
             tracing_symint = (
@@ -1810,7 +1817,8 @@ class VariableBuilder:
             if isinstance(value, set):
                 set_vt_cls = SetVariable
             else:
-                assert isinstance(value, frozenset)
+                if not isinstance(value, frozenset):
+                    raise AssertionError(f"Expected frozenset, got {type(value)}")
                 set_vt_cls = FrozensetVariable
 
             set_vt = set_vt_cls(
@@ -1947,7 +1955,8 @@ class VariableBuilder:
             # e.g. instead of `def forward(self, L_inputs_0_, L_inputs_1_, ...):`, we have
             # `def forward(self, L_inputs_):`
             source = self.source
-            assert isinstance(value, list)
+            if not isinstance(value, list):
+                raise AssertionError(f"Expected list for steal_arg, got {type(value)}")
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(value),
@@ -2258,7 +2267,8 @@ class VariableBuilder:
 
     def wrap_literal(self, value: object) -> VariableTracker:
         if type(value) is int:
-            assert isinstance(value, int)
+            if not isinstance(value, int):
+                raise AssertionError(f"Expected int, got {type(value)}")
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -2306,13 +2316,15 @@ class VariableBuilder:
 
             return self._wrap_lazy_constant(value)
         elif type(value) is float:
-            assert isinstance(value, float)
+            if not isinstance(value, float):
+                raise AssertionError(f"Expected float, got {type(value)}")
             if not config.specialize_float:
                 return self._wrap_lazy_constant(value, self._wrap_symfloat_for_lazy)
 
             return self._wrap_lazy_constant(value)
         elif type(value) in (bool, str):
-            assert isinstance(value, (bool, str))
+            if not isinstance(value, (bool, str)):
+                raise AssertionError(f"Expected bool or str, got {type(value)}")
             return self._wrap_lazy_constant(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -2373,7 +2385,8 @@ class VariableBuilder:
 
         # We cannot already be tracking the tensor, which implies
         # it would have already been wrapped
-        assert value not in self.tx.output.side_effects
+        if value in self.tx.output.side_effects:
+            raise AssertionError("Tensor is already tracked in side effects")
 
         is_static_input = get_static_address_type(value) is not None
 
@@ -2636,7 +2649,8 @@ class VariableBuilder:
                 )
 
         self.tx.output.input_source_to_var[source] = tensor_variable
-        assert "tensor_dict" not in tensor_proxy.node.meta
+        if "tensor_dict" in tensor_proxy.node.meta:
+            raise AssertionError("tensor_dict already exists in tensor_proxy node meta")
         tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
 
         # Note: this information is conveyed via subclass_type now
@@ -2650,8 +2664,10 @@ class VariableBuilder:
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value: Any) -> VariableTracker:
-        assert np is not None
-        assert isinstance(value, np.ndarray)
+        if np is None:
+            raise AssertionError("numpy must be available to wrap ndarray")
+        if not isinstance(value, np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(value)}")
 
         source = NumpyTensorSource(self.get_source())
 
@@ -2664,7 +2680,10 @@ class VariableBuilder:
             except ValueError:
                 # One can not easily make nditer elements writable,
                 # but warning is not the end of the world
-                assert isinstance(value.base, np.nditer)
+                if not isinstance(value.base, np.nditer):
+                    raise AssertionError(
+                        f"Expected np.nditer base, got {type(value.base)}"
+                    ) from None
         tensor_value = None
         with torch_function_mode_stack_state_mgr.temp_restore_stack():
             try:
@@ -2682,7 +2701,8 @@ class VariableBuilder:
                     hints=[],
                     from_exc=e,
                 )
-        assert tensor_value is not None
+        if tensor_value is None:
+            raise AssertionError("Failed to convert numpy ndarray to tensor")
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
@@ -2740,7 +2760,8 @@ class VariableBuilder:
         dynamism: DimDynamic | None = None,
         context: SymIntSymbolicContext | None = None,
     ) -> VariableTracker:
-        assert type(value) is int
+        if type(value) is not int:
+            raise AssertionError(f"Expected exact int type, got {type(value)}")
 
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
@@ -2829,12 +2850,18 @@ class VariableBuilder:
                 TrackedFake(wrapped_value, self.source, context)
             )
         else:
-            assert is_constant_source(self.get_source())
+            if not is_constant_source(self.get_source()):
+                raise AssertionError(
+                    f"Expected constant source, got {self.get_source()}"
+                )
             # TODO: Do I actually need guard for constant source?
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        assert not isinstance(self.get_source(), RandomValueSource)
+        if isinstance(self.get_source(), RandomValueSource):
+            raise AssertionError(
+                "RandomValueSource is not supported for symint wrapping"
+            )
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
@@ -2847,7 +2874,8 @@ class VariableBuilder:
         )
 
         sym_expr = wrapped_value.node.expr
-        assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
+        if not isinstance(sym_expr, sympy.Symbol):
+            raise AssertionError(f"{sym_expr} is not a basic Symbol.")
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         unspec_var = SymNodeVariable.create(self.tx, proxy, wrapped_value, **options)
         # type: ignore[assignment]
@@ -2922,7 +2950,10 @@ class VariableBuilder:
 
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
-        assert not isinstance(self.get_source(), RandomValueSource)
+        if isinstance(self.get_source(), RandomValueSource):
+            raise AssertionError(
+                "RandomValueSource is not supported for symfloat wrapping"
+            )
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         # The FloatTensorSource here is just for pedantic correctness: if you
@@ -2955,7 +2986,10 @@ class VariableBuilder:
             subclass_type=None,
             **options,
         )
-        assert isinstance(unspec_var, UnspecializedPythonVariable)
+        if not isinstance(unspec_var, UnspecializedPythonVariable):
+            raise AssertionError(
+                f"Expected UnspecializedPythonVariable, got {type(unspec_var)}"
+            )
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if self.tx.export and not isinstance(self.get_source(), LocalSource):
@@ -2964,14 +2998,18 @@ class VariableBuilder:
             )
         fake_tensor_value = None
         example_value = unspec_var.proxy.node.meta["example_value"]
-        assert is_fake(example_value)
+        if not is_fake(example_value):
+            raise AssertionError(
+                f"Expected fake tensor example_value, got {type(example_value)}"
+            )
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
-            f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-            "({self.tx.fake_mode}) from InstructionTranslator"
-        )
+        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            raise AssertionError(
+                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                "({self.tx.fake_mode}) from InstructionTranslator"
+            )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
         # specifically regarding sources.
@@ -3054,14 +3092,18 @@ class VariableBuilder:
             else:
                 # type: ignore[attr-defined]
                 example_value = unspec_var.proxy.node.meta["example_value"]
-            assert is_fake(example_value)
+            if not is_fake(example_value):
+                raise AssertionError(
+                    f"Expected fake tensor example_value, got {type(example_value)}"
+                )
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
-                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                "({self.tx.fake_mode}) from InstructionTranslator"
-            )
+            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+                raise AssertionError(
+                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    "({self.tx.fake_mode}) from InstructionTranslator"
+                )
 
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
@@ -3086,7 +3128,8 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             explanation=f"Dataclass fields handling fails for {obj}. Expected it to be a user-defined object.",
             hints=[],
         )
-    assert value is not None
+    if value is None:
+        raise AssertionError("dataclasses.fields requires a non-None value")
     items = []
     # type: ignore[arg-type]
     for field in dataclasses.fields(value):
@@ -3249,24 +3292,26 @@ def _wrap_fx_preexisting_tensor(
 ) -> VTTypeAlias:
     from ..symbolic_convert import InstructionTranslatorBase
 
-    assert isinstance(tensor, torch.Tensor), (
-        f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
-    )
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(
+            f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
+        )
 
-    assert isinstance(tx, InstructionTranslatorBase)
+    if not isinstance(tx, InstructionTranslatorBase):
+        raise AssertionError(f"Expected InstructionTranslatorBase, got {type(tx)}")
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
     # Placeholders always carry example_value in node.meta.
     # non-placeholders always have no example_value in node.meta
     if proxy.node.op == "placeholder":
-        assert "example_value" in proxy.node.meta, (
-            f"placeholder {proxy} doesn't have 'example_value' in node.meta"
-        )
+        if "example_value" not in proxy.node.meta:
+            raise AssertionError(
+                f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+            )
     else:
-        assert "example_value" not in proxy.node.meta, (
-            f"{proxy.node.meta['example_value']}"
-        )
+        if "example_value" in proxy.node.meta:
+            raise AssertionError(f"{proxy.node.meta['example_value']}")
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
@@ -3292,7 +3337,10 @@ def _wrap_fx_preexisting_tensor(
                 "is_tensor": target_cls
                 in (TensorVariable, TensorWithTFOverrideVariable),
             }
-            assert "source" in options and options["source"] is not None
+            if "source" not in options:
+                raise AssertionError("source must be provided in options")
+            if options["source"] is None:
+                raise AssertionError("source must not be None in options")
             kwargs["source"] = options["source"]
             # pyrefly: ignore [missing-argument]
             tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
@@ -3321,11 +3369,13 @@ def _wrap_fx_proxy(
 ) -> VTTypeAlias:
     from ..symbolic_convert import InstructionTranslatorBase
 
-    assert isinstance(tx, InstructionTranslatorBase)
+    if not isinstance(tx, InstructionTranslatorBase):
+        raise AssertionError(f"Expected InstructionTranslatorBase, got {type(tx)}")
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
-    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
+    if "example_value" in proxy.node.meta:
+        raise AssertionError(f"{proxy.node.meta['example_value']}")
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
@@ -3384,7 +3434,8 @@ def handle_traced_output(
         # NOTE we pass a dummy object as the `item` argument to avoid
         # constructing a dummy _tensor_ object. The object isn't used for
         # newly constructed VTs anyways.
-        assert isinstance(var, VariableTracker)
+        if not isinstance(var, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(var)}")
         tx.output.side_effects._track_obj(
             proxy, var, mutation_type_cls=AttributeMutationNew
         )
@@ -3396,7 +3447,8 @@ def handle_traced_output(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target is torch.random.set_rng_state
     ):
-        assert type(proxy.node.target) is not str
+        if type(proxy.node.target) is str:
+            raise AssertionError("proxy.node.target must not be a string")
         # pyrefly: ignore[bad-argument-type]
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
@@ -3429,7 +3481,10 @@ def handle_traced_output(
                 if "source" in options:
                     # This path should only trigger for list stealing, so it's
                     # safe to use `GetItemSource`.
-                    assert isinstance(example_value, list)
+                    if not isinstance(example_value, list):
+                        raise AssertionError(
+                            f"Expected list for source path, got {type(example_value)}"
+                        )
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
@@ -3462,9 +3517,10 @@ def handle_traced_output(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, **options)
         else:
-            assert is_namedtuple(example_value), (
-                f"expected namedtuple or structseq but got {type(example_value)}"
-            )
+            if not is_namedtuple(example_value):
+                raise AssertionError(
+                    f"expected namedtuple or structseq but got {type(example_value)}"
+                )
             tuple_vt = TupleVariable(
                 unpacked,
                 mutation_type=options.get("mutation_type", ValueMutationNew()),
@@ -3856,7 +3912,10 @@ def _automatic_dynamic(
         outer_context = _automatic_dynamic(
             e, tx, source, static_shapes, outer_only=True
         )
-        assert isinstance(outer_context, StatefulSymbolicContext)
+        if not isinstance(outer_context, StatefulSymbolicContext):
+            raise AssertionError(
+                f"Expected StatefulSymbolicContext, got {type(outer_context)}"
+            )
 
         # Get symbolic contexts for inner tensors
         inner_contexts = {}  # mapping from attr -> symbolic context
@@ -4148,7 +4207,8 @@ def _wrap_to_fake_tensor_and_record_impl(
         or isinstance(e, torch.Tensor)
         or is_traceable_wrapper_subclass(e)
     ):
-        assert source is not None
+        if source is None:
+            raise AssertionError("source must not be None for tensor wrapping")
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
@@ -4165,7 +4225,10 @@ def _wrap_to_fake_tensor_and_record_impl(
             # into bugs around how meta_utils knows and works to create fake tensors
             # with tensor subclasses. Ideally, dynamo would drive both the recursive
             # wrap_to_fake_tensor_and_record and _automatic_dynamic policy creation.
-            assert isinstance(source, AttrSource)
+            if not isinstance(source, AttrSource):
+                raise AssertionError(
+                    f"Expected AttrSource for parent context, got {type(source)}"
+                )
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
@@ -4183,7 +4246,8 @@ def _wrap_to_fake_tensor_and_record_impl(
         # we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
         # can check it to know if they are running in an eager context or not
         with enable_python_dispatcher():
-            assert tx.fake_mode is not None
+            if tx.fake_mode is None:
+                raise AssertionError("tx.fake_mode must not be None")
             fake_e = wrap_fake_exception(
                 lambda: tx.fake_mode.from_tensor(
                     e,  # type: ignore[arg-type]
@@ -4362,7 +4426,10 @@ class SourcelessBuilder:
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
-                assert getattr(value.__self__, value.__func__.__name__) == value
+                if getattr(value.__self__, value.__func__.__name__) != value:
+                    raise AssertionError(
+                        f"Classmethod lookup mismatch: {value.__func__.__name__} on {value.__self__}"
+                    )
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
@@ -4436,7 +4503,8 @@ class SourcelessBuilder:
 
     @staticmethod
     def wrap_constant_literal(value: object) -> VariableTracker:
-        assert ConstantVariable.is_literal(value)
+        if not ConstantVariable.is_literal(value):
+            raise AssertionError(f"Expected literal value, got {type(value)}")
         return ConstantVariable.create(value=value)
 
     @staticmethod

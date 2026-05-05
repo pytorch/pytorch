@@ -503,11 +503,11 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
         def fn(x: Any) -> None:
-            assert x, "msg"
+            assert x, "msg"  # noqa: S101
     else:
 
         def fn(x: Any) -> None:
-            assert x
+            assert x  # noqa: S101
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 

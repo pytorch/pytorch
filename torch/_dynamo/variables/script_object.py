@@ -90,10 +90,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
-        assert not (isinstance(value, type) and issubclass(value, enum.Enum)), (
-            f"Enum class {value} should use UserDefinedClassVariable, "
-            "not OpaqueObjectClassVariable"
-        )
+        if isinstance(value, type) and issubclass(value, enum.Enum):
+            raise AssertionError(
+                f"Enum class {value} should use UserDefinedClassVariable, "
+                "not OpaqueObjectClassVariable"
+            )
         super().__init__(**kwargs)
         self.value = value
 
@@ -255,9 +256,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
-        assert not isinstance(value, enum.Enum), (
-            f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
-        )
+        if isinstance(value, enum.Enum):
+            raise AssertionError(
+                f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
+            )
         out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
@@ -293,7 +295,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         if not isinstance(self.proxy, torch.fx.Proxy):
             # If we have a hoisted value type, then lazily lift it to be a graph
             # input when as_proxy() is called.
-            assert is_opaque_value_type(type(self.proxy))
+            if not is_opaque_value_type(type(self.proxy)):
+                raise AssertionError(
+                    f"Expected opaque value type, got {type(self.proxy)}"
+                )
             if should_hoist(type(self.proxy)):
                 from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -403,7 +408,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 ],
             )
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "TorchScriptObjectVariable requires a source for var_getattr"
+            )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
@@ -542,7 +550,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return hash(real_obj)
 
     def is_python_equal(self, other: object) -> bool:
-        assert isinstance(other, VariableTracker)
+        if not isinstance(other, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
         real_self = self.as_python_constant()
         real_other = other.as_python_constant()
         return real_self == real_other
