@@ -20,13 +20,13 @@ class SimpleLinearModule(torch.nn.Module):
 
 @torch._dynamo.config.patch(generate_pycode=True)
 class TestPycode(torch._inductor.test_case.TestCase):
-    def test_pycode_basic(self):
+    def test_pycode_module(self):
         mod = SimpleLinearModule()
         x = torch.randn(3, 3)
         with get_metrics_context():
             capture_output = fullgraph_capture(mod, (x,), {})
         pycode = capture_output.graph_capture_output.pycode
-        pycode_str = "\n".join(p for p in pycode if p is not None)
+        pycode_str = "\n".join("\n".join(p) for p in pycode if p is not None)
         pycode_str = re.sub(
             r"__compiled_fn_\d+_[0-9a-f_]+",
             "__compiled_fn_<ID>",
@@ -62,7 +62,7 @@ __ret = __stack0""",
         with get_metrics_context():
             capture_output = fullgraph_capture(fn, (x, y), {})
         pycode = capture_output.graph_capture_output.pycode
-        pycode_str = "\n".join(p for p in pycode if p is not None)
+        pycode_str = "\n".join("\n".join(p) for p in pycode if p is not None)
         pycode_str = re.sub(
             r"__compiled_fn_\d+_[0-9a-f_]+",
             "__compiled_fn_<ID>",
@@ -97,7 +97,7 @@ __ret = __stack0""",
         with get_metrics_context():
             capture_output = fullgraph_capture(fn, (x, y), {})
         pycode = capture_output.graph_capture_output.pycode
-        pycode_str = "\n".join(p for p in pycode if p is not None)
+        pycode_str = "\n".join("\n".join(p) for p in pycode if p is not None)
         pycode_str = re.sub(
             r"__compiled_fn_\d+_[0-9a-f_]+",
             "__compiled_fn_<ID>",

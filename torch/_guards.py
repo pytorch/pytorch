@@ -1343,7 +1343,12 @@ class Source:
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
-    def pycode(self, codegen: PyCodegen) -> str:
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        """
+        Reconstructs the source into a string of Python code. This method should
+        be eventually implemented for all subclasses of Source to achieve full
+        coverage of python wrapper code generation.
+        """
         raise NotImplementedError
 
     @functools.cached_property

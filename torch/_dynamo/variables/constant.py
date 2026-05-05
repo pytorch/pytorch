@@ -109,15 +109,16 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(value), f"""
-Cannot construct `ConstantVariable` for value of type {type(value)}.
-
-This failure likely due to PyTorch-internal use of `ConstantVariable` on
-non-literal python values, please try using `VariableTracker.build` instead. If
-you believe it's a necessary and legitimate use case (the value is immutable and
-can't easily be represented with another `VariableTracker` class), please add
-its type to `common_constant_types`.
-"""
+        if not ConstantVariable.is_base_literal(value):
+            raise AssertionError(
+                f"Cannot construct `ConstantVariable` for value of type {type(value)}.\n"
+                "\n"
+                "This failure likely due to PyTorch-internal use of `ConstantVariable` on\n"
+                "non-literal python values, please try using `VariableTracker.build` instead. If\n"
+                "you believe it's a necessary and legitimate use case (the value is immutable and\n"
+                "can't easily be represented with another `VariableTracker` class), please add\n"
+                "its type to `common_constant_types`."
+            )
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -330,7 +331,10 @@ its type to `common_constant_types`.
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            assert not kwargs
+            if kwargs:
+                raise AssertionError(
+                    f"__contains__ does not accept keyword arguments, got {kwargs}"
+                )
             search = args[0].as_python_constant()
             try:
                 result = search in self.value
@@ -455,7 +459,39 @@ its type to `common_constant_types`.
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
 
-    def pycode(self, codegen) -> str:
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_or.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5606 (long_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
+        # bool inherits int's nb_or via slot inheritance.
+        if not isinstance(self.value, (int, frozenset, type)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        result = self_.python_type().__or__(v, w)  # type: ignore[bad-argument-count]
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
+        # bool inherits nb_negative from int via slot inheritance.
+        return ConstantVariable.create(-self.value)
+
+    def reconstruct_pycode(self, codegen) -> str:
         return repr(self.value)
 
 
