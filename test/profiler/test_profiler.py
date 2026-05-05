@@ -82,6 +82,15 @@ if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
 
 
+def get_profiler_activities(device_type):
+    activities = [ProfilerActivity.CPU]
+    if device_type not in ("cpu", "meta"):
+        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if device_activity and device_activity in supported_activities():
+            activities.append(device_activity)
+    return activities
+
+
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
@@ -487,17 +496,11 @@ class TestProfiler(TestCase):
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
-    def payload(self, use_cuda=False, tensor_size=10):
-        x = torch.randn(tensor_size, tensor_size)
-        if use_cuda:
-            x = x.cuda()
-        y = torch.randn(tensor_size, tensor_size)
-        if use_cuda:
-            y = y.cuda()
+    def payload(self, device="cpu", tensor_size=10):
+        x = torch.randn(tensor_size, tensor_size).to(device)
+        y = torch.randn(tensor_size, tensor_size).to(device)
         z = torch.mm(x, y)
         z = z + y
-        if use_cuda:
-            z = z.cpu()
 
     def _check_stats(self, profiler_stats):
         self.assertGreater(profiler_stats.profiling_window_duration_sec, 0)
@@ -513,18 +516,19 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         use_device = "cuda" if use_cuda else None
         with _profile(use_device=use_device, use_kineto=True):
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
 
         # rerun to avoid initial start overhead
         with _profile(use_device=use_device, use_kineto=True) as p:
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
 
         self.assertTrue("aten::mm" in str(p))
 
         output = p.key_averages().table(
-            sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
+            sort_by="self_device_time_total" if use_cuda else "self_cpu_time_total",
             row_limit=-1,
         )
         # print(output)
@@ -1069,16 +1073,15 @@ class TestProfiler(TestCase):
         called_num = [0]
 
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         with profile(activities=supported_activities()):
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
 
         def trace_handler(p):
             output = p.key_averages().table(
-                sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
+                sort_by="self_device_time_total" if use_cuda else "self_cpu_time_total",
                 row_limit=-1,
             )
-            # print(output)
-            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
             called_num[0] += 1
 
         initial_step = KinetoStepTracker.current_step()
@@ -1089,7 +1092,7 @@ class TestProfiler(TestCase):
             on_trace_ready=trace_handler,
         ) as p:
             for _ in range(8):
-                self.payload(use_cuda=use_cuda)
+                self.payload(device=device)
                 p.step()
 
         self.assertEqual(called_num[0], 2)
@@ -1097,10 +1100,10 @@ class TestProfiler(TestCase):
 
         # case without schedule
         with profile(activities=supported_activities()) as p:
-            self.payload(use_cuda=use_cuda)
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
+            self.payload(device=device)
         output = p.key_averages().table(
-            sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
+            sort_by="self_device_time_total" if use_cuda else "self_cpu_time_total",
             row_limit=-1,
         )
         # print(output)
@@ -1154,13 +1157,14 @@ class TestProfiler(TestCase):
     def test_kineto_profiler_multiple_steppers(self):
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         net = SimpleNet()
         opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
         opt.zero_grad()
         inputs = torch.rand(10)
 
         with profile(activities=supported_activities()):
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
 
         def optimizer_step():
             """This simulates a step() hook in the optimizer"""
@@ -1255,8 +1259,9 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         with _profile(use_device="cuda" if use_cuda else None, use_kineto=True):
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
 
         with TemporaryDirectoryName() as dname:
             with profile(
@@ -1266,7 +1271,7 @@ class TestProfiler(TestCase):
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(dname),
             ) as p:
                 for _ in range(18):
-                    self.payload(use_cuda=use_cuda)
+                    self.payload(device=device)
                     p.step()
 
             self.assertTrue(os.path.exists(dname))
@@ -1294,7 +1299,7 @@ class TestProfiler(TestCase):
             )
             p.start()
             for _ in range(18):
-                self.payload(use_cuda=use_cuda)
+                self.payload(device=device)
                 p.step()
             p.stop()
 
@@ -1655,27 +1660,22 @@ class SimpleNet(nn.Module):
         return self.fc2(self.fc1(x))
 
 
-def payload(use_cuda=False):
-    x = torch.randn(10, 10)
-    if use_cuda:
-        x = x.cuda()
-    y = torch.randn(10, 10)
-    if use_cuda:
-        y = y.cuda()
+def payload(device="cpu"):
+    x = torch.randn(10, 10).to(device)
+    y = torch.randn(10, 10).to(device)
     z = torch.mm(x, y)
     z = z + y
-    if use_cuda:
-        z = z.cpu()
 
 niters = 8
 use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+device = "cuda" if use_cuda else "cpu"
 net = SimpleNet()
 opt = torch.optim.SGD(net.parameters(), lr=0.01)
 opt.zero_grad()
 inputs = torch.rand(10)
 
 with profile(activities=supported_activities()):
-    payload(use_cuda=use_cuda)
+    payload(device=device)
 
 initial_step = KinetoStepTracker.current_step()
 
@@ -2256,9 +2256,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_user_annotation(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         with profile(activities=supported_activities()) as p:
             with torch.profiler.record_function("test_user_annotation"):
-                self.payload(use_cuda=use_cuda)
+                self.payload(device=device)
 
         for evt in p.key_averages():
             if evt.key == "test_user_annotation":
@@ -2454,7 +2455,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(use_cuda=True, tensor_size=256)
+                self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
@@ -2731,11 +2732,12 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_profiler(self):
         """Basic test for torch.profiler.profile API."""
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        device = "cuda" if use_cuda else "cpu"
         activities = [ProfilerActivity.CPU]
         if use_cuda:
             activities.append(ProfilerActivity.CUDA)
         with profile(activities=activities) as p:
-            self.payload(use_cuda=use_cuda)
+            self.payload(device=device)
         events = p.events()
         self.assertGreater(len(events), 0)
         found_mm = False
@@ -2744,7 +2746,8 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 found_mm = True
         self.assertTrue(found_mm)
         if use_cuda:
-            gpu_events = [e for e in events if e.device_type == DeviceType.CUDA]
+            device_type_enum = getattr(DeviceType, device.upper(), None)
+            gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -2829,7 +2832,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_kineto_kernel_metadata_in_trace(self):
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            self.payload(use_cuda=True)
+            self.payload(device="cuda")
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
