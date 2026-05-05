@@ -115,16 +115,21 @@ def ensure_pip_on_path() -> None:
 
 
 def cuda_version_from_env() -> str:
-    arch_version = os.environ.get("GPU_ARCH_VERSION", "")
-    if arch_version:
-        return arch_version
+    """Match the original build_cuda.sh precedence: DESIRED_CUDA wins.
+
+    GPU_ARCH_VERSION on aarch64 jobs comes through as e.g. "12.6-aarch64"
+    which install_cuda.sh rejects, so we strip the "-aarch64" suffix when
+    falling back to it.
+    """
     desired = os.environ.get("DESIRED_CUDA", "")
     # "12.6" → keep; "cu126" → "12.6"
-    if "." in desired:
+    if "." in desired and desired.replace(".", "").isdigit():
         return desired
-    if len(desired) == 5 and desired.startswith("cu"):
+    if len(desired) == 5 and desired.startswith("cu") and desired[2:].isdigit():
         return f"{desired[2:4]}.{desired[4]}"
-    return ""
+
+    arch_version = os.environ.get("GPU_ARCH_VERSION", "")
+    return arch_version.removesuffix("-aarch64")
 
 
 def install_cuda_toolkit(cuda_version: str) -> None:
