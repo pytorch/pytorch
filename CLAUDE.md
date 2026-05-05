@@ -8,7 +8,10 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Environment
 
-If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+If any tool you're trying to use (pip, python, spin, etc) is missing, check for
+a `.venv` directory in the project root or its parent directory. If found,
+activate it and retry. If no `.venv` is found, stop and ask the user if an
+environment is needed. Do NOT try to find alternatives or install these tools.
 
 # CI Docker Images
 
@@ -48,6 +51,9 @@ For any test that checks numerics of the on-device implementation, use `instanti
 Only use commands provided via `spin` for linting.
 Use `spin help` to list available commands.
 Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
+
+When the user asks you to commit or amend, run `lintrunner -a` before creating
+the commit. Fix any lint errors it reports, then commit.
 
 # Commit messages
 
