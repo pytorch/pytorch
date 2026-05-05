@@ -78,6 +78,7 @@ from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
+    copy_strided_storage_,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -119,7 +120,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -1937,9 +1937,15 @@ def index_expanded_dims_and_copy_(
     expanded_dims: list[int],
 ) -> None:
     "Index into expanded dimensions of both dst and src then copy_"
-    dst = index_expanded_dims(dst, expanded_dims)
-    src = index_expanded_dims(src, expanded_dims)
-    dst.copy_(src)
+    indexed_dst = index_expanded_dims(dst, expanded_dims)
+    if torch._debug_has_internal_overlap(indexed_dst) != 0:
+        # dst still self-overlaps after dropping expanded dims (rare). A regular
+        # copy_ would have ambiguous semantics; bytewise-copy the strided extent
+        # instead so dst's overlap pattern is reproduced verbatim.
+        copy_strided_storage_(dst, src)
+        return
+    indexed_src = index_expanded_dims(src, expanded_dims)
+    indexed_dst.copy_(indexed_src)
 
 
 def cudagraphify_impl(
