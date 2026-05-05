@@ -312,7 +312,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = compiled(list(args))
         self.assertEqual(result[0].shape, torch.Size([4]))
 
-
     def test_symint_expr_serialized(self):
         """InputWriter serializes symbolic expressions alongside hint values,
         and InputReader captures them in symint_exprs."""
@@ -339,13 +338,13 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         # Free symbol should have expr=
         self.assertIn("expr=", code)
         # Plain int should NOT have expr=
-        plain_line = [l for l in lines if "plain_int" in l][0]
+        plain_line = next(l for l in lines if "plain_int" in l)
         self.assertNotIn("expr=", plain_line)
 
         # Round-trip: execute load_args and verify reader captures exprs
         reader = InputReader(save_dir=None)
         ns: dict = {}
-        exec(compile(code, "<test>", "exec"), ns)  # noqa: S102
+        exec(compile(code, "<test>", "exec"), ns)
         ns["load_args"](reader)
 
         self.assertEqual(len(reader.args), 3)
@@ -372,7 +371,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         class SimpleGraph(torch.nn.Module):
             def forward(self, size, x):
-                return x.sum() + size
+                return (x.sum() + size,)
 
         mod = SimpleGraph()
         args = [si0, torch.randn(16)]
@@ -380,8 +379,12 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         buf = io.StringIO()
         save_graph_repro(
-            buf, gm, args, "inductor",
-            save_dir=None, tracing_mode="symbolic",
+            buf,
+            gm,
+            args,
+            "inductor",
+            save_dir=None,
+            tracing_mode="symbolic",
         )
         repro_src = buf.getvalue()
 
@@ -389,17 +392,18 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIn("expr=", repro_src)
 
         # Run the generated repro in a subprocess
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
             tmp.write(repro_src)
             tmp.flush()
             res = subprocess.run(
                 [sys.executable, tmp.name],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             self.assertEqual(
-                res.returncode, 0,
+                res.returncode,
+                0,
                 f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
             )
 
