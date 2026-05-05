@@ -531,6 +531,7 @@ aten::_sample_dirichlet.out
 aten::_scaled_dot_product_attention_math_for_mps
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
+aten::_scaled_dot_product_cudnn_attention_quantized_per_tensor
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention

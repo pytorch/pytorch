@@ -15337,6 +15337,11 @@
     NestedTensorCUDA: _scaled_dot_product_cudnn_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_cudnn_attention_quantized_per_tensor(Tensor query, Tensor key, Tensor value, Tensor descale_q, Tensor descale_k, Tensor descale_v, float scale_s=256.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor softmax_stats, Tensor amax_s, Tensor amax_o)
+  dispatch:
+    CUDA: _scaled_dot_product_cudnn_attention_quantized_per_tensor_cuda
+  tags: nondeterministic_seeded
+
 - func: _scaled_dot_product_cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor attn_bias, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_cudnn_attention_backward_cuda

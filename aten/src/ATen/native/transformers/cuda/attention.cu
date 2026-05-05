@@ -39,6 +39,8 @@
 #include <ATen/ops/scaled_dot_product_attention_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention_quantized_per_tensor_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
 #include <ATen/ops/_softmax.h>
@@ -47,6 +49,7 @@
 #include <ATen/ops/_triton_scaled_dot_attention.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/linear.h>
 #include <ATen/ops/narrow_native.h>
@@ -1162,6 +1165,88 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   const int64_t max_seqlen_batch_k = key.size(2);
 
   return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_scaled_dot_product_cudnn_attention_quantized_per_tensor_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    double scale_s,
+    bool is_causal,
+    std::optional<double> scale) {
+  // Query (Batch x Num_heads_q x Q_seq_len x Dim_per_head) in FP8
+  // Key   (Batch x Num_heads_k x KV_seq_len x Dim_per_head) in FP8
+  // Value (Batch x Num_heads_v x KV_seq_len x Dim_per_head_v) in FP8
+  TORCH_CHECK(query.dim() == 4, "FP8 cuDNN SDPA expects 4D query tensor");
+  TORCH_CHECK(key.dim() == 4, "FP8 cuDNN SDPA expects 4D key tensor");
+  TORCH_CHECK(value.dim() == 4, "FP8 cuDNN SDPA expects 4D value tensor");
+  TORCH_CHECK(
+      query.scalar_type() == kFloat8_e4m3fn,
+      "FP8 cuDNN SDPA expects float8_e4m3fn query, got ", query.scalar_type());
+  TORCH_CHECK(
+      key.scalar_type() == kFloat8_e4m3fn,
+      "FP8 cuDNN SDPA expects float8_e4m3fn key, got ", key.scalar_type());
+  TORCH_CHECK(
+      value.scalar_type() == kFloat8_e4m3fn,
+      "FP8 cuDNN SDPA expects float8_e4m3fn value, got ", value.scalar_type());
+
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads_q = query.size(1);
+  const int64_t num_heads_k = key.size(1);
+  const int64_t num_heads_v = value.size(1);
+  const int64_t max_seqlen_q = query.size(2);
+  const int64_t max_seqlen_kv = key.size(2);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+
+  float softmax_scale = static_cast<float>(
+      sdp::calculate_scale(query, scale).as_float_unchecked());
+
+  // cuDNN writes BF16 output directly (no FP8 requantization)
+  auto output = at::empty(
+      {batch_size, num_heads_q, max_seqlen_q, head_dim_v},
+      query.options().dtype(kBFloat16));
+
+  // Stats for backward (logsumexp-style)
+  auto softmaxstats = at::empty(
+      {batch_size, num_heads_q, max_seqlen_q, 1},
+      query.options().dtype(kFloat));
+
+  auto amax_s = at::empty({1, 1, 1, 1}, query.options().dtype(kFloat));
+  auto amax_o = at::empty({1, 1, 1, 1}, query.options().dtype(kFloat));
+
+  run_cudnn_SDP_fp8_fprop(
+      batch_size,
+      num_heads_q,
+      num_heads_k,
+      num_heads_v,
+      max_seqlen_q,
+      max_seqlen_kv,
+      head_dim_qk,
+      head_dim_v,
+      softmax_scale,
+      is_causal,
+      static_cast<float>(scale_s),
+      query,
+      key,
+      value,
+      descale_q,
+      descale_k,
+      descale_v,
+      output,
+      softmaxstats,
+      amax_s,
+      amax_o);
+
+  return std::make_tuple(
+      std::move(output),
+      std::move(softmaxstats),
+      std::move(amax_s),
+      std::move(amax_o));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
