@@ -70,6 +70,11 @@ whichever assistant was used). NEVER add a `Co-authored-by:` trailer
 attributing the AI assistant, as it interferes with the Linux Foundation CLA
 bot.
 
+When the user asks you to amend a commit, check whether the commit message
+still accurately describes the changes. If it doesn't and the commit is not a
+ghstack commit, update the message. For ghstack commits, amending the message
+is a no-op, so just remind the user to update the PR description if needed.
+
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
 will update the source id automatically when needed.
