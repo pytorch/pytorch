@@ -12,7 +12,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 
 
-__all__ = ["Partition", "split_module", "split_module_simple", "_decompose_size_nodes"]
+__all__ = ["Partition", "split_module", "split_module_simple"]
 log = _LOGGER = logging.getLogger(__name__)
 
 
