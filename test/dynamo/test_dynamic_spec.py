@@ -9,11 +9,14 @@ import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.decorators import mark_unbacked
 from torch._dynamo.dynamic_spec import (
     IntVar,
+    lookup_spec_from_dynamo_source,
+    ObjectSpec,
     ParamsSpec,
     ShapesSpec,
     ShapeVar,
     TensorSpec,
 )
+from torch._dynamo.source import AttrSource, LocalSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
@@ -392,6 +395,156 @@ class TestShapeVarCompile(TestCase):
         # y not in spec → all static; changing y's shape recompiles
         compiled(torch.randn(8, 3), torch.randn(8, 3))  # x dim0 absorbed, y recompiles
         self.assertEqual(cnt.frame_count, 2)
+
+
+class TestObjectSpec(TestCase):
+    """``ObjectSpec`` data class — construction, access, repr, recursion."""
+
+    def test_empty(self):
+        os = ObjectSpec()
+        self.assertEqual(len(os), 0)
+
+    def test_dict_construction(self):
+        spec = TensorSpec([ShapeVar("h"), None])
+        os = ObjectSpec({"weight": spec, "bias": None})
+        self.assertEqual(len(os), 2)
+        self.assertIn("weight", os)
+        self.assertIs(os["weight"], spec)
+        self.assertIsNone(os["bias"])
+
+    def test_iter_and_items(self):
+        spec_w = TensorSpec([ShapeVar("h"), None])
+        spec_b = TensorSpec([ShapeVar("h")])
+        os = ObjectSpec({"weight": spec_w, "bias": spec_b})
+        self.assertEqual(list(os), ["weight", "bias"])
+        self.assertEqual(list(os.items()), [("weight", spec_w), ("bias", spec_b)])
+
+    def test_recursive_nesting(self):
+        # Nested ObjectSpec — value can itself be an ObjectSpec.
+        inner = ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        outer = ObjectSpec({"inner": inner})
+        self.assertIs(outer["inner"], inner)
+        self.assertIs(outer["inner"]["weight"]._specs[0], inner["weight"]._specs[0])
+
+    def test_repr_single(self):
+        os = ObjectSpec({"weight": None})
+        self.assertEqual(
+            repr(os),
+            "ObjectSpec(\n  .weight: None\n)",
+        )
+
+    def test_repr_with_tensorspec(self):
+        os = ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        self.assertEqual(
+            repr(os),
+            "ObjectSpec(\n"
+            "  .weight:\n"
+            "    TensorSpec(\n"
+            "      0: ShapeVar(name='h', min=0)\n"
+            "      1: None\n"
+            "    )\n"
+            ")",
+        )
+
+
+class TestObjectSpecLookup(TestCase):
+    """``lookup_spec_from_dynamo_source`` walks an ``AttrSource`` chain
+    against an ``ObjectSpec`` and returns the leaf at that path."""
+
+    def _local(self, name):
+        return LocalSource(name, is_input=True)
+
+    def _attr(self, base, member):
+        return AttrSource(base, member)
+
+    def test_attr_descends_into_objectspec(self):
+        leaf = TensorSpec([ShapeVar("h"), None])
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec({"model": ObjectSpec({"weight": leaf})})
+        )
+        result = lookup_spec_from_dynamo_source(
+            self._attr(self._local("model"), "weight"), shapes_spec
+        )
+        self.assertIs(result, leaf)
+
+    def test_nested_objectspec_walk(self):
+        leaf = TensorSpec([ShapeVar("h"), None])
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec(
+                {"model": ObjectSpec({"inner": ObjectSpec({"weight": leaf})})}
+            )
+        )
+        # model.inner.weight
+        src = self._attr(self._attr(self._local("model"), "inner"), "weight")
+        self.assertIs(lookup_spec_from_dynamo_source(src, shapes_spec), leaf)
+
+    def test_missing_attr_returns_none(self):
+        shapes_spec = ShapesSpec(
+            params=ParamsSpec(
+                {"model": ObjectSpec({"weight": TensorSpec([None, None])})}
+            )
+        )
+        # model.bias is not in the spec → None.
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._attr(self._local("model"), "bias"), shapes_spec
+            )
+        )
+
+    def test_attr_against_non_objectspec_returns_none(self):
+        # Top-level spec is a TensorSpec but source asks for an attr — mismatch.
+        shapes_spec = ShapesSpec(params=ParamsSpec({"x": TensorSpec([None, None])}))
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(
+                self._attr(self._local("x"), "weight"), shapes_spec
+            )
+        )
+
+    def test_local_source_root_returns_top_level_spec(self):
+        # Bare LocalSource at the root returns the top-level spec object
+        # (an ObjectSpec); preserves the v0 behavior for non-walked sources.
+        spec_obj = ObjectSpec({"weight": TensorSpec([None, None])})
+        shapes_spec = ShapesSpec(params=ParamsSpec({"model": spec_obj}))
+        self.assertIs(
+            lookup_spec_from_dynamo_source(self._local("model"), shapes_spec),
+            spec_obj,
+        )
+
+
+class TestObjectSpecCompile(TestCase):
+    """End-to-end: ``ObjectSpec`` routes through to a tensor reached
+    via attribute access on a function arg (``obj.w``)."""
+
+    def test_attr_tensor_dim_dynamic(self):
+        # Plain Python container — avoids nn.Module wrapping subtleties.
+        class Container:
+            def __init__(self, w):
+                self.w = w
+
+        def fn(obj):
+            return obj.w + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec(
+                    {"obj": ObjectSpec({"w": TensorSpec([ShapeVar("h"), None])})}
+                )
+            ),
+        )
+
+        compiled(Container(torch.randn(4, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Different dim 0 size — dynamic absorbs it, no recompile.
+        compiled(Container(torch.randn(8, 3)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Captured weight placeholder has a SymInt at dim 0.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
 
 
 if __name__ == "__main__":

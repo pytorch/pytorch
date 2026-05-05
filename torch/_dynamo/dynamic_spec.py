@@ -10,13 +10,14 @@ from typing import Any, TYPE_CHECKING, TypeAlias
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-from torch._dynamo.source import LocalSource
+from torch._dynamo.source import AttrSource, LocalSource
 
 
 __all__ = [
     "ShapeVar",
     "IntVar",
     "TensorSpec",
+    "ObjectSpec",
     "ParamsSpec",
     "ShapesSpec",
     "lookup_spec_from_dynamo_source",
@@ -132,6 +133,55 @@ class TensorSpec:
         return "\n".join(lines)
 
 
+class ObjectSpec:
+    """Spec for any Python object's attributes.
+
+    Models attribute access on a Python object (e.g., an ``nn.Module``'s
+    parameters / buffers / submodules; ``self`` inside an instance
+    method). Each field corresponds to an ``AttrSource`` in the dynamo
+    builder — when ``model.weight`` is traced, the spec walk descends
+    via ``ObjectSpec._fields["weight"]``.
+
+    Construct with a dict; values may be leaves (``TensorSpec`` /
+    ``IntVar`` / ``None``) or another ``ObjectSpec`` for recursion.
+
+    Example::
+
+        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        ObjectSpec({"inner": ObjectSpec({"weight": TensorSpec([ShapeVar("h")])})})
+    """
+
+    def __init__(self, fields: dict[str, Any] | None = None) -> None:
+        self._fields: dict[str, Any] = dict(fields or {})
+
+    def __getitem__(self, name: str) -> Any:
+        return self._fields[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def items(self) -> Any:
+        return self._fields.items()
+
+    def __repr__(self) -> str:
+        lines = ["ObjectSpec("]
+        for name, spec in self._fields.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                indented = "\n".join("    " + line for line in spec_repr.splitlines())
+                lines.append(f"  .{name}:\n{indented}")
+            else:
+                lines.append(f"  .{name}: {spec_repr}")
+        lines.append(")")
+        return "\n".join(lines)
+
+
 class ParamsSpec:
     """Specification for the arguments of a compiled function.
 
@@ -222,13 +272,43 @@ class ShapesSpec:
 
 
 def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Only supports LocalSource with is_input=True (direct function args).
-    Returns TensorSpec, IntVar, or None.
+    Returns the leaf ``IntVar`` / ``TensorSpec`` at the corresponding
+    path, or ``None`` if the source isn't covered. Supported source
+    kinds:
+
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec._fields[member]``.
+
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
     if shapes_spec is None or shapes_spec.params is None:
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
+
+    # Walk source.base chain to its root, collecting (kind, key) entries.
+    path: list[tuple[str, Any]] = []
+    cur = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, AttrSource):
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
+    if not cur.is_input:
         return None
-    return shapes_spec.params._named_args.get(source.local_name)
+    path.reverse()
+
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec.params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
+            return None
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    return spec
