@@ -50,13 +50,13 @@ class IntVar:
         self.optimization_hint = optimization_hint
 
     def __repr__(self) -> str:
-        parts = [f"name={self.name!r}"]
+        parts = [self.name]
         if self.min is not None:
             parts.append(f"min={self.min}")
         if self.max is not None:
             parts.append(f"max={self.max}")
         if self.optimization_hint is not None:
-            parts.append(f"optimization_hint={self.optimization_hint}")
+            parts.append(f"hint={self.optimization_hint}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
 
@@ -81,12 +81,6 @@ class ShapeVar(IntVar):
         optimization_hint: int | None = None,
     ) -> None:
         super().__init__(name, min=min, max=max, optimization_hint=optimization_hint)
-
-
-# Type alias for leaf specs (individual argument specifications)
-LeafSpec: TypeAlias = "TensorSpec | IntVar | None"
-# Any spec — what public APIs accept.
-IntermediateSpec: TypeAlias = LeafSpec
 
 
 class TensorSpec:
@@ -125,11 +119,16 @@ class TensorSpec:
         return iter(self._specs)
 
     def __repr__(self) -> str:
-        lines = ["TensorSpec("]
+        lines = ["Tensor:"]
         for i, spec in enumerate(self._specs):
             lines.append(f"  {i}: {spec!r}")
-        lines.append(")")
         return "\n".join(lines)
+
+
+# Type alias for leaf specs (individual argument specifications)
+LeafSpec: TypeAlias = TensorSpec | IntVar | None
+# Any spec — what public APIs accept.
+IntermediateSpec: TypeAlias = LeafSpec
 
 
 class ParamsSpec:
@@ -164,19 +163,14 @@ class ParamsSpec:
         self._varkw: dict[str, IntermediateSpec] | None = None
 
     def __repr__(self) -> str:
-        lines = ["ParamsSpec("]
+        lines = []
         for k, v in self._named_args.items():
             v_repr = repr(v)
             if "\n" in v_repr:
-                indented = "\n".join("    " + line for line in v_repr.splitlines())
-                lines.append(f"  {k}:\n{indented}")
+                indented = "\n".join("  " + line for line in v_repr.splitlines())
+                lines.append(f"{k}:\n{indented}")
             else:
-                lines.append(f"  {k}: {v_repr}")
-        if self._varargs is not None:
-            lines.append(f"  *args: {self._varargs!r}")
-        if self._varkw is not None:
-            lines.append(f"  **kwargs: {self._varkw!r}")
-        lines.append(")")
+                lines.append(f"{k}: {v_repr}")
         return "\n".join(lines)
 
 
@@ -212,12 +206,12 @@ class ShapesSpec:
         return self._params
 
     def __repr__(self) -> str:
-        lines = ["ShapesSpec("]
+        lines = ["shapes_spec:"]
         if self._params is not None:
+            lines.append("  params:")
             param_repr = repr(self._params)
-            indented = "\n".join("    " + line for line in param_repr.splitlines())
-            lines.append(f"  params:\n{indented}")
-        lines.append(")")
+            for line in param_repr.splitlines():
+                lines.append("    " + line)
         return "\n".join(lines)
 
 

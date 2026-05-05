@@ -2256,6 +2256,12 @@ class VariableBuilder:
 
             # Check for user-provided spec from shapes_spec.
             int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
+
+            if config._shapes_spec is not None and int_spec is None:
+                # shapes_spec is set but this int has no spec → force static
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value, source=self.source)
+
             if isinstance(int_spec, int):
                 # Explicit static value — verify the actual matches.
                 if value != int_spec:
@@ -2267,24 +2273,22 @@ class VariableBuilder:
                 return ConstantVariable.create(value=value, source=self.source)
             elif isinstance(int_spec, IntVar):
                 # All IntVar specs are unbacked.
-                hint = int_spec.optimization_hint
-                hint_value = hint if hint is not None else value
-                result = self.wrap_symint(hint_value, dynamism=DimDynamic.UNBACKED)
+                result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
                 sym_val = result.sym_num  # type: ignore[attr-defined]
                 if int_spec.min is not None:
                     torch._check(sym_val >= int_spec.min)
                 if int_spec.max is not None:
                     torch._check(sym_val <= int_spec.max)
-                if hint is not None:
+                if int_spec.optimization_hint is not None:
                     expr = sym_val.node.expr
-                    sym_val.node.shape_env.var_to_hint_override[expr] = hint
+                    sym_val.node.shape_env.var_to_hint_override[expr] = (
+                        int_spec.optimization_hint
+                    )
                 return result
-            elif config._shapes_spec is not None:
-                # shapes_spec is set but this int has no spec → force static
-                self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value, source=self.source)
 
             # allowlist has higher precedence over specialization control.
+            # I am keeping some power for dynamic_source over unspecified
+            # spec.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
@@ -2402,22 +2406,19 @@ class VariableBuilder:
 
         is_static_input = get_static_address_type(value) is not None
 
-        # If the user provided any spec for this source, the
-        # Parameter / nn-module-attr static-marking and the
-        # graph-attribute lifting paths below would route the tensor as
-        # a constant and skip ``_automatic_dynamic`` (where the spec is
-        # consulted). Skip those paths so the spec drives shape
-        # decisions. Checking ``is not None`` rather than
-        # ``isinstance(..., TensorSpec)`` so that a mis-typed user spec
-        # (e.g. ``IntVar`` on a tensor) still bypasses the fast path
-        # rather than being silently ignored.
+        # When a shapes_spec is provided for this tensor, we must skip the
+        # fast paths below (mark_static_input, register_attr_or_module,
+        # guarded ID_MATCH) that would freeze the tensor as a graph constant.
+        # Those paths bypass _automatic_dynamic where the spec is applied.
+        # Without this check, specifying TensorSpec on an nn.Parameter would
+        # be silently ignored.
         _has_spec = (
             lookup_spec_from_dynamo_source(source, config._shapes_spec) is not None
         )
 
         if (
-            not is_static_input
-            and not _has_spec
+            not _has_spec
+            and not is_static_input
             and (
                 isinstance(value, torch.nn.Parameter)
                 # mark tensor attributes of nn modules static
@@ -2453,7 +2454,7 @@ class VariableBuilder:
                 value, self.name, source=source
             )
 
-        if get_static_address_type(value) == "guarded" and not _has_spec:
+        if get_static_address_type(value) == "guarded":
             # If it's a guarded tensor, we can install the parameter directly
             # into  the Fx graph instead of lifting it as an input. Lifting
             # offers no benefit,  such as regional compilation, since we still
@@ -2462,11 +2463,6 @@ class VariableBuilder:
             # from locals/globals, reducing overhead.  This can lead to
             # significant cost savings, especially for optimizers  handling many
             # tensors.
-            #
-            # Skipped when a TensorSpec applies — the user opted into
-            # dynamic shapes via the spec system, so we route through
-            # ``wrap_to_fake_tensor`` (and ``_automatic_dynamic``) where
-            # the spec is consulted.
             self.install_guards(GuardBuilder.ID_MATCH)
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -3946,7 +3942,7 @@ def _automatic_dynamic(
     _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
     tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
 
-    if static_shapes and not is_dynamic_source(name) and _spec_lookup is None:
+    if tensor_spec is None and static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3959,7 +3955,7 @@ def _automatic_dynamic(
 
     # If shapes_spec is provided but this tensor has no spec (None),
     # force all dims static — "unspecified = static" when a spec is set.
-    if config._shapes_spec is not None and _spec_lookup is None:
+    if config._shapes_spec is not None and tensor_spec is None:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -4033,9 +4029,6 @@ def _automatic_dynamic(
     constraint_strides = []
     specialize_on = []
 
-    # ``tensor_spec`` was looked up earlier (above the static-shapes
-    # fast-path guard) and reused here for per-dim dispatch.
-
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
@@ -4048,16 +4041,9 @@ def _automatic_dynamic(
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
-        # If user provided a TensorSpec, use it and skip the existing heuristics.
-        # None entries mean static (infer from example).
-        if tensor_spec is not None:
-            if tensor_spec[i] is None:
-                # Unspecified = static
-                dynamic_sizes.append(DimDynamic.STATIC)
-                constraint_sizes.append(None)
-                dynamic_strides.append(DimDynamic.INFER_STRIDE)
-                constraint_strides.append(None)
-                continue
+        # If user provided a TensorSpec with a spec for this dim, use it
+        # and skip the existing heuristics.
+        if tensor_spec is not None and tensor_spec[i] is not None:
             if any(
                 [
                     marked_strict_unbacked,
@@ -4087,6 +4073,7 @@ def _automatic_dynamic(
                 dynamic_sizes.append(DimDynamic.UNBACKED)
                 constraint_sizes.append(None)
             else:
+                # None = not specified and shall be static.
                 dynamic_sizes.append(DimDynamic.STATIC)
                 constraint_sizes.append(None)
             dynamic_strides.append(DimDynamic.INFER_STRIDE)

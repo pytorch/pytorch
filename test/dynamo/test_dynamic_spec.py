@@ -98,13 +98,11 @@ class TestShapeVarConstruction(TestCase):
 
     def test_repr(self):
         s = ShapeVar("batch", max=64, optimization_hint=32)
-        self.assertEqual(
-            repr(s), "ShapeVar(name='batch', min=0, max=64, optimization_hint=32)"
-        )
+        self.assertEqual(repr(s), "ShapeVar(batch, min=0, max=64, hint=32)")
 
     def test_repr_minimal(self):
         s = ShapeVar("x")
-        self.assertEqual(repr(s), "ShapeVar(name='x', min=0)")
+        self.assertEqual(repr(s), "ShapeVar(x, min=0)")
 
     def test_implicit_min_is_zero(self):
         s = ShapeVar("x")
@@ -150,13 +148,11 @@ class TestIntVarConstruction(TestCase):
 
     def test_repr(self):
         s = IntVar("offset", min=-100, max=100, optimization_hint=0)
-        self.assertEqual(
-            repr(s), "IntVar(name='offset', min=-100, max=100, optimization_hint=0)"
-        )
+        self.assertEqual(repr(s), "IntVar(offset, min=-100, max=100, hint=0)")
 
     def test_repr_minimal(self):
         s = IntVar("x")
-        self.assertEqual(repr(s), "IntVar(name='x')")
+        self.assertEqual(repr(s), "IntVar(x)")
 
 
 class TestTensorSpecConstruction(TestCase):
@@ -196,11 +192,10 @@ class TestTensorSpecConstruction(TestCase):
         self.assertEqual(
             repr(ts),
             """\
-TensorSpec(
-  0: ShapeVar(name='batch', min=0)
+Tensor:
+  0: ShapeVar(batch, min=0)
   1: None
-  2: 10
-)""",
+  2: 10""",
         )
 
 
@@ -220,16 +215,12 @@ class TestParamsSpecConstruction(TestCase):
         self.assertEqual(
             repr(ss),
             """\
-ShapesSpec(
+shapes_spec:
   params:
-    ParamsSpec(
-      x:
-        TensorSpec(
-          0: ShapeVar(name='batch', min=0)
-          1: None
-        )
-    )
-)""",
+    x:
+      Tensor:
+        0: ShapeVar(batch, min=0)
+        1: None""",
         )
 
 
