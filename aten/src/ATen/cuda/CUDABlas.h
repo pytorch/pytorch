@@ -167,27 +167,28 @@ void scaled_gemm(
 void grouped_gemm(
       char transa,
       char transb,
-      const int32_t* mArrayDev,
+      const void* mArrayDev,
       int64_t avgM,
-      const int32_t* nArrayDev,
+      const void* nArrayDev,
       int64_t avgN,
-      const int32_t* kArrayDev,
+      const void* kArrayDev,
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
       ScalarType input_dtype,
       const int64_t* APtrArrayDev,
-      const int32_t* ldaArrayDev,
+      const void* ldaArrayDev,
       const int64_t* BPtrArrayDev,
-      const int32_t* ldbArrayDev,
+      const void* ldbArrayDev,
       const int64_t* betaArrayDev,
       const float* betaScalar,
       ScalarType result_dtype,
       const int64_t* CPtrArrayDev,
-      const int32_t* ldcArrayDev,
+      const void* ldcArrayDev,
       int64_t* DPtrArrayDev,
-      const int32_t* lddArrayDev,
-      int batchCount);
+      const void* lddArrayDev,
+      int batchCount,
+      bool use_int64_dims);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 

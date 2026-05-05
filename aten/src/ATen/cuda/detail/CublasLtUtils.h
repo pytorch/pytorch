@@ -89,10 +89,11 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
   CuBlasLtGroupedMatrixLayout(
       cudaDataType_t type,
       int group_count,
-      const int32_t* rows_array,
-      const int32_t* cols_array,
-      const int32_t* ld_array,
-      bool t = false) {
+      const void* rows_array,
+      const void* cols_array,
+      const void* ld_array,
+      bool t = false,
+      bool use_int64 = false) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
         &raw_descriptor,
@@ -102,6 +103,14 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
         t ? rows_array : cols_array,
         ld_array));
     descriptor_.reset(raw_descriptor);
+    if (use_int64) {
+      setAttribute(
+          CUBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH,
+          CUBLASLT_INTEGER_WIDTH_64);
+      setAttribute(
+          CUBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH,
+          CUBLASLT_INTEGER_WIDTH_64);
+    }
   }
 
   template <typename T>
