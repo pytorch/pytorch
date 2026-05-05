@@ -398,6 +398,13 @@ struct CachingHostAllocatorImpl {
     auto context = maybeGatherContext(
         c10::CachingDeviceAllocator::RecordContext::ALL);
 
+    {
+      std::lock_guard<std::mutex> g(block->mutex_);
+      if (!context) {
+        context = block->context_when_allocated_;
+      }
+    }
+
     record_trace(
         TraceEntry::FREE_REQUESTED,
         reinterpret_cast<size_t>(block->ptr_),
@@ -411,7 +418,6 @@ struct CachingHostAllocatorImpl {
     {
       std::lock_guard<std::mutex> g(block->mutex_);
       block->allocated_ = false;
-      block->context_when_allocated_.reset();
       allocated_during_capture = block->was_allocated_during_stream_capture_;
       if (block->streams_.empty()) {
         TORCH_INTERNAL_ASSERT(block->event_count_ == 0);
@@ -780,12 +786,16 @@ struct CachingHostAllocatorImpl {
   }
 
   void maybe_cache_block(B* block, BlockPool& pool) {
-    record_trace(
-        TraceEntry::FREE_COMPLETED,
-        reinterpret_cast<size_t>(block->ptr_),
-        block->size_,
-        nullptr,
-        nullptr);
+    {
+      std::lock_guard<std::mutex> g(block->mutex_);
+      record_trace(
+          TraceEntry::FREE_COMPLETED,
+          reinterpret_cast<size_t>(block->ptr_),
+          block->size_,
+          nullptr,
+          block->context_when_allocated_);
+      block->context_when_allocated_.reset();
+    }
 
     auto size = block->size_;
     auto index = size_index(size);
@@ -1025,11 +1035,10 @@ private:
     if (record_context_ < level) {
       return nullptr;
     }
-    auto fn = context_recorder_.load(std::memory_order_acquire);
-    if (!fn) {
+    if (!context_recorder_) {
       return nullptr;
     }
-    return fn();
+    return context_recorder_();
   }
 
   void record_trace(
@@ -1049,7 +1058,8 @@ private:
         stream_ptr,
         c10::MempoolId_t{0, 0},
         c10::getApproximateTime(),
-        std::move(context));
+        record_context_ >= RecordContext::ALLOC ? std::move(context)
+                                                : nullptr);
     trace_buffer_.insertEntries(te);
   }
 
@@ -1062,11 +1072,11 @@ private:
       bool clearHistory) {
     record_history_ = enabled;
     if (enabled) {
-      context_recorder_.store(context_recorder, std::memory_order_release);
+      context_recorder_ = context_recorder;
       record_context_ = when;
       trace_buffer_.setMaxEntries(max_entries);
     } else {
-      context_recorder_.store(nullptr, std::memory_order_release);
+      context_recorder_ = nullptr;
       record_context_ = RecordContext::NEVER;
     }
     if (clearHistory) {
@@ -1164,9 +1174,12 @@ private:
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{false};
 
-  // Memory profiling state
+  // Memory profiling state.
+  // Like CUDA's DeviceCachingAllocator, these are protected by the
+  // assumption that recordHistory() is called from Python (under the GIL)
+  // and not concurrently with allocate()/free().
   bool record_history_{false};
-  std::atomic<CreateContextFn> context_recorder_{nullptr};
+  CreateContextFn context_recorder_{nullptr};
   RecordContext record_context_{RecordContext::NEVER};
   c10::RingBuffer<TraceEntry> trace_buffer_;
 

@@ -228,9 +228,11 @@ void _record_memory_history(
       clearHistory,
       skip_actions);
 
-  if (record_host) {
+  // When disabling, always turn off host recording if it was on.
+  // When enabling, only turn on host recording if requested.
+  if (record_host || !enabled) {
     auto* host_alloc = at::getHostAllocator(at::kCUDA);
-    if (host_alloc) {
+    if (host_alloc && (record_host || host_alloc->is_history_enabled())) {
       host_alloc->record_history(
           enabled, recorder, trace_alloc_max_entries, when, clearHistory);
     }
@@ -298,9 +300,11 @@ void _record_memory_history(
       clearHistory,
       skip_actions);
 
-  if (record_host) {
+  // When disabling, always turn off host recording if it was on.
+  // When enabling, only turn on host recording if requested.
+  if (record_host || !enabled.has_value()) {
     auto* host_alloc = at::getHostAllocator(at::kCUDA);
-    if (host_alloc) {
+    if (host_alloc && (record_host || host_alloc->is_history_enabled())) {
       host_alloc->record_history(
           enabled.has_value(), recorder, max_entries, when, clearHistory);
     }
@@ -442,26 +446,30 @@ std::string _memory_snapshot_pickled() {
     TORCH_CHECK(false, "unreachable");
   };
 
+  auto traceEntryToDict = [&](const TraceEntry& te) {
+    auto trace_entry = new_dict();
+    trace_entry.insert(action_s, action_to_str(te.action_));
+    trace_entry.insert(
+        TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
+        static_cast<int64_t>(te.addr_));
+    trace_entry.insert(size_s, (int64_t)te.size_);
+    trace_entry.insert(stream_s, int64_t(te.stream_));
+    trace_entry.insert(compile_contexts_s, te.compile_context_);
+    trace_entry.insert(user_metadata_s, te.user_metadata_);
+    if (te.context_) {
+      auto sc = getCapturedTracebackFromContext(te.context_);
+      frame_tracebacks.push_back(sc);
+      frame_dict.push_back(trace_entry);
+    }
+    trace_entry.insert(time_us_s, te.time_.t_);
+    trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
+    return trace_entry;
+  };
+
   for (const auto& traceInfo : snapshot.device_traces) {
     auto trace = new_list();
     for (const auto& te : traceInfo) {
-      auto trace_entry = new_dict();
-      trace_entry.insert(action_s, action_to_str(te.action_));
-      trace_entry.insert(
-          TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
-          static_cast<int64_t>(te.addr_));
-      trace_entry.insert(size_s, (int64_t)te.size_);
-      trace_entry.insert(stream_s, int64_t(te.stream_));
-      trace_entry.insert(compile_contexts_s, te.compile_context_);
-      trace_entry.insert(user_metadata_s, te.user_metadata_);
-      if (te.context_) {
-        auto sc = getCapturedTracebackFromContext(te.context_);
-        frame_tracebacks.push_back(sc);
-        frame_dict.push_back(trace_entry);
-      }
-      trace_entry.insert(time_us_s, te.time_.t_);
-      trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
-      trace.push_back(trace_entry);
+      trace.push_back(traceEntryToDict(te));
     }
     traces.push_back(trace);
   }
@@ -551,23 +559,7 @@ std::string _memory_snapshot_pickled() {
 
   auto host_traces = new_list();
   for (const auto& te : snapshot.host_traces) {
-    auto trace_entry = new_dict();
-    trace_entry.insert(action_s, action_to_str(te.action_));
-    trace_entry.insert(
-        TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
-        static_cast<int64_t>(te.addr_));
-    trace_entry.insert(size_s, (int64_t)te.size_);
-    trace_entry.insert(stream_s, int64_t(te.stream_));
-    trace_entry.insert(compile_contexts_s, te.compile_context_);
-    trace_entry.insert(user_metadata_s, te.user_metadata_);
-    if (te.context_) {
-      auto sc = getCapturedTracebackFromContext(te.context_);
-      frame_tracebacks.push_back(sc);
-      frame_dict.push_back(trace_entry);
-    }
-    trace_entry.insert(time_us_s, te.time_.t_);
-    trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
-    host_traces.push_back(trace_entry);
+    host_traces.push_back(traceEntryToDict(te));
   }
 
   auto result = new_dict();

@@ -5098,6 +5098,74 @@ class TestCudaAllocator(TestCase):
                 finally:
                     torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all", context="alloc", stacks="python",
+                record_host=True, clear_history=True,
+            )
+
+            def host_alloc():
+                return torch.empty(311, 411, pin_memory=True)
+
+            x = host_alloc()
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Find our block by size in host_segments
+            found_it = False
+            for seg in ss["host_segments"]:
+                self.assertEqual(seg["device"], -1)
+                self.assertEqual(len(seg["blocks"]), 1)
+                b = seg["blocks"][0]
+                if b["state"] == "active_allocated":
+                    self.assertTrue("test_cuda" in b["frames"][0]["filename"])
+                    found_it = True
+            self.assertTrue(found_it)
+
+            # Verify alloc stack trace contains the named function
+            text = json.dumps(ss)
+            self.assertIn("host_alloc", text)
+
+            # Verify trace actions: segment_alloc then alloc
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("segment_alloc", actions)
+            self.assertIn("alloc", actions)
+
+            # Free and verify free traces
+            del x
+            ss = torch.cuda.memory._snapshot()
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("free_requested", actions)
+            self.assertIn("free_completed", actions)
+
+            # Empty cache and verify segment_free is the last action
+            torch._C._host_emptyCache()
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(ss["host_traces"][-1]["action"], "segment_free")
+
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_disabled(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history("all")
+            x = torch.empty(1024, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(len(ss["host_segments"]), 0)
+            self.assertEqual(len(ss["host_traces"]), 0)
+            del x
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
     @serialTest()
     def test_max_split_expandable(self):
         try:
