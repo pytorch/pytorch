@@ -38,11 +38,13 @@ Work::Work(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const std::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors,
+    bool allowProfilingNameOverride)
     : rank_(rank), opType_(opType) {
   // comm_profiling_name is thread-local; take a local copy so the
   // RecordFunction owns the string (the TLS can be mutated after we return).
-  const bool use_tls_name =
+  // Backends that profile the communication launch separately can opt out.
+  const bool use_tls_name = allowProfilingNameOverride &&
       comm_profiling_name != nullptr && !comm_profiling_name->empty();
   if (use_tls_name || profilingTitle != nullptr) {
     auto recordingFunction =
