@@ -16,15 +16,13 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/"):
-    return [gencode_pattern.format(path_prefix + name) for name in [
-        "autograd/generated/Functions.cpp",
+def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/", only_type_vars=False):
+    type_vars = [
         "autograd/generated/VariableType_0.cpp",
         "autograd/generated/VariableType_1.cpp",
         "autograd/generated/VariableType_2.cpp",
         "autograd/generated/VariableType_3.cpp",
         "autograd/generated/VariableType_4.cpp",
-        "autograd/generated/ViewFuncs.cpp",
         "autograd/generated/TraceType_0.cpp",
         "autograd/generated/TraceType_1.cpp",
         "autograd/generated/TraceType_2.cpp",
@@ -32,7 +30,11 @@ def libtorch_generated_sources(gencode_pattern, path_prefix="torch/csrc/"):
         "autograd/generated/TraceType_4.cpp",
         "autograd/generated/ADInplaceOrViewType_0.cpp",
         "autograd/generated/ADInplaceOrViewType_1.cpp",
-    ]]
+    ] + ([] if only_type_vars else [
+        "autograd/generated/Functions.cpp",
+        "autograd/generated/ViewFuncs.cpp",
+    ])
+    return [gencode_pattern.format(path_prefix + name) for name in type_vars]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
