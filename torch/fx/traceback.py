@@ -384,7 +384,16 @@ def annotate_fn(
     """
     from functools import wraps
 
+    from torch.fx.proxy import _register_stack_trace_anchor
+
     def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        # Register the wrapped function as a stack-trace anchor so make_fx
+        # preserves its frame in node.meta["stack_trace"]. The user
+        # explicitly opted into annotating this function, so its frame is a
+        # meaningful attribution point even though it isn't an
+        # ``nn.Module.forward``.
+        _register_stack_trace_anchor(func)
+
         @wraps(func)
         # NB: Do not annotate with _P.args/_P.kwargs here. Dynamo guards on
         # the identity of ParamSpec annotation objects, causing guard failures.
