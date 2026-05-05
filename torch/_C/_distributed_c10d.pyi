@@ -382,6 +382,7 @@ class ProcessGroup:
         opts: Backend.Options | None = None,
         group_name: GroupName | None = None,
         group_desc: str | None = None,
+        device_types: list[torch.device] | None = None,
     ) -> ProcessGroup | None: ...
     def merge_remote_group(
         self,
