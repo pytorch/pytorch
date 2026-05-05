@@ -1710,7 +1710,7 @@ def create_block_mask(
     _compile=False,
     separate_full_blocks: bool = True,
     compute_dq_write_order: bool = False,
-    dq_write_order_spt: bool = False,
+    dq_write_order_spt: bool = True,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
 

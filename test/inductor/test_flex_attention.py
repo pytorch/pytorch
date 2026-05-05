@@ -6929,6 +6929,25 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertEqual(dq_write_order_full[0], dq_write_order_full[1])
 
     @supported_platform
+    def test_create_block_mask_defaults_to_spt_dq_write_order(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=256,
+            KV_LEN=256,
+            BLOCK_SIZE=128,
+            device=device,
+            compute_dq_write_order=True,
+        )
+
+        self.assertIsNotNone(block_mask.dq_write_order)
+        self.assertEqual(block_mask.dq_write_order_spt, True)
+
+    @supported_platform
     @skip_on_cpu
     def test_broadcasted_head_block_mask(self, device):
         torch.manual_seed(42)
