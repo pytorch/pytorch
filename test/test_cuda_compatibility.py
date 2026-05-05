@@ -153,10 +153,9 @@ class TestCheckCapability(TestCase):
             torch.cuda._check_capability()
             self.assertEqual(len(w), 1)
             msg = str(w[0].message)
-            self.assertNotIn(
-                "install a PyTorch release that supports one of these CUDA versions",
-                msg,
-            )
+            self.assertNotIn("pip install torch==", msg)
+            self.assertIn("No published PyTorch CUDA builds for release", msg)
+            self.assertIn("https://pytorch.org/get-started/locally/", msg)
 
 
 if __name__ == "__main__":
