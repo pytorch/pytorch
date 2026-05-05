@@ -306,7 +306,10 @@ def wrap_compiler_debug(
 
         # TODO: why do we need to deepcopy the original graph?
         orig_graph = copy.deepcopy(gm.graph)
-        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after not in ("dynamo", "aot", None):
+            raise AssertionError(
+                f"repro_after must be 'dynamo', 'aot', or None, got {config.repro_after!r}"
+            )
 
         try:
             # Call the compiler_fn - which is either aot_autograd or inductor
@@ -339,9 +342,11 @@ def wrap_compiler_debug(
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
             # we should never hit this branch
-            assert not _kwargs
+            if _kwargs:
+                raise AssertionError(f"Unexpected kwargs: {_kwargs}")
             if config.repro_after != "aot":
-                assert not isinstance(inner_compiled_fn, str)
+                if isinstance(inner_compiled_fn, str):
+                    raise AssertionError("inner_compiled_fn should not be a string")
                 return inner_compiled_fn(real_inputs)
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
@@ -980,8 +985,12 @@ def inductor_fails(
 
     try:
         result = fx_g(*args)
-        assert isinstance(result, (tuple, list))
-        assert not any(isinstance(x, (tuple, list)) for x in result)
+        if not isinstance(result, (tuple, list)):
+            raise AssertionError(
+                f"Expected result to be a tuple or list, got {type(result)}"
+            )
+        if any(isinstance(x, (tuple, list)) for x in result):
+            raise AssertionError("Result should not contain nested tuples or lists")
     except Exception:
         return False
 
@@ -990,7 +999,8 @@ def inductor_fails(
     try:
         compile_args = _get_compile_args(fx_g, args)
         compile_mod = compile_fx_inner(fx_g, compile_args)
-        assert not isinstance(compile_mod, str)
+        if isinstance(compile_mod, str):
+            raise AssertionError("compile_fx_inner should not return a string")
         compile_mod(args)
         sync()
     except Exception as e:
@@ -1037,7 +1047,8 @@ def repro_common(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters())
+    if any(mod.named_parameters()):
+        raise AssertionError("Repro graph should not have any parameters")
     for n, b in mod.named_buffers():
         if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
             log.warning(
@@ -1203,9 +1214,11 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         intermediate_hook(save_hook),
         tqdm(desc="Saving inductor intermediates", total=total) as pbar,
     ):
-        assert not isinstance(compiled, str)
+        if isinstance(compiled, str):
+            raise AssertionError("compile_fx_inner should not return a string")
         compiled(new_args)  # type: ignore[arg-type]
-        assert not new_args
+        if new_args:
+            raise AssertionError("new_args should be empty after compiled() call")
 
     def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> str | None:
         diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
@@ -1231,7 +1244,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
             compiled(new_args)  # type: ignore[arg-type]
-            assert not new_args
+            if new_args:
+                raise AssertionError("new_args should be empty after compiled() call")
 
     class WriterInterp(fx.Interpreter):
         def __init__(self, mod: torch.nn.Module, subdir: str) -> None:
@@ -1252,7 +1266,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
-        assert not new_args
+        if new_args:
+            raise AssertionError("new_args should be empty after boxed_run() call")
 
     class ExactReaderInterp(fx.Interpreter):
         def run_node(self, n: torch.fx.Node) -> Any:
@@ -1273,7 +1288,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
-            assert not new_args
+            if new_args:
+                raise AssertionError("new_args should be empty after boxed_run() call")
 
     # Now that we've saved everything, interp through the eager graph
     # and do comparisons
@@ -1299,13 +1315,15 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
                     equal_nan=True,
                     log_error=log_error,
                 ):
-                    assert logged
+                    if not logged:
+                        raise AssertionError("Divergence detected but not logged")
                 pbar.update(1)
             return r
 
     with tqdm(desc="Checking divergence", total=total) as pbar:
         ReaderInterp(mod).boxed_run(args)
-    assert not args
+    if args:
+        raise AssertionError("args should be empty after boxed_run() call")
 
 
 def repro_get_args(
@@ -1324,7 +1342,8 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     compile_args = _get_compile_args(mod, args)
     compiled = compile_fx_inner(mod, compile_args)
-    assert not isinstance(compiled, str)
+    if isinstance(compiled, str):
+        raise AssertionError("compile_fx_inner should not return a string")
 
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
