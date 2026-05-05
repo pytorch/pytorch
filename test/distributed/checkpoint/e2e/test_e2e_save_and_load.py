@@ -155,7 +155,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"{self.device_type}:{curr_backend}"
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)

@@ -924,7 +924,7 @@ class TestReplicationStager(DTensorTestBase):
 
     @property
     def backend(self) -> str:
-        return f"{device_type}:{backend}"
+        return f"cpu:gloo,{device_type}:{backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
