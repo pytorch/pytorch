@@ -99,6 +99,41 @@ class TestCase(InductorTestCase):
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
     @requires_gpu()
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.codegen_upcast_to_fp32", True)
+    def test_no_redundant_to_float32(self, input_dtype):
+        """When codegen_upcast_to_fp32 is enabled, to_dtype should not emit
+        a redundant .to(tl.float32) on a value that is already float32."""
+
+        def func(x, y):
+            a = x * y
+            b = a.float()
+            return b + 1.0
+
+        inps = (
+            torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),
+            torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),
+        )
+        func_opt = torch.compile(func, backend="inductor")
+        code = run_and_get_triton_code(func_opt, *inps)
+        # Count .to(tl.float32) occurrences that are NOT on tl.load or tl.sum lines
+        lines = code.split("\n")
+        print("\n".join(lines))
+        redundant = [
+            l.strip()
+            for l in lines
+            if ".to(tl.float32)" in l
+            and "tl.load" not in l
+            and "tl.sum" not in l
+            and l.strip().startswith("tmp")
+        ]
+        self.assertEqual(
+            redundant,
+            [],
+            f"Redundant .to(tl.float32) found: {redundant}",
+        )
+
+    @requires_gpu()
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize(
         "reduction_func",

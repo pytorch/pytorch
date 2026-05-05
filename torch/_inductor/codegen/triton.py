@@ -1344,6 +1344,13 @@ class TritonOverrides(OpOverrides):
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
 
+        if (
+            isinstance(x, CSEVariable)
+            and x.dtype is not None
+            and triton_type(x.dtype) == out_dtype
+        ):
+            return x
+
         return f"{x}.to({out_dtype})"
 
     @staticmethod
