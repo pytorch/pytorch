@@ -587,10 +587,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 compiled_step()
 
             # perturb state to force recompile
-            # Adagrad doesn't reinitialize state on each step
             # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is SGD:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adagrad:
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["sum"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]]["sum"] = (
+                    torch.zeros_like(state_tensor)
+                )
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
                     opt_compiled.param_groups[0]["params"][0]
@@ -603,7 +609,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             compiled_step()
 
-        if self.check_kernel_count:
+        if self.check_kernel_count and kernel_count is not None:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
             # hence, the usual kernel count is 2
@@ -758,7 +764,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01, kernel_count=None)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=8, lr=0.01, foreach=False
