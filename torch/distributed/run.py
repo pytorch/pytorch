@@ -622,7 +622,8 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training.",
+        help="Rank of the node for multi-node distributed training. It is only used for static "
+        "rendezvous (i.e., when ``--rdzv-backend=static``).",
     )
     parser.add_argument(
         "--master-addr",
@@ -854,6 +855,17 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
+        )
+
+    if (
+        hasattr(args, "node_rank")
+        and args.node_rank != 0
+        and args.rdzv_backend != "static"
+    ):
+        logger.warning(
+            "node_rank is only used for static rdzv_backend. It will be ignored "
+            "for rdzv_backend=%s.",
+            args.rdzv_backend,
         )
 
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
