@@ -1110,21 +1110,39 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     op(dst.data, dstOffset, dstNumel, &val);
   };
 
-  if constexpr (VecSize > 1 && IndexIsMajor) {
+  if constexpr (VecSize > 1) {
+    // Warp-contiguous path: reuse the index lookup across VecSize warp-wide
+    // rounds while keeping each round contiguous across lanes.
     constexpr int64_t warp_size = C10_WARP_SIZE;
     constexpr int64_t elements_per_warp = warp_size * VecSize;
     const IndexType numSlices = at::ceil_div(totalSize, innerSize);
-    const IndexType tilesPerSlice = at::ceil_div(innerSize, (IndexType)elements_per_warp);
-    const IndexType totalTiles = numSlices * tilesPerSlice;
+    const IndexType fullTilesPerSlice = innerSize / elements_per_warp;
+    const IndexType fullTiles = numSlices * fullTilesPerSlice;
+    const IndexType tailStart = fullTilesPerSlice * elements_per_warp;
     const IndexType warpsPerBlock = at::ceil_div((IndexType)blockDim.x, (IndexType)warp_size);
     const IndexType warpInBlock = threadIdx.x / warp_size;
     const IndexType lane = threadIdx.x % warp_size;
 
+    auto processWarpElement = [&](IndexType elementInSlice, IndexType srcIndex, IndexType dstIndex) {
+      IndexType dstOffset =
+          cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+      dstOffset += dstIndex * dst.strides[dstAddDim];
+
+      IndexType srcOffset =
+          cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
+      srcOffset += srcIndex * src.strides[srcAddDim];
+
+      T val = src.data[srcOffset] * alpha;
+      op(dst.data, dstOffset, dstNumel, &val);
+    };
+
+    // Full tiles have C10_WARP_SIZE * VecSize valid elements and need no
+    // per-element bounds checks.
     for (IndexType tileIdx = blockIdx.x * warpsPerBlock + warpInBlock;
-         tileIdx < totalTiles;
+         tileIdx < fullTiles;
          tileIdx += gridDim.x * warpsPerBlock) {
-      const IndexType srcIndex = tileIdx / tilesPerSlice;
-      const IndexType tileInSlice = tileIdx - srcIndex * tilesPerSlice;
+      const IndexType srcIndex = tileIdx / fullTilesPerSlice;
+      const IndexType tileInSlice = tileIdx - srcIndex * fullTilesPerSlice;
       const IndexType elementBase = tileInSlice * elements_per_warp + lane;
       const IndexType dstIndex =
           indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
@@ -1132,18 +1150,27 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 
       #pragma unroll
       for (int v = 0; v < VecSize; ++v) {
-        const IndexType elementInSlice = elementBase + v * warp_size;
-        if (elementInSlice < innerSize) {
-          IndexType dstOffset =
-              cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-          dstOffset += dstIndex * dst.strides[dstAddDim];
+        processWarpElement(elementBase + v * warp_size, srcIndex, dstIndex);
+      }
+    }
 
-          IndexType srcOffset =
-              cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
-          srcOffset += srcIndex * src.strides[srcAddDim];
+    // The final tile in each slice is partial when innerSize is not a multiple
+    // of C10_WARP_SIZE * VecSize.
+    if (tailStart < innerSize) {
+      for (IndexType srcIndex = blockIdx.x * warpsPerBlock + warpInBlock;
+           srcIndex < numSlices;
+           srcIndex += gridDim.x * warpsPerBlock) {
+        const IndexType elementBase = tailStart + lane;
+        const IndexType dstIndex =
+            indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+        CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
 
-          T val = src.data[srcOffset] * alpha;
-          op(dst.data, dstOffset, dstNumel, &val);
+        #pragma unroll
+        for (int v = 0; v < VecSize; ++v) {
+          const IndexType elementInSlice = elementBase + v * warp_size;
+          if (elementInSlice < innerSize) {
+            processWarpElement(elementInSlice, srcIndex, dstIndex);
+          }
         }
       }
     }
