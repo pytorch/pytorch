@@ -1697,10 +1697,10 @@ class TestForeachGroupsUnit(InductorTestCase):
 
         # With and without groups should produce identical results
         result_with = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, groups
         )
         result_without = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
 
