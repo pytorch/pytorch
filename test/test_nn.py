@@ -1885,6 +1885,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = nn.Linear(4, 5, dtype=torch.float16)
         m = torch.nn.utils.weight_norm(m)
 
+    def test_weight_norm_init_meta(self):
+        """
+        Ensures nn.utils.weight_norm correctly transforms meta-tensors.
+        """
+        with torch.device("meta"):
+            m = nn.Linear(10, 20)
+            # Triggers weight_norm initialization on Meta
+            m = nn.utils.weight_norm(m, name="weight", dim=1)
+
+        self.assertTrue(m.weight.is_meta)
+        self.assertEqual(m.weight.shape, (20, 10))
+
+        self.assertTrue(m.weight_v.is_meta)
+        self.assertTrue(m.weight_g.is_meta)
+
+        self.assertEqual(m.weight_v.shape, (20, 10))
+
+        # dim=1 keeps one norm per input-feature column, resulting in a
+        # (1, 10) broadcastable scale tensor for a Linear(10, 20) weight
+        self.assertEqual(m.weight_g.shape, (1, 10))
+
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
