@@ -1144,7 +1144,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   // get the optimal work size and allocate workspace tensor
   int lwork;
   at::cuda::solver::orgqr_buffersize<scalar_t>(
-    at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
+    at::cuda::getCurrentCUDASolverDnHandle(true), m, n, k, self_data, lda, tau_data, &lwork);
 
   auto info = at::zeros({1}, self.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
@@ -1152,7 +1152,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle(true);
 
     // allocate workspace storage
     auto& allocator = *at::cuda::getCUDADeviceAllocator();
