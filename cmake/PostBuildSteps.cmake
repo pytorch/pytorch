@@ -1,9 +1,6 @@
 # Post-build steps previously handled by setup.py's build_ext.run().
 # These run as CMake install(SCRIPT) or install(CODE) commands.
 
-if(NOT TORCH_INSTALL_LIB_DIR)
-  set(TORCH_INSTALL_LIB_DIR lib)
-endif()
 if(NOT TORCH_INSTALL_INCLUDE_DIR)
   set(TORCH_INSTALL_INCLUDE_DIR include)
 endif()
@@ -22,6 +19,7 @@ install(CODE "
     COMMAND \"${_python_exe}\"
       \"${_project_src}/tools/wrap_headers.py\"
       \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_INCLUDE_DIR}\"
+    COMMAND_ERROR_IS_FATAL ANY
   )
 ")
 
