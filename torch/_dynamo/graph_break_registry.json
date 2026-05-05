@@ -3883,6 +3883,16 @@
       ]
     }
   ],
+  "GB4372": [
+    {
+      "Gb_type": "autograd_function_kwonly_args",
+      "Context": "forward() has keyword-only args: {set(kwargs) - set(self.fn_cls.forward.__code__.co_varnames)}",
+      "Explanation": "autograd.Function.apply does not support keyword-only arguments in forward().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0290": [
     {
       "Gb_type": "attempted to trace numpy.* function as a method",
@@ -4364,6 +4374,16 @@
       "Context": "accumulate_grad_ with sparse gradient",
       "Explanation": "Sparse gradients are not supported in compiled autograd",
       "Hints": []
+    }
+  ],
+  "GB1724": [
+    {
+      "Gb_type": "autograd.grad with non-constant dict key",
+      "Context": "non-constant key in {arg_name}",
+      "Explanation": "autograd.grad/backward dict inputs must have constant keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0323": [
@@ -4868,6 +4888,16 @@
       "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
       "Hints": [
         "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB9137": [
+    {
+      "Gb_type": "non-constant typing subscript",
+      "Context": "TypingVariable[{key}]",
+      "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
