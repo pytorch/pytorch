@@ -37,21 +37,6 @@
   - Lint
   - pull
 
-- name: OSS CI / Auto Reviewer Routing
-  # auto-request-reviewers operates under pull_request_target with write
-  # permissions; the compute/request job split is what keeps it safe.
-  # Restrict to a small set of security-aware approvers.
-  patterns:
-  - .github/workflows/auto-request-reviewers.yml
-  - .github/scripts/match_reviewers.py
-  approved_by:
-  - albanD
-  - pytorch/pytorch-dev-infra
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: OSS CI
   patterns:
   - .github/**
