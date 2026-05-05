@@ -2571,6 +2571,9 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+    # enable origami on triton templates
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+    origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)

@@ -21,6 +21,7 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
+    _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
@@ -235,13 +236,19 @@ class InductorChoices:
         op_name: str,
     ) -> bool:
         """
-        Check if we need to fix the layout instead of keeping it flexible
+        Check if we need to fix the layout instead of keeping it flexible.
+
+        Some backends require fixed tensor layouts due to hardware-specific optimizations.
+        Origami performs device-aware GEMM kernel selection with exact dependencies on
+        tensor strides and memory layout. Flexible layouts (which transpose/reorder tensors
+        at runtime) break the pre-computed grid/workgroup mappings, causing correctness issues.
 
         Args:
-            ktc: KernelTemplateChoice object
+            adjusted_choices: List of KernelTemplateChoice objects
+            op_name: Name of the operation (mm, addmm, bmm, etc)
 
         Returns:
-            True if we need to fix the layout, False otherwise
+            True if we must use fixed layouts, False if flexible layouts are safe
         """
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
@@ -253,6 +260,9 @@ class InductorChoices:
             ]:
                 return True
 
+        if _origami_enabled():
+            # Origami requires fixed layouts: device-specific grid/workgroup mappings depend on exact strides
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
