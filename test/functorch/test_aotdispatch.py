@@ -7784,6 +7784,74 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_get_rng_state_", source)
 
+    # --- Backward epilogue codegen tests ---
+
+    def test_backward_epilogue_codegen_emitted(self):
+        with self._capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _backward_epilogue(", source)
+        self.assertIn("tuple(out)", source)
+
+    def test_backward_epilogue_no_codegen_for_inference(self):
+        with self._capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_backward_epilogue_elides_rng_when_off(self):
+        with self._capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_set_offset_", source)
+
+    def test_backward_epilogue_elides_tokens_when_zero(self):
+        with self._capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("[:-", source)
+
+    def test_backward_epilogue_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y + 1
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        out = f(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,

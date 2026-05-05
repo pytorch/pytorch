@@ -2855,6 +2855,55 @@ def _codegen_backward_prologue(
     )
 
 
+def _codegen_backward_epilogue(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: SubclassMeta | None,
+    codegen_wrap_fn: Callable[..., Any] | None,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    num_bw_tokens = fw_metadata.num_backward_tokens
+    is_rng = fw_metadata.is_rng_op_functionalized
+    has_subclass = maybe_subclass_meta is not None
+
+    L: list[str] = ["def _backward_epilogue(out):"]
+    G: dict[str, object] = {}
+
+    if num_bw_tokens > 0:
+        L.append(f"    out = out[:-{num_bw_tokens}]")
+
+    if is_rng:
+        G["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        L.append("    _oi = len(out) - 1")
+        L.append("    _set_offset_(out[_oi])")
+        L.append("    out = out[:_oi] + out[_oi + 1:]")
+
+    L.append("    out = tuple(out)")
+
+    if has_subclass and codegen_wrap_fn is not None:
+        G["_wrap_"] = codegen_wrap_fn
+        L.append("    return _wrap_(out)")
+    elif has_subclass:
+        G["_wrap_subclasses_"] = wrap_tensor_subclasses
+        if (
+            maybe_subclass_meta.grad_input_metas is None
+        ):  # pyrefly: ignore [missing-attribute]
+            raise AssertionError("grad_input_metas must not be None")
+        G["_grad_input_metas_"] = (
+            maybe_subclass_meta.grad_input_metas
+        )  # pyrefly: ignore [missing-attribute]
+        L.append("    return _wrap_subclasses_(out,")
+        L.append("        subclass_metas=_grad_input_metas_,")
+        L.append("        included_subclass_symints=True, is_runtime=True)")
+    else:
+        L.append("    return out")
+
+    source = "\n".join(L)
+    return _compile_and_exec_source(
+        source, G, "_backward_epilogue", "backward_epilogue"
+    )
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
@@ -2902,6 +2951,12 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_unwrap_fn,
+        )
+
+        _codegen_bw_epilogue = _codegen_backward_epilogue(
+            fw_metadata,
+            maybe_subclass_meta,
+            _codegen_bw_wrap_fn,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3016,6 +3071,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
             _bw_prologue_fn = _codegen_bw_prologue
+            _bw_epilogue_fn = _codegen_bw_epilogue
             boxed_grads_call = True
 
             @staticmethod
@@ -3083,12 +3139,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
                 def impl_fn(double_ctx: Any = None) -> Any:
                     out = CompiledFunction._backward_impl(ctx, all_args)
-                    return _backward_epilogue_functional(
-                        CompiledFunction.metadata,
-                        CompiledFunction.maybe_subclass_metadata,
-                        out,
-                        codegen_wrap_fn=CompiledFunction._bw_epilogue_wrap_fn,
-                    )
+                    return CompiledFunction._bw_epilogue_fn(out)
 
                 if (
                     torch._C._is_key_in_tls("context")
