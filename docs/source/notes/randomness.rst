@@ -168,10 +168,10 @@ characteristics, summarized in the table below:
        ``torch.use_deterministic_algorithms(True, warn_only=False)`` forces
        ``num_splits_key = 1``, making the backward pass deterministic.
    * - ``SDPBackend.CUDNN_ATTENTION``
+     - Deterministic
      - Non-deterministic
-     - Non-deterministic
-     - No deterministic implementation is available. This backend is
-       **disabled** when
+     - The backward pass is non-deterministic and no deterministic
+       implementation is available. This backend is **disabled** when
        ``torch.use_deterministic_algorithms(True, warn_only=False)`` is set,
        and the dispatcher falls back to another backend.
 
