@@ -2694,7 +2694,7 @@ class CommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
@@ -2783,7 +2783,7 @@ class CommonTemplate:
         self.common(fn, (a, q_group, in_features, out_features))
 
     @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     @xfailIf(
         IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED
     )  # see https://github.com/pytorch/pytorch/issues/170787
