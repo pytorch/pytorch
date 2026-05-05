@@ -493,8 +493,8 @@ class ConstantVariable(VariableTracker):
         self,
         tx: Any,
     ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5611 (long_long)
-        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1099 (float_float)
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
         # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
         # bool inherits nb_positive from int via slot inheritance.
         return ConstantVariable.create(+self.value)
