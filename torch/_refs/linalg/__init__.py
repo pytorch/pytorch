@@ -168,6 +168,8 @@ def vector_norm(
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
         if dim == []:
             dim = None
+        elif dim is not None:
+            dim = utils.canonicalize_dims(x.ndim, dim)
 
         if (dim is None and guard_or_false(x.numel() == 1)) or (
             dim is not None
