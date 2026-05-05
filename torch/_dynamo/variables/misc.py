@@ -851,12 +851,65 @@ class AutogradFunctionVariable(VariableTracker):
     def python_type(self) -> type:
         return type
 
+    def _resolve_kwargs(
+        self,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> list[VariableTracker] | None:
+        """Resolve kwargs to positional args using forward().__code__.
+
+        Uses co_varnames/co_argcount directly to match the C++
+        resolve_kwargs_to_positional in python_function.cpp.
+        Keyword-only args are not resolved; callers should graph break.
+        """
+        from torch.autograd.function import _is_setup_context_defined
+
+        fn = self.fn_cls.forward
+        code = fn.__code__
+        has_ctx = not _is_setup_context_defined(self.fn_cls.setup_context)
+        param_offset = 1 if has_ctx else 0
+        param_names = list(code.co_varnames[param_offset : code.co_argcount])
+
+        for name in kwargs:
+            if name not in param_names:
+                return None
+            if param_names.index(name) < len(args):
+                raise TypeError(f"forward() got multiple values for argument '{name}'")
+
+        max_idx = max(
+            (param_names.index(name) for name in kwargs),
+            default=len(args) - 1,
+        )
+
+        result: list[VariableTracker] = list(args)
+        for i in range(len(args), max_idx + 1):
+            name = param_names[i]
+            if name in kwargs:
+                result.append(kwargs[name])
+            else:
+                raise TypeError(
+                    f"forward() missing required argument: '{name}' (position {i})"
+                )
+        return result
+
     def call_apply(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if kwargs:
+            resolved = self._resolve_kwargs(args, kwargs)
+            if resolved is None:
+                unimplemented(
+                    gb_type="autograd_function_kwonly_args",
+                    context=f"forward() has keyword-only args: {set(kwargs) - set(self.fn_cls.forward.__code__.co_varnames)}",
+                    explanation="autograd.Function.apply does not support keyword-only arguments in forward().",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            args = resolved
+            kwargs = {}
+
         requires_grad = False
 
         def visit(vt: VariableTracker) -> None:
