@@ -811,7 +811,8 @@ def constexpr_next_power_of_2(
     """
     A version triton.next_power_of_two that can be used within a kernel on constants.
     """
-    assert isinstance(n, tl.constexpr)
+    if not isinstance(n, tl.constexpr):
+        raise AssertionError(f"Expected tl.constexpr, got {type(n)}")
     return tl.constexpr(triton.next_power_of_2(n.value))
 
 

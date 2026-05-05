@@ -2006,7 +2006,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        assert isinstance(kernel_inputs, MMKernelInputs)
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
         # Calculate allow_tf32
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
@@ -2044,9 +2045,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Convert config lists to template kwargs.
         This replaces the logic from choices.get_mm_configs and inlines mm_options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
@@ -2158,7 +2158,8 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
@@ -2224,9 +2225,8 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "TMATemplateConfigMixin requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
@@ -2325,9 +2325,8 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         """
         for scaled_mm, we need to unsqueeze scale tensors, and bias
         """
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for scaled MM"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for scaled MM")
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
@@ -2341,7 +2340,11 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             bias = L[aten.unsqueeze](bias, 0)
 
         if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-            assert len(scale_a.get_size()) == len(scale_b.get_size())
+            if len(scale_a.get_size()) != len(scale_b.get_size()):
+                raise AssertionError(
+                    f"scale_a and scale_b must have same ndim, got "
+                    f"{len(scale_a.get_size())} and {len(scale_b.get_size())}"
+                )
             # Need to unsqueeze scale from [] -> [1, 1]
             scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
             scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
@@ -2367,9 +2370,10 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
         # Initial assertion from mm_common.scaled_mm_options
-        assert len(input_nodes) >= 4, (
-            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
-        )
+        if len(input_nodes) < 4:
+            raise AssertionError(
+                f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+            )
 
         # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
         scale_a = input_nodes[2]
@@ -2388,14 +2392,14 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             return False
 
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
-        assert are_compatible_scales(size_a, size_b), (
-            "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
-            f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
-        )
+        if not are_compatible_scales(size_a, size_b):
+            raise AssertionError(
+                "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+                f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+            )
 
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            f"{self.__class__.__name__} requires MMKernelInputs"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
 
         if not self._valid(kernel_inputs):
             return
@@ -2430,9 +2434,8 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for ScaledMMConfigMixin"
-        )
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for ScaledMMConfigMixin")
         _, _, k = kernel_inputs.mnk_symbolic()
         if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
             # Triton crashes however uncommon for real workloads
