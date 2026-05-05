@@ -2255,15 +2255,6 @@ class VariableBuilder:
         if type(value) is int:
             assert isinstance(value, int)
 
-            # allowlist has higher precedence over specialization control.
-            if is_dynamic_source(self.source.name):
-                log.debug("%s marked dynamic via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
-
-            if is_unbacked_source(self.source.name):
-                log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
-
             # Check for user-provided IntSpec from shapes_spec.
             int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
             if isinstance(int_spec, IntSpec):
@@ -2297,6 +2288,15 @@ class VariableBuilder:
                         expr = sym_val.node.expr
                         sym_val.node.shape_env.var_to_hint_override[expr] = hint
                     return result
+
+            # allowlist has higher precedence over specialization control.
+            if is_dynamic_source(self.source.name):
+                log.debug("%s marked dynamic via source whitelist", self.source.name)
+                return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
+
+            if is_unbacked_source(self.source.name):
+                log.debug("%s marked unbacked via source whitelist", self.source.name)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3951,11 +3951,7 @@ def _automatic_dynamic(
     _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
     tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
 
-    if (
-        static_shapes
-        and not is_dynamic_source(name)
-        and _spec_lookup is None
-    ):
+    if static_shapes and not is_dynamic_source(name) and _spec_lookup is None:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),

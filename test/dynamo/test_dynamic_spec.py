@@ -507,7 +507,7 @@ class TestTensorSpecCompile(TestCase):
         fn = torch.compile(
             lambda x: x + 1,
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("x", ts)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
         )
 
         fn(torch.randn(4, 3))
@@ -543,9 +543,7 @@ class TestTensorSpecCompile(TestCase):
             lambda x: x + 1,
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec(
-                    named_args={"x": TensorSpec([IntSpec.backed("batch"), None])}
-                )
+                params=ParamsSpec({"x": TensorSpec([IntSpec.backed("batch"), None])})
             ),
         )
 
@@ -573,7 +571,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x + 1,
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.static()}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.static()})})
             ),
         )
         fn(torch.randn(4, 3))
@@ -593,7 +591,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x.sum(0),
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.backed("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
             ),
         )
         for n in [4, 8, 16, 32, 64]:
@@ -611,7 +609,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x.sum(0),
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.unbacked("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked("batch")})})
             ),
         )
         for n in [4, 8, 16, 32]:
@@ -637,7 +635,7 @@ class TestIntSpecCompile(TestCase):
             backend="eager",
             fullgraph=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.unbacked()}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked()})})
             ),
         )
         with self.assertRaises(GuardOnDataDependentSymNode) as cm:
@@ -657,7 +655,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x.sum(0 if x.size()[0] > 8 else 1),
             backend=cnt,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.backed("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
             ),
         )
         for n in [4, 8, 16, 32, 64]:
@@ -671,7 +669,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x + 1,
             backend=cnt,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.backed("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
             ),
         )
         for n in [0, 1, 2, 4, 8]:
@@ -685,7 +683,7 @@ class TestIntSpecCompile(TestCase):
             lambda x: x + 1 if x.size()[0] == 3 else x - 1,
             backend=cnt,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.backed("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
             ),
         )
         for n in [3, 4, 5, 6]:
@@ -700,7 +698,7 @@ class TestIntSpecCompile(TestCase):
             backend=cnt,
             dynamic=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.static()}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.static()})})
             ),
         )
         fn(torch.randn(4, 3))
@@ -715,7 +713,7 @@ class TestIntSpecCompile(TestCase):
             backend=cnt,
             dynamic=False,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.backed("batch")}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
             ),
         )
         for n in [4, 8, 16, 32, 64]:
@@ -736,7 +734,7 @@ class TestIntSpecMinMax(TestCase):
             backend="eager",
             fullgraph=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.unbacked(min=1)}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked(min=1)})})
             ),
         )
         # Should NOT raise DDE — min=1 proves size(0) > 0
@@ -752,7 +750,7 @@ class TestIntSpecMinMax(TestCase):
             backend="eager",
             fullgraph=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.unbacked(max=10)}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked(max=10)})})
             ),
         )
         # Should NOT raise DDE — max=10 proves size(0) <= 10
@@ -768,7 +766,7 @@ class TestIntSpecMinMax(TestCase):
             backend="eager",
             fullgraph=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg("x", TensorSpec({0: IntSpec.unbacked()}))
+                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked()})})
             ),
         )
         with self.assertRaises(GuardOnDataDependentSymNode):
@@ -789,7 +787,7 @@ class TestIntSpecMinMax(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec(named_args={"x": ts})),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
         )
         result = compiled(torch.randn(16, 3))
         self.assertEqual(result.shape, (3,))
@@ -808,7 +806,7 @@ class TestIntSpecMinMax(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("n", N)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
         )
         result = compiled(torch.randn(4), 42)
         self.assertEqual(result.shape, (4,))
@@ -827,7 +825,7 @@ class TestIntSpecMinMax(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("n", N)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
         )
         result = compiled(torch.randn(4), 5)
         self.assertEqual(result.shape, (4,))
@@ -840,7 +838,7 @@ class TestIntSpecMinMax(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("x", ts)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
         )
         fn(torch.randn(8, 3))
         # The graph's placeholder should have the override in var_to_hint_override
@@ -859,7 +857,7 @@ class TestIntSpecMinMax(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("x", ts)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
         )
         fn(torch.randn(8, 3))
         shape = _tensor_placeholder_shape(backend.graphs[0])
@@ -881,7 +879,7 @@ class TestIntSpecMinMax(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("n", N)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
         )
         compiled(torch.randn(4), 42)
         # Find the scalar int placeholder in the graph
@@ -903,7 +901,7 @@ class TestIntSpecMinMax(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec().arg("n", N)),
+            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
         )
         compiled(torch.randn(4), 42)
         for node in backend.graphs[0].graph.nodes:
@@ -939,9 +937,7 @@ class TestParameterSpecCompile(TestCase):
             fn,
             backend=backend,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec().arg(
-                    "p", TensorSpec([IntSpec.backed("h"), None])
-                )
+                params=ParamsSpec({"p": TensorSpec([IntSpec.backed("h"), None])})
             ),
         )
 

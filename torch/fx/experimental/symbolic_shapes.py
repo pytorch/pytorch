@@ -2335,7 +2335,6 @@ class StatefulSymbolicContext(StatelessSymbolicContext[..., Any]):
     )
     excluded_sizes: tuple[int | None, ...] | None = None
     # Per-dim shape spec from torch.compile(shapes_spec=...).
-    # Set by _automatic_dynamic, consumed for torch._check after fakification.
     tensor_spec: Any = None
 
 

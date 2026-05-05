@@ -33,6 +33,8 @@ import enum
 from collections.abc import Iterator
 from typing import Any, ClassVar, TypeAlias
 
+from torch._dynamo.source import LocalSource
+
 
 __all__ = [
     "IntSpecType",
@@ -409,24 +411,15 @@ class ParamsSpec:
         #           ^^^^^  varargs
         #                   ^^^^^^  varkw
 
-    Construct via the constructor or build incrementally with fluent methods::
+    Example::
 
-        # Constructor form
-        ParamsSpec(
-            named_args={"x": TensorSpec(3), "y": IntSpec.backed("y")},
-            varargs=[TensorSpec(2), None],
-            varkw={"extra": TensorSpec(1)},
-        )
-
-        # Fluent form
-        ParamsSpec().arg("x", TensorSpec(3)).arg("y", IntSpec.backed("y"))
-        ParamsSpec().varargs([TensorSpec(2), None])
-        ParamsSpec().varkw({"extra": TensorSpec(1)})
+        ParamsSpec({"x": TensorSpec(3), "y": IntSpec.backed("y")})
     """
 
     def __init__(
         self,
         named_args: dict[str, IntermediateSpec] | None = None,
+        *,
         varargs: list[IntermediateSpec] | None = None,
         varkw: dict[str, IntermediateSpec] | None = None,
     ) -> None:
@@ -437,21 +430,6 @@ class ParamsSpec:
             raise NotImplementedError("varkw is not supported yet")
         self._varargs: list[IntermediateSpec] | None = None
         self._varkw: dict[str, IntermediateSpec] | None = None
-
-    def arg(self, name: str, spec: IntermediateSpec) -> "ParamsSpec":
-        """Add or update a named argument spec. Returns ``self`` for chaining."""
-        if not isinstance(name, str):
-            raise TypeError(f"arg name must be str, got {type(name).__name__}")
-        self._named_args[name] = spec
-        return self
-
-    def varargs(self, specs: list[IntermediateSpec]) -> "ParamsSpec":
-        """Set specs for positional *args. Returns ``self`` for chaining."""
-        raise NotImplementedError("varargs is not supported yet")
-
-    def varkw(self, specs: dict[str, IntermediateSpec]) -> "ParamsSpec":
-        """Set specs for **kwargs. Returns ``self`` for chaining."""
-        raise NotImplementedError("varkw is not supported yet")
 
     def __repr__(self) -> str:
         parts: list[str] = []
@@ -473,7 +451,7 @@ class ShapesSpec:
 
     Currently only ``params`` is supported::
 
-        ShapesSpec(params=ParamsSpec().arg("x", TensorSpec(3)))
+        ShapesSpec(params=ParamsSpec({"x": TensorSpec(3)}))
 
     ``globals`` and ``assumptions`` are reserved for future use and will
     raise ``NotImplementedError`` if set.
@@ -505,8 +483,6 @@ def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> Le
     Only supports LocalSource with is_input=True (direct function args).
     Returns TensorSpec, IntSpec, or None.
     """
-    from torch._dynamo.source import LocalSource
-
     if shapes_spec is None or shapes_spec.params is None:
         return None
     # Only top-level function input args are supported for now.
