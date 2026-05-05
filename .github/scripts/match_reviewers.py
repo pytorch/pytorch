@@ -4,12 +4,17 @@
 Reuses patterns_to_regex from gitutils.py to ensure matching semantics are
 identical to trymerge.
 
-Inputs (via env vars when run from CI):
+Two modes, selected by which env var is set. Result is written to stdout as
+JSON in both modes.
+
+Batch mode (BATCH set):
+    BATCH: JSON list of {"number": int, "files": [str], "author": str}
+    Output: list of {"number", "reviewers", "teams"}.
+
+Single-PR mode (CHANGED_FILES + PR_AUTHOR set):
     CHANGED_FILES: JSON array of file paths
     PR_AUTHOR:     PR author login
-
-Output:
-    Writes `result=<json>` to $GITHUB_OUTPUT if set, else stdout.
+    Output: {"reviewers", "teams"}.
 """
 
 from __future__ import annotations
@@ -89,18 +94,21 @@ def main() -> None:
     with open(args.merge_rules) as f:
         rules = yaml.safe_load(f)
 
-    changed_files = json.loads(os.environ["CHANGED_FILES"])
-    pr_author = os.environ["PR_AUTHOR"]
-
-    reviewers, teams = match_reviewers(rules, changed_files, pr_author)
-    result_json = json.dumps({"reviewers": reviewers, "teams": teams})
-
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, "a") as f:
-            f.write(f"result={result_json}\n")
+    if "BATCH" in os.environ:
+        batch = json.loads(os.environ["BATCH"])
+        out: list | dict = []
+        for entry in batch:
+            reviewers, teams = match_reviewers(rules, entry["files"], entry["author"])
+            out.append(
+                {"number": entry["number"], "reviewers": reviewers, "teams": teams}
+            )
     else:
-        sys.stdout.write(result_json)
+        changed_files = json.loads(os.environ["CHANGED_FILES"])
+        pr_author = os.environ["PR_AUTHOR"]
+        reviewers, teams = match_reviewers(rules, changed_files, pr_author)
+        out = {"reviewers": reviewers, "teams": teams}
+
+    json.dump(out, sys.stdout)
 
 
 if __name__ == "__main__":

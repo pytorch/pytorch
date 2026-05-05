@@ -3,158 +3,174 @@
 # author-based routing via necojackarc/auto-request-review. That workflow
 # assigns reviewers based on who authored the PR; this one assigns domain
 # owners based on which files the PR touches.
+#
+# Triggered on a 12h cron (and manually via workflow_dispatch). We do not use
+# pull_request_target — it requires "Approve and run" for first-time external
+# contributors, which is exactly the population this workflow is meant to
+# triage. The cron sweep finds eligible PRs via the GitHub Search API and
+# routes them in bulk, no approval gate.
 name: Auto Request Reviewers
 
 on:
-  pull_request_target:
-    types: [opened, ready_for_review]
+  schedule:
+    - cron: "0 */12 * * *"
   workflow_dispatch:
     inputs:
       pr:
-        description: "PR number or link (e.g. 12345 or https://github.com/pytorch/pytorch/pull/12345)"
+        description: "Optional: PR number or URL to triage. Empty = sweep all eligible PRs."
         type: string
-        required: true
+        required: false
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.event.pull_request.number) }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
-  # Read-only compute: resolve PR, check eligibility, run the matcher over
-  # attacker-controlled filenames. Cannot write to the PR even if compromised.
+  # Read-only compute: discover eligible PRs, fetch files, run the matcher
+  # over attacker-controlled filenames. Cannot write to PRs even if compromised.
   compute:
-    if: |
-      github.repository == 'pytorch/pytorch' && (
-        github.event_name == 'workflow_dispatch' ||
-        (!github.event.pull_request.draft && github.event.pull_request.base.ref == 'main')
-      )
+    if: github.repository == 'pytorch/pytorch'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
     outputs:
-      eligible: ${{ steps.pr.outputs.eligible }}
-      number: ${{ steps.pr.outputs.number }}
-      match_result: ${{ steps.reviewers.outputs.result }}
+      results: ${{ steps.match.outputs.results }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # Under pull_request_target, pin to the PR base SHA so we never check out PR head.
-          # Under workflow_dispatch, github.event.pull_request is empty and we fall back to
-          # github.sha (the SHA of the branch the dispatcher selected, defaults to main).
-          # Triggering workflow_dispatch already requires repo write access.
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           sparse-checkout: |
             .github/merge_rules.yaml
             .github/scripts/gitutils.py
             .github/scripts/match_reviewers.py
 
-      - name: Resolve PR and check eligibility
-        id: pr
+      - name: Discover eligible PRs and fetch files
+        id: discover
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           PR_INPUT: ${{ inputs.pr }}
         with:
           script: |
-            let prNumber;
-            const prInput = process.env.PR_INPUT;
-            if (prInput) {
-              if (/^\d+$/.test(prInput)) {
-                prNumber = parseInt(prInput);
-              } else {
-                const match = prInput.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
-                if (!match) {
-                  core.setFailed('Invalid input. Expected a PR number or URL like https://github.com/pytorch/pytorch/pull/12345');
-                  return;
-                }
-                if (match[1] !== 'pytorch/pytorch') {
-                  core.setFailed(`URL must be for pytorch/pytorch, got ${match[1]}`);
-                  return;
-                }
-                prNumber = parseInt(match[2]);
+            // Resolve a single PR number from a workflow_dispatch input.
+            // Returns null if no input was provided (sweep mode).
+            function resolveInputPr(input) {
+              if (!input) return null;
+              if (/^\d+$/.test(input)) return parseInt(input);
+              const m = input.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)$/);
+              if (!m) {
+                core.setFailed('Invalid input. Expected a PR number or URL.');
+                return null;
               }
-            } else {
-              prNumber = context.payload.pull_request.number;
+              if (m[1] !== 'pytorch/pytorch') {
+                core.setFailed(`URL must be for pytorch/pytorch, got ${m[1]}`);
+                return null;
+              }
+              return parseInt(m[2]);
             }
-            const {data: pr} = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-            });
 
-            const labels = pr.labels.map(l => l.name);
+            // Eligibility check applied to a fully-fetched PR object. Mirrors
+            // the search query qualifiers as defense in depth (especially for
+            // the workflow_dispatch single-PR path which doesn't go through
+            // search), and adds the "no pending review request" check that
+            // Search has no qualifier for.
+            function isEligible(pr) {
+              const labels = pr.labels.map(l => l.name);
+              const reasons = [];
+              if (pr.state !== 'open') reasons.push(`state=${pr.state}`);
+              if (pr.draft) reasons.push('draft');
+              if (pr.base.ref !== 'main') reasons.push(`base=${pr.base.ref}`);
+              if (new Date(pr.created_at) < new Date('2019-06-06')) reasons.push('created before 2019-06-06');
+              if (!labels.includes('open source')) reasons.push('no "open source" label');
+              if (labels.includes('triaged')) reasons.push('has "triaged" label');
+              if ((pr.requested_reviewers || []).length > 0) reasons.push('reviewers already requested');
+              if ((pr.requested_teams || []).length > 0) reasons.push('team reviewers already requested');
+              if (reasons.length) {
+                core.info(`Skip PR #${pr.number}: ${reasons.join(', ')}`);
+                return false;
+              }
+              return true;
+            }
 
-            // Filter criteria based on:
-            // base:main draft:false label:"open source" -label:triaged
-            // -review:approved created:>=2019-06-06
-            const skip = (reason) => {
-              core.info(`Skipping PR #${prNumber}: ${reason}`);
-              core.setOutput('eligible', 'false');
-            };
+            const inputPr = resolveInputPr(process.env.PR_INPUT);
+            let candidateNumbers;
 
-            if (pr.base.ref !== 'main') return skip(`base branch is '${pr.base.ref}', not 'main'`);
-            if (new Date(pr.created_at) < new Date('2019-06-06')) return skip(`created before 2019-06-06 (${pr.created_at})`);
-            if (pr.draft) return skip('PR is a draft');
-            if (!labels.includes('open source')) return skip('missing "open source" label');
-            if (labels.includes('triaged')) return skip('already has "triaged" label');
+            if (inputPr) {
+              candidateNumbers = [inputPr];
+              core.info(`Single-PR mode: #${inputPr}`);
+            } else {
+              // Sweep mode: search for plausibly-eligible PRs.
+              const q = [
+                'repo:pytorch/pytorch',
+                'is:pr',
+                'is:open',
+                'base:main',
+                'draft:false',
+                'label:"open source"',
+                '-label:triaged',
+                'created:>=2019-06-06',
+                '-review:approved',
+                '-review:changes_requested',
+              ].join(' ');
+              core.info(`Sweep query: ${q}`);
+              const items = await github.paginate(github.rest.search.issuesAndPullRequests, {
+                q,
+                sort: 'updated',
+                order: 'desc',
+                per_page: 100,
+              });
+              const all = items.map(i => i.number);
+              const MAX_CANDIDATES = 200;
+              candidateNumbers = all.slice(0, MAX_CANDIDATES);
+              core.info(`Search returned ${all.length} candidates; processing ${candidateNumbers.length}`);
+            }
 
-            // Skip if any reviewer has already approved or requested changes —
-            // the PR already has review activity and doesn't need auto-triage.
-            const allReviews = await github.paginate(github.rest.pulls.listReviews, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-              per_page: 100,
-            });
-            const hasReviewActivity = allReviews.some(
-              r => r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED'
-            );
-            if (hasReviewActivity) return skip('PR already has review activity');
+            // Fetch each candidate to apply the (b) check + collect files.
+            // Per-PR try/catch keeps one transient failure from killing the sweep.
+            const batch = [];
+            for (const number of candidateNumbers) {
+              try {
+                const {data: pr} = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: number,
+                });
+                if (!isEligible(pr)) continue;
+                const files = await github.paginate(github.rest.pulls.listFiles, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: number,
+                  per_page: 100,
+                }, (resp) => resp.data.map(f => f.filename));
+                batch.push({number, author: pr.user.login, files});
+                core.info(`Eligible: PR #${number} by ${pr.user.login} (${files.length} files)`);
+              } catch (error) {
+                core.warning(`Skip PR #${number}: ${error.message}`);
+              }
+            }
 
-            core.info(`PR #${prNumber} is eligible for auto reviewer request`);
-            core.setOutput('eligible', 'true');
-            core.setOutput('number', prNumber);
-            core.setOutput('author', pr.user.login);
-
-      - name: Get changed files
-        if: steps.pr.outputs.eligible == 'true'
-        id: changed
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-        with:
-          script: |
-            const prNumber = parseInt(process.env.PR_NUMBER);
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-              per_page: 100,
-            }, (resp) => resp.data.map(f => f.filename));
-            core.setOutput('files', JSON.stringify(files));
+            const fs = require('fs');
+            fs.writeFileSync('batch.json', JSON.stringify(batch));
+            core.info(`Eligible PRs: ${batch.length}`);
 
       - name: Install PyYAML
-        if: steps.pr.outputs.eligible == 'true'
         run: pip install pyyaml==6.0.2
 
-      - name: Determine reviewers from merge rules
-        if: steps.pr.outputs.eligible == 'true'
-        id: reviewers
-        env:
-          CHANGED_FILES: ${{ steps.changed.outputs.files }}
-          PR_AUTHOR: ${{ steps.pr.outputs.author }}
-        run: python3 .github/scripts/match_reviewers.py --merge-rules .github/merge_rules.yaml
+      - name: Run matcher over batch
+        id: match
+        run: |
+          RESULTS="$(BATCH="$(cat batch.json)" python3 .github/scripts/match_reviewers.py \
+            --merge-rules .github/merge_rules.yaml)"
+          echo "results=$RESULTS" >> "$GITHUB_OUTPUT"
 
-  # Write-only requester: no checkout, no code execution over PR data, only
-  # consumes the JSON output from `compute` and calls requestReviewers.
+  # Write-only requester: no checkout, only consumes the JSON output from compute.
   request:
     needs: compute
-    if: needs.compute.outputs.eligible == 'true'
+    if: needs.compute.outputs.results != '' && needs.compute.outputs.results != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: none
       pull-requests: write
@@ -162,43 +178,41 @@ jobs:
       - name: Request reviews
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
-          PR_NUMBER: ${{ needs.compute.outputs.number }}
-          MATCH_RESULT: ${{ needs.compute.outputs.match_result }}
+          RESULTS: ${{ needs.compute.outputs.results }}
         with:
           script: |
-            const {reviewers, teams} = JSON.parse(process.env.MATCH_RESULT);
-            const prNumber = parseInt(process.env.PR_NUMBER);
-
-            if (reviewers.length === 0 && teams.length === 0) {
-              core.info('No reviewers to request.');
-              return;
-            }
-
-            // Request reviews individually so a single stale username doesn't
-            // prevent all other valid reviewers from being assigned.
-            for (const reviewer of reviewers) {
-              try {
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers: [reviewer],
-                });
-                core.info(`Requested review from ${reviewer}`);
-              } catch (error) {
-                core.warning(`Failed to request review from ${reviewer}: ${error.message}`);
+            const results = JSON.parse(process.env.RESULTS);
+            for (const {number, reviewers, teams} of results) {
+              if (reviewers.length === 0 && teams.length === 0) {
+                core.info(`PR #${number}: no matching reviewers, skipping.`);
+                continue;
               }
-            }
-            for (const team of teams) {
-              try {
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  team_reviewers: [team],
-                });
-                core.info(`Requested review from team pytorch/${team}`);
-              } catch (error) {
-                core.warning(`Failed to request review from team pytorch/${team}: ${error.message}`);
+              // Request reviews individually so a single stale username doesn't
+              // prevent all other valid reviewers from being assigned.
+              for (const reviewer of reviewers) {
+                try {
+                  await github.rest.pulls.requestReviewers({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: number,
+                    reviewers: [reviewer],
+                  });
+                  core.info(`PR #${number}: requested review from ${reviewer}`);
+                } catch (error) {
+                  core.warning(`PR #${number}: failed to request ${reviewer}: ${error.message}`);
+                }
+              }
+              for (const team of teams) {
+                try {
+                  await github.rest.pulls.requestReviewers({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: number,
+                    team_reviewers: [team],
+                  });
+                  core.info(`PR #${number}: requested review from team pytorch/${team}`);
+                } catch (error) {
+                  core.warning(`PR #${number}: failed to request team pytorch/${team}: ${error.message}`);
+                }
               }
             }
