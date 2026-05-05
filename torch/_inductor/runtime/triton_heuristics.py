@@ -39,13 +39,14 @@ from ..utils import (
 )
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
-from .benchmarking import benchmarker
+from .benchmarking import benchmarker, INVALID_CONFIG_ERR_SUBSTR
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    MAX_GRID_SIZE,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
@@ -107,6 +108,10 @@ class InductorConfig(Config):
 
 class NoTritonConfigsError(RuntimeError):
     pass
+
+
+class GridOverflowError(RuntimeError):
+    """Raised when a Triton grid dimension exceeds CUDA limits."""
 
 
 if TYPE_CHECKING:
@@ -2193,9 +2198,11 @@ class CompileResult(Generic[_T]):
             f"    grid_0 = {grid.x_grid}",
             f"    grid_1 = {grid.y_grid}",
             f"    grid_2 = {grid.z_grid}",
+            "    _check_grid_values(grid_0, grid_1, grid_2)",
             f"    runner({', '.join(runner_args)})",
         ]
         launcher_code = "\n".join(lines)
+        scope["_check_grid_values"] = _check_grid_values
         exec(launcher_code, scope)
         return scope["launcher"]
 
@@ -2972,9 +2979,21 @@ def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=F
     return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
 
+def _check_grid_values(grid_0: int, grid_1: int, grid_2: int) -> None:
+    """Runtime check that grid dimensions don't exceed GPU limits."""
+    # These limits apply to both CUDA and ROCm/HIP
+    for i, (val, limit) in enumerate(zip((grid_0, grid_1, grid_2), MAX_GRID_SIZE)):
+        if val > limit:
+            raise GridOverflowError(
+                f"{INVALID_CONFIG_ERR_SUBSTR}: Grid dimension {i} = {val} exceeds maxGridSize limit {limit}. "
+                f"This can happen with dynamic shapes when runtime tensor sizes are "
+                f"much larger than compile-time size hints."
+            )
+
+
 def _check_max_grid_x(size_hints, x, num_warps):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
-    max_grid_x = 2147483647
+    max_grid_x = MAX_GRID_SIZE[0]
     max_block_x = TRITON_MAX_BLOCK["X"]
     warp_size = (
         64 if torch.version.hip else 32
@@ -3031,10 +3050,6 @@ def triton_config(
     min_elem_per_thread controls the minimum number of elements
     processed by each thread. It's always enforced.
     """
-    # Ideally we want to read this from some device config
-
-    maxGridSize = [2147483647, 65535, 65535]
-
     target = conditional_product(x, y, z)
     if conditional_product(*size_hints.values()) < target:
         target //= 8
@@ -3049,14 +3064,14 @@ def triton_config(
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
     while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and (
-        x * maxGridSize[0] < size_hints["x"] or conditional_product(x, y, z) < target
+        x * MAX_GRID_SIZE[0] < size_hints["x"] or conditional_product(x, y, z) < target
     ):
         x *= 2
     while (
         y
         and y < min(size_hints["y"], TRITON_MAX_BLOCK["Y"])
         and (
-            y * maxGridSize[1] < size_hints["y"]
+            y * MAX_GRID_SIZE[1] < size_hints["y"]
             or conditional_product(x, y, z) < target
         )
     ):
@@ -3065,7 +3080,7 @@ def triton_config(
         z
         and z < min(size_hints["z"], TRITON_MAX_BLOCK["Z"])
         and (
-            z * maxGridSize[2] < size_hints["z"]
+            z * MAX_GRID_SIZE[2] < size_hints["z"]
             or conditional_product(x, y, z) < target
         )
     ):

@@ -306,6 +306,70 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    @skipIfRocm  # upstream Triton's HIP MLIR pipeline issue, see: https://github.com/pytorch/pytorch/pull/182254
+    def test_grid_overflow_skips_config(self):
+        """
+        When runtime xnumel produces a grid that exceeds CUDA maxGridSize,
+        the autotuner should skip that config instead of crashing with
+        OverflowError.
+        """
+
+        @triton.jit
+        def triton_(in_ptr0, out_ptr0, xnumel, n_elements, XBLOCK: tl.constexpr):
+            xoffset = tl.program_id(0).to(tl.int64) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)
+            xmask = xindex < n_elements
+            tmp0 = tl.load(in_ptr0 + xindex, xmask)
+            tl.store(out_ptr0 + xindex, tmp0, xmask)
+
+        triton_meta = {
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i64",
+                "n_elements": "i64",
+            },
+            "device": DeviceProperties.create(torch.device(GPU_TYPE)),
+            "constants": {},
+            "configs": [AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())],
+        }
+
+        configs = [
+            # XBLOCK=1: ceildiv(3*10^9, 1) > 2^31-1 -> grid overflow
+            triton_config({"x": 8192}, 1),
+            # XBLOCK=2048: ceildiv(3*10^9, 2048) < 2^31-1 -> valid
+            triton_config({"x": 8192}, 2048),
+        ]
+
+        inductor_meta = {"grid_type": "Grid1D"}
+
+        autotuner = CachingAutotuner(
+            fn=triton_,
+            triton_meta=triton_meta,
+            configs=configs,
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=True,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta=inductor_meta,
+        )
+
+        # xnumel large enough that XBLOCK=1 overflows grid but XBLOCK=2048 does not
+        xnumel = 3_000_000_000
+        n_elements = 16
+        inp = torch.randn(n_elements, device=GPU_TYPE)
+        out = torch.empty(n_elements, device=GPU_TYPE)
+
+        # Should not crash -- autotuner skips the overflowing config
+        autotuner.run(inp, out, xnumel, n_elements, stream=0)
+
+        # The overflowing config should have been skipped, leaving one valid config
+        self.assertEqual(len(autotuner.launchers), 1)
+        self.assertEqual(autotuner.launchers[0].config.kwargs["XBLOCK"], 2048)
+        # Kernel should have copied inp to out for the in-bounds elements
+        self.assertEqual(out, inp)
+
 
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"

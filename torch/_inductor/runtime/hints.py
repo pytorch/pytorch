@@ -10,6 +10,10 @@ import torch
 from torch.utils._triton import has_triton_package
 
 
+# Ideally we want to read this from some device config
+MAX_GRID_SIZE = (2147483647, 65535, 65535)
+
+
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
