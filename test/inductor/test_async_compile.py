@@ -329,7 +329,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
     r0_base = tl.arange(0, R0_BLOCK)[None, :]
     rbase = r0_base
     x0 = xindex
-    _tmp3 = tl.full([XBLOCK, R0_BLOCK], 0, tl.float32)
+    _tmp2 = tl.full([XBLOCK, R0_BLOCK], 0, tl.float32)
     {loop_header}
         r0_index = r0_offset + r0_base
         r0_mask = r0_index < r0_numel
@@ -337,12 +337,11 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         rindex = r0_index
         r0_1 = r0_index
         tmp0 = tl.load(in_ptr0 + (r0_1 + 11776*x0), r0_mask & xmask, eviction_policy='evict_first', other=0.0).to(tl.float32)
-        tmp1 = tmp0.to(tl.float32)
-        tmp2 = tl.broadcast_to(tmp1, [XBLOCK, R0_BLOCK])
-        tmp4 = _tmp3 + tmp2
-        _tmp3 = tl.where(r0_mask & xmask, tmp4, _tmp3)
-    tmp3 = tl.sum(_tmp3, 1)[:, None]
-    tl.store(out_ptr0 + (x0), tmp3, xmask)
+        tmp1 = tl.broadcast_to(tmp0, [XBLOCK, R0_BLOCK])
+        tmp3 = _tmp2 + tmp1
+        _tmp2 = tl.where(r0_mask & xmask, tmp3, _tmp2)
+    tmp2 = tl.sum(_tmp2, 1)[:, None]
+    tl.store(out_ptr0 + (x0), tmp2, xmask)
 
 """
 
