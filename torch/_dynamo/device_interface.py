@@ -223,7 +223,10 @@ class CudaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "cuda"
+                    if device.type != "cuda":
+                        raise AssertionError(
+                            f"Expected device type 'cuda', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -319,7 +322,10 @@ class MtiaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "mtia"
+                    if device.type != "mtia":
+                        raise AssertionError(
+                            f"Expected device type 'mtia', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -401,7 +407,10 @@ class XpuInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "xpu"
+                    if device.type != "xpu":
+                        raise AssertionError(
+                            f"Expected device type 'xpu', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
