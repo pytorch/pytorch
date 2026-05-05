@@ -946,6 +946,17 @@ class TestBasicGEMM(TestCase):
                         RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2)
                     )
 
+    @dtypes(torch.float)
+    def test_addmm_expanded_errors(self, device, dtype):
+        mat1 = torch.randn(3, 3, device=device, dtype=dtype)
+        mat2 = torch.randn(3, 3, device=device, dtype=dtype)
+        self_ = torch.randn(3, 3, device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "must be greater or equal to the number of dimensions",
+            lambda: torch.addmm(self_.unsqueeze(0), mat1, mat2),
+        )
+
     @precisionOverride(
         {
             torch.float: 1e-4,

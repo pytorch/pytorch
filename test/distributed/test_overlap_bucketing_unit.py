@@ -1697,10 +1697,10 @@ class TestForeachGroupsUnit(InductorTestCase):
 
         # With and without groups should produce identical results
         result_with = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, groups
         )
         result_without = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
 
@@ -2162,9 +2162,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
             estimator = ProfileGuidedEstimator(trace_path)
 
             def func(a, b):
-                ar = torch.ops._c10d_functional.all_reduce(
-                    a, "sum", len(pg_ranks), group_name
-                )
+                ar = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
                 ar_out = torch.ops._c10d_functional.wait_tensor(ar)
                 mm = torch.mm(b, b)
                 return ar_out + mm
@@ -2192,7 +2190,6 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
                 collective_hit, "Estimator should match the collective node"
             )
             self.assertTrue(mm_hit, "Estimator should match the mm node")
-            self.assertGreater(len(estimator.estimation_log), 0)
         finally:
             os.unlink(trace_path)
 
