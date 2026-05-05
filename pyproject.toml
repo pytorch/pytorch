@@ -136,13 +136,12 @@ docstring-code-format = true
 quote-style = "double"
 
 [tool.ruff.lint]
-# NOTE: Synchoronize the ignores with .flake8
+# NOTE: Synchronize the ignores with .flake8
 external = [
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",
     "T484",
-    "TOR901",
     # Codes that are preview-only in ruff, so flake8 is still the enforcer.
     # As ruff promotes these out of preview, move them to flake8's ignore list.
     "B901",
