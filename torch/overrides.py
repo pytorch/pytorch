@@ -2205,6 +2205,11 @@ def redispatch_function(func, types, args, kwargs):
         >>> result
         tensor([13.])
 
+    Note that only ``mul`` is logged, not ``add``: ``redispatch_function``
+    returns a plain ``torch.Tensor``, so the ``+ 1`` inside ``scaled_mul``
+    no longer sees a ``LoggingTensor`` input and ``__torch_function__`` is
+    not triggered.
+
     With ``TorchFunctionMode`` the mode stays active across all inner ops,
     so the ``+ 1`` is now visible too.  Use ``with self:`` after
     ``redispatch_function`` to re-enable the mode for those inner calls.

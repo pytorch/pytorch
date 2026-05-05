@@ -17,6 +17,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
+from torch._dynamo.utils import clone_input
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -36,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
@@ -2001,21 +2004,37 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOps(TestCase):
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
-        # as_strided_partial_views feeds tensors that are slices of a larger
-        # storage and uses storage_offset values that reference data outside
-        # the visible slice. Cloning the input produces a fresh, smaller
-        # storage, so the redispatched call observes different memory than
-        # the direct call.
-        if op.name == "as_strided_partial_views":
-            self.skipTest("clone changes storage layout; not comparable for this op")
+        if op.has_nondeterministic_output:
+            self.skipTest("output is nondeterministic; not comparable across calls")
 
-        def wrap(x):
+        def clone_and_wrap(x):
             if isinstance(x, torch.Tensor):
-                return RedispatchTensor(x.detach().clone())
+                x = x.detach()
+                if x.layout == torch.strided:
+                    x = clone_preserve_strides_offset(x)
+                else:
+                    x = clone_input(x)
+                return RedispatchTensor(x)
+            return x
+
+        def clone_only(x):
+            if isinstance(x, torch.Tensor):
+                x = x.detach()
+                if x.layout == torch.strided:
+                    return clone_preserve_strides_offset(x)
+                return clone_input(x)
             return x
 
         for sample in op.sample_inputs(device=device, dtype=dtype):
-            wrapped = sample.transform(wrap)
+            # Wrap only sample.input in RedispatchTensor so
+            # __torch_function__ fires. Clone args/kwargs without wrapping
+            # because some ops pass auxiliary tensors (e.g. spacing, bins)
+            # through C++ arg parsing that rejects subclasses.
+            wrapped = SampleInput(
+                clone_and_wrap(sample.input),
+                args=tree_map(clone_only, sample.args),
+                kwargs=tree_map(clone_only, sample.kwargs),
+            )
 
             expect = op(sample.input, *sample.args, **sample.kwargs)
             actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
