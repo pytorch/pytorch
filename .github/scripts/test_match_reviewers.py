@@ -2,7 +2,7 @@
 
 from unittest import main, TestCase
 
-from match_reviewers import is_bot, is_wildcard_only, match_reviewers
+from match_reviewers import has_catchall_pattern, is_bot, match_reviewers
 
 
 SAMPLE_RULES = [
@@ -36,25 +36,39 @@ SAMPLE_RULES = [
         "patterns": ["**rocm**", "**hip**"],
         "approved_by": ["rocm-dev", "facebook-github-bot"],
     },
+    {
+        # Rule with `*` mixed with a `-prefix` "negation" pattern that the
+        # underlying glob compiler doesn't actually support. The `*`
+        # alternative makes this rule match every file, so it must be skipped.
+        "name": "Metamates",
+        "patterns": ["*", "-.ci/docker/**"],
+        "approved_by": ["metamate1"],
+    },
 ]
 
 
-class TestIsWildcardOnly(TestCase):
+class TestHasCatchallPattern(TestCase):
     def test_single_star(self) -> None:
-        self.assertTrue(is_wildcard_only(["*"]))
+        self.assertTrue(has_catchall_pattern(["*"]))
 
     def test_double_star(self) -> None:
-        self.assertTrue(is_wildcard_only(["**"]))
+        self.assertTrue(has_catchall_pattern(["**"]))
 
     def test_mixed_wildcards(self) -> None:
-        self.assertTrue(is_wildcard_only(["*", "**"]))
+        self.assertTrue(has_catchall_pattern(["*", "**"]))
 
     def test_real_pattern(self) -> None:
-        self.assertFalse(is_wildcard_only(["torch/onnx/**"]))
+        self.assertFalse(has_catchall_pattern(["torch/onnx/**"]))
 
     def test_empty(self) -> None:
-        # Empty pattern list matches nothing — not a superuser/wildcard rule.
-        self.assertFalse(is_wildcard_only([]))
+        self.assertFalse(has_catchall_pattern([]))
+
+    def test_wildcard_with_extra_pattern(self) -> None:
+        # The bug case: a rule mixing `*` with a "negation" pattern would
+        # previously slip through because not all patterns were wildcards.
+        # `*` alone is a catch-all (matches every file), so the rule must be
+        # skipped regardless of any other patterns.
+        self.assertTrue(has_catchall_pattern(["*", "-.ci/docker/**"]))
 
 
 class TestIsBot(TestCase):
@@ -104,6 +118,9 @@ class TestMatchReviewers(TestCase):
         )
         self.assertNotIn("superadmin", reviewers)
         self.assertNotIn("maintainer1", reviewers)
+        # Regression: a rule with `*` plus other patterns must also be
+        # skipped — the `*` alternative makes it match every file.
+        self.assertNotIn("metamate1", reviewers)
 
     def test_skips_bots(self) -> None:
         reviewers, teams = match_reviewers(

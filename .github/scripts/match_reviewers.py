@@ -23,8 +23,15 @@ from pathlib import Path
 from gitutils import patterns_to_regex
 
 
-def is_wildcard_only(patterns: list[str]) -> bool:
-    return len(patterns) > 0 and all(p in ("*", "**") for p in patterns)
+def has_catchall_pattern(patterns: list[str]) -> bool:
+    """A rule is a catch-all if any pattern is bare `*` or `**`.
+
+    Such rules match every file (the alternative regex `[^/]*` / `.*` matches
+    at position 0 of any path), so they're meant for superuser/maintainer
+    approval — not for file-path-based reviewer routing. Skip them entirely
+    rather than spamming their approver list on every PR.
+    """
+    return any(p in ("*", "**") for p in patterns)
 
 
 KNOWN_BOTS = frozenset(
@@ -54,7 +61,7 @@ def match_reviewers(
         patterns = rule.get("patterns", [])
         approvers = rule.get("approved_by", [])
 
-        if is_wildcard_only(patterns):
+        if has_catchall_pattern(patterns):
             continue
 
         regex = patterns_to_regex(patterns)
