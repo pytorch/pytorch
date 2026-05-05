@@ -87,13 +87,19 @@ def _bytecode_from_template_with_split(
         ),
         (None, None),
     )
-    assert dummy_idx is not None and dummy_inst is not None
+    if dummy_idx is None:
+        raise AssertionError("LOAD_FAST dummy instruction not found in template code")
+    if dummy_inst is None:
+        raise AssertionError("LOAD_FAST dummy instruction instance is None")
 
     # replace LOAD_FAST dummy with first NOP marking exception area
     overwrite_instruction(dummy_inst, [create_instruction("NOP")])
 
     # POP_TOP follows LOAD_FAST dummy - replace with NOP marking end of exception area
-    assert template_code[dummy_idx + 1].opname == "POP_TOP"
+    if template_code[dummy_idx + 1].opname != "POP_TOP":
+        raise AssertionError(
+            f"Expected POP_TOP after LOAD_FAST dummy, got {template_code[dummy_idx + 1].opname}"
+        )
     overwrite_instruction(template_code[dummy_idx + 1], [create_instruction("NOP")])
 
     return template_code[: dummy_idx + 1], template_code[dummy_idx + 1 :]
@@ -232,7 +238,8 @@ class ReenterWith:
             ),
             None,
         )
-        assert load_fast_ctx_inst is not None
+        if load_fast_ctx_inst is None:
+            raise AssertionError("LOAD_FAST ctx instruction not found in setup_with")
         # ctx already loaded on stack before the template - no need to LOAD_FAST
         overwrite_instruction(load_fast_ctx_inst, [create_instruction("NOP")])
 
@@ -242,7 +249,8 @@ class ReenterWith:
         )
         push_exc_info_inst = next(push_exc_info_gen, None)
         # expect only 1 PUSH_EXC_INFO in epilogue
-        assert next(push_exc_info_gen, None) is None
+        if next(push_exc_info_gen, None) is not None:
+            raise AssertionError("Expected only 1 PUSH_EXC_INFO in epilogue")
 
         return create_ctx + setup_with, push_exc_info_inst
 
@@ -335,12 +343,16 @@ class ContinueExecutionCache:
         # the result of calling the next resume function.
         pop_nested_resume_result: bool,
     ) -> types.CodeType:
-        assert resume_offset is not None
-        assert not (
-            code.co_flags
-            & (CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR)
-        )
-        assert code.co_flags & CO_OPTIMIZED
+        if resume_offset is None:
+            raise AssertionError("resume_offset must not be None")
+        if code.co_flags & (
+            CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        ):
+            raise AssertionError(
+                "Cannot generate resume function for generator, coroutine, or async generator"
+            )
+        if not (code.co_flags & CO_OPTIMIZED):
+            raise AssertionError("Code object must have CO_OPTIMIZED flag set")
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
                 code,
@@ -383,7 +395,10 @@ class ContinueExecutionCache:
                 if len(qualified_path) == 1:
                     code_options["co_qualname"] = code_options["co_name"]
                 else:
-                    assert len(qualified_path) == 2
+                    if len(qualified_path) != 2:
+                        raise AssertionError(
+                            f"Expected qualified path to have 2 parts, got {len(qualified_path)}"
+                        )
                     module_name, co_name = qualified_path
                     code_options["co_qualname"] = (
                         f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
@@ -469,7 +484,8 @@ class ContinueExecutionCache:
                     reversed(meta.prefix_block_target_offset_remap)
                 )
 
-            assert not hooks
+            if hooks:
+                raise AssertionError(f"Unprocessed hooks remaining: {hooks}")
 
             # NOTE: we assume that local var is a context manager CLASS!
             # initialize inactive context vars in argnames
@@ -481,9 +497,15 @@ class ContinueExecutionCache:
 
             # 3.12+: store NULL into variables that were NULL
             if argnames_null:
-                assert sys.version_info >= (3, 12)
+                if sys.version_info < (3, 12):
+                    raise AssertionError(
+                        f"argnames_null requires Python 3.12+, got {sys.version_info}"
+                    )
                 for v in argnames_null:
-                    assert v not in args
+                    if v in args:
+                        raise AssertionError(
+                            f"argnames_null variable {v!r} should not be in args"
+                        )
                     prefix.extend(
                         [
                             create_instruction("PUSH_NULL"),
@@ -575,7 +597,8 @@ class ContinueExecutionCache:
             # remap original instructions' exception table entries
             if old_hook_target_remap:
                 # pyrefly: ignore [unbound-name]
-                assert is_py311_plus
+                if not is_py311_plus:
+                    raise AssertionError("old_hook_target_remap requires Python 3.11+")
                 for inst in instructions:
                     if (
                         inst.exn_tab_entry
@@ -645,11 +668,19 @@ class ContinueExecutionCache:
                     # Caller expected to handle this case.
                     return
 
-                assert len(new_target_tuple) == 1
+                if len(new_target_tuple) != 1:
+                    raise AssertionError(
+                        f"Expected exactly 1 matching target, got {len(new_target_tuple)}"
+                    )
                 new_target = new_target_tuple[0]
 
-                assert target.opcode == new_target.opcode
-                assert new_target.offset is not None
+                if target.opcode != new_target.opcode:
+                    raise AssertionError(
+                        f"Opcode mismatch: target has {target.opcode}, "
+                        f"new_target has {new_target.opcode}"
+                    )
+                if new_target.offset is None:
+                    raise AssertionError("new_target.offset must not be None")
                 orig_offset = new_target.offset
 
             transform_code_object(code, find_orig_offset_transform)
@@ -660,9 +691,10 @@ class ContinueExecutionCache:
         # this means we graph broke in the prefix, which only happens with nested graph breaks.
         # We should not be running into ambiguous graph break issues here.
         orig_resume_offset = find_orig_offset(resume_offset)
-        assert orig_resume_offset > -1, (
-            "resume instruction not found in original code - this is a bug."
-        )
+        if orig_resume_offset <= -1:
+            raise AssertionError(
+                "resume instruction not found in original code - this is a bug."
+            )
 
         if sys.version_info >= (3, 11):
             # setup_fn_target_offsets currently contains the target offset of
