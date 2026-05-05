@@ -870,8 +870,7 @@ class TestSortAndSelect(TestCase):
                 for k in (1, slice_size // 2 or 1, slice_size):
                     vals, idx = a.topk(k, dim=1, largest=largest)
                     self.assertTrue(
-                        (idx >= 0).all().item()
-                        and (idx < slice_size).all().item(),
+                        (idx >= 0).all().item() and (idx < slice_size).all().item(),
                         f"OOB index from topk k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
