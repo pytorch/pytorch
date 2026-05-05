@@ -1331,3 +1331,12 @@ def conv1d_to_conv2d(
 
     # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
     return out_2d.squeeze(-1)
+
+
+@register_decomposition(torch.ops.aten._int_mm_acc.default)
+def decompose_int_mm_acc(a, b, out_dtype=None):
+    if out_dtype is None:
+        out_dtype = torch.float32
+
+    # Canonical form that Inductor understands
+    return torch._int_mm(a, b).to(dtype=out_dtype)

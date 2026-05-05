@@ -4042,6 +4042,31 @@ def meta__int_mm(a, b):
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
+@register_meta([aten._int_mm_acc])
+@out_wrapper()
+def meta__int_mm_acc(a, b, out_dtype=None):
+    torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
+    torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
+    torch._check(
+        a.dtype in [torch.int8, torch.uint8],
+        lambda: f"expected self to be int8 or uint8, got {a.dtype}",
+    )
+    torch._check(
+        b.dtype is torch.int8,
+        lambda: f"expected mat2 to be int8, got {b.dtype}",
+    )
+    torch._check(
+        a.size(1) == b.size(0),
+        lambda: (
+            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
+            f"and {b.size(0)}x{b.size(1)})"
+        ),
+    )
+    if out_dtype is None:
+        out_dtype = torch.float32
+    return a.new_empty((a.size(0), b.size(1)), dtype=out_dtype)
+
+
 @register_meta([aten._convert_weight_to_int4pack])
 def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")

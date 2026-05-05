@@ -3863,7 +3863,7 @@ Tensor _int_mm_acc_cpu(
     const Tensor& mat2,
     std::optional<ScalarType> out_dtype) {
 
-  //Default out_dtype_ to Float if None is provided
+  // Default out_dtype_ to Float if None is provided
   const ScalarType out_dtype_ = out_dtype.value_or(at::kFloat);
   TORCH_CHECK(out_dtype_ == at::kFloat || out_dtype_ == at::kBFloat16,
       "_int_mm_acc_cpu: out_dtype_ must be float32 or bfloat16");
