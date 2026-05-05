@@ -2497,6 +2497,16 @@
       ]
     }
   ],
+  "GB1319": [
+    {
+      "Gb_type": "Reconstruct user defined class without a source",
+      "Context": "Class: {var.python_type().__name__}",
+      "Explanation": "Cannot reconstruct an instance of {var.python_type().__name__} that escapes the compiled region. This happens when the class is defined dynamically (e.g., inside the compiled function) and the class object itself has no source that can be reconstructed. To fix this, move the class definition outside the compiled function or prevent the object from escaping the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0188": [
     {
       "Gb_type": "getattr with no source",
