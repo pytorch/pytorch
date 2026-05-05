@@ -112,6 +112,11 @@ jobs:
             docker_image: "!{{ config['container_image'] }}"
             docker_image_tag_prefix: "!{{ config['container_image_tag_prefix'] }}"
             build_name: "!{{ config['build_name'] }}"
+            {%- if config['gpu_arch_type'] == 'rocm' %}
+            timeout_minutes: 420
+            {%- else %}
+            timeout_minutes: !{{ timeout_minutes }}
+            {%- endif %}
             {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0 %}
             pytorch_extra_install_requirements: "!{{ config['pytorch_extra_install_requirements'] }}"
             {%- else %}
@@ -132,7 +137,7 @@ jobs:
       use_container_directive: !{{ use_container_directive | string | lower }}
       ALPINE_IMAGE: "!{{ alpine_image }}"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
-      timeout-minutes: !{{ timeout_minutes }}
+      timeout-minutes: ${{ matrix.timeout_minutes }}
       build_name: ${{ matrix.build_name }}
       build_environment: !{{ build_environment }}
     secrets:

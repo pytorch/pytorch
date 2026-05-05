@@ -1195,6 +1195,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
         return self._nb_slot_not_implemented("nb_inplace_or", other)
 
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_negative slot.
+
+        Called when type_implements_nb_negative returns True for this type.
+        Subclasses override to provide the actual negation.
+        """
+        unimplemented(
+            gb_type="nb_negative_impl not implemented",
+            context=f"{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_negative C slot but "
+            "the corresponding VariableTracker doesn't implement nb_negative_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,

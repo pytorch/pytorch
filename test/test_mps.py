@@ -3969,6 +3969,44 @@ class TestMPS(TestCaseMPS):
             ),
         )
 
+    # Regression test for uint32 element-offset wrap in MPS scatter/gather kernels
+    # (aten/src/ATen/mps/IndexKernels.h): a strided view whose storage-relative
+    # element offset crossed 2^32 routed writes/reads to (offset mod 2^32).
+    # uint8 chosen for memory economy; the bug is in element-offset arithmetic
+    # and is dtype-independent. Minimum 5-D shape that crosses 2^32 elements:
+    # max view offset is 8 * 2^29 + 1 * 2^28 = 2^32 + 2^28.
+    _OVERFLOW_SHAPE = (9, 1, 2, 1, 1 << 28)  # uint8, 4.5 GiB
+
+    def test_copy_strided_scatter_offset_overflow_n(self):
+        shape = self._OVERFLOW_SHAPE
+        required_memory = 1.05 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        x_cpu = torch.zeros(shape, dtype=torch.uint8)
+        x_mps = x_cpu.to('mps')
+
+        # 18 distinct markers, one per (dim-0, dim-2) position.
+        update = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
+
+        x_cpu[:, :, :, :, 0:1] = update
+        x_mps[:, :, :, :, 0:1] = update.to('mps')  # aten::slice + aten::copy_ -> scatter_kernel_n
+
+        self.assertEqual(x_mps.cpu(), x_cpu)
+
+    def test_copy_strided_gather_offset_overflow_n(self):
+        shape = self._OVERFLOW_SHAPE
+        required_memory = 1.05 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        x_cpu = torch.zeros(shape, dtype=torch.uint8)
+        markers = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
+        x_cpu[:, :, :, :, 0:1] = markers
+        x_mps = x_cpu.to('mps')
+
+        gathered_mps = x_mps[:, :, :, :, 0:1].contiguous().cpu()
+        gathered_cpu = x_cpu[:, :, :, :, 0:1].contiguous()
+        self.assertEqual(gathered_mps, gathered_cpu)
+
     # See https://github.com/pytorch/pytorch/issues/152701
     def test_jacfwd_cat(self):
         def fn(x, y):
@@ -10158,6 +10196,22 @@ class TestSDPA(TestCaseMPS):
 
         out_cpu = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
+        self._compare_tensors(out_mps.cpu(), out_cpu)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_sdpa_math_mps_bool_mask_1pass(self, dtype):
+        torch.manual_seed(0)
+        q = torch.randn(1, 1, 8, 64, dtype=dtype, device='mps')
+        k = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
+        v = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
+        mask = torch.eye(8, 512, dtype=torch.bool, device='mps')
+
+        out_mps, _ = torch.ops.aten._scaled_dot_product_attention_math_for_mps(
+            q, k, v, mask
+        )
+        out_cpu = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu()
+        )
         self._compare_tensors(out_mps.cpu(), out_cpu)
 
     @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float])
