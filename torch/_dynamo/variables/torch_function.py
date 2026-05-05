@@ -170,7 +170,10 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
-        assert self.source
+        if not self.source:
+            raise AssertionError(
+                "TorchFunctionModeVariable requires a source for reconstruct"
+            )
         self.source.reconstruct(codegen)
 
     def module_name(self) -> str:
@@ -441,7 +444,8 @@ def _flatten_vts(vts: Iterable[VariableTracker]) -> list[VariableTracker]:
 
 
 def _get_subclass_type(var: VariableTracker) -> type:
-    assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
+    if not isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable)):
+        raise AssertionError(f"Unexpected type {type(var)}")
     return var.python_type()
 
 
@@ -603,11 +607,13 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
-        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter) or issubclass(
-            input_tensor_type, torch.Tensor
-        ), (
-            f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
-        )
+        if not (
+            input_tensor_type in (torch.Tensor, torch.nn.Parameter)
+            or issubclass(input_tensor_type, torch.Tensor)
+        ):
+            raise AssertionError(
+                f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
+            )
         var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
