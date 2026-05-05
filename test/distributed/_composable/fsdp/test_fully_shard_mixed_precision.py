@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
+from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
@@ -687,6 +688,32 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             forward_inputs["l2_input_y"].dtype,
             torch.float16 if enable_submodule_cast else torch.float32,
         )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_forward_inputs(self):
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(1, 1)
+                self.linear2 = nn.Linear(1, 1)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.float()
+                x = checkpoint(self.linear1, x, use_reentrant=False)
+                return self.linear2(x).sum()
+
+        torch.manual_seed(42)
+        model = Model().to(device_type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fully_shard(model.linear1, mp_policy=mp_policy)
+        fully_shard(model.linear2, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        inp = torch.randn(8, 1, device=device_type.type)
+        model(inp).backward()
 
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
