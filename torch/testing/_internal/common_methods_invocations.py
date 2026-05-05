@@ -2329,6 +2329,14 @@ def _fill_sample_kwargs(device, dtype, input):
 
     return ({'value': value}, {'value': value})
 
+def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
+
+    # Test bool scalar base with floating-point exponent (type promotion in backward)
+    if dtype.is_floating_point:
+        exponent = make_tensor((3,), device=device, dtype=dtype, requires_grad=requires_grad, low=0)
+        yield SampleInput(True, args=(exponent,))
+
 def sample_inputs_comparison_ops(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
@@ -18937,6 +18945,7 @@ op_db: list[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     dtypesIfMPS=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+                    sample_inputs_func=sample_inputs_pow,
                     ref=np.power,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
