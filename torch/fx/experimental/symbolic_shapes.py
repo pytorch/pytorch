@@ -4661,18 +4661,6 @@ class ShapeEnv:
 
         if not hint_overrides:
             hint_overrides = {}
-        # Read hint overrides from tensor_spec on symbolic_context
-        if (
-            isinstance(symbolic_context, StatefulSymbolicContext)
-            and symbolic_context.tensor_spec is not None
-        ):
-            _ts = symbolic_context.tensor_spec
-            for i in range(len(tensor_size)):
-                ds = _ts[i]
-                if ds is not None:
-                    h = ds._guarding_hint
-                    if h is not None:
-                        hint_overrides[i] = h
 
         _assert_symbol_context(symbolic_context)
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]

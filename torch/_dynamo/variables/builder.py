@@ -2254,9 +2254,18 @@ class VariableBuilder:
         if type(value) is int:
             assert isinstance(value, int)
 
-            # Check for user-provided IntVar from shapes_spec.
+            # Check for user-provided spec from shapes_spec.
             int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
-            if isinstance(int_spec, IntVar):
+            if isinstance(int_spec, int):
+                # Explicit static value — verify the actual matches.
+                if value != int_spec:
+                    raise ValueError(
+                        f"shapes_spec declares {self.source.name} as static "
+                        f"with value {int_spec}, but got {value}"
+                    )
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value, source=self.source)
+            elif isinstance(int_spec, IntVar):
                 # All IntVar specs are unbacked.
                 hint = int_spec.optimization_hint
                 hint_value = hint if hint is not None else value
@@ -2270,6 +2279,10 @@ class VariableBuilder:
                     expr = sym_val.node.expr
                     sym_val.node.shape_env.var_to_hint_override[expr] = hint
                 return result
+            elif config._shapes_spec is not None:
+                # shapes_spec is set but this int has no spec → force static
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value, source=self.source)
 
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
@@ -3944,6 +3957,19 @@ def _automatic_dynamic(
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
+    # If shapes_spec is provided but this tensor has no spec (None),
+    # force all dims static — "unspecified = static" when a spec is set.
+    if config._shapes_spec is not None and _spec_lookup is None:
+        return StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
+            view_base_context=view_base_context,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        )
+
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -4022,9 +4048,16 @@ def _automatic_dynamic(
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
-        # If user provided a TensorSpec with a spec for this dim, use it
-        # and skip the existing heuristics.
-        if tensor_spec is not None and tensor_spec[i] is not None:
+        # If user provided a TensorSpec, use it and skip the existing heuristics.
+        # None entries mean static (infer from example).
+        if tensor_spec is not None:
+            if tensor_spec[i] is None:
+                # Unspecified = static
+                dynamic_sizes.append(DimDynamic.STATIC)
+                constraint_sizes.append(None)
+                dynamic_strides.append(DimDynamic.INFER_STRIDE)
+                constraint_strides.append(None)
+                continue
             if any(
                 [
                     marked_strict_unbacked,
@@ -4040,7 +4073,13 @@ def _automatic_dynamic(
                 )
             dim_spec = tensor_spec[i]
             if isinstance(dim_spec, int):
-                # Explicit static value
+                # Explicit static value — verify the actual matches.
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
                 dynamic_sizes.append(DimDynamic.STATIC)
                 constraint_sizes.append(None)
             elif isinstance(dim_spec, IntVar):

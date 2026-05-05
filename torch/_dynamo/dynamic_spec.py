@@ -215,7 +215,7 @@ class ShapesSpec:
         lines = ["ShapesSpec("]
         if self._params is not None:
             param_repr = repr(self._params)
-            indented = "\n".join("  " + line for line in param_repr.splitlines())
+            indented = "\n".join("    " + line for line in param_repr.splitlines())
             lines.append(f"  params:\n{indented}")
         lines.append(")")
         return "\n".join(lines)

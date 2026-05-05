@@ -222,19 +222,55 @@ class TestParamsSpecConstruction(TestCase):
             """\
 ShapesSpec(
   params:
-  ParamsSpec(
-    x:
-      TensorSpec(
-        0: ShapeVar(name='batch', min=0)
-        1: None
-      )
-  )
+    ParamsSpec(
+      x:
+        TensorSpec(
+          0: ShapeVar(name='batch', min=0)
+          1: None
+        )
+    )
 )""",
         )
 
 
 class TestShapeVarCompile(TestCase):
     """ShapeVar + torch.compile integration."""
+
+    def test_static_int_spec_mismatch_raises(self):
+        """If shapes_spec declares a scalar int as static=10, passing 42 should error."""
+
+        def fn(x, n):
+            return x + n
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec=ShapesSpec(params=ParamsSpec({"n": 10})),
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"shapes_spec declares L\['n'\] as static with value 10, but got 42",
+        ):
+            compiled(torch.randn(4), 42)
+
+    def test_static_tensor_dim_mismatch_raises(self):
+        """If shapes_spec declares dim 1 as static=3, passing a tensor with dim 1=5 should error."""
+
+        def fn(x):
+            return x + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), 3])})
+            ),
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            r"shapes_spec declares dim 1 as static with value 3, but got 5",
+        ):
+            compiled(torch.randn(4, 5))
 
     def test_unbacked_graph_has_unbacked_symbol(self):
         """ShapeVar dim appears as an unbacked SymInt; single compile covers all shapes."""
@@ -278,7 +314,6 @@ class TestShapeVarCompile(TestCase):
             msg=f"expected unbacked symbol (u-prefix), got {sym!r}",
         )
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_none_entry_is_static(self):
         """A ``None`` entry doesn't mark the dim — it stays static.
         Each distinct shape at dim 1 triggers a recompile."""
@@ -301,6 +336,62 @@ class TestShapeVarCompile(TestCase):
 
         fn(torch.randn(16, 5))  # dim 0 unbacked → no recompile; dim 1 same
         self.assertEqual(len(backend.graphs), 2)
+
+    def test_none_scalar_int_is_static(self):
+        """A scalar int arg not mentioned in shapes_spec stays static (specialized).
+        Each distinct value triggers a recompile."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, n):
+            return x + n
+
+        compiled = torch.compile(
+            fn,
+            backend=cnt,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch")])})
+            ),
+        )
+
+        compiled(torch.randn(4), 10)
+        self.assertEqual(cnt.frame_count, 1)
+
+        compiled(torch.randn(8), 10)  # same n=10 → no recompile
+        self.assertEqual(cnt.frame_count, 1)
+
+        compiled(torch.randn(8), 20)  # different n → recompile (static)
+        self.assertEqual(cnt.frame_count, 2)
+
+        compiled(torch.randn(16), 20)  # same n=20 → no recompile
+        self.assertEqual(cnt.frame_count, 2)
+
+        compiled(
+            torch.randn(16), 30
+        )  # different n=30 → recompile (stays static, no auto-dynamic)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_unspecified_tensor_is_all_static(self):
+        """A tensor not mentioned in shapes_spec has all dims static when
+        shapes_spec is provided."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, y):
+            return x + y
+
+        compiled = torch.compile(
+            fn,
+            backend=cnt,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+            ),
+        )
+
+        compiled(torch.randn(4, 3), torch.randn(4, 3))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # y not in spec → all static; changing y's shape recompiles
+        compiled(torch.randn(8, 3), torch.randn(8, 3))  # x dim0 absorbed, y recompiles
+        self.assertEqual(cnt.frame_count, 2)
 
 
 if __name__ == "__main__":
