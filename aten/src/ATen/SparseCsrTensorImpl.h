@@ -168,6 +168,23 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
         std::move(version_counter), allow_tensor_metadata_change);
   }
 
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   *
+   * For why this function doesn't check this TensorImpl's
+   * `allow_tensor_metadata_change_`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    auto sparse_csr_impl = static_cast<const SparseCsrTensorImpl*>(impl.get());
+    copy_tensor_metadata(
+        /*src_sparse_impl=*/sparse_csr_impl,
+        /*dest_sparse_impl=*/this,
+        /*version_counter=*/version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+  }
+
  private:
   explicit SparseCsrTensorImpl(
       at::DispatchKeySet key_set,
